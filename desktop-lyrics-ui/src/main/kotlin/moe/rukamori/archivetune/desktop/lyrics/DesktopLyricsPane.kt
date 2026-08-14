@@ -104,7 +104,11 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
                 }
                 DesktopLyricsState.Idle -> LyricsMessage("Select a song to see lyrics", Modifier)
                 is DesktopLyricsState.Loading -> LyricsMessage("Loading lyrics…", Modifier)
-                is DesktopLyricsState.Empty -> LyricsMessage(current.message, Modifier, presenter::retry)
+                is DesktopLyricsState.Empty -> LyricsMessage(
+                    if (searchState.results.any { it.document != null }) "Lyrics found — choose a provider result above" else current.message,
+                    Modifier,
+                    presenter::retry,
+                )
                 is DesktopLyricsState.Error -> LyricsMessage(current.message, Modifier, presenter::retry)
             }
         }

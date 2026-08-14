@@ -30,5 +30,16 @@ class LyricsTimelineParserTest {
         assertEquals(-1, timeline.activeLineIndex(10_000))
     }
 
+    @Test fun `qrc karaoke content becomes timed display lines`() {
+        val qrc = """<?xml version="1.0"?><QrcInfos><LyricInfo><Lyric_1 LyricContent="[ti:Song]
+[1000,2000]First(1000,800) (1800,200)line(2000,1000)
+[3000,1500]Second(3000,1500)"/></LyricInfo></QrcInfos>"""
+        val timeline = LyricsTimelineParser.parse(document(LyricsFormat.QRC, qrc))
+
+        assertEquals(listOf("First line", "Second"), timeline.lines.map { it.text })
+        assertEquals(listOf(1000L, 3000L), timeline.lines.map { it.startTimeMs })
+        assertEquals(1, timeline.activeLineIndex(3200))
+    }
+
     private fun document(format: LyricsFormat, text: String) = LyricsDocument("test", "Test", text, format)
 }

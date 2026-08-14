@@ -42,6 +42,7 @@ class JvmLyricsClientTest {
     @Test
     fun detectsTtml() {
         assertEquals(LyricsFormat.TTML, detectLyricsFormat("<?xml version=\"1.0\"?><tt></tt>"))
+        assertEquals(LyricsFormat.QRC, detectLyricsFormat("<?xml version=\"1.0\"?><QrcInfos><Lyric_1 LyricContent=\"[1000,500]Hi(1000,500)\"/></QrcInfos>"))
         assertEquals(LyricsFormat.PLAIN, detectLyricsFormat("Just a line"))
     }
 

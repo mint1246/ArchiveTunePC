@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.supervisorScope
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,9 +60,11 @@ class DesktopLyricsPresenter(
     private val _searchState = MutableStateFlow(DesktopLyricsSearchState())
     val searchState: StateFlow<DesktopLyricsSearchState> = _searchState.asStateFlow()
     private var searchJob: Job? = null
+    private val loadGeneration = AtomicLong()
     private val itemJob: Job = scope.launch {
         playback.state.map { it.currentItem }.distinctUntilChanged().collectLatest { item ->
             if (item == null) {
+                loadGeneration.incrementAndGet()
                 searchJob?.cancel()
                 _state.value = DesktopLyricsState.Idle
                 _searchState.value = DesktopLyricsSearchState()
@@ -69,7 +72,7 @@ class DesktopLyricsPresenter(
             }
             searchJob?.cancel()
             _searchState.value = DesktopLyricsSearchState(item.metadata.id, item.toLyricsRequestOrNull())
-            load(item, playback.state.value.positionMs)
+            load(item, playback.state.value.positionMs, loadGeneration.incrementAndGet())
         }
     }
     private val positionJob: Job = scope.launch {
@@ -81,24 +84,27 @@ class DesktopLyricsPresenter(
         }
     }
 
-    private suspend fun load(item: PlaybackItem, positionMs: Long) {
+    private suspend fun load(item: PlaybackItem, positionMs: Long, generation: Long) {
         val id = item.metadata.id
+        if (generation != loadGeneration.get()) return
         _state.value = DesktopLyricsState.Loading(id)
         val request = item.toLyricsRequestOrNull()
         if (request == null) {
-            _state.value = DesktopLyricsState.Empty(id, "Lyrics need a song title and artist metadata")
+            if (generation == loadGeneration.get()) _state.value = DesktopLyricsState.Empty(id, "Lyrics need a song title and artist metadata")
             return
         }
         val document = synchronized(cache) { cache[id] } ?: lyricsClient.getLyrics(request).getOrElse { error ->
-            _state.value =
-                if (error is LyricsUnavailableException && !error.hasProviderFailures) {
-                    DesktopLyricsState.Empty(id)
-                } else {
-                    DesktopLyricsState.Error(id, error.message ?: "Lyrics providers could not be reached")
-                }
+            if (generation == loadGeneration.get()) {
+                _state.value =
+                    if (error is LyricsUnavailableException && !error.hasProviderFailures) {
+                        DesktopLyricsState.Empty(id)
+                    } else {
+                        DesktopLyricsState.Error(id, error.message ?: "Lyrics providers could not be reached")
+                    }
+            }
             return
         }.also { synchronized(cache) { cache[id] = it } }
-        showDocument(id, document, positionMs)
+        if (generation == loadGeneration.get()) showDocument(id, document, positionMs)
     }
 
     private fun showDocument(itemId: String, document: LyricsDocument, positionMs: Long) {
@@ -114,7 +120,8 @@ class DesktopLyricsPresenter(
     /** Re-runs provider lookup for the current item after an Empty/Error state. */
     fun retry() {
         val item = playback.state.value.currentItem ?: return
-        scope.launch { load(item, playback.state.value.positionMs) }
+        val generation = loadGeneration.incrementAndGet()
+        scope.launch { load(item, playback.state.value.positionMs, generation) }
     }
 
     fun search(request: LyricsRequest) {
@@ -152,6 +159,7 @@ class DesktopLyricsPresenter(
     fun select(result: LyricsProviderSearchResult) {
         val item = playback.state.value.currentItem ?: return
         val document = result.document ?: return
+        loadGeneration.incrementAndGet()
         synchronized(cache) { cache[item.metadata.id] = document }
         showDocument(item.metadata.id, document, playback.state.value.positionMs)
     }

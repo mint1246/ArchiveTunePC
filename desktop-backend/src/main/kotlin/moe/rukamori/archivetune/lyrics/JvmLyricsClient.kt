@@ -50,6 +50,7 @@ enum class LyricsFormat {
     PLAIN,
     LRC,
     TTML,
+    QRC,
 }
 
 data class LyricsDocument(
@@ -324,6 +325,7 @@ private fun NamedLyricsProvider.toDocument(text: String): LyricsDocument =
 
 internal fun detectLyricsFormat(text: String): LyricsFormat =
     when {
+        text.contains("<QrcInfos", ignoreCase = true) || text.contains("LyricContent=", ignoreCase = true) -> LyricsFormat.QRC
         text.trimStart().startsWith("<?xml", ignoreCase = true) ||
             text.contains("<tt", ignoreCase = true) -> LyricsFormat.TTML
 

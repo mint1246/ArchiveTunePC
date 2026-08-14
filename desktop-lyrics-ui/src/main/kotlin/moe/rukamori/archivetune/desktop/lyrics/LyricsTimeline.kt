@@ -30,6 +30,7 @@ object LyricsTimelineParser {
             LyricsFormat.PLAIN -> plain(document.text)
             LyricsFormat.LRC -> lrc(document.text)
             LyricsFormat.TTML -> ttml(document.text)
+            LyricsFormat.QRC -> qrc(document.text)
         }
 
     private fun plain(text: String) = LyricsTimeline(
@@ -72,6 +73,22 @@ object LyricsTimelineParser {
         plain(text)
     }
 
+    private fun qrc(text: String): LyricsTimeline {
+        val content = qrcContent.find(text)?.groupValues?.get(1).orEmpty().ifBlank { text }
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+        val lines = qrcLine.findAll(content).mapNotNull { match ->
+            val start = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val duration = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+            val line = match.groupValues[3].replace(qrcWordTiming, "").replace(Regex("\\s+"), " ").trim()
+            line.takeIf(String::isNotEmpty)?.let { TimedLyricLine(it, start, start + duration) }
+        }.toList()
+        return timed(lines)
+    }
+
     private fun timed(lines: List<TimedLyricLine>): LyricsTimeline = LyricsTimeline(
         lines = lines.mapIndexed { index, line ->
             line.copy(endTimeMs = line.endTimeMs ?: lines.getOrNull(index + 1)?.startTimeMs)
@@ -105,4 +122,7 @@ object LyricsTimelineParser {
     }
 
     private val timestamp = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]""")
+    private val qrcContent = Regex("""LyricContent="([\s\S]*)"\s*/>""", RegexOption.IGNORE_CASE)
+    private val qrcLine = Regex("""(?m)^\[(\d+),(\d+)](.*)$""")
+    private val qrcWordTiming = Regex("""\(\d+,\d+\)""")
 }

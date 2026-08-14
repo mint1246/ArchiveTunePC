@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
@@ -103,6 +105,37 @@ class DesktopLyricsPresenterTest {
         val ready = presenter.state.value as DesktopLyricsState.Ready
         assertEquals("Found", ready.providerName)
         assertEquals("Manual lyrics", ready.timeline.lines.single().text)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `late automatic miss cannot overwrite manually selected lyrics`() = runTest {
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(
+            listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider { request ->
+                if (request.title == "Song") {
+                    delay(1_000)
+                    ""
+                } else {
+                    "[00:00]Manually selected"
+                }
+            })),
+            providerTimeoutMillis = 2_000,
+            overallTimeoutMillis = 3_000,
+        )
+        val presenter = DesktopLyricsPresenter(playback, client, this)
+        val item = PlaybackItem(PlaybackMetadata(id = "id", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
+        runCurrent()
+
+        presenter.search(LyricsRequest("Edited song", "Artist"))
+        runCurrent()
+        presenter.select(presenter.searchState.value.results.single { it.document != null })
+        advanceTimeBy(1_000)
+        advanceUntilIdle()
+
+        val ready = presenter.state.value as DesktopLyricsState.Ready
+        assertEquals("Manually selected", ready.timeline.lines.single().text)
         presenter.close()
     }
 }

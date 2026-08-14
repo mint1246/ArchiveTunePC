@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
 import moe.rukamori.archivetune.lyrics.LyricsRequest
+import javax.xml.parsers.DocumentBuilderFactory
 
 /** Live, redaction-safe provider health check. It never prints lyric text or provider URLs. */
 fun main() = runBlocking {
@@ -22,7 +23,16 @@ fun main() = runBlocking {
     val results = JvmLyricsClient().searchLyrics(request, providerIds)
     results.forEach { result ->
         val format = result.document?.format?.name ?: "none"
-        println("lyrics_provider id=${result.providerId} status=${result.status.name} format=$format")
+        val text = result.document?.text.orEmpty()
+        val structure = if (format == "TTML") {
+            val root = runCatching {
+                DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(text.byteInputStream()).documentElement.nodeName
+            }.getOrDefault("unparseable")
+            " root=$root p=${Regex("<p(?:\\s|>)", RegexOption.IGNORE_CASE).findAll(text).count()}" +
+                " p_begin=${Regex("<p[^>]*\\sbegin=", RegexOption.IGNORE_CASE).findAll(text).count()}" +
+                " span_begin=${Regex("<span[^>]*\\sbegin=", RegexOption.IGNORE_CASE).findAll(text).count()}"
+        } else ""
+        println("lyrics_provider id=${result.providerId} status=${result.status.name} format=$format$structure")
     }
     val unhealthy = results.filter { it.status == LyricsProviderSearchStatus.FAILED || it.status == LyricsProviderSearchStatus.TIMED_OUT }
     check(unhealthy.isEmpty()) { "Unhealthy lyrics providers: ${unhealthy.joinToString { it.providerId }}" }
