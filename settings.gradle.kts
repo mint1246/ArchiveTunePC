@@ -46,6 +46,16 @@ dependencyResolutionManagement {
 
 rootProject.name = "ArchiveTune"
 include(":app")
+include(":desktopApp")
+include(":desktop-backend")
+include(":desktop-auth")
+include(":playback-core")
+include(":desktop-playback")
+include(":desktop-library")
+include(":desktop-settings")
+include(":desktop-lyrics-ui")
+include(":windows-media-integration")
+include(":desktop-downloads")
 include(":core")
 include(":lyrics:kugou")
 include(":lyrics:lrclib")

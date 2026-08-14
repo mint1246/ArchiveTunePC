@@ -1,0 +1,149 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ */
+
+package moe.rukamori.archivetune.windowsmedia
+
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import moe.rukamori.archivetune.playback.api.PlaybackController
+import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+/** Commands which may be supplied by a platform media-control surface. */
+enum class MediaCommand { PLAY_PAUSE, NEXT, PREVIOUS, SEEK_FORWARD, SEEK_BACKWARD }
+
+/** Sanitized now-playing data retained by the integration for a future native publisher. */
+data class NowPlayingMetadata(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val artworkUri: String?,
+    val durationMs: Long?,
+)
+
+data class WindowsMediaPresentation(
+    val metadata: NowPlayingMetadata?,
+    val isPlaying: Boolean,
+    val positionMs: Long,
+    val durationMs: Long,
+)
+
+enum class WindowsMediaAvailability {
+    NOT_STARTED,
+    ACTIVE_HOTKEYS_ONLY,
+    UNSUPPORTED,
+    CLOSED,
+}
+
+/**
+ * Platform-neutral bridge from [PlaybackSnapshot] to operating-system media controls.
+ *
+ * The current Windows implementation registers the standard global media-key virtual keys.
+ * It deliberately does not claim System Media Transport Controls (SMTC) publishing: JNA ships
+ * Win32 bindings, not a maintained projection for the required WinRT SMTC APIs. The latest
+ * presentation remains observable so a proper WinRT implementation can publish it later.
+ */
+class WindowsMediaControls(
+    private val hotKeys: WindowsHotKeySource = JnaWindowsHotKeySource(),
+    private val callbackExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "archive-tune-media-controls").apply { isDaemon = true }
+    },
+) : AutoCloseable {
+    private val lock = Any()
+    private val _commands = MutableSharedFlow<MediaCommand>(extraBufferCapacity = 16)
+    private val _presentation = MutableStateFlow(
+        WindowsMediaPresentation(metadata = null, isPlaying = false, positionMs = 0, durationMs = 0),
+    )
+    private val _availability = MutableStateFlow(WindowsMediaAvailability.NOT_STARTED)
+    private var registration: AutoCloseable? = null
+    private var closed = false
+
+    val commands: SharedFlow<MediaCommand> = _commands.asSharedFlow()
+    val presentation: StateFlow<WindowsMediaPresentation> = _presentation.asStateFlow()
+    val availability: StateFlow<WindowsMediaAvailability> = _availability.asStateFlow()
+
+    /** Starts global hardware media-key capture. Safe to call repeatedly. */
+    fun start() {
+        synchronized(lock) {
+        if (closed || registration != null) return
+        val startedRegistration: AutoCloseable? = try {
+            hotKeys.start { command ->
+                // Win32 message-loop callbacks must never execute app playback on the native thread.
+                callbackExecutor.execute { _commands.tryEmit(command) }
+            }
+        } catch (_: UnsupportedOperationException) {
+            null
+        } catch (_: LinkageError) {
+            null
+        } catch (_: SecurityException) {
+            null
+        }
+        registration = startedRegistration
+        _availability.value = if (startedRegistration == null) {
+            WindowsMediaAvailability.UNSUPPORTED
+        } else {
+            WindowsMediaAvailability.ACTIVE_HOTKEYS_ONLY
+        }
+        }
+    }
+
+    /** Updates retained now-playing information without exposing playback URLs or headers. */
+    fun update(snapshot: PlaybackSnapshot) {
+        if (closed) return
+        val item = snapshot.currentItem
+        val source = item?.metadata
+        _presentation.value = WindowsMediaPresentation(
+            metadata = source?.let {
+                NowPlayingMetadata(
+                    id = it.id,
+                    title = it.title.ifBlank { "Unknown title" },
+                    artist = it.artistText.ifBlank { "Unknown artist" },
+                    album = it.album?.title?.takeIf(String::isNotBlank),
+                    artworkUri = it.artworkUri,
+                    durationMs = it.durationHintMs?.coerceAtLeast(0L),
+                )
+            },
+            isPlaying = snapshot.isPlaying,
+            positionMs = snapshot.positionMs.coerceAtLeast(0L),
+            durationMs = snapshot.durationMs.coerceAtLeast(0L),
+        )
+    }
+
+    override fun close() {
+        synchronized(lock) {
+        if (closed) return
+        closed = true
+        registration?.close()
+        registration = null
+        callbackExecutor.shutdownNow()
+        _availability.value = WindowsMediaAvailability.CLOSED
+        }
+    }
+}
+
+/** Maps platform-neutral commands to the existing playback boundary. */
+class PlaybackMediaCommandRouter(
+    private val controller: PlaybackController,
+    private val seekStepMs: Long = 10_000L,
+) {
+    init { require(seekStepMs > 0) }
+
+    suspend fun handle(command: MediaCommand) {
+        when (command) {
+            MediaCommand.PLAY_PAUSE -> if (controller.state.value.isPlaying) controller.pause() else controller.play()
+            MediaCommand.NEXT -> controller.skipNext()
+            MediaCommand.PREVIOUS -> controller.skipPrevious()
+            MediaCommand.SEEK_FORWARD -> controller.seekTo(controller.state.value.positionMs + seekStepMs)
+            MediaCommand.SEEK_BACKWARD -> controller.seekTo((controller.state.value.positionMs - seekStepMs).coerceAtLeast(0L))
+        }
+    }
+}
