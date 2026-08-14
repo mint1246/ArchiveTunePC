@@ -169,3 +169,11 @@ tasks.matching {
 }.configureEach {
     dependsOn(generateWindowsIcon)
 }
+
+tasks.register<JavaExec>("authenticatedStreamDiagnostic") {
+    group = "verification"
+    description = "Uses the current user's DPAPI session through the normal session manager and prints redacted stream diagnostics."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("moe.rukamori.archivetune.desktop.platform.AuthenticatedStreamDiagnosticKt")
+    dependsOn("classes")
+}

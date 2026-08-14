@@ -105,6 +105,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private fun logStreamDiagnostic(event: StreamResolutionDiagnostic) {
         when (event) {
             is StreamResolutionDiagnostic.Attempt -> runtime.logger.info("stream_resolution event=attempt client=${event.client} result=${event.classification.name}")
+            is StreamResolutionDiagnostic.FormatAttempt -> runtime.logger.info("stream_resolution event=format client=${event.client} format=${event.format} result=${event.classification.name}")
             is StreamResolutionDiagnostic.Success -> runtime.logger.info("stream_resolution event=success client=${event.client}")
             is StreamResolutionDiagnostic.Failure -> runtime.logger.warning("stream_resolution event=failure result=${event.classification.name}")
         }

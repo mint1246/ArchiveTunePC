@@ -196,7 +196,7 @@ class ArchiveTuneJvmClient(
 
         for (client in orderedStreamClients(authState)) {
             if (client.loginRequired && !authState.hasPlaybackLoginContext) continue
-            val useLogin = authState.hasLoginCookie && client.loginSupported
+            val useLogin = authState.hasLoginCookie && client.supportsCookieAuthentication
             val playerResult =
                 YouTube.player(
                     videoId = videoId,
@@ -246,7 +246,13 @@ class ArchiveTuneJvmClient(
                 val streamUrlFailure = streamUrlResult.exceptionOrNull()
                 if (streamUrlFailure != null) {
                     failures += streamUrlFailure
-                    streamDiagnostics.record(StreamResolutionDiagnostic.Attempt(client.clientName, classifyStreamResolutionFailure(streamUrlFailure)))
+                    streamDiagnostics.record(
+                        StreamResolutionDiagnostic.FormatAttempt(
+                            client = client.clientName,
+                            format = if (format.url != null) "direct" else "cipher",
+                            classification = classifyStreamResolutionFailure(streamUrlFailure),
+                        ),
+                    )
                     continue
                 }
                 val streamUrl = streamUrlResult.getOrThrow().patchClientVersion(client.clientVersion)
@@ -356,6 +362,7 @@ fun interface StreamResolutionDiagnosticSink {
 
 sealed interface StreamResolutionDiagnostic {
     data class Attempt(val client: String, val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
+    data class FormatAttempt(val client: String, val format: String, val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
     data class Success(val client: String) : StreamResolutionDiagnostic
     data class Failure(val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
 }
