@@ -80,13 +80,20 @@ fun main() = runBlocking {
                 "authenticated_stream_diagnostic playlists result=OK total=${library.items.size} " +
                     "count=${playlists.size} continuation=${library.continuation != null}",
             )
-            playlists.firstOrNull()?.let { playlist ->
+            playlists.forEachIndexed { index, playlist ->
                 backend.playlist(playlist.id).fold(
                     onSuccess = { detail ->
-                        println("authenticated_stream_diagnostic playlist_detail result=OK songs=${detail.songs.size}")
+                        println("authenticated_stream_diagnostic playlist_detail ordinal=$index result=OK songs=${detail.songs.size}")
                     },
-                    onFailure = {
-                        println("authenticated_stream_diagnostic playlist_detail result=FAILED")
+                    onFailure = { failure ->
+                        val status = Regex("\\b[45]\\d\\d\\b").find(failure.message.orEmpty())?.value ?: "none"
+                        val causes = generateSequence(failure as Throwable?) { it.cause }.toList()
+                        val missing = causes.filterIsInstance<MissingFieldException>().flatMap { it.missingFields }.joinToString(",")
+                        val types = causes.joinToString(",") { it::class.simpleName ?: "unknown" }
+                        println(
+                            "authenticated_stream_diagnostic playlist_detail result=FAILED " +
+                                "ordinal=$index types=$types status=$status missing=$missing",
+                        )
                     },
                 )
             }

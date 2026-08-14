@@ -22,6 +22,8 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.VolumeUp
@@ -31,6 +33,8 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -119,7 +123,7 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, loading, failure, ::open, { song -> scope.launch { downloadServices.enqueue(song).onSuccess { state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS) }.onFailure { failure = it.message ?: "Could not resolve a stream for download" } } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path)), title = "Downloads") } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
-                localTracks, onlinePlaylists, services.library.folders, libraryLoading, libraryError,
+                localTracks, onlinePlaylists, services.library.folders, libraryLoading || loading, failure ?: libraryError,
                 onAddFolder = { scope.launch { chooseLibraryFolder()?.let { services.library.setFolders(services.library.folders + it); rescanLibrary() } } },
                 onRescan = { scope.launch { rescanLibrary() } },
                 onOpenPlaylist = ::open,
@@ -127,7 +131,15 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
             )
             else -> FoundationDestinationContent(state, paths, logger, services.account, modifier)
         }
-        else -> DetailPage(page, loading, failure, onBack = { detail = null }, onOpen = ::open, onPlay = { songs, title -> scope.launch { services.playback.replaceQueue(songs.map(::toPlaybackItem), title = title) } }, modifier = modifier)
+        is Detail.Playlist -> PlaylistDetailPage(
+            page.page,
+            onBack = { detail = null },
+            onPlay = { songs, index, title ->
+                scope.launch { services.playback.replaceQueue(songs.map(::toPlaybackItem), index, title = title) }
+            },
+            modifier = modifier,
+        )
+        else -> DetailPage(page, loading, failure, onBack = { detail = null }, onOpen = ::open, onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map(::toPlaybackItem), index, title = title) } }, modifier = modifier)
     }
 }
 
@@ -165,17 +177,99 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     }
 }
 
-@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onPlay: (List<SongItem>, String) -> Unit, modifier: Modifier) {
+@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, modifier: Modifier) {
     val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title }
     val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail }
     val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist" }
     val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist -> emptyList() }
     Column(modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back to search") }
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(image, Modifier.size(112.dp)); Spacer(Modifier.width(18.dp)); Column(Modifier.weight(1f)) { Text(extra, color = MaterialTheme.colorScheme.primary); Text(title, style = MaterialTheme.typography.headlineMedium); if (tracks.isNotEmpty()) Text("${tracks.size} songs") }; if (tracks.isNotEmpty()) FilledIconButton(onClick = { onPlay(tracks, title) }) { Icon(Icons.Rounded.PlayArrow, "Play all") } }
+        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(image, Modifier.size(112.dp)); Spacer(Modifier.width(18.dp)); Column(Modifier.weight(1f)) { Text(extra, color = MaterialTheme.colorScheme.primary); Text(title, style = MaterialTheme.typography.headlineMedium); if (tracks.isNotEmpty()) Text("${tracks.size} songs") }; if (tracks.isNotEmpty()) FilledIconButton(onClick = { onPlay(tracks, title, 0) }) { Icon(Icons.Rounded.PlayArrow, "Play all") } }
         if (loading) Loading(); error?.let { Error(it) }
         if (page is Detail.Artist) page.page.sections.forEach { section -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(section.title, style = MaterialTheme.typography.titleLarge); section.items.forEach { ResultCard(it, { onOpen(it) }) } } }
-        else tracks.forEach { song -> ResultCard(song, { onPlay(tracks, title) }) }
+        else tracks.forEachIndexed { index, song -> ResultCard(song, { onPlay(tracks, title, index) }) }
+    }
+}
+
+@Composable
+private fun PlaylistDetailPage(
+    page: PlaylistPage,
+    onBack: () -> Unit,
+    onPlay: (List<SongItem>, Int, String) -> Unit,
+    modifier: Modifier,
+) {
+    var query by remember(page.playlist.id) { mutableStateOf("") }
+    val filtered = remember(page.songs, query) {
+        if (query.isBlank()) page.songs else page.songs.filter { song ->
+            song.title.contains(query, ignoreCase = true) ||
+                song.artists.any { it.name.contains(query, ignoreCase = true) } ||
+                song.album?.name?.contains(query, ignoreCase = true) == true
+        }
+    }
+    val subtitle = listOfNotNull(
+        page.playlist.author?.name,
+        page.playlist.songCountText ?: "${page.songs.size} songs",
+    ).joinToString(" • ")
+
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back to library") }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.extraLarge,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                Artwork(page.playlist.thumbnail, Modifier.size(180.dp))
+                Spacer(Modifier.width(24.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("PLAYLIST", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    Text(page.playlist.title, style = MaterialTheme.typography.headlineLarge)
+                    if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    page.playlist.description?.takeIf(String::isNotBlank)?.let {
+                        Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Button(
+                            onClick = { if (page.songs.isNotEmpty()) onPlay(page.songs, 0, page.playlist.title) },
+                            enabled = page.songs.isNotEmpty(),
+                        ) { Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
+                        OutlinedButton(
+                            onClick = {
+                                if (page.songs.isNotEmpty()) {
+                                    val shuffled = page.songs.shuffled()
+                                    onPlay(shuffled, 0, page.playlist.title)
+                                }
+                            },
+                            enabled = page.songs.isNotEmpty(),
+                        ) { Icon(Icons.Rounded.Shuffle, null); Spacer(Modifier.width(8.dp)); Text("Shuffle") }
+                    }
+                }
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Tracks", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                placeholder = { Text("Search in playlist") },
+                modifier = Modifier.width(320.dp),
+            )
+        }
+        if (page.songs.isEmpty()) {
+            Text("This playlist has no available tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (filtered.isEmpty()) {
+            Text("No matching tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        filtered.forEach { song ->
+            val queueIndex = page.songs.indexOf(song).coerceAtLeast(0)
+            ResultCard(song, { onPlay(page.songs, queueIndex, page.playlist.title) })
+        }
     }
 }
 

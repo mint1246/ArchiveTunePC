@@ -156,7 +156,29 @@ class ArchiveTuneJvmClient(
         run {
             applyProvidedSession()
             normalizedId(playlistId, "Playlist ID").fold(
-            onSuccess = { YouTube.playlist(it.removePrefix("VL")) },
+            onSuccess = { id ->
+                val normalizedPlaylistId = id.removePrefix("VL")
+                val initial = YouTube.authState
+                YouTube.authState = initial.copy(dataSyncId = null)
+                val channels = YouTube.accountChannels().getOrNull().orEmpty()
+                YouTube.authState = initial.copy(dataSyncId = null)
+                val refreshedDataSyncId = YouTube.accountDataSyncId().getOrNull()
+                val candidates =
+                    (listOfNotNull(initial.dataSyncId) +
+                        channels.sortedByDescending { it.isSelected }.map { it.dataSyncId } +
+                        listOfNotNull(refreshedDataSyncId) + "")
+                        .distinct()
+                var lastFailure: Throwable? = null
+
+                for (dataSyncId in candidates.ifEmpty { listOf("") }) {
+                    YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
+                    val result = YouTube.playlist(normalizedPlaylistId).completed()
+                    if (result.isSuccess) return@fold result
+                    lastFailure = result.exceptionOrNull()
+                }
+
+                Result.failure(lastFailure ?: IllegalStateException("YouTube Music playlist is unavailable"))
+            },
             onFailure = { Result.failure(it) },
             )
         }
