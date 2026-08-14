@@ -10,7 +10,10 @@ package moe.rukamori.archivetune.lyrics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.betterlyrics.BetterLyrics
 import moe.rukamori.archivetune.kugou.KuGou
@@ -67,6 +70,22 @@ data class NamedLyricsProvider(
     val id: String,
     val name: String,
     val provider: JvmLyricsProvider,
+)
+
+enum class LyricsProviderSearchStatus {
+    SEARCHING,
+    FOUND,
+    NO_MATCH,
+    TIMED_OUT,
+    FAILED,
+}
+
+/** One provider's redaction-safe search outcome. Lyrics text is present only in [document]. */
+data class LyricsProviderSearchResult(
+    val providerId: String,
+    val providerName: String,
+    val status: LyricsProviderSearchStatus,
+    val document: LyricsDocument? = null,
 )
 
 /**
@@ -130,30 +149,52 @@ class JvmLyricsClient(
     suspend fun getAllLyrics(
         request: LyricsRequest,
         providerIds: List<String>? = null,
-    ): List<LyricsDocument> {
-        val normalized = request.normalized()
-        val documents = mutableListOf<LyricsDocument>()
-        val seenTexts = mutableSetOf<String>()
-        for (provider in selectProviders(providerIds)) {
-            for (providerRequest in normalized.providerQueryVariants()) {
-                currentCoroutineContext().ensureActive()
-                val text =
-                    try {
-                        provider.provider.getLyrics(providerRequest).trim().takeIf(String::isNotEmpty)
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Exception) {
-                        null
-                    }
-                currentCoroutineContext().ensureActive()
-                if (text == null) continue
-                if (seenTexts.add(text.normalizedForDeduplication())) {
-                    documents += provider.toDocument(text)
-                }
-            }
+    ): List<LyricsDocument> =
+        searchLyrics(request, providerIds)
+            .mapNotNull(LyricsProviderSearchResult::document)
+            .distinctBy { it.text.normalizedForDeduplication() }
+
+    /** Searches selected providers concurrently and reports every provider's outcome. */
+    suspend fun searchLyrics(
+        request: LyricsRequest,
+        providerIds: List<String>? = null,
+    ): List<LyricsProviderSearchResult> {
+        val variants = request.normalized().providerQueryVariants()
+        val selected = selectProviders(providerIds)
+        return supervisorScope {
+            selected.map { provider ->
+                async { searchProvider(provider, variants) }
+            }.awaitAll()
         }
-        return documents
     }
+
+    private suspend fun searchProvider(
+        provider: NamedLyricsProvider,
+        variants: List<LyricsRequest>,
+    ): LyricsProviderSearchResult =
+        try {
+            withTimeout(providerTimeoutMillis) {
+                for (variant in variants) {
+                    currentCoroutineContext().ensureActive()
+                    val text = provider.provider.getLyrics(variant).trim().takeIf(String::isNotEmpty)
+                    if (text != null) {
+                        return@withTimeout LyricsProviderSearchResult(
+                            provider.id,
+                            provider.name,
+                            LyricsProviderSearchStatus.FOUND,
+                            provider.toDocument(text),
+                        )
+                    }
+                }
+                LyricsProviderSearchResult(provider.id, provider.name, LyricsProviderSearchStatus.NO_MATCH)
+            }
+        } catch (_: TimeoutCancellationException) {
+            LyricsProviderSearchResult(provider.id, provider.name, LyricsProviderSearchStatus.TIMED_OUT)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            LyricsProviderSearchResult(provider.id, provider.name, LyricsProviderSearchStatus.FAILED)
+        }
 
     private fun selectProviders(providerIds: List<String>?): List<NamedLyricsProvider> {
         if (providerIds == null) return providers
@@ -211,7 +252,9 @@ object BuiltInLyricsProviders {
                     artist = request.artist,
                     album = request.album,
                     durationSeconds = request.durationSeconds,
-                ).getOrThrow()
+                ).getOrElse { failure ->
+                    if (failure.message == "Lyrics unavailable") "" else throw failure
+                }
             },
             named(PAXSENIX_APPLE_MUSIC, "Paxsenix: Apple Music") { request ->
                 PaxsenixLyrics.getAppleMusicLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()

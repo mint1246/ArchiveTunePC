@@ -2,6 +2,8 @@ package moe.rukamori.archivetune.desktop.lyrics
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,6 +13,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.LyricsDocument
+import moe.rukamori.archivetune.lyrics.LyricsProviderSearchResult
+import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
 import moe.rukamori.archivetune.lyrics.LyricsRequest
 import moe.rukamori.archivetune.lyrics.LyricsUnavailableException
 import moe.rukamori.archivetune.playback.api.PlaybackController
@@ -29,6 +33,14 @@ sealed interface DesktopLyricsState {
     data class Error(val itemId: String, val message: String) : DesktopLyricsState
 }
 
+data class DesktopLyricsSearchState(
+    val itemId: String? = null,
+    val request: LyricsRequest? = null,
+    val searching: Boolean = false,
+    val results: List<LyricsProviderSearchResult> = emptyList(),
+    val message: String? = null,
+)
+
 /**
  * Bridges the real playback StateFlow to JvmLyricsClient. collectLatest cancels a pending provider
  * request immediately when the track changes. Cache entries are documents from real providers only.
@@ -44,12 +56,19 @@ class DesktopLyricsPresenter(
     }
     private val _state = MutableStateFlow<DesktopLyricsState>(DesktopLyricsState.Idle)
     val state: StateFlow<DesktopLyricsState> = _state.asStateFlow()
+    private val _searchState = MutableStateFlow(DesktopLyricsSearchState())
+    val searchState: StateFlow<DesktopLyricsSearchState> = _searchState.asStateFlow()
+    private var searchJob: Job? = null
     private val itemJob: Job = scope.launch {
         playback.state.map { it.currentItem }.distinctUntilChanged().collectLatest { item ->
             if (item == null) {
+                searchJob?.cancel()
                 _state.value = DesktopLyricsState.Idle
+                _searchState.value = DesktopLyricsSearchState()
                 return@collectLatest
             }
+            searchJob?.cancel()
+            _searchState.value = DesktopLyricsSearchState(item.metadata.id, item.toLyricsRequestOrNull())
             load(item, playback.state.value.positionMs)
         }
     }
@@ -79,9 +98,13 @@ class DesktopLyricsPresenter(
                 }
             return
         }.also { synchronized(cache) { cache[id] = it } }
+        showDocument(id, document, positionMs)
+    }
+
+    private fun showDocument(itemId: String, document: LyricsDocument, positionMs: Long) {
         val timeline = LyricsTimelineParser.parse(document)
-        _state.value = if (timeline.lines.isEmpty()) DesktopLyricsState.Empty(id) else DesktopLyricsState.Ready(
-            itemId = id,
+        _state.value = if (timeline.lines.isEmpty()) DesktopLyricsState.Empty(itemId) else DesktopLyricsState.Ready(
+            itemId = itemId,
             providerName = document.providerName,
             timeline = timeline,
             activeLineIndex = timeline.activeLineIndex(positionMs),
@@ -94,7 +117,47 @@ class DesktopLyricsPresenter(
         scope.launch { load(item, playback.state.value.positionMs) }
     }
 
+    fun search(request: LyricsRequest) {
+        val item = playback.state.value.currentItem ?: return
+        val itemId = item.metadata.id
+        searchJob?.cancel()
+        val pending = lyricsClient.providers.map {
+            LyricsProviderSearchResult(it.id, it.name, LyricsProviderSearchStatus.SEARCHING)
+        }
+        _searchState.value = DesktopLyricsSearchState(itemId, request, searching = true, results = pending)
+        searchJob = scope.launch {
+            supervisorScope {
+                lyricsClient.providers.mapIndexed { index, provider ->
+                    launch {
+                        val result = runCatching { lyricsClient.searchLyrics(request, listOf(provider.id)).single() }
+                            .getOrElse { LyricsProviderSearchResult(provider.id, provider.name, LyricsProviderSearchStatus.FAILED) }
+                        if (playback.state.value.currentItem?.metadata?.id == itemId) {
+                            val current = _searchState.value
+                            val updated = current.results.toMutableList().also { if (index in it.indices) it[index] = result }
+                            _searchState.value = current.copy(results = updated)
+                        }
+                    }
+                }.joinAll()
+            }
+            if (playback.state.value.currentItem?.metadata?.id == itemId) {
+                val current = _searchState.value
+                _searchState.value = current.copy(
+                    searching = false,
+                    message = if (current.results.none { it.document != null }) "No provider found lyrics for this search" else null,
+                )
+            }
+        }
+    }
+
+    fun select(result: LyricsProviderSearchResult) {
+        val item = playback.state.value.currentItem ?: return
+        val document = result.document ?: return
+        synchronized(cache) { cache[item.metadata.id] = document }
+        showDocument(item.metadata.id, document, playback.state.value.positionMs)
+    }
+
     override fun close() {
+        searchJob?.cancel()
         itemJob.cancel()
         positionJob.cancel()
     }

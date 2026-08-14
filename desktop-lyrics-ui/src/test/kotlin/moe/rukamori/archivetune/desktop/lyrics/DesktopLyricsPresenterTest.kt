@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.runTest
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.JvmLyricsProvider
 import moe.rukamori.archivetune.lyrics.NamedLyricsProvider
+import moe.rukamori.archivetune.lyrics.LyricsRequest
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -77,6 +78,31 @@ class DesktopLyricsPresenterTest {
         advanceUntilIdle()
 
         assertTrue(presenter.state.value is DesktopLyricsState.Error)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `manual search exposes providers and selected result becomes active`() = runTest {
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(
+            listOf(
+                NamedLyricsProvider("empty", "Empty", JvmLyricsProvider { "" }),
+                NamedLyricsProvider("found", "Found", JvmLyricsProvider { "[00:00]Manual lyrics" }),
+            ),
+        )
+        val presenter = DesktopLyricsPresenter(playback, client, this)
+        val item = PlaybackItem(PlaybackMetadata(id = "id", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
+        advanceUntilIdle()
+
+        presenter.search(LyricsRequest("Edited song", "Edited artist"))
+        advanceUntilIdle()
+
+        val result = presenter.searchState.value.results.single { it.document != null }
+        presenter.select(result)
+        val ready = presenter.state.value as DesktopLyricsState.Ready
+        assertEquals("Found", ready.providerName)
+        assertEquals("Manual lyrics", ready.timeline.lines.single().text)
         presenter.close()
     }
 }

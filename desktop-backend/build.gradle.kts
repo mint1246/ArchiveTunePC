@@ -35,3 +35,11 @@ tasks.register<JavaExec>("smokeTest") {
     mainClass.set("moe.rukamori.archivetune.backend.BackendSmokeKt")
     dependsOn(smoke.classesTaskName)
 }
+
+tasks.register<JavaExec>("lyricsSmokeTest") {
+    group = "verification"
+    description = "Runs an opt-in live search against every built-in lyrics provider."
+    classpath = smoke.runtimeClasspath
+    mainClass.set("moe.rukamori.archivetune.backend.LyricsSmokeKt")
+    dependsOn(smoke.classesTaskName)
+}

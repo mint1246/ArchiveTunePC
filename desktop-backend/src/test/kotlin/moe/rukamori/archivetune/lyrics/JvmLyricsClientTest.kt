@@ -84,6 +84,32 @@ class JvmLyricsClientTest {
         assertTrue(failure.failures.single().cause is LyricsProviderTimeoutException)
     }
 
+    @Test
+    fun searchReportsEveryProviderOutcome() = runBlocking {
+        val client = JvmLyricsClient(
+            providers = listOf(
+                provider("found") { "[00:01]Found" },
+                provider("empty") { "" },
+                provider("failed") { error("offline") },
+                provider("slow") { delay(Long.MAX_VALUE); "unreachable" },
+            ),
+            providerTimeoutMillis = 50,
+        )
+
+        val results = client.searchLyrics(LyricsRequest("Song", "Artist"))
+
+        assertEquals(
+            listOf(
+                LyricsProviderSearchStatus.FOUND,
+                LyricsProviderSearchStatus.NO_MATCH,
+                LyricsProviderSearchStatus.FAILED,
+                LyricsProviderSearchStatus.TIMED_OUT,
+            ),
+            results.map { it.status },
+        )
+        assertEquals("found", results.first().document?.providerId)
+    }
+
     private fun provider(
         id: String,
         block: suspend (LyricsRequest) -> String,
