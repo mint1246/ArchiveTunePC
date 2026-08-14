@@ -79,7 +79,7 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
                         ),
                     )
                 },
-                onSelect = { presenter.select(it); showSearch = false },
+                onSelect = { if (presenter.select(it)) showSearch = false },
             )
         }
         Box(Modifier.weight(1f)) {
@@ -107,7 +107,7 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
                 is DesktopLyricsState.Empty -> LyricsMessage(
                     if (searchState.results.any { it.document != null }) "Lyrics found — choose a provider result above" else current.message,
                     Modifier,
-                    presenter::retry,
+                    if (searchState.results.any { it.document != null }) null else presenter::retry,
                 )
                 is DesktopLyricsState.Error -> LyricsMessage(current.message, Modifier, presenter::retry)
             }

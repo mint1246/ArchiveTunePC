@@ -1,6 +1,7 @@
 package moe.rukamori.archivetune.desktop.lyrics
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.supervisorScope
@@ -17,7 +18,6 @@ import moe.rukamori.archivetune.lyrics.LyricsDocument
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchResult
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
 import moe.rukamori.archivetune.lyrics.LyricsRequest
-import moe.rukamori.archivetune.lyrics.LyricsUnavailableException
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 
@@ -93,28 +93,55 @@ class DesktopLyricsPresenter(
             if (generation == loadGeneration.get()) _state.value = DesktopLyricsState.Empty(id, "Lyrics need a song title and artist metadata")
             return
         }
-        val document = synchronized(cache) { cache[id] } ?: lyricsClient.getLyrics(request).getOrElse { error ->
+        synchronized(cache) { cache[id] }?.let { cached ->
+            if (generation == loadGeneration.get()) showDocument(id, cached, positionMs)
+            return
+        }
+
+        val results = try {
+            lyricsClient.searchLyrics(request)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
             if (generation == loadGeneration.get()) {
-                _state.value =
-                    if (error is LyricsUnavailableException && !error.hasProviderFailures) {
-                        DesktopLyricsState.Empty(id)
-                    } else {
-                        DesktopLyricsState.Error(id, error.message ?: "Lyrics providers could not be reached")
-                    }
+                _state.value = DesktopLyricsState.Error(id, "Lyrics providers could not be reached")
             }
             return
-        }.also { synchronized(cache) { cache[id] = it } }
-        if (generation == loadGeneration.get()) showDocument(id, document, positionMs)
+        }
+        if (generation != loadGeneration.get()) return
+        _searchState.value = _searchState.value.copy(
+            searching = false,
+            results = results,
+            message = if (results.none { it.document != null }) "No provider found lyrics for this search" else null,
+        )
+        val document = results.asSequence()
+            .mapNotNull(LyricsProviderSearchResult::document)
+            .firstOrNull { LyricsTimelineParser.parse(it).lines.isNotEmpty() }
+        if (document != null) {
+            synchronized(cache) { cache[id] = document }
+            showDocument(id, document, positionMs)
+        } else if (results.any { it.document != null }) {
+            _state.value = DesktopLyricsState.Error(id, "Lyrics were returned but could not be rendered")
+        } else if (results.any { it.status == LyricsProviderSearchStatus.FAILED || it.status == LyricsProviderSearchStatus.TIMED_OUT }) {
+            _state.value = DesktopLyricsState.Error(id, "Lyrics providers could not be reached")
+        } else {
+            _state.value = DesktopLyricsState.Empty(id)
+        }
     }
 
-    private fun showDocument(itemId: String, document: LyricsDocument, positionMs: Long) {
+    private fun showDocument(itemId: String, document: LyricsDocument, positionMs: Long): Boolean {
         val timeline = LyricsTimelineParser.parse(document)
-        _state.value = if (timeline.lines.isEmpty()) DesktopLyricsState.Empty(itemId) else DesktopLyricsState.Ready(
-            itemId = itemId,
-            providerName = document.providerName,
-            timeline = timeline,
-            activeLineIndex = timeline.activeLineIndex(positionMs),
-        )
+        _state.value = if (timeline.lines.isEmpty()) {
+            DesktopLyricsState.Error(itemId, "${document.providerName} returned lyrics that could not be rendered")
+        } else {
+            DesktopLyricsState.Ready(
+                itemId = itemId,
+                providerName = document.providerName,
+                timeline = timeline,
+                activeLineIndex = timeline.activeLineIndex(positionMs),
+            )
+        }
+        return timeline.lines.isNotEmpty()
     }
 
     /** Re-runs provider lookup for the current item after an Empty/Error state. */
@@ -156,12 +183,13 @@ class DesktopLyricsPresenter(
         }
     }
 
-    fun select(result: LyricsProviderSearchResult) {
-        val item = playback.state.value.currentItem ?: return
-        val document = result.document ?: return
+    fun select(result: LyricsProviderSearchResult): Boolean {
+        val item = playback.state.value.currentItem ?: return false
+        val document = result.document ?: return false
         loadGeneration.incrementAndGet()
-        synchronized(cache) { cache[item.metadata.id] = document }
-        showDocument(item.metadata.id, document, playback.state.value.positionMs)
+        val rendered = showDocument(item.metadata.id, document, playback.state.value.positionMs)
+        if (rendered) synchronized(cache) { cache[item.metadata.id] = document }
+        return rendered
     }
 
     override fun close() {

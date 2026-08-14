@@ -15,6 +15,10 @@ import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.JvmLyricsProvider
 import moe.rukamori.archivetune.lyrics.NamedLyricsProvider
 import moe.rukamori.archivetune.lyrics.LyricsRequest
+import moe.rukamori.archivetune.lyrics.LyricsDocument
+import moe.rukamori.archivetune.lyrics.LyricsFormat
+import moe.rukamori.archivetune.lyrics.LyricsProviderSearchResult
+import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -136,6 +140,54 @@ class DesktopLyricsPresenterTest {
 
         val ready = presenter.state.value as DesktopLyricsState.Ready
         assertEquals("Manually selected", ready.timeline.lines.single().text)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `unrenderable selection remains an error and is not cached`() = runTest {
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(listOf(NamedLyricsProvider("empty", "Empty", JvmLyricsProvider { "" })))
+        val presenter = DesktopLyricsPresenter(playback, client, this)
+        val item = PlaybackItem(PlaybackMetadata(id = "id", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
+        advanceUntilIdle()
+
+        val selected = presenter.select(
+            LyricsProviderSearchResult(
+                "broken",
+                "Broken provider",
+                LyricsProviderSearchStatus.FOUND,
+                LyricsDocument("broken", "Broken provider", "<tt><body/></tt>", LyricsFormat.TTML),
+            ),
+        )
+
+        assertEquals(false, selected)
+        assertTrue(presenter.state.value is DesktopLyricsState.Error)
+        presenter.retry()
+        advanceUntilIdle()
+        assertTrue(presenter.state.value is DesktopLyricsState.Empty)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `automatic lookup skips unrenderable provider and displays a renderable result`() = runTest {
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(
+            listOf(
+                NamedLyricsProvider("broken", "Broken", JvmLyricsProvider { "<tt><body/></tt>" }),
+                NamedLyricsProvider("working", "Working", JvmLyricsProvider { "[00:00]Displayed automatically" }),
+            ),
+        )
+        val presenter = DesktopLyricsPresenter(playback, client, this)
+        val item = PlaybackItem(PlaybackMetadata(id = "id", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
+
+        advanceUntilIdle()
+
+        val ready = presenter.state.value as DesktopLyricsState.Ready
+        assertEquals("Working", ready.providerName)
+        assertEquals("Displayed automatically", ready.timeline.lines.single().text)
+        assertEquals(2, presenter.searchState.value.results.count { it.document != null })
         presenter.close()
     }
 }

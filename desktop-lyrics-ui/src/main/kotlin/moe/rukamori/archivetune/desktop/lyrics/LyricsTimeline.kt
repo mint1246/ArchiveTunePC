@@ -1,8 +1,9 @@
 package moe.rukamori.archivetune.desktop.lyrics
 
+import moe.rukamori.archivetune.betterlyrics.QRCParser
+import moe.rukamori.archivetune.betterlyrics.TTMLParser
 import moe.rukamori.archivetune.lyrics.LyricsDocument
 import moe.rukamori.archivetune.lyrics.LyricsFormat
-import javax.xml.parsers.DocumentBuilderFactory
 
 /** One visible lyric line. Translation and romanization stay null unless a provider exposes them. */
 data class TimedLyricLine(
@@ -51,42 +52,50 @@ object LyricsTimelineParser {
         return timed(parsed)
     }
 
-    private fun ttml(text: String): LyricsTimeline = try {
-        val factory = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        }
-        val document = factory.newDocumentBuilder().parse(text.byteInputStream())
-        val nodes = document.getElementsByTagNameNS("*", "p")
-        val lines = buildList {
-            for (index in 0 until nodes.length) {
-                val node = nodes.item(index)
-                val start = parseTtmlTime(node.attributes.getNamedItem("begin")?.nodeValue) ?: continue
-                val end = parseTtmlTime(node.attributes.getNamedItem("end")?.nodeValue)
-                val line = node.textContent.replace(Regex("\\s+"), " ").trim()
-                if (line.isNotEmpty()) add(TimedLyricLine(line, start, end))
-            }
-        }.sortedBy { it.startTimeMs }
-        timed(lines)
-    } catch (_: Exception) {
-        // A malformed TTML response is still shown honestly as readable, non-synced text.
-        plain(text)
-    }
+    private fun ttml(text: String): LyricsTimeline = timed(
+        TTMLParser.parseTTML(text).map { line ->
+            TimedLyricLine(
+                text = line.text,
+                startTimeMs = line.startTime.toMilliseconds(),
+                endTimeMs = line.endTime.toMilliseconds(),
+                translation = line.providerTranslationText,
+                romanization = line.providerRomanizedText,
+            )
+        },
+    )
 
     private fun qrc(text: String): LyricsTimeline {
-        val content = qrcContent.find(text)?.groupValues?.get(1).orEmpty().ifBlank { text }
+        val productionLines = QRCParser.parseQrc(text).map { line ->
+            TimedLyricLine(
+                text = line.text,
+                startTimeMs = line.startTime.toMilliseconds(),
+                endTimeMs = line.endTime.toMilliseconds(),
+            )
+        }
+        if (productionLines.isNotEmpty()) return timed(productionLines)
+
+        // Some mirrors return line-timed QRC without per-word timing. Keep that valid fallback.
+        val content = extractQrcContent(text)
+        return timed(qrcLine.findAll(content).mapNotNull { match ->
+            val start = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+            val duration = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+            val line = match.groupValues[3].replace(qrcWordTiming, "").replace(Regex("\\s+"), " ").trim()
+            line.takeIf(String::isNotEmpty)?.let { TimedLyricLine(it, start, start + duration) }
+        }.toList())
+    }
+
+    private fun extractQrcContent(text: String): String {
+        val marker = Regex("""LyricContent\s*=\s*\"""", RegexOption.IGNORE_CASE).find(text) ?: return text
+        val start = marker.range.last + 1
+        val end = text.lastIndexOf("\"")
+        return text.substring(start, end.takeIf { it >= start } ?: text.length)
+            .replace("&#13;", "\r")
+            .replace("&#10;", "\n")
             .replace("&quot;", "\"")
             .replace("&apos;", "'")
             .replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&amp;", "&")
-        val lines = qrcLine.findAll(content).mapNotNull { match ->
-            val start = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-            val duration = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
-            val line = match.groupValues[3].replace(qrcWordTiming, "").replace(Regex("\\s+"), " ").trim()
-            line.takeIf(String::isNotEmpty)?.let { TimedLyricLine(it, start, start + duration) }
-        }.toList()
-        return timed(lines)
     }
 
     private fun timed(lines: List<TimedLyricLine>): LyricsTimeline = LyricsTimeline(
@@ -103,26 +112,9 @@ object LyricsTimelineParser {
         return minutes * 60_000L + seconds * 1_000L + fraction
     }
 
-    private fun parseTtmlTime(value: String?): Long? {
-        val clean = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
-        return when {
-            clean.endsWith("ms") -> clean.dropLast(2).toDoubleOrNull()?.toLong()
-            clean.endsWith("s") -> (clean.dropLast(1).toDoubleOrNull()?.times(1_000))?.toLong()
-            ':' in clean -> {
-                val parts = clean.split(':')
-                if (parts.size != 3) null else {
-                    val hours = parts[0].toLongOrNull() ?: return null
-                    val minutes = parts[1].toLongOrNull() ?: return null
-                    val seconds = parts[2].toDoubleOrNull() ?: return null
-                    (hours * 3_600_000 + minutes * 60_000 + seconds * 1_000).toLong()
-                }
-            }
-            else -> null
-        }
-    }
+    private fun Double.toMilliseconds(): Long = (this * 1_000.0).toLong()
 
     private val timestamp = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]""")
-    private val qrcContent = Regex("""LyricContent="([\s\S]*)"\s*/>""", RegexOption.IGNORE_CASE)
-    private val qrcLine = Regex("""(?m)^\[(\d+),(\d+)](.*)$""")
+    private val qrcLine = Regex("""(?m)^\s*\[(\d+),(\d+)]([^\r\n]*)""")
     private val qrcWordTiming = Regex("""\(\d+,\d+\)""")
 }
