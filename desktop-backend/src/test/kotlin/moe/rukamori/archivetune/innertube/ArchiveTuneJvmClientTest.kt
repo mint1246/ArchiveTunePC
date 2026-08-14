@@ -104,9 +104,10 @@ class ArchiveTuneJvmClientTest {
 
     @Test
     fun muxedAudioOnlyFormatsRemainPlayableFallbacks() {
-        val muxedAudio = format(itag = 18, bitrate = 96_000, mimeType = "audio/mp4", direct = true)
+        val muxedAudio = format(itag = 18, bitrate = 96_000, mimeType = "video/mp4; codecs=\"avc1, mp4a.40.2\"", direct = true, width = 640)
 
-        assertEquals(listOf(muxedAudio), selectAudioFormatCandidates(playerResponse(muxedAudio), JvmAudioQuality.HIGHEST))
+        val response = playerResponse().copy(streamingData = PlayerResponse.StreamingData(formats = listOf(muxedAudio), adaptiveFormats = emptyList()))
+        assertEquals(listOf(muxedAudio), selectAudioFormatCandidates(response, JvmAudioQuality.HIGHEST))
     }
 
     @Test
@@ -158,6 +159,19 @@ class ArchiveTuneJvmClientTest {
 
         assertTrue(failure is kotlinx.coroutines.TimeoutCancellationException)
         assertEquals(StreamResolutionFailureKind.NETWORK_TIMEOUT, classifyStreamResolutionFailure(StreamResolutionTimeoutException()))
+    }
+
+    @Test
+    fun unavailableWebFailureWinsOverLaterNativeAuthRequired() {
+        val failure = StreamResolutionException(
+            "video",
+            listOf(
+                StreamPlaybackUnavailableException("video", "WEB", "UNPLAYABLE", null),
+                StreamPlaybackUnavailableException("video", "ANDROID", "LOGIN_REQUIRED", null),
+            ),
+        )
+
+        assertEquals(StreamResolutionFailureKind.UNAVAILABLE, classifyStreamResolutionFailure(failure))
     }
 
     private fun playerResponse(vararg formats: PlayerResponse.StreamingData.Format) =

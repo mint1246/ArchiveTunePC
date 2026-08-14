@@ -186,6 +186,30 @@ class DesktopSessionManager(
         return _state.value
     }
 
+    /**
+     * Revalidates a restored, non-expired DPAPI session in the background. A failed refresh is
+     * deliberately non-destructive: offline users retain their last verified session and can keep
+     * using it until the next successful validation or explicit logout.
+     */
+    suspend fun refreshRestoredSession(): Boolean {
+        val restored = active ?: return false
+        if (restored.isExpired(clock.millis())) return false
+        val verified = verifier.verify(restored.authState).getOrNull() ?: return false
+        val refreshed =
+            restored.copy(
+                authState = verified.authState.normalized(),
+                account = verified.account,
+            )
+        return try {
+            secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
+            active = refreshed
+            _state.value = DesktopAccountState.SignedIn(refreshed.account, restoredFromSecureStore = false)
+            true
+        } catch (_: SecureStoreUnavailableException) {
+            false
+        }
+    }
+
     suspend fun importAndValidate(input: YouTubeSessionImport): SessionImportResult {
         val candidate =
             PlaybackAuthState(

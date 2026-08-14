@@ -101,7 +101,7 @@ class MpvPlaybackController(
         if (request == null) {
             host?.let { runCatching { it.command("stop") } }
         } else {
-            executeLoad(request)
+            enqueueLoad(request)
         }
     }
 
@@ -125,7 +125,7 @@ class MpvPlaybackController(
                 }
             }
         if (reload != null) {
-            executeLoad(reload)
+            enqueueLoad(reload)
         } else {
             commandMutex.withLock {
                 sendHostCommandLocked("set_property", "pause", false)
@@ -194,7 +194,7 @@ class MpvPlaybackController(
                 transition(previous, selected.item, TransitionReason.USER_SELECTED)
                 LoadRequest(generation, selected.item, positionMs.coerceAtLeast(0L))
             }
-        executeLoad(request)
+        enqueueLoad(request)
     }
 
     override suspend fun skipNext() {
@@ -213,7 +213,7 @@ class MpvPlaybackController(
                     prepareSelectionLocked(previous, selected, TransitionReason.USER_NEXT)
                 }
             }
-        request?.let { executeLoad(it) }
+        request?.let(::enqueueLoad)
     }
 
     override suspend fun skipPrevious(restartThresholdMs: Long) {
@@ -233,7 +233,7 @@ class MpvPlaybackController(
                     prepareSelectionLocked(previous, selected, TransitionReason.USER_PREVIOUS)
                 }
             }
-        if (request == null) seekTo(0L) else executeLoad(request)
+        if (request == null) seekTo(0L) else enqueueLoad(request)
     }
 
     override suspend fun enqueue(items: List<PlaybackItem>) {
@@ -253,7 +253,7 @@ class MpvPlaybackController(
                     null
                 }
             }
-        request?.let { executeLoad(it) }
+        request?.let(::enqueueLoad)
     }
 
     override suspend fun playNext(items: List<PlaybackItem>) {
@@ -273,7 +273,7 @@ class MpvPlaybackController(
                     null
                 }
             }
-        request?.let { executeLoad(it) }
+        request?.let(::enqueueLoad)
     }
 
     override suspend fun removeQueueItem(index: Int) {
@@ -309,7 +309,7 @@ class MpvPlaybackController(
                     else -> null
                 }
             }
-        request?.let { executeLoad(it) }
+        request?.let(::enqueueLoad)
     }
 
     override suspend fun moveQueueItem(fromIndex: Int, toIndex: Int) {
@@ -357,7 +357,7 @@ class MpvPlaybackController(
     override suspend fun retry() {
         checkOpen()
         val request = commandMutex.withLock { prepareReloadLocked(TransitionReason.RETRY, _state.value.positionMs) }
-        request?.let { executeLoad(it) }
+        request?.let(::enqueueLoad)
     }
 
     override suspend fun clearError() {
@@ -500,6 +500,10 @@ class MpvPlaybackController(
         }
     }
 
+    private fun enqueueLoad(request: LoadRequest) {
+        scope.launch { executeLoad(request) }
+    }
+
     private suspend fun ensureHost(): MpvProcessHost =
         hostMutex.withLock {
             host?.takeIf(MpvProcessHost::isRunning)?.let { return@withLock it }
@@ -535,8 +539,9 @@ class MpvPlaybackController(
             try {
                 candidate.start()
                 OBSERVED_PROPERTIES.forEachIndexed { index, property ->
-                    candidate.command("observe_property", index + 1, property)
+                    candidate.eventCommand("observe_property", index + 1, property)
                 }
+                candidate.startEventLoop()
                 candidate
             } catch (error: Throwable) {
                 candidate.close()
@@ -600,7 +605,7 @@ class MpvPlaybackController(
                             prepareSelectionLocked(previous, selected, TransitionReason.AUTO_ADVANCE)
                         }
                     }
-                request?.let { executeLoad(it) }
+                request?.let(::enqueueLoad)
             }
 
             "error", "unknown" -> commandMutex.withLock {

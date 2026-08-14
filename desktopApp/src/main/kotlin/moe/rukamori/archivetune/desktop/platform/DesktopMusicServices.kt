@@ -62,6 +62,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         backend.bindSessionProvider(account)
         runtime.applicationScope.launch {
             account.restore()
+            account.refreshRestoredSession()
         }
         val restored = settings.snapshot()
         runtime.applicationScope.launch {
@@ -106,6 +107,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         when (event) {
             is StreamResolutionDiagnostic.Attempt -> runtime.logger.info("stream_resolution event=attempt client=${event.client} result=${event.classification.name}")
             is StreamResolutionDiagnostic.FormatAttempt -> runtime.logger.info("stream_resolution event=format client=${event.client} format=${event.format} result=${event.classification.name}")
+            is StreamResolutionDiagnostic.PlayerResponse -> runtime.logger.info("stream_resolution event=player client=${event.client} status=${event.status} adaptive=${event.adaptiveFormats} audio=${event.audioFormats} direct=${event.directUrls} cipher=${event.ciphers}")
+            is StreamResolutionDiagnostic.LibraryResponse -> runtime.logger.info("library_response single_tabs=${event.singleTabs} two_tabs=${event.twoColumnTabs} direct_sections=${event.directSections} secondary_sections=${event.secondarySections} selected_sections=${event.selectedSections} renderer_items=${event.rendererItems} parsed_items=${event.parsedItems} renderer_keys=${event.rendererKeys.joinToString(",")}")
             is StreamResolutionDiagnostic.Success -> runtime.logger.info("stream_resolution event=success client=${event.client}")
             is StreamResolutionDiagnostic.Failure -> runtime.logger.warning("stream_resolution event=failure result=${event.classification.name}")
         }

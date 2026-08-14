@@ -24,6 +24,7 @@ internal class MpvProcessHost(
     private val onExit: (Int, String) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
+    private val eventLoopStarted = AtomicBoolean(false)
     private val writeLock = Any()
     private val diagnostics = ConcurrentLinkedDeque<String>()
     private var endpoint: MpvIpcEndpoint? = null
@@ -73,7 +74,6 @@ internal class MpvProcessHost(
         while (System.nanoTime() < deadline && newProcess.isAlive && !closed.get()) {
             try {
                 transport = newEndpoint.connect()
-                startReadLoop(newProcess)
                 return@withContext
             } catch (error: IOException) {
                 lastConnectError = error
@@ -93,16 +93,29 @@ internal class MpvProcessHost(
     }
 
     fun command(vararg arguments: Any?) {
-        val payload =
-            JSONObject().put(
-                "command",
-                JSONArray().apply { arguments.forEach { put(JSONObject.wrap(it)) } },
-            ).toString()
+        val payload = commandPayload(arguments)
         synchronized(writeLock) {
             val activeTransport = transport ?: throw IllegalStateException("mpv IPC is not connected")
             activeTransport.writeLine(payload)
         }
     }
+
+    fun eventCommand(vararg arguments: Any?) {
+        val activeTransport = transport ?: throw IllegalStateException("mpv IPC is not connected")
+        activeTransport.writeEventLine(commandPayload(arguments))
+    }
+
+    fun startEventLoop() {
+        if (!eventLoopStarted.compareAndSet(false, true)) return
+        val ownedProcess = process ?: throw IllegalStateException("mpv is not running")
+        startReadLoop(ownedProcess)
+    }
+
+    private fun commandPayload(arguments: Array<out Any?>): String =
+        JSONObject().put(
+            "command",
+            JSONArray().apply { arguments.forEach { put(JSONObject.wrap(it)) } },
+        ).toString()
 
     private fun startReadLoop(ownedProcess: Process) {
         Thread(

@@ -7,7 +7,9 @@
 
 package moe.rukamori.archivetune.playback.desktop
 
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.playback.api.PlaybackFailure
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
@@ -21,7 +23,7 @@ import kotlin.test.assertFalse
 
 class MpvUnavailableTest {
     @Test
-    fun `missing runtime becomes a recoverable player error`() = runTest {
+    fun `missing runtime becomes a recoverable player error`() = runBlocking {
         val audioFile = createTempFile(prefix = "archivetune-playback-", suffix = ".audio")
         val controller =
             MpvPlaybackController(
@@ -43,9 +45,9 @@ class MpvUnavailableTest {
                     ),
             )
 
-            assertEquals(PlaybackStatus.ERROR, controller.state.value.status)
-            assertEquals(PlaybackFailure.Kind.ENGINE_UNAVAILABLE, controller.state.value.error?.kind)
-            assertFalse(controller.state.value.isPlaying)
+            val failed = withTimeout(5_000) { controller.state.first { it.status == PlaybackStatus.ERROR } }
+            assertEquals(PlaybackFailure.Kind.ENGINE_UNAVAILABLE, failed.error?.kind)
+            assertFalse(failed.isPlaying)
         } finally {
             controller.close()
             java.nio.file.Files.deleteIfExists(audioFile)

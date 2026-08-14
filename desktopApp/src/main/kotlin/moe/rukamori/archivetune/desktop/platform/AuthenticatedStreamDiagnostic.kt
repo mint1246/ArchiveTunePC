@@ -8,6 +8,8 @@ import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.StreamResolutionDiagnostic
 import moe.rukamori.archivetune.innertube.StreamResolutionDiagnosticSink
 import moe.rukamori.archivetune.innertube.classifyStreamResolutionFailure
+import moe.rukamori.archivetune.innertube.models.PlaylistItem
+import moe.rukamori.archivetune.innertube.probeResolvedAudioStream
 
 /**
  * Local-only diagnostic for a user-approved installed session. It uses the existing DPAPI-backed
@@ -27,7 +29,14 @@ fun main() = runBlocking {
         println("authenticated_stream_diagnostic session=unavailable")
         return@runBlocking
     }
-
+    val auth = session.currentAuthState()
+    // Presence flags only: never print a proof-token value or session identifier.
+    println(
+        "authenticated_stream_diagnostic auth_context " +
+            "visitor=${!auth.visitorData.isNullOrBlank()} data_sync=${!auth.dataSyncId.isNullOrBlank()} " +
+            "web_po_enabled=${auth.webClientPoTokenEnabled} player_po=${!auth.poTokenPlayer.isNullOrBlank()} " +
+            "gvs_po=${!auth.poTokenGvs.isNullOrBlank()}",
+    )
     val backend = ArchiveTuneJvmClient(
         cacheDirectory = paths.cache.resolve("cipher").toFile(),
         sessionProvider = session,
@@ -35,18 +44,56 @@ fun main() = runBlocking {
             when (event) {
                 is StreamResolutionDiagnostic.Attempt -> println("authenticated_stream_diagnostic attempt client=${event.client} result=${event.classification.name}")
                 is StreamResolutionDiagnostic.FormatAttempt -> println("authenticated_stream_diagnostic format client=${event.client} format=${event.format} result=${event.classification.name}")
+                is StreamResolutionDiagnostic.PlayerResponse -> println("authenticated_stream_diagnostic player client=${event.client} status=${event.status} adaptive=${event.adaptiveFormats} audio=${event.audioFormats} direct=${event.directUrls} cipher=${event.ciphers}")
+                is StreamResolutionDiagnostic.LibraryResponse -> println("authenticated_stream_diagnostic library_shape single_tabs=${event.singleTabs} two_tabs=${event.twoColumnTabs} direct_sections=${event.directSections} secondary_sections=${event.secondarySections} selected_sections=${event.selectedSections} renderer_items=${event.rendererItems} parsed_items=${event.parsedItems} renderer_keys=${event.rendererKeys.joinToString(",")}")
                 is StreamResolutionDiagnostic.Success -> println("authenticated_stream_diagnostic success client=${event.client}")
                 is StreamResolutionDiagnostic.Failure -> println("authenticated_stream_diagnostic failure result=${event.classification.name}")
             }
         },
     )
-    backend.resolveAudioStream(videoId).fold(
+    if (!System.getenv("ARCHIVETUNE_DIAGNOSTIC_PLAYLISTS_ONLY").equals("true", ignoreCase = true)) backend.resolveAudioStream(videoId).fold(
         onSuccess = { stream ->
             val source = if (stream.format.url != null) "direct" else "cipher"
             println("authenticated_stream_diagnostic resolved format=$source mime=${stream.mimeType.substringBefore(';')} bitrate=${stream.bitrate}")
+            probeResolvedAudioStream(stream).fold(
+                onSuccess = { probe ->
+                    println(
+                        "authenticated_stream_diagnostic probe status=${probe.httpStatus} " +
+                            "bytes=${probe.bytesRead} ranged=${probe.rangedResponse}",
+                    )
+                },
+                onFailure = {
+                    println("authenticated_stream_diagnostic probe result=FAILED")
+                },
+            )
         },
         onFailure = { failure ->
             println("authenticated_stream_diagnostic unresolved result=${classifyStreamResolutionFailure(failure).name}")
         },
     )
+
+    backend.libraryPlaylists().fold(
+        onSuccess = { library ->
+            val playlists = library.items.filterIsInstance<PlaylistItem>()
+            println(
+                "authenticated_stream_diagnostic playlists result=OK total=${library.items.size} " +
+                    "count=${playlists.size} continuation=${library.continuation != null}",
+            )
+            playlists.firstOrNull()?.let { playlist ->
+                backend.playlist(playlist.id).fold(
+                    onSuccess = { detail ->
+                        println("authenticated_stream_diagnostic playlist_detail result=OK songs=${detail.songs.size}")
+                    },
+                    onFailure = {
+                        println("authenticated_stream_diagnostic playlist_detail result=FAILED")
+                    },
+                )
+            }
+        },
+        onFailure = { failure ->
+            val status = Regex("\\b[45]\\d\\d\\b").find(failure.message.orEmpty())?.value ?: "none"
+            println("authenticated_stream_diagnostic playlists result=FAILED type=${failure::class.simpleName} status=$status")
+        },
+    )
+    Unit
 }

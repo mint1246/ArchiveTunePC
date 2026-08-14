@@ -18,6 +18,7 @@ import moe.rukamori.archivetune.innertube.pages.AlbumPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.ExplorePage
 import moe.rukamori.archivetune.innertube.pages.HomePage
+import moe.rukamori.archivetune.innertube.pages.LibraryPage
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.innertube.pages.SearchResult
 import moe.rukamori.archivetune.innertube.pages.SearchSummaryPage
@@ -159,6 +160,43 @@ class ArchiveTuneJvmClient(
             )
         }
 
+    /** Returns the signed-in user's YouTube Music playlists. */
+    suspend fun libraryPlaylists(): Result<LibraryPage> = run {
+        applyProvidedSession()
+        val initial = YouTube.authState
+        // The account-list response can contain both a generic main-app DataSync value and one
+        // value per YouTube channel. Private Music library pages are scoped to a channel, so use
+        // the explicitly selected channel first instead of the ambiguous main-app value.
+        YouTube.authState = initial.copy(dataSyncId = null)
+        val channels = YouTube.accountChannels().getOrNull().orEmpty()
+        val candidates =
+            (channels.sortedByDescending { it.isSelected }.map { it.dataSyncId } + listOfNotNull(initial.dataSyncId))
+                .distinct()
+        var lastFailure: Throwable? = null
+
+        for (dataSyncId in candidates.ifEmpty { listOf("") }) {
+            YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
+            val result = YouTube.library("FEmusic_liked_playlists") { shape ->
+                streamDiagnostics.record(
+                    StreamResolutionDiagnostic.LibraryResponse(
+                        singleTabs = shape.singleTabs,
+                        twoColumnTabs = shape.twoColumnTabs,
+                        directSections = shape.directSections,
+                        secondarySections = shape.secondarySections,
+                        selectedSections = shape.selectedSections,
+                        rendererItems = shape.rendererItems,
+                        parsedItems = shape.parsedItems,
+                        rendererKeys = shape.rendererKeys,
+                    ),
+                )
+            }
+            if (result.isSuccess) return@run result
+            lastFailure = result.exceptionOrNull()
+        }
+
+        Result.failure(lastFailure ?: IllegalStateException("YouTube Music library is unavailable"))
+    }
+
     /** Resolve an actual YouTube audio stream suitable for a desktop media engine. */
     suspend fun resolveAudioStream(
         videoId: String,
@@ -213,6 +251,7 @@ class ArchiveTuneJvmClient(
                 continue
             }
             val playerResponse = playerResult.getOrThrow()
+            streamDiagnostics.record(playerResponse.toDiagnostic(client.clientName))
 
             if (playerResponse.playabilityStatus.status != "OK") {
                 failures +=
@@ -363,6 +402,24 @@ fun interface StreamResolutionDiagnosticSink {
 sealed interface StreamResolutionDiagnostic {
     data class Attempt(val client: String, val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
     data class FormatAttempt(val client: String, val format: String, val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
+    data class PlayerResponse(
+        val client: String,
+        val status: String,
+        val adaptiveFormats: Int,
+        val audioFormats: Int,
+        val directUrls: Int,
+        val ciphers: Int,
+    ) : StreamResolutionDiagnostic
+    data class LibraryResponse(
+        val singleTabs: Int,
+        val twoColumnTabs: Int,
+        val directSections: Int,
+        val secondarySections: Int,
+        val selectedSections: Int,
+        val rendererItems: Int,
+        val parsedItems: Int,
+        val rendererKeys: List<String>,
+    ) : StreamResolutionDiagnostic
     data class Success(val client: String) : StreamResolutionDiagnostic
     data class Failure(val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
 }
@@ -383,9 +440,6 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
     if (all.any { it is StreamResolutionTimeoutException || it::class.simpleName.orEmpty().contains("Timeout", ignoreCase = true) }) {
         return StreamResolutionFailureKind.NETWORK_TIMEOUT
     }
-    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
-        return StreamResolutionFailureKind.AUTH_REQUIRED
-    }
     if (all.any { throwable ->
             throwable is StreamAudioFormatUnavailableException ||
                 throwable::class.simpleName.orEmpty().let { name ->
@@ -395,8 +449,29 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
                 }
         }
     ) return StreamResolutionFailureKind.EXTRACTOR_INCOMPATIBLE
+    // When an authenticated Web profile has a concrete non-login failure, preserve it over a
+    // later native fallback's expected AUTH_REQUIRED result.
+    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { !it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
+        return StreamResolutionFailureKind.UNAVAILABLE
+    }
+    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
+        return StreamResolutionFailureKind.AUTH_REQUIRED
+    }
     if (all.any { it is java.io.IOException }) return StreamResolutionFailureKind.NETWORK
     return StreamResolutionFailureKind.UNAVAILABLE
+}
+
+private fun PlayerResponse.toDiagnostic(client: String): StreamResolutionDiagnostic.PlayerResponse {
+    val formats = streamingData?.adaptiveFormats.orEmpty() + streamingData?.formats.orEmpty()
+    return StreamResolutionDiagnostic.PlayerResponse(
+        client = client,
+        // Status is a stable enum-like protocol field. Do not expose playability reason text.
+        status = playabilityStatus.status.uppercase(Locale.US).take(64),
+        adaptiveFormats = streamingData?.adaptiveFormats?.size ?: 0,
+        audioFormats = formats.count { it.isAudio },
+        directUrls = formats.count { it.url != null },
+        ciphers = formats.count { it.signatureCipher != null || it.cipher != null },
+    )
 }
 
 internal suspend fun <T> resolveStreamWithinTimeout(timeoutMillis: Long, block: suspend () -> T): T =
@@ -507,7 +582,11 @@ internal fun selectAudioFormatCandidates(
                     format.bitrate > 0 &&
                     (format.url != null || format.signatureCipher != null || format.cipher != null)
             }.orEmpty()
-    if (audioFormats.isEmpty()) return emptyList()
+    if (audioFormats.isEmpty()) {
+        return playerResponse.streamingData?.formats.orEmpty()
+            .filter { it.url != null && !it.isAudio && it.mimeType.hasAudioCodec() }
+            .sortedByDescending { it.bitrate }
+    }
 
     val targetBitrate =
         when (quality) {
@@ -541,6 +620,10 @@ private fun codecRank(mimeType: String): Int =
         mimeType.contains("mp4a", ignoreCase = true) -> 2
         else -> 1
     }
+
+private fun String.hasAudioCodec(): Boolean =
+    contains("mp4a", ignoreCase = true) || contains("opus", ignoreCase = true) ||
+        contains("vorbis", ignoreCase = true) || contains("aac", ignoreCase = true)
 
 internal fun requestHeaders(client: YouTubeClient): Map<String, String> =
     buildMap {

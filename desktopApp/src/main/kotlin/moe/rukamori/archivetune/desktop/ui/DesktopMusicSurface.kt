@@ -84,6 +84,7 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
     var failure by remember { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<Detail?>(null) }
     var localTracks by remember { mutableStateOf(services.library.tracks) }
+    var onlinePlaylists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     suspend fun rescanLibrary() {
@@ -92,6 +93,12 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
         libraryLoading = false
     }
     LaunchedEffect(Unit) { if (services.library.folders.isNotEmpty()) rescanLibrary() }
+    LaunchedEffect(state.destination) {
+        if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
+        services.backend.libraryPlaylists()
+            .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
+            .onFailure { libraryError = "Could not load your YouTube Music playlists." }
+    }
     LaunchedEffect(state.searchQuery, state.destination) {
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH || state.searchQuery.isBlank()) return@LaunchedEffect
         delay(300); loading = true; failure = null
@@ -112,9 +119,10 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, loading, failure, ::open, { song -> scope.launch { downloadServices.enqueue(song).onSuccess { state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS) }.onFailure { failure = it.message ?: "Could not resolve a stream for download" } } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path)), title = "Downloads") } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
-                localTracks, services.library.folders, libraryLoading, libraryError,
+                localTracks, onlinePlaylists, services.library.folders, libraryLoading, libraryError,
                 onAddFolder = { scope.launch { chooseLibraryFolder()?.let { services.library.setFolders(services.library.folders + it); rescanLibrary() } } },
                 onRescan = { scope.launch { rescanLibrary() } },
+                onOpenPlaylist = ::open,
                 onPlay = { selected -> scope.launch { val items = localTracks.map(::toPlaybackItem); services.playback.replaceQueue(items, localTracks.indexOf(selected).coerceAtLeast(0), title = "Local library") } }, modifier,
             )
             else -> FoundationDestinationContent(state, paths, logger, services.account, modifier)
@@ -123,8 +131,12 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
     }
 }
 
-@Composable private fun LocalLibrary(tracks: List<LocalTrack>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, onPlay: (LocalTrack) -> Unit, modifier: Modifier) {
+@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, modifier: Modifier) {
     Column(modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("YouTube Music playlists", style = MaterialTheme.typography.headlineMedium)
+        if (onlinePlaylists.isEmpty()) Text("No signed-in playlists found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        onlinePlaylists.forEach { playlist -> ResultCard(playlist, { onOpenPlaylist(playlist) }) }
+        Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Local library", style = MaterialTheme.typography.headlineMedium); Text(if (folders.isEmpty()) "Choose a music folder to begin." else "${tracks.size} tracks from ${folders.size} folder${if (folders.size == 1) "" else "s"}", color = MaterialTheme.colorScheme.onSurfaceVariant) }; androidx.compose.material3.Button(onClick = onAddFolder) { Text("Add folder") }; Spacer(Modifier.width(8.dp)); androidx.compose.material3.OutlinedButton(onClick = onRescan, enabled = folders.isNotEmpty() && !loading) { Text("Rescan") } }
         if (loading) Loading(); error?.let { Error(it) }
         tracks.forEach { track -> Card(Modifier.fillMaxWidth().clickable { onPlay(track) }) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(54.dp).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.MusicNote, null) }; Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium); Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Icon(Icons.Rounded.PlayArrow, "Play") } } }
@@ -179,7 +191,7 @@ private fun itemSubtitle(item: YTItem) = when (item) { is SongItem -> item.artis
     val snapshot by services.playback.state.collectAsState(); val scope = androidx.compose.runtime.rememberCoroutineScope(); val item = snapshot.currentItem
     var lyricsExpanded by remember(item?.metadata?.id) { mutableStateOf(false) }
     Surface(modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(item?.metadata?.title ?: "Nothing playing", maxLines = 1, overflow = TextOverflow.Ellipsis); Text(snapshot.error?.let { if (it.kind.name == "ENGINE_UNAVAILABLE") "mpv is required for desktop playback — install mpv or set ARCHIVETUNE_MPV_PATH" else it.message } ?: item?.metadata?.artistText ?: "Choose a song to begin", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = if (snapshot.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }; TextButton(onClick = { lyricsExpanded = !lyricsExpanded }, enabled = item != null) { Text(if (lyricsExpanded) "Hide lyrics" else "Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(item?.metadata?.title ?: "Nothing playing", maxLines = 1, overflow = TextOverflow.Ellipsis); Text(snapshot.error?.let { if (it.kind.name == "ENGINE_UNAVAILABLE") "mpv is required for desktop playback — install mpv or set ARCHIVETUNE_MPV_PATH" else it.message } ?: when (snapshot.status) { PlaybackStatus.RESOLVING -> "Resolving audio stream…"; PlaybackStatus.BUFFERING -> "Buffering…"; else -> item?.metadata?.artistText ?: "Choose a song to begin" }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = if (snapshot.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }; TextButton(onClick = { lyricsExpanded = !lyricsExpanded }, enabled = item != null) { Text(if (lyricsExpanded) "Hide lyrics" else "Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
         if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth())
         if (lyricsExpanded) Surface(Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 320.dp).padding(top = 8.dp), color = MaterialTheme.colorScheme.surfaceContainer) { DesktopLyricsPane(services.lyrics, Modifier.fillMaxSize().padding(vertical = 16.dp)) }
     } }

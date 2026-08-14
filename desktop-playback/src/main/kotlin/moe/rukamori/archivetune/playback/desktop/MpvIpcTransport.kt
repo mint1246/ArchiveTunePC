@@ -50,20 +50,33 @@ internal data class MpvIpcEndpoint(
 internal interface MpvIpcTransport : Closeable {
     fun readLine(): String?
     fun writeLine(value: String)
+    fun writeEventLine(value: String) = writeLine(value)
 }
 
 private class WindowsNamedPipeTransport(path: String) : MpvIpcTransport {
-    private val file = RandomAccessFile(path, "rw")
+    // Java serializes reads and writes performed on one RandomAccessFile handle. A blocking pipe
+    // read would therefore prevent every playback command. mpv supports multiple IPC clients, so
+    // keep one connection for events and a second connection for commands.
+    private val eventFile = RandomAccessFile(path, "rw")
+    private val commandFile = RandomAccessFile(path, "rw")
 
-    override fun readLine(): String? = file.readLine()
+    override fun readLine(): String? = eventFile.readLine()
 
     override fun writeLine(value: String) {
         // JSON emitted by the controller is ASCII-safe except for metadata. UTF-8 is required by mpv.
-        file.write(value.toByteArray(StandardCharsets.UTF_8))
-        file.write('\n'.code)
+        commandFile.write(value.toByteArray(StandardCharsets.UTF_8))
+        commandFile.write('\n'.code)
     }
 
-    override fun close() = file.close()
+    override fun writeEventLine(value: String) {
+        eventFile.write(value.toByteArray(StandardCharsets.UTF_8))
+        eventFile.write('\n'.code)
+    }
+
+    override fun close() {
+        runCatching(eventFile::close)
+        runCatching(commandFile::close)
+    }
 }
 
 private class UnixSocketTransport(path: Path) : MpvIpcTransport {
