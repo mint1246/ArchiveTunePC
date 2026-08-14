@@ -22,6 +22,7 @@ import moe.rukamori.archivetune.innertube.pages.LibraryPage
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.innertube.pages.SearchResult
 import moe.rukamori.archivetune.innertube.pages.SearchSummaryPage
+import moe.rukamori.archivetune.innertube.utils.completed
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherConfig
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherRuntime
 import java.io.File
@@ -176,28 +177,38 @@ class ArchiveTuneJvmClient(
                 listOfNotNull(refreshedDataSyncId, initial.dataSyncId) + "")
                 .distinct()
         var lastFailure: Throwable? = null
+        val pages = mutableListOf<LibraryPage>()
 
         for (dataSyncId in candidates.ifEmpty { listOf("") }) {
             YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
-            val result = YouTube.library("FEmusic_liked_playlists") { shape ->
-                streamDiagnostics.record(
-                    StreamResolutionDiagnostic.LibraryResponse(
-                        singleTabs = shape.singleTabs,
-                        twoColumnTabs = shape.twoColumnTabs,
-                        directSections = shape.directSections,
-                        secondarySections = shape.secondarySections,
-                        selectedSections = shape.selectedSections,
-                        rendererItems = shape.rendererItems,
-                        parsedItems = shape.parsedItems,
-                        rendererKeys = shape.rendererKeys,
-                    ),
-                )
-            }
-            if (result.isSuccess) return@run result
-            lastFailure = result.exceptionOrNull()
+            val result =
+                YouTube.library("FEmusic_liked_playlists") { shape ->
+                    streamDiagnostics.record(
+                        StreamResolutionDiagnostic.LibraryResponse(
+                            singleTabs = shape.singleTabs,
+                            twoColumnTabs = shape.twoColumnTabs,
+                            directSections = shape.directSections,
+                            secondarySections = shape.secondarySections,
+                            selectedSections = shape.selectedSections,
+                            rendererItems = shape.rendererItems,
+                            parsedItems = shape.parsedItems,
+                            rendererKeys = shape.rendererKeys,
+                        ),
+                    )
+                }.completed()
+            result.onSuccess(pages::add).onFailure { lastFailure = it }
         }
 
-        Result.failure(lastFailure ?: IllegalStateException("YouTube Music library is unavailable"))
+        if (pages.isNotEmpty()) {
+            Result.success(
+                LibraryPage(
+                    items = pages.flatMap { it.items }.distinctBy { it::class to it.id },
+                    continuation = null,
+                ),
+            )
+        } else {
+            Result.failure(lastFailure ?: IllegalStateException("YouTube Music library is unavailable"))
+        }
     }
 
     /** Resolve an actual YouTube audio stream suitable for a desktop media engine. */
