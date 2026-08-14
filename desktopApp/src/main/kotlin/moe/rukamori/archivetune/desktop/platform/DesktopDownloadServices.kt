@@ -34,6 +34,12 @@ class DesktopDownloadServices(
             title = song.title,
             artist = song.artists.joinToString { it.name }.ifBlank { null },
             extension = stream.mimeType.substringAfter('/').substringBefore(';').ifBlank { "m4a" },
+            mediaId = song.id,
+            albumTitle = song.album?.name,
+            albumId = song.album?.id,
+            artworkUrl = song.thumbnail,
+            durationMs = song.duration?.times(1000L),
+            explicit = song.explicit,
         )
         manager.enqueue(request).also { retryRequests[it] = request }
     }

@@ -293,5 +293,16 @@ private fun itemSubtitle(item: YTItem) = when (item) { is SongItem -> item.artis
 }
 private fun toPlaybackItem(song: SongItem) = PlaybackItem(PlaybackMetadata(song.id, song.title, song.artists.map { PlaybackArtist(it.id, it.name) }, song.album?.let { PlaybackAlbum(it.id, it.name) }, song.thumbnail, song.duration?.times(1000L), song.explicit))
 private fun toPlaybackItem(track: LocalTrack) = PlaybackItem(PlaybackMetadata(track.id, track.title, listOf(PlaybackArtist(name = track.artist)), track.album?.let { PlaybackAlbum(title = it) }), moe.rukamori.archivetune.playback.api.PlaybackSource.LocalFile(track.path.toString()))
-private fun toPlaybackItem(item: moe.rukamori.archivetune.downloads.DownloadSnapshot, path: java.nio.file.Path) = PlaybackItem(PlaybackMetadata(item.id, item.title, item.artist?.let { listOf(PlaybackArtist(name = it)) }.orEmpty()), moe.rukamori.archivetune.playback.api.PlaybackSource.LocalFile(path.toString()))
+private fun toPlaybackItem(item: moe.rukamori.archivetune.downloads.DownloadSnapshot, path: java.nio.file.Path) = PlaybackItem(
+    PlaybackMetadata(
+        id = item.mediaId ?: item.id,
+        title = item.title,
+        artists = item.artist?.let { listOf(PlaybackArtist(name = it)) }.orEmpty(),
+        album = item.albumTitle?.let { PlaybackAlbum(item.albumId, it) },
+        artworkUri = item.artworkUrl,
+        durationHintMs = item.durationMs,
+        explicit = item.explicit,
+    ),
+    moe.rukamori.archivetune.playback.api.PlaybackSource.LocalFile(path.toString()),
+)
 private fun format(ms: Long) = "%d:%02d".format(ms / 60000, (ms / 1000) % 60)

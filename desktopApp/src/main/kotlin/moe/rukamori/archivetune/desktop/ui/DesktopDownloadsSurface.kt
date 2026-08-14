@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Download
@@ -27,8 +29,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,7 +65,23 @@ fun DesktopDownloadsSurface(
 
 @Composable private fun DownloadRow(item: DownloadSnapshot, onCancel: () -> Unit, onRetry: () -> Unit, onPlay: () -> Unit) {
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium); item.artist?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } }; when (item.status) { DownloadStatus.COMPLETED -> IconButton(onPlay) { Icon(Icons.Rounded.PlayArrow, "Play downloaded file") }; DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING -> IconButton(onCancel) { Icon(Icons.Rounded.Cancel, "Cancel download") }; DownloadStatus.FAILED, DownloadStatus.CANCELLED -> IconButton(onRetry) { Icon(Icons.Rounded.Refresh, "Retry download") } } }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            item.artworkUrl?.let { artwork ->
+                AsyncImage(
+                    model = artwork,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                )
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                item.artist?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                item.albumTitle?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            when (item.status) { DownloadStatus.COMPLETED -> IconButton(onPlay) { Icon(Icons.Rounded.PlayArrow, "Play downloaded file") }; DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING -> IconButton(onCancel) { Icon(Icons.Rounded.Cancel, "Cancel download") }; DownloadStatus.FAILED, DownloadStatus.CANCELLED -> IconButton(onRetry) { Icon(Icons.Rounded.Refresh, "Retry download") } }
+        }
         if (item.status == DownloadStatus.DOWNLOADING || item.status == DownloadStatus.QUEUED) { LinearProgressIndicator(progress = { (item.totalBytes?.let { item.bytesDownloaded.toFloat() / it } ?: 0f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()); Text(item.totalBytes?.let { "${item.bytesDownloaded / 1024} KB / ${it / 1024} KB" } ?: "${item.bytesDownloaded / 1024} KB downloaded", style = MaterialTheme.typography.labelSmall) }
         Text(item.error ?: item.status.name.lowercase().replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelMedium, color = if (item.status == DownloadStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
     } }

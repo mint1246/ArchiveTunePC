@@ -43,6 +43,12 @@ data class DownloadRequest(
     val title: String,
     val artist: String? = null,
     val extension: String = "m4a",
+    val mediaId: String? = null,
+    val albumTitle: String? = null,
+    val albumId: String? = null,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = null,
+    val explicit: Boolean = false,
 )
 
 enum class DownloadStatus { QUEUED, DOWNLOADING, COMPLETED, FAILED, CANCELLED }
@@ -58,6 +64,12 @@ data class DownloadSnapshot(
     val totalBytes: Long? = null,
     val error: String? = null,
     val updatedAt: Instant = Instant.now(),
+    val mediaId: String? = null,
+    val albumTitle: String? = null,
+    val albumId: String? = null,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = null,
+    val explicit: Boolean = false,
 )
 
 /**
@@ -88,7 +100,21 @@ class DesktopDownloadManager(
         require(request.url.isNotBlank()) { "A resolved stream URL is required" }
         val id = UUID.randomUUID().toString()
         val fileName = safeFileName(request.title, request.artist, request.extension, id)
-        update(DownloadSnapshot(id, request.title, request.artist, fileName, DownloadStatus.QUEUED))
+        update(
+            DownloadSnapshot(
+                id = id,
+                title = request.title,
+                artist = request.artist,
+                fileName = fileName,
+                status = DownloadStatus.QUEUED,
+                mediaId = request.mediaId,
+                albumTitle = request.albumTitle,
+                albumId = request.albumId,
+                artworkUrl = request.artworkUrl,
+                durationMs = request.durationMs,
+                explicit = request.explicit,
+            ),
+        )
         jobs[id] = scope.launch { permits.withPermit { download(id, request, fileName) } }
         return id
     }
@@ -191,6 +217,12 @@ class DesktopDownloadManager(
             properties["$prefix.total"] = item.totalBytes?.toString().orEmpty()
             properties["$prefix.error"] = item.error.orEmpty()
             properties["$prefix.updatedAt"] = item.updatedAt.toEpochMilli().toString()
+            properties["$prefix.mediaId"] = item.mediaId.orEmpty()
+            properties["$prefix.albumTitle"] = item.albumTitle.orEmpty()
+            properties["$prefix.albumId"] = item.albumId.orEmpty()
+            properties["$prefix.artworkUrl"] = item.artworkUrl.orEmpty()
+            properties["$prefix.durationMs"] = item.durationMs?.toString().orEmpty()
+            properties["$prefix.explicit"] = item.explicit.toString()
         }
         Files.newOutputStream(journal).use { properties.store(it, "ArchiveTune desktop download state (no URLs or headers)") }
     }
@@ -206,12 +238,23 @@ class DesktopDownloadManager(
             val id = properties.getProperty("$prefix.id") ?: return@mapNotNull null
             val prior = runCatching { DownloadStatus.valueOf(properties.getProperty("$prefix.status")) }.getOrDefault(DownloadStatus.FAILED)
             val status = if (prior == DownloadStatus.QUEUED || prior == DownloadStatus.DOWNLOADING) DownloadStatus.FAILED else prior
-            DownloadSnapshot(id, properties.getProperty("$prefix.title", "Untitled"), properties.getProperty("$prefix.artist").orEmpty().ifBlank { null },
-                properties.getProperty("$prefix.fileName", "download-$id"), status,
-                properties.getProperty("$prefix.bytes", "0").toLongOrNull() ?: 0,
-                properties.getProperty("$prefix.total").toLongOrNull(),
-                if (status == DownloadStatus.FAILED && status != prior) "Interrupted by application restart; resolve a new stream to retry" else properties.getProperty("$prefix.error").orEmpty().ifBlank { null },
-                Instant.ofEpochMilli(properties.getProperty("$prefix.updatedAt", "0").toLongOrNull() ?: 0))
+            DownloadSnapshot(
+                id = id,
+                title = properties.getProperty("$prefix.title", "Untitled"),
+                artist = properties.getProperty("$prefix.artist").orEmpty().ifBlank { null },
+                fileName = properties.getProperty("$prefix.fileName", "download-$id"),
+                status = status,
+                bytesDownloaded = properties.getProperty("$prefix.bytes", "0").toLongOrNull() ?: 0,
+                totalBytes = properties.getProperty("$prefix.total").toLongOrNull(),
+                error = if (status == DownloadStatus.FAILED && status != prior) "Interrupted by application restart; resolve a new stream to retry" else properties.getProperty("$prefix.error").orEmpty().ifBlank { null },
+                updatedAt = Instant.ofEpochMilli(properties.getProperty("$prefix.updatedAt", "0").toLongOrNull() ?: 0),
+                mediaId = properties.getProperty("$prefix.mediaId").orEmpty().ifBlank { null },
+                albumTitle = properties.getProperty("$prefix.albumTitle").orEmpty().ifBlank { null },
+                albumId = properties.getProperty("$prefix.albumId").orEmpty().ifBlank { null },
+                artworkUrl = properties.getProperty("$prefix.artworkUrl").orEmpty().ifBlank { null },
+                durationMs = properties.getProperty("$prefix.durationMs").toLongOrNull(),
+                explicit = properties.getProperty("$prefix.explicit").toBoolean(),
+            )
         }
         persist(recovered)
         mutableDownloads.value = recovered

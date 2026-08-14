@@ -61,12 +61,32 @@ class DesktopDownloadManagerTest {
         server.enqueue(MockResponse().setBody("complete"))
         val completedId: String
         DesktopDownloadManager(directory).use { manager ->
-            completedId = manager.enqueue(DownloadRequest(server.url("/complete").toString(), emptyMap(), "complete"))
+            completedId = manager.enqueue(
+                DownloadRequest(
+                    server.url("/complete").toString(),
+                    emptyMap(),
+                    "complete",
+                    artist = "Artist",
+                    mediaId = "video-id",
+                    albumTitle = "Album",
+                    albumId = "album-id",
+                    artworkUrl = "https://i.ytimg.com/example.jpg",
+                    durationMs = 123_000,
+                    explicit = true,
+                ),
+            )
             manager.downloads.filter { it.any { item -> item.id == completedId && item.status == DownloadStatus.COMPLETED } }.first()
         }
         DesktopDownloadManager(directory).use { recovered ->
-            assertEquals(DownloadStatus.COMPLETED, recovered.downloads.value.single { it.id == completedId }.status)
-            assertNotNull(recovered.downloads.value.single { it.id == completedId }.fileName)
+            val item = recovered.downloads.value.single { it.id == completedId }
+            assertEquals(DownloadStatus.COMPLETED, item.status)
+            assertNotNull(item.fileName)
+            assertEquals("video-id", item.mediaId)
+            assertEquals("Album", item.albumTitle)
+            assertEquals("album-id", item.albumId)
+            assertEquals("https://i.ytimg.com/example.jpg", item.artworkUrl)
+            assertEquals(123_000L, item.durationMs)
+            assertTrue(item.explicit)
         }
     }
 
