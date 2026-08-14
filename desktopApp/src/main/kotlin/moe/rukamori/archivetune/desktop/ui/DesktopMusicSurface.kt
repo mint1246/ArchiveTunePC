@@ -98,6 +98,7 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
     }
     LaunchedEffect(Unit) { if (services.library.folders.isNotEmpty()) rescanLibrary() }
     LaunchedEffect(state.destination) {
+        detail = null
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
         services.backend.libraryPlaylists()
             .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
