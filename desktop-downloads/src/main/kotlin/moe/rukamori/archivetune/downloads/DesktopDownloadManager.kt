@@ -252,8 +252,8 @@ class DesktopDownloadManager(
                 albumTitle = properties.getProperty("$prefix.albumTitle").orEmpty().ifBlank { null },
                 albumId = properties.getProperty("$prefix.albumId").orEmpty().ifBlank { null },
                 artworkUrl = properties.getProperty("$prefix.artworkUrl").orEmpty().ifBlank { null },
-                durationMs = properties.getProperty("$prefix.durationMs").toLongOrNull(),
-                explicit = properties.getProperty("$prefix.explicit").toBoolean(),
+                durationMs = properties.getProperty("$prefix.durationMs").orEmpty().toLongOrNull(),
+                explicit = properties.getProperty("$prefix.explicit").orEmpty().toBoolean(),
             )
         }
         persist(recovered)

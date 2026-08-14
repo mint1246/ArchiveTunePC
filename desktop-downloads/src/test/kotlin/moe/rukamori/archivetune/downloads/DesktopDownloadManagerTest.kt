@@ -3,6 +3,7 @@ package moe.rukamori.archivetune.downloads
 
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
+import java.util.Properties
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -87,6 +88,27 @@ class DesktopDownloadManagerTest {
             assertEquals("https://i.ytimg.com/example.jpg", item.artworkUrl)
             assertEquals(123_000L, item.durationMs)
             assertTrue(item.explicit)
+        }
+    }
+
+    @Test fun `legacy journal without extended metadata still opens`() {
+        val properties = Properties().apply {
+            setProperty("download.0.id", "legacy-id")
+            setProperty("download.0.title", "Legacy song")
+            setProperty("download.0.artist", "Legacy artist")
+            setProperty("download.0.fileName", "legacy.mp4")
+            setProperty("download.0.status", DownloadStatus.COMPLETED.name)
+            setProperty("download.0.bytes", "42")
+            setProperty("download.0.total", "42")
+            setProperty("download.0.updatedAt", "1")
+        }
+        Files.newOutputStream(directory.resolve("downloads.properties")).use { properties.store(it, null) }
+
+        DesktopDownloadManager(directory).use { manager ->
+            val item = manager.downloads.value.single()
+            assertEquals("legacy-id", item.id)
+            assertEquals(null, item.durationMs)
+            assertFalse(item.explicit)
         }
     }
 
