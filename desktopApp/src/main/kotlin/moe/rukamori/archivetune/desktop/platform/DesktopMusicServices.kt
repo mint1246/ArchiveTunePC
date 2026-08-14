@@ -17,6 +17,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackSource
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
+import moe.rukamori.archivetune.playback.desktop.DesktopConcretePlaybackSourceResolver
 import moe.rukamori.archivetune.playback.desktop.MpvPlaybackController
 import moe.rukamori.archivetune.windowsmedia.PlaybackMediaCommandRouter
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
@@ -97,10 +98,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 Result.failure(DesktopStreamResolutionException(classification, failure))
             },
         )
-        is PlaybackSource.Remote -> Result.success(
-            ResolvedPlaybackSource(source.url, source.mimeType, source.headers, source.expiresAtEpochMs),
-        )
-        is PlaybackSource.LocalFile -> Result.success(ResolvedPlaybackSource(File(source.path).toURI().toString()))
+        is PlaybackSource.Remote, is PlaybackSource.LocalFile -> DesktopConcretePlaybackSourceResolver.resolve(item)
     }
 
     private fun logStreamDiagnostic(event: StreamResolutionDiagnostic) {
