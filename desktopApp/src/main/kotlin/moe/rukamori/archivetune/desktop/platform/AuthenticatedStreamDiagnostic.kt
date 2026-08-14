@@ -1,6 +1,7 @@
 package moe.rukamori.archivetune.desktop.platform
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.MissingFieldException
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.desktopauth.DesktopSessionVerifier
 import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
@@ -92,7 +93,11 @@ fun main() = runBlocking {
         },
         onFailure = { failure ->
             val status = Regex("\\b[45]\\d\\d\\b").find(failure.message.orEmpty())?.value ?: "none"
-            println("authenticated_stream_diagnostic playlists result=FAILED type=${failure::class.simpleName} status=$status")
+            val missing = (failure as? MissingFieldException)?.missingFields.orEmpty().joinToString(",")
+            println(
+                "authenticated_stream_diagnostic playlists result=FAILED type=${failure::class.simpleName} " +
+                    "status=$status missing=$missing",
+            )
         },
     )
     Unit

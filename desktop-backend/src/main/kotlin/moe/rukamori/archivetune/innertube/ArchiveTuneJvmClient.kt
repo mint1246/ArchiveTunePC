@@ -169,8 +169,11 @@ class ArchiveTuneJvmClient(
         // the explicitly selected channel first instead of the ambiguous main-app value.
         YouTube.authState = initial.copy(dataSyncId = null)
         val channels = YouTube.accountChannels().getOrNull().orEmpty()
+        YouTube.authState = initial.copy(dataSyncId = null)
+        val refreshedDataSyncId = YouTube.accountDataSyncId().getOrNull()
         val candidates =
-            (channels.sortedByDescending { it.isSelected }.map { it.dataSyncId } + listOfNotNull(initial.dataSyncId))
+            (channels.sortedByDescending { it.isSelected }.map { it.dataSyncId } +
+                listOfNotNull(refreshedDataSyncId, initial.dataSyncId) + "")
                 .distinct()
         var lastFailure: Throwable? = null
 
