@@ -1,0 +1,519 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+
+package moe.rukamori.archivetune.desktop.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
+import moe.rukamori.archivetune.desktopauth.DesktopAccountState
+import moe.rukamori.archivetune.innertube.models.AlbumItem
+import moe.rukamori.archivetune.innertube.models.PlaylistItem
+import moe.rukamori.archivetune.innertube.models.SongItem
+import moe.rukamori.archivetune.innertube.models.YTItem
+import moe.rukamori.archivetune.innertube.pages.HomePage
+
+/**
+ * Desktop Home surface: a faithful port of the Android remote (YouTube Music) home feed. Loads
+ * the remote feed, category chips, quick picks hero, signed-in playlists, and infinite scroll.
+ */
+@Composable
+fun DesktopHomeSurface(
+    services: DesktopMusicServices,
+    onOpenItem: (YTItem) -> Unit,
+    onPlayQueue: (List<SongItem>, Int, String) -> Unit,
+    onDownload: (SongItem) -> Unit,
+    onPlayNext: (SongItem) -> Unit,
+    onAddToQueue: (SongItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val playbackState by services.playback.state.collectAsState()
+    val accountState by services.account.state.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    var homePage by remember { mutableStateOf<HomePage?>(null) }
+    var remoteQuickPicks by remember { mutableStateOf<HomePage.Section?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var playlists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
+    var selectedChip by remember { mutableStateOf<HomePage.Chip?>(null) }
+    var previousHomePage by remember { mutableStateOf<HomePage?>(null) }
+    var previousQuickPicks by remember { mutableStateOf<HomePage.Section?>(null) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+
+    suspend fun loadInitial() {
+        isLoading = true
+        error = null
+        coroutineScope {
+            launch {
+                services.backend.home().onSuccess { page ->
+                    val (pageWithoutQuickPicks, quickPicksSection) = page.extractQuickPicks()
+                    homePage = pageWithoutQuickPicks
+                    remoteQuickPicks = quickPicksSection
+                }.onFailure { failure ->
+                    error = failure.message ?: "Could not load the home feed."
+                }
+            }
+            launch {
+                services.backend.libraryPlaylists().onSuccess { page ->
+                    playlists = page.items.filterIsInstance<PlaylistItem>().filterNot { it.id == "SE" }
+                }
+            }
+        }
+        isLoading = false
+    }
+
+    LaunchedEffect(Unit) { loadInitial() }
+
+    LaunchedEffect(homePage?.continuation) {
+        val continuation = homePage?.continuation ?: return@LaunchedEffect
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            lastVisibleIndex >= layoutInfo.totalItemsCount - 3
+        }.collect { nearEnd ->
+            if (nearEnd && !isLoadingMore) {
+                isLoadingMore = true
+                services.backend.home(continuation = continuation).onSuccess { page ->
+                    val current = homePage ?: return@onSuccess
+                    val merged = current.copy(sections = current.sections + page.sections, continuation = page.continuation)
+                    val (pageWithoutQuickPicks, quickPicksSection) = merged.extractQuickPicks()
+                    quickPicksSection?.let { remoteQuickPicks = it }
+                    homePage = pageWithoutQuickPicks
+                }
+                isLoadingMore = false
+            }
+        }
+    }
+
+    fun selectChip(chip: HomePage.Chip) {
+        if (chip == selectedChip && previousHomePage != null) {
+            homePage = previousHomePage
+            remoteQuickPicks = previousQuickPicks
+            previousHomePage = null
+            previousQuickPicks = null
+            selectedChip = null
+            return
+        }
+        if (selectedChip == null) {
+            previousHomePage = homePage
+            previousQuickPicks = remoteQuickPicks
+        }
+        scope.launch {
+            services.backend.home(params = chip.endpoint?.params).onSuccess { page ->
+                val (pageWithoutQuickPicks, quickPicksSection) = page.copy(chips = homePage?.chips).extractQuickPicks()
+                remoteQuickPicks = quickPicksSection
+                homePage = pageWithoutQuickPicks
+                selectedChip = chip
+            }
+        }
+    }
+
+    val sections = homePage?.sections.orEmpty()
+    val heroSongs = remember(remoteQuickPicks) {
+        remoteQuickPicks?.items.orEmpty().filterIsInstance<SongItem>().distinctBy { it.id }
+    }
+    val hasContent = sections.isNotEmpty() || heroSongs.isNotEmpty() || playlists.isNotEmpty()
+    val isPlaying = playbackState.isPlaying
+    val currentItemId = playbackState.currentItem?.metadata?.id
+    val currentAlbumId = playbackState.currentItem?.metadata?.album?.id
+    val accountName =
+        (accountState as? DesktopAccountState.SignedIn)?.account?.name?.takeIf { it.isNotBlank() } ?: "Account"
+    val accountAvatarUrl = (accountState as? DesktopAccountState.SignedIn)?.account?.avatarUrl
+
+    when {
+        isLoading -> {
+            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+
+        error != null && !hasContent -> {
+            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    Text(
+                        text = error.orEmpty(),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Button(onClick = { scope.launch { loadInitial() } }) { Text("Retry") }
+                }
+            }
+        }
+
+        !hasContent -> {
+            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                    Text(
+                        text = "No results found.",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+
+        else -> {
+            val chips = homePage?.chips.orEmpty().filterNot { it.title.contains("podcasts", ignoreCase = true) }
+            val quickPicksSection = remoteQuickPicks
+            LazyColumn(
+                state = listState,
+                modifier = modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 16.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (chips.isNotEmpty()) {
+                    item(key = "home_category_chips") {
+                        HomeCategoryChips(chips = chips, selectedChip = selectedChip, onChipSelected = ::selectChip)
+                    }
+                }
+
+                if (quickPicksSection != null && heroSongs.isNotEmpty()) {
+                    item(key = "home_quick_picks_header") {
+                        DesktopSectionHeader(title = quickPicksSection.title)
+                    }
+                    item(key = "home_quick_picks") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(heroSongs, key = { it.id }) { song ->
+                                DesktopQuickPickHeroCard(
+                                    song = song,
+                                    isActive = song.id == currentItemId,
+                                    isPlaying = isPlaying,
+                                    onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (playlists.isNotEmpty()) {
+                    item(key = "home_account_playlists") {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            AccountPlaylistsHeader(accountName = accountName, accountAvatarUrl = accountAvatarUrl)
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(playlists.distinctBy { it.id }, key = { it.id }) { playlist ->
+                                    DesktopMediaGridCard(
+                                        item = playlist,
+                                        isActive = false,
+                                        isPlaying = isPlaying,
+                                        modifier = Modifier.width(160.dp),
+                                        onClick = { onOpenItem(playlist) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                itemsIndexed(sections, key = { index, section -> "${section.endpoint?.browseId ?: section.title}:$index" }) { _, section ->
+                    HomeSectionBlock(
+                        section = section,
+                        isPlaying = isPlaying,
+                        currentItemId = currentItemId,
+                        currentAlbumId = currentAlbumId,
+                        onOpenItem = onOpenItem,
+                        onPlayQueue = onPlayQueue,
+                        onPlayNext = onPlayNext,
+                        onAddToQueue = onAddToQueue,
+                        onDownload = onDownload,
+                    )
+                }
+
+                if (isLoadingMore) {
+                    item(key = "home_loading_more") {
+                        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeCategoryChips(
+    chips: List<HomePage.Chip>,
+    selectedChip: HomePage.Chip?,
+    onChipSelected: (HomePage.Chip) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        chips.forEach { chip ->
+            val selected = chip == selectedChip
+            FilterChip(
+                selected = selected,
+                onClick = { onChipSelected(chip) },
+                label = { Text(chip.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingIcon =
+                    if (selected) {
+                        {
+                            Icon(
+                                Icons.Rounded.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                            )
+                        }
+                    } else {
+                        null
+                    },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DesktopQuickPickHeroCard(
+    song: SongItem,
+    isActive: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier =
+            modifier
+                .width(300.dp)
+                .height(170.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick),
+    ) {
+        AsyncImage(
+            model = song.thumbnail,
+            contentDescription = song.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.5f to Color.Black.copy(alpha = 0.1f),
+                            1f to Color.Black.copy(alpha = 0.84f),
+                        ),
+                    ),
+        )
+        if (isActive && isPlaying) {
+            Surface(
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = CircleShape,
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(30.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.VolumeUp, contentDescription = "Now playing", modifier = Modifier.size(17.dp))
+                }
+            }
+        }
+        Column(
+            modifier = Modifier.align(Alignment.BottomStart).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = song.artists.joinToString { it.name },
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.78f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountPlaylistsHeader(
+    accountName: String,
+    accountAvatarUrl: String?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!accountAvatarUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = accountAvatarUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(40.dp).clip(CircleShape),
+                )
+            } else {
+                Icon(Icons.Rounded.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+            Text(
+                text = "Your YouTube playlists",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = accountName,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionBlock(
+    section: HomePage.Section,
+    isPlaying: Boolean,
+    currentItemId: String?,
+    currentAlbumId: String?,
+    onOpenItem: (YTItem) -> Unit,
+    onPlayQueue: (List<SongItem>, Int, String) -> Unit,
+    onPlayNext: (SongItem) -> Unit,
+    onAddToQueue: (SongItem) -> Unit,
+    onDownload: (SongItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sectionSongs = remember(section) { section.items.filterIsInstance<SongItem>().distinctBy { it.id } }
+    Column(modifier) {
+        DesktopSectionHeader(title = section.title, label = section.label)
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            itemsIndexed(section.items, key = { index, item -> "${item.id}:$index" }) { _, item ->
+                val isActive =
+                    when (item) {
+                        is SongItem -> item.id == currentItemId
+                        is AlbumItem -> item.browseId == currentAlbumId
+                        else -> false
+                    }
+                DesktopMediaGridCard(
+                    item = item,
+                    isActive = isActive,
+                    isPlaying = isPlaying,
+                    modifier = Modifier.width(160.dp),
+                    onClick = {
+                        when (item) {
+                            is SongItem -> onPlayQueue(sectionSongs, sectionSongs.indexOf(item).coerceAtLeast(0), section.title)
+                            else -> onOpenItem(item)
+                        }
+                    },
+                    onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
+                    onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
+                    onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
+                )
+            }
+        }
+    }
+}
+
+private fun HomePage.extractQuickPicks(): Pair<HomePage, HomePage.Section?> {
+    val quickPicksIndex = sections.indexOfFirst { it.title.contains("quick pick", ignoreCase = true) }
+    if (quickPicksIndex < 0) return this to null
+    val quickPicks = sections[quickPicksIndex]
+    return copy(sections = sections.toMutableList().also { it.removeAt(quickPicksIndex) }) to quickPicks
+}
