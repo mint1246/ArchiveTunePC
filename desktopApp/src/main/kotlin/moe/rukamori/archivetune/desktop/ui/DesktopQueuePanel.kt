@@ -1,0 +1,408 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+
+package moe.rukamori.archivetune.desktop.ui
+
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
+import moe.rukamori.archivetune.playback.api.PlaybackQueueEntry
+import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
+import moe.rukamori.archivetune.playback.api.RepeatMode
+import kotlin.math.floor
+
+private val QueueRowHeight = 56.dp
+
+/**
+ * The "up next" queue panel. Renders the queue the same way the Android queue sheet does: the
+ * current item first, upcoming items in play order, and already-played items at the bottom.
+ */
+@Composable
+fun DesktopQueuePanel(
+    services: DesktopMusicServices,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val snapshot by services.playback.state.collectAsState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val playback = services.playback
+    val entries = snapshot.queueEntries
+
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            QueueHeader(snapshot, entries, onClose, playback)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+            if (entries.isEmpty()) {
+                EmptyQueue()
+            } else {
+                QueueList(entries, snapshot, playback, scope)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueueHeader(
+    snapshot: PlaybackSnapshot,
+    entries: List<PlaybackQueueEntry>,
+    onClose: () -> Unit,
+    playback: moe.rukamori.archivetune.playback.api.PlaybackController,
+) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val totalDuration = remember(entries) { entries.sumOf { it.item.metadata.durationHintMs ?: 0L } }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    snapshot.queueTitle ?: "Up next",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (entries.isEmpty()) "Queue is empty" else "${entries.size} songs • ${formatDuration(totalDuration)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            ShuffleButton(enabled = snapshot.shuffleEnabled, onClick = { scope.launch { playback.setShuffleEnabled(!snapshot.shuffleEnabled) } })
+            RepeatButton(mode = snapshot.repeatMode, onClick = {
+                scope.launch {
+                    playback.setRepeatMode(
+                        when (snapshot.repeatMode) {
+                            RepeatMode.OFF -> RepeatMode.ALL
+                            RepeatMode.ALL -> RepeatMode.ONE
+                            RepeatMode.ONE -> RepeatMode.OFF
+                        },
+                    )
+                }
+            })
+            IconButton(onClick = { scope.launch { playback.clearQueue() } }, enabled = entries.isNotEmpty()) {
+                Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear queue")
+            }
+            IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Close queue") }
+        }
+    }
+}
+
+@Composable
+private fun ShuffleButton(enabled: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            Icons.Rounded.Shuffle,
+            contentDescription = if (enabled) "Shuffle on" else "Shuffle off",
+            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun RepeatButton(mode: RepeatMode, onClick: () -> Unit) {
+    val active = mode != RepeatMode.OFF
+    IconButton(onClick = onClick) {
+        Icon(
+            if (mode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+            contentDescription = "Repeat mode ${mode.name.lowercase()}",
+            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun EmptyQueue() {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Rounded.MusicNote, contentDescription = null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Queue is empty", style = MaterialTheme.typography.titleMedium)
+            Text("Play an album, playlist or song to start a queue.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun QueueList(
+    entries: List<PlaybackQueueEntry>,
+    snapshot: PlaybackSnapshot,
+    playback: moe.rukamori.archivetune.playback.api.PlaybackController,
+    scope: CoroutineScope,
+) {
+    val order = remember { mutableStateListOf<PlaybackQueueEntry>() }
+    var draggedId by remember { mutableStateOf<Long?>(null) }
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val listState = rememberLazyListState()
+    val rowHeightPx = with(LocalDensity.current) { QueueRowHeight.toPx() }
+    val latestEntries by rememberUpdatedState(entries)
+
+    LaunchedEffect(entries) {
+        if (draggedId != null) return@LaunchedEffect
+        order.clear()
+        order.addAll(entries)
+    }
+
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 6.dp)) {
+        itemsIndexed(order, key = { _, entry -> entry.id }) { index, entry ->
+            QueueRow(
+                entry = entry,
+                snapshot = snapshot,
+                isDragging = draggedId == entry.id,
+                dragHandleEnabled = !entry.isCurrent,
+                onRowClick = { scope.launch { playback.seekToItem(entry.logicalIndex) } },
+                onPlayNext = { scope.launch { playback.moveQueueItemToNext(entry.logicalIndex) } },
+                onRemove = { scope.launch { playback.removeQueueItem(entry.logicalIndex) } },
+                onDragStart = {
+                    draggedId = entry.id
+                    dragStartIndex = index
+                    dragOffset = 0f
+                },
+                onDrag = { change, amount ->
+                    change.consume()
+                    dragOffset += amount.y
+                    val from = order.indexOfFirst { it.id == draggedId }
+                    if (from != -1) {
+                        autoScroll(listState, scope, change.position.y, from)
+                        val target = floor((dragStartIndex * rowHeightPx + dragOffset) / rowHeightPx)
+                            .toInt()
+                            .coerceIn(0, order.lastIndex)
+                        if (target != from) {
+                            val moved = order.removeAt(from)
+                            order.add(target, moved)
+                        }
+                    }
+                },
+                onDragEnd = {
+                    val dragged = draggedId
+                    if (dragged != null) {
+                        val sourceVisual = latestEntries.indexOfFirst { it.id == dragged }
+                        val destinationVisual = order.indexOfFirst { it.id == dragged }
+                        if (sourceVisual != -1 && destinationVisual != -1 && sourceVisual != destinationVisual) {
+                            scope.launch { playback.moveQueueItem(sourceVisual, destinationVisual) }
+                        }
+                    }
+                    draggedId = null
+                    dragStartIndex = -1
+                    dragOffset = 0f
+                },
+                onDragCancel = {
+                    draggedId = null
+                    dragStartIndex = -1
+                    dragOffset = 0f
+                },
+            )
+        }
+    }
+}
+
+private fun autoScroll(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    scope: CoroutineScope,
+    pointerYInRow: Float,
+    fromIndex: Int,
+) {
+    val layoutInfo = listState.layoutInfo
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == fromIndex } ?: return
+    val pointerY = item.offset + pointerYInRow
+    val viewportHeight = layoutInfo.viewportSize.height.toFloat()
+    val topEdge = viewportHeight * 0.12f
+    val bottomEdge = viewportHeight * 0.88f
+    val delta =
+        when {
+            pointerY < topEdge -> (pointerY - topEdge) * 0.15f
+            pointerY > bottomEdge -> (pointerY - bottomEdge) * 0.15f
+            else -> return
+        }
+    scope.launch {
+        listState.scroll(MutatePriority.Default) { scrollBy(delta) }
+    }
+}
+
+@Composable
+private fun QueueRow(
+    entry: PlaybackQueueEntry,
+    snapshot: PlaybackSnapshot,
+    isDragging: Boolean,
+    dragHandleEnabled: Boolean,
+    onRowClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onRemove: () -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (PointerInputChange, Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val item = entry.item.metadata
+    val isCurrent = entry.isCurrent
+    val isNextUp = snapshot.queueEntries.getOrNull(1)?.id == entry.id
+    val rowBackground =
+        if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        else if (hovered) MaterialTheme.colorScheme.surfaceContainerHighest
+        else MaterialTheme.colorScheme.surfaceContainerHigh
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(QueueRowHeight)
+            .background(if (isDragging) MaterialTheme.colorScheme.primaryContainer else rowBackground)
+            .hoverable(interactionSource)
+            .combinedClickable(onClick = onRowClick, onLongClick = { menuOpen = true }),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+            if (item.artworkUri != null) {
+                AsyncImage(item.artworkUri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.title.ifBlank { "Unknown title" },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                item.artistText.ifBlank { " " },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (isCurrent && snapshot.isPlaying) {
+            Icon(Icons.Rounded.GraphicEq, contentDescription = "Now playing", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        } else if (isCurrent) {
+            Icon(Icons.Rounded.PlayArrow, contentDescription = "Paused", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        }
+        Text(
+            item.durationHintMs?.let(::formatDuration) ?: "",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "Queue item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Play now") },
+                    onClick = { menuOpen = false; onRowClick() },
+                )
+                if (!isCurrent && !isNextUp) {
+                    DropdownMenuItem(
+                        text = { Text("Play next") },
+                        onClick = { menuOpen = false; onPlayNext() },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("Remove from queue") },
+                    onClick = { menuOpen = false; onRemove() },
+                )
+            }
+        }
+        if (dragHandleEnabled) {
+            Icon(
+                Icons.Rounded.DragHandle,
+                contentDescription = "Reorder",
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier
+                    .size(28.dp)
+                    .pointerInput(entry.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { onDragStart() },
+                            onDragEnd = { onDragEnd() },
+                            onDragCancel = { onDragCancel() },
+                            onDrag = { change, amount -> onDrag(change, amount) },
+                        )
+                    },
+            )
+        } else {
+            Spacer(Modifier.width(28.dp))
+        }
+    }
+}
+
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return if (minutes >= 60) "%d:%02d:%02d".format(minutes / 60, minutes % 60, seconds) else "%d:%02d".format(minutes, seconds)
+}

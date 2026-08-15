@@ -6,6 +6,18 @@
 
 package moe.rukamori.archivetune.desktop.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -79,6 +91,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -136,8 +149,13 @@ fun ArchiveTuneDesktopApp(
     initialDestination: DesktopDestination,
     initialThemePreference: DesktopThemePreference,
     onShellStateChanged: (DesktopDestination, DesktopThemePreference) -> Unit,
+    windowDragModifier: Modifier = Modifier,
+    windowControls: (@Composable () -> Unit)? = null,
+    immersiveContent: (@Composable (Modifier) -> Unit)? = null,
+    onDismissImmersive: () -> Unit = {},
     content: (@Composable (DesktopContentState, Modifier) -> Unit)? = null,
     playerContent: (@Composable (Modifier) -> Unit)? = null,
+    queueContent: (@Composable (Modifier) -> Unit)? = null,
 ) {
     val navigator = remember { DesktopNavigator(initialDestination) }
     val searchFocusRequester = remember { FocusRequester() }
@@ -155,7 +173,12 @@ fun ArchiveTuneDesktopApp(
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {
-                        event.isCtrlPressed && event.key == Key.F -> {
+                        immersiveContent != null &&
+                            (event.key == Key.Escape || event.isAltPressed && event.key == Key.DirectionLeft) -> {
+                            onDismissImmersive()
+                            true
+                        }
+                        immersiveContent == null && event.isCtrlPressed && event.key == Key.F -> {
                             navigator.navigate(DesktopDestination.SEARCH)
                             searchFocusRequester.requestFocus()
                             true
@@ -185,47 +208,98 @@ fun ArchiveTuneDesktopApp(
                 setThemePreference = { themePreference = it },
             )
 
-            Row(Modifier.fillMaxSize()) {
-                when (layout) {
-                    DesktopNavigationLayout.EXPANDED -> ExpandedSidebar(state, Modifier.width(248.dp).fillMaxHeight())
-                    DesktopNavigationLayout.RAIL -> DesktopRail(state, Modifier.width(88.dp).fillMaxHeight())
-                    DesktopNavigationLayout.COMPACT -> Unit
-                }
+            AnimatedContent(
+                targetState = immersiveContent,
+                transitionSpec = {
+                    val enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) +
+                        slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 18 }
+                    val exit = fadeOut(tween(170, easing = FastOutSlowInEasing)) +
+                        slideOutVertically(tween(170, easing = FastOutSlowInEasing)) { -it / 24 }
+                    (enter togetherWith exit).using(SizeTransform(clip = false))
+                },
+                label = "immersive-shell-transition",
+                modifier = Modifier.fillMaxSize(),
+            ) { immersive ->
+                if (immersive != null) {
+                    Column(Modifier.fillMaxSize()) {
+                        DesktopTopBar(
+                            navigator = navigator,
+                            destination = state.destination,
+                            query = searchQuery,
+                            onQueryChanged = {},
+                            searchFocusRequester = searchFocusRequester,
+                            compact = false,
+                            windowDragModifier = windowDragModifier,
+                            windowControls = windowControls,
+                            titleOverride = "Lyrics",
+                            descriptionOverride = "Immersive now playing",
+                            onNavigateBackOverride = onDismissImmersive,
+                            showSearch = false,
+                        )
+                        immersive(Modifier.weight(1f).fillMaxWidth())
+                    }
+                } else Row(Modifier.fillMaxSize()) {
+                    when (layout) {
+                        DesktopNavigationLayout.EXPANDED -> ExpandedSidebar(state, Modifier.width(248.dp).fillMaxHeight())
+                        DesktopNavigationLayout.RAIL -> DesktopRail(state, Modifier.width(88.dp).fillMaxHeight())
+                        DesktopNavigationLayout.COMPACT -> Unit
+                    }
 
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    DesktopTopBar(
-                        navigator = navigator,
-                        destination = state.destination,
-                        query = searchQuery,
-                        onQueryChanged = { query ->
-                            searchQuery = query
-                            if (query.isNotEmpty()) navigator.navigate(DesktopDestination.SEARCH)
-                        },
-                        searchFocusRequester = searchFocusRequester,
-                        compact = layout == DesktopNavigationLayout.COMPACT,
-                    )
+                    Column(Modifier.weight(1f).fillMaxHeight()) {
+                        DesktopTopBar(
+                            navigator = navigator,
+                            destination = state.destination,
+                            query = searchQuery,
+                            onQueryChanged = { query ->
+                                searchQuery = query
+                                if (query.isNotEmpty()) navigator.navigate(DesktopDestination.SEARCH)
+                            },
+                            searchFocusRequester = searchFocusRequester,
+                            compact = layout == DesktopNavigationLayout.COMPACT,
+                            windowDragModifier = windowDragModifier,
+                            windowControls = windowControls,
+                        )
 
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        if (content != null) {
-                            content(state, Modifier.fillMaxSize())
-                        } else {
-                            FoundationDestinationContent(
-                                state = state,
-                                paths = paths,
-                                logger = logger,
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            AnimatedContent(
+                                targetState = state.destination,
+                                transitionSpec = {
+                                    val enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+                                        slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 16 }
+                                    val exit = fadeOut(tween(150, easing = FastOutSlowInEasing)) +
+                                        slideOutHorizontally(tween(150, easing = FastOutSlowInEasing)) { -it / 22 }
+                                    (enter togetherWith exit).using(SizeTransform(clip = false))
+                                },
+                                label = "destination-transition",
                                 modifier = Modifier.fillMaxSize(),
-                            )
+                            ) { destination ->
+                                val destinationState = state.copy(destination = destination)
+                                if (content != null) {
+                                    content(destinationState, Modifier.fillMaxSize())
+                                } else {
+                                    FoundationDestinationContent(
+                                        state = destinationState,
+                                        paths = paths,
+                                        logger = logger,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                            }
+
+                            if (queueContent != null) {
+                                queueContent(Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                            }
                         }
-                    }
 
-                    if (playerContent != null) {
-                        playerContent(Modifier.fillMaxWidth())
-                    } else {
-                        FoundationMiniPlayer(Modifier.fillMaxWidth())
-                    }
+                        if (playerContent != null) {
+                            playerContent(Modifier.fillMaxWidth())
+                        } else {
+                            FoundationMiniPlayer(Modifier.fillMaxWidth())
+                        }
 
-                    if (layout == DesktopNavigationLayout.COMPACT) {
-                        CompactNavigation(state)
+                        if (layout == DesktopNavigationLayout.COMPACT) {
+                            CompactNavigation(state)
+                        }
                     }
                 }
             }
@@ -247,7 +321,7 @@ private fun ExpandedSidebar(
             Spacer(Modifier.height(24.dp))
             DesktopDestination.entries.forEach { destination ->
                 NavigationDrawerItem(
-                    icon = { Icon(destination.icon, contentDescription = null) },
+                    icon = { AnimatedDestinationIcon(destination.icon, destination == state.destination, null) },
                     label = { Text(destination.title) },
                     selected = destination == state.destination,
                     onClick = { state.navigate(destination) },
@@ -287,7 +361,7 @@ private fun DesktopRail(
             NavigationRailItem(
                 selected = destination == state.destination,
                 onClick = { state.navigate(destination) },
-                icon = { Icon(destination.icon, contentDescription = destination.title) },
+                icon = { AnimatedDestinationIcon(destination.icon, destination == state.destination, destination.title) },
                 label = { Text(destination.title) },
             )
         }
@@ -308,11 +382,32 @@ private fun CompactNavigation(state: DesktopContentState) {
             NavigationBarItem(
                 selected = destination == state.destination,
                 onClick = { state.navigate(destination) },
-                icon = { Icon(destination.icon, contentDescription = destination.title) },
+                icon = { AnimatedDestinationIcon(destination.icon, destination == state.destination, destination.title) },
                 label = { Text(destination.title) },
             )
         }
     }
+}
+
+@Composable
+private fun AnimatedDestinationIcon(
+    icon: ImageVector,
+    selected: Boolean,
+    contentDescription: String?,
+) {
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.10f else 1f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "destination-icon-scale",
+    )
+    Icon(
+        icon,
+        contentDescription = contentDescription,
+        modifier = Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        },
+    )
 }
 
 @Composable
@@ -336,22 +431,41 @@ private fun DesktopTopBar(
     onQueryChanged: (String) -> Unit,
     searchFocusRequester: FocusRequester,
     compact: Boolean,
+    windowDragModifier: Modifier,
+    windowControls: (@Composable () -> Unit)?,
+    titleOverride: String? = null,
+    descriptionOverride: String? = null,
+    onNavigateBackOverride: (() -> Unit)? = null,
+    showSearch: Boolean = true,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = if (compact) 12.dp else 24.dp, vertical = 12.dp),
+        Modifier
+            .fillMaxWidth()
+            // The custom controls are part of the window edge, like a browser tab strip. Keep
+            // their hit targets flush with the right/top edge while retaining shell padding when
+            // the host does not provide controls (e.g. previews/tests).
+            .padding(
+                start = if (compact) 12.dp else 24.dp,
+                end = if (windowControls == null) {
+                    if (compact) 12.dp else 24.dp
+                } else 0.dp,
+                top = if (windowControls == null) 12.dp else 0.dp,
+                bottom = if (windowControls == null) 12.dp else 0.dp,
+            )
+            .heightIn(min = if (windowControls == null) 0.dp else 64.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (navigator.canNavigateBack) {
-            IconButton(onClick = navigator::navigateBack) {
-                Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
+        if (onNavigateBackOverride != null || navigator.canNavigateBack) {
+            IconButton(onClick = { if (onNavigateBackOverride != null) onNavigateBackOverride() else navigator.navigateBack() }) {
+                Icon(Icons.Rounded.ArrowBack, contentDescription = if (onNavigateBackOverride != null) "Close lyrics" else "Back")
             }
         }
         if (!compact) {
-            Column(Modifier.weight(1f)) {
-                Text(destination.title, style = MaterialTheme.typography.titleLarge)
+            Column(Modifier.weight(1f).then(windowDragModifier)) {
+                Text(titleOverride ?: destination.title, style = MaterialTheme.typography.titleLarge)
                 Text(
-                    destination.description,
+                    descriptionOverride ?: destination.description,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -359,26 +473,31 @@ private fun DesktopTopBar(
                 )
             }
         } else {
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(1f).then(windowDragModifier))
         }
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChanged,
-            singleLine = true,
-            placeholder = { Text("Search music") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-            modifier = if (compact) {
-                Modifier
-                    .widthIn(min = 220.dp, max = 480.dp)
-                    .weight(5f)
-                    .focusRequester(searchFocusRequester)
-            } else {
-                Modifier
-                    .widthIn(min = 300.dp, max = 480.dp)
-                    .focusRequester(searchFocusRequester)
-            },
-            shape = CircleShape,
-        )
+        if (showSearch) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChanged,
+                singleLine = true,
+                placeholder = { Text("Search music") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                modifier = if (compact) {
+                    Modifier
+                        .widthIn(min = 220.dp, max = 480.dp)
+                        .weight(5f)
+                        .focusRequester(searchFocusRequester)
+                } else {
+                    Modifier
+                        .widthIn(min = 300.dp, max = 480.dp)
+                        .focusRequester(searchFocusRequester)
+                },
+                shape = CircleShape,
+            )
+        }
+        if (windowControls != null) {
+            windowControls()
+        }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 }
@@ -424,11 +543,27 @@ fun FoundationDestinationContent(
     paths: AppPaths,
     logger: Logger,
     account: DesktopSessionManager? = null,
+    settingsStore: moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore? = null,
+    playback: moe.rukamori.archivetune.playback.api.PlaybackController? = null,
+    downloads: moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices? = null,
+    libraryFolders: List<java.nio.file.Path> = emptyList(),
+    onLibraryFoldersChanged: (List<java.nio.file.Path>) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (state.destination) {
         DesktopDestination.HOME -> FoundationHome(state, modifier)
-        DesktopDestination.SETTINGS -> FoundationSettings(state, paths, logger, account, modifier)
+        DesktopDestination.SETTINGS -> FoundationSettings(
+            state,
+            paths,
+            logger,
+            account,
+            settingsStore,
+            playback,
+            downloads,
+            libraryFolders,
+            onLibraryFoldersChanged,
+            modifier,
+        )
         else -> FoundationEmptyState(state.destination, state.searchQuery, modifier)
     }
 }
@@ -565,35 +700,30 @@ private fun FoundationSettings(
     paths: AppPaths,
     logger: Logger,
     account: DesktopSessionManager?,
+    settingsStore: moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore?,
+    playback: moe.rukamori.archivetune.playback.api.PlaybackController?,
+    downloads: moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices?,
+    libraryFolders: List<java.nio.file.Path>,
+    onLibraryFoldersChanged: (List<java.nio.file.Path>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(24.dp).widthIn(max = 980.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        Text("Appearance", style = MaterialTheme.typography.headlineMedium)
-        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
-            Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThemeChoice("System", Icons.Rounded.BrightnessAuto, DesktopThemePreference.SYSTEM, state, Modifier.weight(1f))
-                ThemeChoice("Light", Icons.Rounded.LightMode, DesktopThemePreference.LIGHT, state, Modifier.weight(1f))
-                ThemeChoice("Dark", Icons.Rounded.DarkMode, DesktopThemePreference.DARK, state, Modifier.weight(1f))
-            }
-        }
-
-        Text("Account", style = MaterialTheme.typography.headlineMedium)
-        if (account != null) DesktopAccountCard(account) else AnonymousAccountCard()
-
-        Text("Storage", style = MaterialTheme.typography.headlineMedium)
-        DirectoryCard("Downloads", paths.downloads.toString(), Icons.Rounded.Download) {
-            DesktopPlatform.openDirectory(paths.downloads, logger)
-        }
-        DirectoryCard("Application data", paths.data.toString(), Icons.Rounded.FolderOpen) {
-            DesktopPlatform.openDirectory(paths.data, logger)
-        }
-        DirectoryCard("Logs", paths.logs.toString(), Icons.Rounded.FolderOpen) {
-            DesktopPlatform.openDirectory(paths.logs, logger)
-        }
+    if (settingsStore == null) {
+        Text("Desktop settings are unavailable in this host.", modifier.padding(24.dp))
+        return
     }
+    DesktopSettingsPanel(
+        state = state,
+        paths = paths,
+        logger = logger,
+        settingsStore = settingsStore,
+        playback = playback,
+        downloads = downloads,
+        libraryFolders = libraryFolders,
+        onLibraryFoldersChanged = onLibraryFoldersChanged,
+        account = account,
+        accountContent = { if (account != null) DesktopAccountCard(account) else AnonymousAccountCard() },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -835,8 +965,24 @@ private suspend fun chooseCookieJsonFile(): String? =
                 if (showOpenDialog(null) == JFileChooser.APPROVE_OPTION) selected = selectedFile
             }
         }
-        selected?.readText(Charsets.UTF_8)
+        selected?.readBoundedCookieJson()
     }
+
+/** Read one character past the importer limit so its existing TOO_LARGE result remains visible. */
+private fun File.readBoundedCookieJson(): String =
+    bufferedReader(Charsets.UTF_8).use { reader ->
+        val result = StringBuilder(MAX_COOKIE_JSON_UI_CHARACTERS + 1)
+        val buffer = CharArray(8_192)
+        while (result.length <= MAX_COOKIE_JSON_UI_CHARACTERS) {
+            val remaining = MAX_COOKIE_JSON_UI_CHARACTERS + 1 - result.length
+            val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
+            if (count < 0) break
+            result.append(buffer, 0, count)
+        }
+        result.toString()
+    }
+
+private const val MAX_COOKIE_JSON_UI_CHARACTERS = 1_000_000
 
 private fun cookieJsonMessage(reason: YouTubeCookieJsonFailure): String =
     when (reason) {
