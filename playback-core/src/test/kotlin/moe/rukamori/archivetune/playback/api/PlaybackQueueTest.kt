@@ -117,6 +117,110 @@ class PlaybackQueueTest {
         assertEquals("last", queue.advance(automatic = false)?.item?.metadata?.id)
     }
 
+    @Test
+    fun `visual entries put current first then upcoming then played`() {
+        val queue = PlaybackQueue(Random(11))
+        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
+
+        val visual = queue.visualEntries()
+
+        assertEquals(listOf("c", "d", "e", "a", "b"), visual.map { it.item.metadata.id })
+        assertEquals(listOf(2, 3, 4, 0, 1), visual.map { it.logicalIndex })
+        assertEquals(true, visual.first().isCurrent)
+    }
+
+    @Test
+    fun `append in shuffle order places new items at the end`() {
+        val queue = PlaybackQueue(Random(12))
+        queue.replace(items("a", "b", "c"))
+        queue.setShuffleEnabled(true)
+        queue.append(items("x", "y"))
+
+        val visited = mutableListOf(requireNotNull(queue.current).metadata.id)
+        while (true) {
+            val next = queue.advance(automatic = true) ?: break
+            visited += next.item.metadata.id
+        }
+
+        assertEquals("a", visited.first())
+        assertEquals(setOf("a", "b", "c", "x", "y"), visited.toSet())
+        assertEquals(listOf("x", "y"), visited.takeLast(2))
+    }
+
+    @Test
+    fun `moveVisual reorders logical order when not shuffled`() {
+        val queue = PlaybackQueue(Random(13))
+        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
+
+        // Visual order is [c, d, e, a, b]; move visual index 1 (d) to visual index 3.
+        queue.moveVisual(fromVisual = 1, toVisual = 3)
+
+        assertEquals(listOf("c", "e", "a", "d", "b"), queue.items.map { it.metadata.id })
+        assertEquals("c", queue.current?.metadata?.id)
+    }
+
+    @Test
+    fun `moveVisual only reorders traversal when shuffled`() {
+        val queue = PlaybackQueue(Random(14))
+        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
+        queue.setShuffleEnabled(true)
+        val logicalBefore = queue.items.map { it.metadata.id }
+
+        queue.moveVisual(fromVisual = 1, toVisual = 2)
+
+        assertEquals(logicalBefore, queue.items.map { it.metadata.id })
+        assertEquals("c", queue.current?.metadata?.id)
+    }
+
+    @Test
+    fun `moveToNext places item after current in linear mode`() {
+        val queue = PlaybackQueue(Random(15))
+        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
+
+        queue.moveToNext(0)
+
+        assertEquals(listOf("b", "c", "d", "a", "e"), queue.items.map { it.metadata.id })
+        assertEquals("c", queue.current?.metadata?.id)
+        assertEquals("d", queue.advance(automatic = false)?.item?.metadata?.id)
+        assertEquals("a", queue.advance(automatic = false)?.item?.metadata?.id)
+    }
+
+    @Test
+    fun `moveToNext reorders shuffle traversal after current`() {
+        val queue = PlaybackQueue(Random(16))
+        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
+        queue.setShuffleEnabled(true)
+
+        queue.moveToNext(0)
+
+        assertEquals("c", queue.current?.metadata?.id)
+        assertEquals("a", queue.advance(automatic = false)?.item?.metadata?.id)
+    }
+
+    @Test
+    fun `clear keeps only the current item`() {
+        val queue = PlaybackQueue(Random(17))
+        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
+
+        queue.clear()
+
+        assertEquals(listOf("c"), queue.items.map { it.metadata.id })
+        assertEquals("c", queue.current?.metadata?.id)
+        assertFalse(queue.canAdvance)
+        assertFalse(queue.canRetreat)
+    }
+
+    @Test
+    fun `clear on empty queue is a no-op`() {
+        val queue = PlaybackQueue(Random(18))
+        queue.replace(emptyList())
+
+        val mutation = queue.clear()
+
+        assertFalse(mutation.currentChanged)
+        assertNull(queue.current)
+    }
+
     private fun items(vararg ids: String): List<PlaybackItem> =
         ids.map { id ->
             PlaybackItem(

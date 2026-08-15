@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Complete platform playback boundary consumed by shared UI and platform integrations.
  * Implementations serialize commands and release all owned resources from [close].
+ *
+ * Queue index contracts follow the Android queue sheet:
+ *  - [removeQueueItem], [seekToItem] and [moveQueueItemToNext] take a *logical* queue index.
+ *  - [moveQueueItem] takes *visual* "up next" positions (the current item is position zero).
  */
 interface PlaybackController : AutoCloseable {
     val state: StateFlow<PlaybackSnapshot>
@@ -38,6 +42,8 @@ interface PlaybackController : AutoCloseable {
     suspend fun playNext(items: List<PlaybackItem>)
     suspend fun removeQueueItem(index: Int)
     suspend fun moveQueueItem(fromIndex: Int, toIndex: Int)
+    suspend fun moveQueueItemToNext(index: Int)
+    suspend fun clearQueue()
 
     suspend fun setRepeatMode(mode: RepeatMode)
     suspend fun setShuffleEnabled(enabled: Boolean)

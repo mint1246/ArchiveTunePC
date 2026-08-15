@@ -315,9 +315,49 @@ class MpvPlaybackController(
     override suspend fun moveQueueItem(fromIndex: Int, toIndex: Int) {
         checkOpen()
         commandMutex.withLock {
-            queue.move(fromIndex, toIndex)
+            queue.moveVisual(fromIndex, toIndex)
             publishQueueLocked()
         }
+    }
+
+    override suspend fun moveQueueItemToNext(index: Int) {
+        checkOpen()
+        commandMutex.withLock {
+            queue.moveToNext(index)
+            publishQueueLocked()
+        }
+    }
+
+    override suspend fun clearQueue() {
+        checkOpen()
+        val request =
+            commandMutex.withLock {
+                val previous = queue.current
+                val mutation = queue.clear()
+                publishQueueLocked()
+                when {
+                    mutation.current == null -> {
+                        generation++
+                        activeMpvGeneration = null
+                        host?.takeIf(MpvProcessHost::isRunning)?.command("stop")
+                        _state.update {
+                            it.copy(
+                                status = PlaybackStatus.IDLE,
+                                playWhenReady = false,
+                                positionMs = 0L,
+                                bufferedPositionMs = 0L,
+                                durationMs = 0L,
+                                queueTitle = null,
+                            )
+                        }
+                        transition(previous, null, TransitionReason.CURRENT_ITEM_REMOVED)
+                        null
+                    }
+
+                    else -> null
+                }
+            }
+        request?.let(::enqueueLoad)
     }
 
     override suspend fun setRepeatMode(mode: RepeatMode) {
@@ -687,6 +727,7 @@ class MpvPlaybackController(
         _state.update {
             it.copy(
                 queue = items,
+                queueEntries = queue.visualEntries(),
                 queueTitle = title,
                 currentIndex = queue.currentIndex,
                 repeatMode = queue.repeatMode,

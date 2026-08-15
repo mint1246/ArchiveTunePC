@@ -107,6 +107,8 @@ class WindowsMediaControlsTest {
         override suspend fun playNext(items: List<PlaybackItem>) = Unit
         override suspend fun removeQueueItem(index: Int) = Unit
         override suspend fun moveQueueItem(fromIndex: Int, toIndex: Int) = Unit
+        override suspend fun moveQueueItemToNext(index: Int) = Unit
+        override suspend fun clearQueue() = Unit
         override suspend fun setRepeatMode(mode: RepeatMode) = Unit
         override suspend fun setShuffleEnabled(enabled: Boolean) = Unit
         override suspend fun setVolume(volume: Float) = Unit

@@ -91,10 +91,9 @@ class PlaybackQueue(
         val newEntries = items.map { Entry(nextToken++, it) }
         entries += newEntries
         if (shuffleEnabled) {
-            newEntries.forEach { entry ->
-                val insertionIndex = random.nextInt(cursor + 1, playOrder.size + 1)
-                playOrder.add(insertionIndex, entry.token)
-            }
+            // Media3 appends newly added items at the end of the shuffle order rather than
+            // interleaving them, so appended tracks play after everything already queued.
+            playOrder += newEntries.map(Entry::token)
         } else {
             syncLinearOrder()
         }
@@ -152,6 +151,109 @@ class PlaybackQueue(
         entries.add(toIndex, entry)
         if (!shuffleEnabled) syncLinearOrder(oldCurrentToken)
         return Mutation(false, selection())
+    }
+
+    /**
+     * Reorders the visible "up next" order, mirroring how the Android queue sheet reorders its
+     * timeline windows. [fromVisual] and [toVisual] are positions in [visualTokens].
+     *
+     * When shuffle is disabled this rewrites the logical order (like Media3's `moveMediaItem`);
+     * when shuffle is enabled only the traversal order changes and the logical list is untouched.
+     */
+    fun moveVisual(fromVisual: Int, toVisual: Int): Mutation {
+        val size = playOrder.size
+        if (size < 2 || fromVisual == toVisual || fromVisual !in 0 until size || toVisual !in 0 until size) {
+            return Mutation(false, selection())
+        }
+        val currentToken = currentToken ?: return Mutation(false, selection())
+
+        val visual = visualTokens().toMutableList()
+        val token = visual.removeAt(fromVisual)
+        visual.add(toVisual, token)
+
+        if (shuffleEnabled) {
+            playOrder.clear()
+            playOrder += visual
+            cursor = playOrder.indexOf(currentToken)
+        } else {
+            val byToken = entries.associateBy(Entry::token)
+            val newEntries = visual.mapNotNull(byToken::get)
+            entries.clear()
+            entries += newEntries
+            syncLinearOrder(currentToken)
+        }
+        return Mutation(false, selection())
+    }
+
+    /**
+     * Moves the item at logical [index] so it plays immediately after the current item, matching
+     * Android's `MusicService.moveQueueItemToNext`. In shuffle mode this repositions the item in
+     * the traversal order right after the current item.
+     */
+    fun moveToNext(index: Int): Mutation {
+        require(index in entries.indices) { "Queue index $index is out of bounds" }
+        if (index == currentIndex) return Mutation(false, selection())
+
+        if (shuffleEnabled) {
+            val token = entries[index].token
+            val sourceVisual = visualTokens().indexOf(token)
+            if (sourceVisual <= 0) return Mutation(false, selection())
+            return moveVisual(sourceVisual, 1)
+        }
+
+        val destination = (currentIndex + 1).coerceAtMost(entries.lastIndex)
+        if (index == destination) return Mutation(false, selection())
+        return move(index, destination)
+    }
+
+    /** Removes everything except the current item, matching Android's clear-queue action. */
+    fun clear(): Mutation {
+        val currentToken = currentToken
+        if (currentToken == null) {
+            entries.clear()
+            playOrder.clear()
+            cursor = -1
+            return Mutation(false, null)
+        }
+        val currentEntry = entries.first { it.token == currentToken }
+        entries.clear()
+        entries += currentEntry
+        playOrder.clear()
+        playOrder += currentToken
+        cursor = 0
+        return Mutation(false, selection())
+    }
+
+    /**
+     * The queue's tokens in visual order: current first, then upcoming in play order, then
+     * already-played items. Equivalent to `Player.getQueueWindows()` on Android.
+     */
+    fun visualTokens(): List<Long> {
+        if (playOrder.isEmpty()) return emptyList()
+        return buildList(playOrder.size) {
+            for (i in cursor until playOrder.size) add(playOrder[i])
+            for (i in 0 until cursor) add(playOrder[i])
+        }
+    }
+
+    /** The queue's rows in visual order, exposing stable ids and logical indices for the UI. */
+    fun visualEntries(): List<PlaybackQueueEntry> {
+        val indexByToken = HashMap<Long, Int>(entries.size)
+        entries.forEachIndexed { index, entry -> indexByToken[entry.token] = index }
+        if (playOrder.isEmpty()) {
+            return entries.map { entry ->
+                PlaybackQueueEntry(entry.token, entry.item, indexByToken.getValue(entry.token), isCurrent = false)
+            }
+        }
+        val currentToken = currentToken
+        val result = ArrayList<PlaybackQueueEntry>(entries.size)
+        fun addToken(token: Long) {
+            val index = indexByToken[token] ?: return
+            result += PlaybackQueueEntry(token, entries[index].item, index, token == currentToken)
+        }
+        for (i in cursor until playOrder.size) addToken(playOrder[i])
+        for (i in 0 until cursor) addToken(playOrder[i])
+        return result
     }
 
     fun select(index: Int): Selection {

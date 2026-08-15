@@ -57,6 +57,22 @@ data class PlaybackItem(
     val source: PlaybackSource = PlaybackSource.Deferred(metadata.id),
 )
 
+/**
+ * One row of the "up next" queue as rendered by the UI.
+ *
+ * Entries are ordered the same way the Android queue sheet orders its timeline windows: the
+ * currently playing item first, then every upcoming item in play order, then already-played items.
+ * This matches the order returned by Android's `Player.getQueueWindows()`.
+ */
+data class PlaybackQueueEntry(
+    /** Stable identity token. Survives reorder and disambiguates duplicate tracks. */
+    val id: Long,
+    val item: PlaybackItem,
+    /** Index into the logical queue, used by remove/seek/play-next mutation calls. */
+    val logicalIndex: Int,
+    val isCurrent: Boolean,
+)
+
 /** A source accepted directly by a desktop engine after any deferred resolution. */
 data class ResolvedPlaybackSource(
     val uri: String,
@@ -103,6 +119,8 @@ data class PlaybackFailure(
 
 data class PlaybackSnapshot(
     val queue: List<PlaybackItem> = emptyList(),
+    /** Queue rows in visual ("up next") order, current first. See [PlaybackQueueEntry]. */
+    val queueEntries: List<PlaybackQueueEntry> = emptyList(),
     val queueTitle: String? = null,
     val currentIndex: Int = -1,
     val status: PlaybackStatus = PlaybackStatus.IDLE,
