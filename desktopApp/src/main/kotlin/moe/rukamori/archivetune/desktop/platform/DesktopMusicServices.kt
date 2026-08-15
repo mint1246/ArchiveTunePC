@@ -72,8 +72,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     init {
         backend.bindSessionProvider(account)
+        // Restore the DPAPI session synchronously before the first UI-driven backend call can race
+        // ahead of it. Network revalidation stays asynchronous so startup is not blocked on it.
+        account.restore()
         runtime.applicationScope.launch {
-            account.restore()
             account.refreshRestoredSession()
             restoreQueueIfPresent()
         }

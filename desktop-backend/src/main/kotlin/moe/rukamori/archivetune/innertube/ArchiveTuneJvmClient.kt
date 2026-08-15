@@ -51,6 +51,9 @@ class ArchiveTuneJvmClient(
     init {
         require(cacheDirectory.path.isNotBlank()) { "Cipher cache directory is required" }
         require(streamClients.isNotEmpty()) { "At least one YouTube stream client is required" }
+        // Mirror Android's default: apply the signed-in cookie to browse calls such as explore,
+        // charts, new releases and library pages that do not explicitly pass setLogin = true.
+        YouTube.useLoginForBrowse = true
         NetworkGatekeeper.setConnectionBlocked(networkPolicy.gatekeeperEnabled)
         MoriCipherRuntime.initialize(
             MoriCipherConfig(
