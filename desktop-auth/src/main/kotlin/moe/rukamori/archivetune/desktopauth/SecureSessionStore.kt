@@ -11,8 +11,10 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
 /** A deliberately small seam around the OS key protection API. */
@@ -71,15 +73,32 @@ class DpapiFileSessionStore(
 
     override fun write(value: ByteArray) {
         guarded {
-            Files.createDirectories(path.parent)
+            val parent = checkNotNull(path.parent) { "Secure session path must have a parent directory" }
+            Files.createDirectories(parent)
             val encrypted = protector.protect(value)
-            Files.write(
-                path,
-                encrypted,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING,
-                StandardOpenOption.WRITE,
-            )
+            // Keep the previous ciphertext usable if the process is interrupted during a write.
+            // A torn DPAPI payload otherwise turns a transient crash into a forced sign-in.
+            val temporary = Files.createTempFile(parent, ".${path.fileName}.", ".tmp")
+            try {
+                Files.write(
+                    temporary,
+                    encrypted,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE,
+                )
+                try {
+                    Files.move(
+                        temporary,
+                        path,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
+                }
+            } finally {
+                Files.deleteIfExists(temporary)
+            }
         }
     }
 

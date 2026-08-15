@@ -6,9 +6,12 @@
 
 package moe.rukamori.archivetune.desktopauth
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.DesktopSessionProvider
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
@@ -106,10 +109,26 @@ fun interface DesktopSessionVerifier {
     suspend fun verify(candidate: PlaybackAuthState): Result<VerifiedDesktopSession>
 }
 
+/**
+ * Optional source for obtaining a fresh browser session. Desktop browsers do not expose cookies
+ * through the normal sign-in redirect, so the application supplies this only when it has a
+ * user-authorized cookie bridge (for example, a browser extension or an explicit re-export).
+ */
+fun interface DesktopSessionCookieRefresher {
+    suspend fun refresh(previous: YouTubeSessionImport): Result<YouTubeSessionImport>
+}
+
 data class VerifiedDesktopSession(
     val authState: PlaybackAuthState,
     val account: DesktopAccount,
 )
+
+private sealed interface VerificationResult {
+    data class Verified(val session: VerifiedDesktopSession) : VerificationResult
+
+    /** [authRejected] is true when the cookie was rejected by the server, false for transient/network failures. */
+    data class Rejected(val authRejected: Boolean) : VerificationResult
+}
 
 class ArchiveTuneSessionVerifier(
     private val backend: ArchiveTuneJvmClient,
@@ -137,8 +156,18 @@ class DesktopSessionManager(
     private val verifier: DesktopSessionVerifier,
     private val browserLauncher: SystemBrowserLauncher = DesktopSystemBrowserLauncher,
     private val clock: Clock = Clock.systemUTC(),
+    private val cookieRefresher: DesktopSessionCookieRefresher? = null,
+    private val refreshIntervalMillis: Long = DEFAULT_REFRESH_INTERVAL_MILLIS,
+    private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
 ) : DesktopSessionProvider {
+    private val refreshMutex = Mutex()
+    private val stateLock = Any()
+    @Volatile
     private var active: StoredDesktopSession? = null
+    @Volatile
+    private var knownExpired = false
+    @Volatile
+    private var lastValidationAtEpochMillis: Long = Long.MIN_VALUE
     private val _state = MutableStateFlow<DesktopAccountState>(DesktopAccountState.SignedOut)
     val state: StateFlow<DesktopAccountState> = _state.asStateFlow()
 
@@ -166,7 +195,12 @@ class DesktopSessionManager(
                 is YouTubeCookieJsonImportResult.Ready -> result.parsed
                 is YouTubeCookieJsonImportResult.Rejected -> return CookieJsonSessionImportResult.Rejected(result.reason)
             }
-        return importAndValidate(YouTubeSessionImport(cookieHeader = parsed.cookieHeader)).asCookieJsonResult()
+        return importAndValidate(
+            YouTubeSessionImport(
+                cookieHeader = parsed.cookieHeader,
+                expiresAtEpochMillis = parsed.expiresAtEpochMillis,
+            ),
+        ).asCookieJsonResult()
     }
 
     /** Restores a DPAPI-protected session if one exists. It is not treated as network-validated. */
@@ -181,8 +215,12 @@ class DesktopSessionManager(
                 _state.value = DesktopAccountState.Unavailable(DesktopAuthIssue.CORRUPT_SESSION)
                 return _state.value
             }
-        active = stored
-        _state.value = stateFor(stored, restored = true)
+        synchronized(stateLock) {
+            active = stored
+            knownExpired = false
+            lastValidationAtEpochMillis = Long.MIN_VALUE
+            _state.value = stateFor(stored, restored = true)
+        }
         return _state.value
     }
 
@@ -192,23 +230,60 @@ class DesktopSessionManager(
      * using it until the next successful validation or explicit logout.
      */
     suspend fun refreshRestoredSession(): Boolean {
-        val restored = active ?: return false
-        if (restored.isExpired(clock.millis())) return false
-        val verified = verifier.verify(restored.authState).getOrNull() ?: return false
-        val refreshed =
-            restored.copy(
-                authState = verified.authState.normalized(),
-                account = verified.account,
-            )
-        return try {
-            secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
-            active = refreshed
-            _state.value = DesktopAccountState.SignedIn(refreshed.account, restoredFromSecureStore = false)
-            true
-        } catch (_: SecureStoreUnavailableException) {
+        return refreshIfNeeded(force = true)
+    }
+
+    /** Called by [ArchiveTuneJvmClient] before each request. Concurrent requests share one check. */
+    override suspend fun refreshIfNeeded() {
+        refreshIfNeeded(force = false)
+    }
+
+    private suspend fun refreshIfNeeded(force: Boolean): Boolean =
+        refreshMutex.withLock {
+            val current = active ?: return@withLock false
+            if (knownExpired && !force) return@withLock false
+            val now = clock.millis()
+            val expirySoon = current.expiresAtEpochMillis?.let { it - now <= refreshLeadMillis } == true
+            val intervalElapsed = lastValidationAtEpochMillis == Long.MIN_VALUE || now - lastValidationAtEpochMillis >= refreshIntervalMillis
+            if (!force && !expirySoon && !intervalElapsed) return@withLock true
+
+            var replacementAttempted = false
+            // A known near-term browser-cookie expiry is precisely when a user-authorized cookie
+            // bridge should be preferred. A successful verifier call only proves that the old
+            // cookie is valid now; it cannot extend its lifetime.
+            if (expirySoon && cookieRefresher != null) {
+                replacementAttempted = true
+                val replacement = requestCookieReplacement(current, now)
+                if (replacement != null && validateAndPersist(current, replacement)) {
+                    return@withLock true
+                }
+            }
+
+            // A browser-side expiry hint is not authoritative: Google can accept a cookie long
+            // after its browser expiration, exactly as the Android app relies on. Re-verify against
+            // the network and only expire the session on a concrete server rejection.
+            val verification = verifySafely(current.authState)
+            if (verification is VerificationResult.Verified && persistVerified(current, verification.session, current.expiresAtEpochMillis)) {
+                return@withLock true
+            }
+
+            if (!replacementAttempted && cookieRefresher != null) {
+                val replacement = requestCookieReplacement(current, now)
+                if (replacement != null && validateAndPersist(current, replacement)) {
+                    return@withLock true
+                }
+            }
+
+            if (verification is VerificationResult.Rejected && verification.authRejected) {
+                synchronized(stateLock) {
+                    if (active?.authState?.fingerprint == current.authState.fingerprint) {
+                        knownExpired = true
+                        _state.value = DesktopAccountState.Expired(current.account)
+                    }
+                }
+            }
             false
         }
-    }
 
     suspend fun importAndValidate(input: YouTubeSessionImport): SessionImportResult {
         val candidate =
@@ -226,30 +301,42 @@ class DesktopSessionManager(
             return SessionImportResult.Rejected(SessionImportFailure.EXPIRED)
         }
 
-        val verified = verifier.verify(candidate).getOrElse {
+        val verification = verifySafely(candidate)
+        val verified = (verification as? VerificationResult.Verified)?.session
+            ?: return SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED)
+        val verifiedAuthState = verified.authState.normalized()
+        if (!verifiedAuthState.hasLoginCookie) {
             return SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED)
         }
         val stored =
             StoredDesktopSession(
-                authState = verified.authState.normalized(),
+                authState = verifiedAuthState,
                 account = verified.account,
                 expiresAtEpochMillis = input.expiresAtEpochMillis,
             )
-        try {
-            secureStore.write(StoredDesktopSessionCodec.encode(stored))
-        } catch (_: SecureStoreUnavailableException) {
-            return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
+        synchronized(stateLock) {
+            try {
+                secureStore.write(StoredDesktopSessionCodec.encode(stored))
+            } catch (_: SecureStoreUnavailableException) {
+                return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
+            }
+            active = stored
+            knownExpired = false
+            lastValidationAtEpochMillis = clock.millis()
+            _state.value = DesktopAccountState.SignedIn(stored.account, restoredFromSecureStore = false)
         }
-        active = stored
-        _state.value = DesktopAccountState.SignedIn(stored.account, restoredFromSecureStore = false)
         return SessionImportResult.Success(stored.account)
     }
 
     fun logout(): Result<Unit> =
         try {
-            secureStore.delete()
-            active = null
-            _state.value = DesktopAccountState.SignedOut
+            synchronized(stateLock) {
+                secureStore.delete()
+                active = null
+                knownExpired = false
+                lastValidationAtEpochMillis = Long.MIN_VALUE
+                _state.value = DesktopAccountState.SignedOut
+            }
             Result.success(Unit)
         } catch (failure: SecureStoreUnavailableException) {
             Result.failure(failure)
@@ -257,7 +344,7 @@ class DesktopSessionManager(
 
     override fun currentAuthState(): PlaybackAuthState =
         active
-            ?.takeUnless { it.isExpired(clock.millis()) }
+            ?.takeUnless { knownExpired }
             ?.authState
             ?: PlaybackAuthState.EMPTY
 
@@ -267,12 +354,106 @@ class DesktopSessionManager(
     ): DesktopAccountState =
         when {
             stored == null -> DesktopAccountState.SignedOut
-            stored.isExpired(clock.millis()) -> DesktopAccountState.Expired(stored.account)
             else -> DesktopAccountState.SignedIn(stored.account, restoredFromSecureStore = restored)
         }
 
+    private suspend fun validateAndPersist(
+        previous: StoredDesktopSession,
+        input: YouTubeSessionImport,
+    ): Boolean {
+        val candidate = input.toAuthState()
+        if (!candidate.hasLoginCookie) return false
+        val verification = verifySafely(candidate)
+        val verified = (verification as? VerificationResult.Verified)?.session ?: return false
+        // A replacement with an unknown expiry deliberately clears the old expiry. Retaining the
+        // previous timestamp would make a freshly imported cookie appear expired immediately.
+        return persistVerified(previous, verified, input.expiresAtEpochMillis)
+    }
+
+    private suspend fun verifySafely(candidate: PlaybackAuthState): VerificationResult =
+        try {
+            verifier.verify(candidate).fold(
+                onSuccess = { VerificationResult.Verified(it) },
+                onFailure = { VerificationResult.Rejected(isAuthRejection(it)) },
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            VerificationResult.Rejected(isAuthRejection(failure))
+        }
+
+    private suspend fun requestCookieReplacement(
+        current: StoredDesktopSession,
+        now: Long,
+    ): YouTubeSessionImport? =
+        try {
+            cookieRefresher
+                ?.refresh(current.toImport())
+                ?.getOrNull()
+                ?.takeUnless { it.expiresAtEpochMillis?.let { expiry -> expiry <= now } == true }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            null
+        }
+
+    private suspend fun persistVerified(
+        previous: StoredDesktopSession,
+        verified: VerifiedDesktopSession,
+        expiresAtEpochMillis: Long?,
+    ): Boolean {
+        val verifiedAuthState = verified.authState.normalized()
+        // Treat the verifier as a trust boundary: a malformed success must never replace a
+        // usable session with an anonymous/invalid credential set.
+        if (!verifiedAuthState.hasLoginCookie) return false
+        val refreshed =
+            previous.copy(
+                authState = verifiedAuthState,
+                account = verified.account,
+                expiresAtEpochMillis = expiresAtEpochMillis,
+            )
+        return try {
+            synchronized(stateLock) {
+                if (active?.authState?.fingerprint != previous.authState.fingerprint) return false
+                secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
+                active = refreshed
+                knownExpired = false
+                lastValidationAtEpochMillis = clock.millis()
+                _state.value = DesktopAccountState.SignedIn(refreshed.account, restoredFromSecureStore = false)
+            }
+            true
+        } catch (_: SecureStoreUnavailableException) {
+            false
+        }
+    }
+
+    private fun StoredDesktopSession.toImport(): YouTubeSessionImport =
+        YouTubeSessionImport(
+            cookieHeader = authState.cookie.orEmpty(),
+            visitorData = authState.visitorData,
+            dataSyncId = authState.dataSyncId,
+            poToken = authState.poToken,
+            poTokenGvs = authState.poTokenGvs,
+            poTokenPlayer = authState.poTokenPlayer,
+            webClientPoTokenEnabled = authState.webClientPoTokenEnabled,
+            expiresAtEpochMillis = expiresAtEpochMillis,
+        )
+
+    private fun YouTubeSessionImport.toAuthState(): PlaybackAuthState =
+        PlaybackAuthState(
+            cookie = cookieHeader,
+            visitorData = visitorData,
+            dataSyncId = dataSyncId,
+            poToken = poToken,
+            poTokenGvs = poTokenGvs,
+            poTokenPlayer = poTokenPlayer,
+            webClientPoTokenEnabled = webClientPoTokenEnabled,
+        ).normalized()
+
     private companion object {
         val GOOGLE_LOGIN_URL = URI("https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com")
+        const val DEFAULT_REFRESH_INTERVAL_MILLIS = 15 * 60 * 1_000L
+        const val DEFAULT_REFRESH_LEAD_MILLIS = 5 * 60 * 1_000L
     }
 }
 
@@ -287,6 +468,22 @@ private fun SessionImportResult.asCookieJsonResult(): CookieJsonSessionImportRes
         is SessionImportResult.Success -> CookieJsonSessionImportResult.Success(account)
         is SessionImportResult.Rejected -> CookieJsonSessionImportResult.SessionRejected(reason)
     }
+
+/**
+ * Distinguishes a concrete server-side auth rejection (dead cookie) from transient failures.
+ * Ktor wraps a rejected request in `ClientRequestException`; a 200 response that lacks the signed-in
+ * account renders as the "not be logged in" parse failure. Everything else (network, timeouts,
+ * server errors) is deliberately treated as non-terminal so offline users keep their last session.
+ */
+private fun isAuthRejection(failure: Throwable): Boolean {
+    val causes = generateSequence(failure) { it.cause }.toList() + failure.suppressed.toList()
+    return causes.any { cause ->
+        val name = cause::class.simpleName.orEmpty()
+        val message = cause.message.orEmpty()
+        (name.contains("ClientRequestException", ignoreCase = true) && Regex("\\b(401|403)\\b").containsMatchIn(message)) ||
+            message.contains("not be logged in", ignoreCase = true)
+    }
+}
 
 data class DesktopSessionDiagnostic(
     val signedIn: Boolean,
@@ -309,7 +506,7 @@ internal data class StoredDesktopSession(
 
     fun toDiagnostic(now: Long) =
         DesktopSessionDiagnostic(
-            signedIn = !isExpired(now),
+            signedIn = authState.hasLoginCookie,
             sessionFingerprint = authState.fingerprint,
             hasVisitorData = !authState.visitorData.isNullOrBlank(),
             hasDataSyncId = !authState.dataSyncId.isNullOrBlank(),

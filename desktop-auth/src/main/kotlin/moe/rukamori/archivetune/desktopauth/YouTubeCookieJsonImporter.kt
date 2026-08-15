@@ -47,6 +47,7 @@ enum class YouTubeCookieJsonFailure {
  */
 internal class ParsedYouTubeCookieJson(
     internal val cookieHeader: String,
+    internal val expiresAtEpochMillis: Long?,
     val summary: YouTubeCookieJsonSummary,
 ) {
     override fun toString(): String = "ParsedYouTubeCookieJson(summary=$summary)"
@@ -113,6 +114,10 @@ object YouTubeCookieJsonImporter {
         return YouTubeCookieJsonImportResult.Ready(
             ParsedYouTubeCookieJson(
                 cookieHeader = header,
+                expiresAtEpochMillis = selected
+                    .filter { it.name in LOGIN_COOKIE_NAMES }
+                    .mapNotNull { it.expiresAtEpochMillis }
+                    .minOrNull(),
                 summary = YouTubeCookieJsonSummary(
                     acceptedCookieCount = selected.size,
                     domains = selected.map { it.domain.displayDomain() }.distinct().sorted(),
@@ -220,4 +225,5 @@ object YouTubeCookieJsonImporter {
     private const val MAX_EXPORTED_COOKIES = 5_000
     private const val MAX_COOKIE_HEADER_CHARACTERS = 24_000
     private val COOKIE_NAME = Regex("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+    private val LOGIN_COOKIE_NAMES = setOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID", "APISID")
 }

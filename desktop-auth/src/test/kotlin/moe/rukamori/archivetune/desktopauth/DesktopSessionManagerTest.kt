@@ -1,6 +1,9 @@
 package moe.rukamori.archivetune.desktopauth
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +14,7 @@ import java.net.URI
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.atomic.AtomicInteger
 
 class DesktopSessionManagerTest {
     @Test
@@ -40,7 +44,7 @@ class DesktopSessionManagerTest {
     }
 
     @Test
-    fun `expired sessions never flow to backend and restore is marked expired`() = runBlocking {
+    fun `past browser expiry is rejected at import but restored sessions are revalidated not pre-expired`() = runBlocking {
         val clock = Clock.fixed(Instant.ofEpochMilli(1000), ZoneOffset.UTC)
         val store = MemoryStore()
         val manager = manager(store = store, clock = clock)
@@ -64,8 +68,60 @@ class DesktopSessionManagerTest {
                 ),
             )
         val restored = manager.restore()
-        assertTrue(restored is DesktopAccountState.Expired)
+        assertTrue(restored is DesktopAccountState.SignedIn)
+        assertEquals("SAPISID=secret", manager.currentAuthState().cookie)
+
+        assertTrue(manager.refreshRestoredSession())
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+    }
+
+    @Test
+    fun `server auth rejection expires a restored session`() = runBlocking {
+        val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(
+                authState = PlaybackAuthState(cookie = "SAPISID=dead"),
+                account = DesktopAccount("Dead", null, null),
+                expiresAtEpochMillis = null,
+            ),
+        )
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier {
+                Result.failure(IllegalStateException("Failed to get account info - user may not be logged in"))
+            },
+            clock = clock,
+        )
+        manager.restore()
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+
+        assertFalse(manager.refreshRestoredSession())
+        assertTrue(manager.state.value is DesktopAccountState.Expired)
         assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+    }
+
+    @Test
+    fun `transient verification failure keeps the session for offline use`() = runBlocking {
+        val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(
+                authState = PlaybackAuthState(cookie = "SAPISID=known"),
+                account = DesktopAccount("Known", null, null),
+                expiresAtEpochMillis = null,
+            ),
+        )
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { Result.failure(java.io.IOException("offline")) },
+            clock = clock,
+        )
+        manager.restore()
+
+        assertFalse(manager.refreshRestoredSession())
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+        assertEquals("SAPISID=known", manager.currentAuthState().cookie)
     }
 
     @Test
@@ -124,6 +180,169 @@ class DesktopSessionManagerTest {
         assertTrue(manager.restore() is DesktopAccountState.Unavailable)
         val result = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
         assertEquals(SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE), result)
+    }
+
+    @Test
+    fun `verifier success without a login cookie is rejected and never stored`() = runBlocking {
+        val store = MemoryStore()
+        val manager =
+            DesktopSessionManager(
+                secureStore = store,
+                verifier = DesktopSessionVerifier {
+                    Result.success(
+                        VerifiedDesktopSession(
+                            authState = PlaybackAuthState.EMPTY,
+                            account = DesktopAccount("Untrusted", null, null),
+                        ),
+                    )
+                },
+            )
+
+        val result = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=candidate"))
+
+        assertEquals(SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED), result)
+        assertNull(store.value)
+        assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+        assertEquals(DesktopAccountState.SignedOut, manager.state.value)
+    }
+
+    @Test
+    fun `refresh verifier cannot replace an existing session with anonymous credentials`() = runBlocking {
+        val store = MemoryStore().apply {
+            value = StoredDesktopSessionCodec.encode(
+                StoredDesktopSession(
+                    authState = PlaybackAuthState(cookie = "SAPISID=known"),
+                    account = DesktopAccount("Known", null, null),
+                    expiresAtEpochMillis = null,
+                ),
+            )
+        }
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier {
+                Result.success(VerifiedDesktopSession(PlaybackAuthState.EMPTY, DesktopAccount("Bad", null, null)))
+            },
+        )
+        manager.restore()
+
+        assertFalse(manager.refreshRestoredSession())
+        assertEquals("SAPISID=known", manager.currentAuthState().cookie)
+        assertEquals("SAPISID=known", StoredDesktopSessionCodec.decode(store.value!!).authState.cookie)
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+    }
+
+    @Test
+    fun `request refresh revalidates once and persists verifier updates`() = runBlocking {
+        val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(
+                authState = PlaybackAuthState(cookie = "SAPISID=old", dataSyncId = "sync"),
+                account = DesktopAccount("Old", null, null),
+                expiresAtEpochMillis = null,
+            ),
+        )
+        val calls = AtomicInteger()
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { candidate ->
+                calls.incrementAndGet()
+                Result.success(VerifiedDesktopSession(candidate.copy(cookie = "SAPISID=new"), DesktopAccount("New", null, null)))
+            },
+            clock = clock,
+        )
+
+        manager.restore()
+        assertTrue(manager.refreshRestoredSession())
+        assertEquals("SAPISID=new", manager.currentAuthState().cookie)
+        assertEquals("SAPISID=new", StoredDesktopSessionCodec.decode(store.value!!).authState.cookie)
+        assertEquals(1, calls.get())
+    }
+
+    @Test
+    fun `concurrent refresh requests are serialized`() = runBlocking {
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(PlaybackAuthState(cookie = "SAPISID=old"), DesktopAccount("Example", null, null), null),
+        )
+        val calls = AtomicInteger()
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { candidate ->
+                calls.incrementAndGet()
+                delay(25)
+                Result.success(VerifiedDesktopSession(candidate, DesktopAccount("Example", null, null)))
+            },
+        )
+        manager.restore()
+
+        List(8) { async { manager.refreshIfNeeded() } }.awaitAll()
+
+        assertEquals(1, calls.get())
+    }
+
+    @Test
+    fun `expired session can be renewed by an authorized cookie source`() = runBlocking {
+        val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(PlaybackAuthState(cookie = "SAPISID=old"), DesktopAccount("Old", null, null), 9_999),
+        )
+        var supplied: YouTubeSessionImport? = null
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { candidate ->
+                Result.success(VerifiedDesktopSession(candidate, DesktopAccount("Fresh", null, null)))
+            },
+            cookieRefresher = DesktopSessionCookieRefresher {
+                supplied = it
+                Result.success(YouTubeSessionImport("SAPISID=fresh", expiresAtEpochMillis = 20_000))
+            },
+            clock = clock,
+        )
+
+        assertTrue(manager.restore() is DesktopAccountState.SignedIn)
+        assertTrue(manager.refreshRestoredSession())
+        assertEquals("SAPISID=old", supplied!!.cookieHeader)
+        assertEquals("SAPISID=fresh", manager.currentAuthState().cookie)
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+        assertEquals(20_000L, StoredDesktopSessionCodec.decode(store.value!!).expiresAtEpochMillis)
+    }
+
+    @Test
+    fun `near expiry prefers replacement cookie and clears obsolete expiry when unknown`() = runBlocking {
+        val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
+        val store = MemoryStore().apply {
+            value = StoredDesktopSessionCodec.encode(
+                StoredDesktopSession(
+                    PlaybackAuthState(cookie = "SAPISID=old"),
+                    DesktopAccount("Old", null, null),
+                    expiresAtEpochMillis = 12_000,
+                ),
+            )
+        }
+        var verifiedCookie: String? = null
+        val refreshCalls = AtomicInteger()
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { candidate ->
+                verifiedCookie = candidate.cookie
+                Result.success(VerifiedDesktopSession(candidate, DesktopAccount("Fresh", null, null)))
+            },
+            cookieRefresher = DesktopSessionCookieRefresher {
+                refreshCalls.incrementAndGet()
+                Result.success(YouTubeSessionImport("SAPISID=fresh", expiresAtEpochMillis = null))
+            },
+            clock = clock,
+        )
+
+        manager.restore()
+        assertTrue(manager.refreshRestoredSession())
+
+        assertEquals(1, refreshCalls.get())
+        assertEquals("SAPISID=fresh", verifiedCookie)
+        assertEquals("SAPISID=fresh", manager.currentAuthState().cookie)
+        assertNull(StoredDesktopSessionCodec.decode(store.value!!).expiresAtEpochMillis)
     }
 
     private fun manager(

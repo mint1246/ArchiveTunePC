@@ -23,6 +23,7 @@ class YouTubeCookieJsonImporterTest {
 
         val parsed = (result as YouTubeCookieJsonImportResult.Ready).parsed
         assertEquals("PREF=pref; SAPISID=youtube-value", parsed.cookieHeader)
+        assertEquals(1_900_000_000_000L, parsed.expiresAtEpochMillis)
         assertEquals(2, parsed.summary.acceptedCookieCount)
         assertEquals(listOf(".music.youtube.com", ".youtube.com"), parsed.summary.domains)
     }
