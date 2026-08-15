@@ -33,6 +33,18 @@ enum class DesktopLastDestination {
     SETTINGS,
 }
 
+/** Persisted playback queue defaults. Kept in this module to avoid a settings→playback cycle. */
+enum class DesktopRepeatMode {
+    OFF,
+    ONE,
+    ALL,
+}
+
+enum class DesktopPartialCleanupPolicy {
+    DELETE_ON_CANCEL,
+    KEEP_ON_CANCEL,
+}
+
 data class DesktopWindowPlacement(
     val widthDp: Float = 1_280f,
     val heightDp: Float = 800f,
@@ -48,10 +60,16 @@ data class DesktopSettings(
     val accentSeedArgb: Long? = null,
     val volume: Float = 1f,
     val speed: Float = 1f,
+    val repeatMode: DesktopRepeatMode = DesktopRepeatMode.OFF,
+    val shuffleEnabled: Boolean = false,
     val lastDestination: DesktopLastDestination = DesktopLastDestination.HOME,
     val windowPlacement: DesktopWindowPlacement = DesktopWindowPlacement(),
     val libraryFolders: List<Path> = emptyList(),
     val downloadLocation: Path? = null,
+    val downloadConcurrency: Int = 2,
+    val partialCleanupPolicy: DesktopPartialCleanupPolicy = DesktopPartialCleanupPolicy.DELETE_ON_CANCEL,
+    /** Empty means all built-in lyrics providers, preserving the Android fallback behavior. */
+    val lyricsProviderIds: List<String> = emptyList(),
 )
 
 /**
@@ -89,6 +107,8 @@ class DesktopSettingsStore(file: Path) {
                 accentSeedArgb = values.getProperty("appearance.accentArgb")?.toLongOrNull(),
                 volume = values.getProperty("playback.volume")?.toFloatOrNull() ?: 1f,
                 speed = values.getProperty("playback.speed")?.toFloatOrNull() ?: 1f,
+                repeatMode = values.enumValue("playback.repeatMode", DesktopRepeatMode.OFF),
+                shuffleEnabled = values.getProperty("playback.shuffle")?.toBooleanStrictOrNull() ?: false,
                 lastDestination = values.enumValue("navigation.lastDestination", DesktopLastDestination.HOME),
                 windowPlacement = DesktopWindowPlacement(
                     widthDp = values.getProperty("window.widthDp")?.toFloatOrNull() ?: 1_280f,
@@ -99,6 +119,9 @@ class DesktopSettingsStore(file: Path) {
                 ),
                 libraryFolders = readPaths(values, "library.folder"),
                 downloadLocation = values.getProperty("downloads.location")?.toPathOrNull(),
+                downloadConcurrency = values.getProperty("downloads.concurrency")?.toIntOrNull() ?: 2,
+                partialCleanupPolicy = values.enumValue("downloads.partialCleanup", DesktopPartialCleanupPolicy.DELETE_ON_CANCEL),
+                lyricsProviderIds = readStrings(values, "lyrics.provider"),
             ).sanitized()
         }.getOrDefault(DesktopSettings())
     }
@@ -111,6 +134,8 @@ class DesktopSettingsStore(file: Path) {
             settings.accentSeedArgb?.let { setProperty("appearance.accentArgb", it.toString()) }
             setProperty("playback.volume", settings.volume.toString())
             setProperty("playback.speed", settings.speed.toString())
+            setProperty("playback.repeatMode", settings.repeatMode.name)
+            setProperty("playback.shuffle", settings.shuffleEnabled.toString())
             setProperty("navigation.lastDestination", settings.lastDestination.name)
             setProperty("window.widthDp", settings.windowPlacement.widthDp.toString())
             setProperty("window.heightDp", settings.windowPlacement.heightDp.toString())
@@ -119,6 +144,9 @@ class DesktopSettingsStore(file: Path) {
             setProperty("window.maximized", settings.windowPlacement.maximized.toString())
             settings.libraryFolders.forEachIndexed { index, path -> setProperty("library.folder.$index", path.toString()) }
             settings.downloadLocation?.let { setProperty("downloads.location", it.toString()) }
+            setProperty("downloads.concurrency", settings.downloadConcurrency.toString())
+            setProperty("downloads.partialCleanup", settings.partialCleanupPolicy.name)
+            settings.lyricsProviderIds.forEachIndexed { index, id -> setProperty("lyrics.provider.$index", id) }
         }
         val temporary = Files.createTempFile(parent, ".${file.fileName}.", ".tmp")
         try {
@@ -137,9 +165,11 @@ class DesktopSettingsStore(file: Path) {
         accentSeedArgb = accentSeedArgb?.takeIf { it in 0..ARGB_MAX },
         volume = volume.finiteOr(1f).coerceIn(0f, 1f),
         speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
+        downloadConcurrency = downloadConcurrency.coerceIn(1, 8),
         windowPlacement = windowPlacement.sanitized(),
         libraryFolders = libraryFolders.map(Path::absolute).map(Path::normalize).distinct().take(MAX_LIBRARY_FOLDERS),
         downloadLocation = downloadLocation?.absolute()?.normalize(),
+        lyricsProviderIds = lyricsProviderIds.map(String::trim).filter(String::isNotEmpty).distinct().take(MAX_LYRICS_PROVIDERS),
     )
 
     private fun DesktopWindowPlacement.sanitized(): DesktopWindowPlacement = copy(
@@ -158,11 +188,16 @@ class DesktopSettingsStore(file: Path) {
         (0 until MAX_LIBRARY_FOLDERS)
             .mapNotNull { values.getProperty("$prefix.$it")?.toPathOrNull() }
 
+    private fun readStrings(values: Properties, prefix: String): List<String> =
+        (0 until MAX_LYRICS_PROVIDERS)
+            .mapNotNull { values.getProperty("$prefix.$it")?.trim()?.takeIf(String::isNotEmpty) }
+
     private fun String.toPathOrNull(): Path? = runCatching { Path.of(this).absolute().normalize() }.getOrNull()
 
     private companion object {
         const val ARGB_MAX = 0xFFFF_FFFFL
         const val MAX_LIBRARY_FOLDERS = 64
+        const val MAX_LYRICS_PROVIDERS = 32
         val locks = ConcurrentHashMap<Path, ReentrantLock>()
     }
 }

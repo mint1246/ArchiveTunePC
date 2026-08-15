@@ -63,4 +63,35 @@ class DesktopSettingsStoreTest {
         assertEquals(0.88f, DesktopSettingsStore(file).snapshot().volume, 0.0001f)
         assertFalse(Files.list(file.parent).use { paths -> paths.anyMatch { it.fileName.toString().endsWith(".tmp") } })
     }
+
+    @Test
+    fun persistsDesktopPlaybackDownloadAndLyricsDefaults() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val expected = DesktopSettings(
+            repeatMode = DesktopRepeatMode.ALL,
+            shuffleEnabled = true,
+            downloadConcurrency = 7,
+            partialCleanupPolicy = DesktopPartialCleanupPolicy.KEEP_ON_CANCEL,
+            lyricsProviderIds = listOf("lrclib", "betterlyrics"),
+        )
+
+        DesktopSettingsStore(file).save(expected)
+
+        assertEquals(expected, DesktopSettingsStore(file).snapshot())
+    }
+
+    @Test
+    fun sanitizesUnsafeDownloadAndLyricsValues() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        DesktopSettingsStore(file).save(
+            DesktopSettings(
+                downloadConcurrency = 100,
+                lyricsProviderIds = listOf("", "lrclib", "lrclib", "  "),
+            ),
+        )
+
+        val restored = DesktopSettingsStore(file).snapshot()
+        assertEquals(8, restored.downloadConcurrency)
+        assertEquals(listOf("lrclib"), restored.lyricsProviderIds)
+    }
 }
