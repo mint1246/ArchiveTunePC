@@ -733,7 +733,7 @@ private fun String.patchClientVersion(clientVersion: String): String =
 private fun String.isHttpUrl(): Boolean =
     runCatching { URI(this).scheme?.lowercase(Locale.US) in setOf("http", "https") }.getOrDefault(false)
 
-private fun String?.visitorDataFromCookie(): String? =
+internal fun String?.visitorDataFromCookie(): String? =
     this?.let(::parseCookieString)?.get("VISITOR_INFO1_LIVE")?.takeIf(String::isNotBlank)
 
 private fun normalizedQuery(query: String): Result<String> =

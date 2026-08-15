@@ -71,6 +71,21 @@ class ArchiveTuneJvmClientTest {
     }
 
     @Test
+    fun visitorDataIsExtractedFromImportedCookie() {
+        assertEquals(
+            "visitor-id-123",
+            "VISITOR_INFO1_LIVE=visitor-id-123; SAPISID=secret; LOGIN_INFO=...".visitorDataFromCookie(),
+        )
+    }
+
+    @Test
+    fun missingVisitorDataCookieYieldsNull() {
+        assertEquals(null, "SAPISID=secret; LOGIN_INFO=...".visitorDataFromCookie())
+        assertEquals(null, "".visitorDataFromCookie())
+        assertEquals(null, null.visitorDataFromCookie())
+    }
+
+    @Test
     fun highQualityPrefersBestDirectFormatAtOrBelowTarget() {
         val response =
             playerResponse(
