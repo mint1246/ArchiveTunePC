@@ -67,7 +67,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
+import moe.rukamori.archivetune.innertube.home.computeLocalHomeContent
 import moe.rukamori.archivetune.innertube.models.AlbumItem
+import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
@@ -89,7 +91,9 @@ fun DesktopHomeSurface(
 ) {
     val playbackState by services.playback.state.collectAsState()
     val accountState by services.account.state.collectAsState()
+    val homeSnapshot by services.homeStore.snapshot.collectAsState()
     val scope = rememberCoroutineScope()
+    val localContent = remember(homeSnapshot) { computeLocalHomeContent(homeSnapshot) }
 
     var homePage by remember { mutableStateOf<HomePage?>(null) }
     var remoteQuickPicks by remember { mutableStateOf<HomePage.Section?>(null) }
@@ -174,7 +178,15 @@ fun DesktopHomeSurface(
     val heroSongs = remember(remoteQuickPicks) {
         remoteQuickPicks?.items.orEmpty().filterIsInstance<SongItem>().distinctBy { it.id }
     }
-    val hasContent = sections.isNotEmpty() || heroSongs.isNotEmpty() || playlists.isNotEmpty()
+    val hasContent =
+        sections.isNotEmpty() ||
+            heroSongs.isNotEmpty() ||
+            playlists.isNotEmpty() ||
+            localContent.quickPicks.isNotEmpty() ||
+            localContent.keepListeningSongs.isNotEmpty() ||
+            localContent.keepListeningAlbums.isNotEmpty() ||
+            localContent.keepListeningArtists.isNotEmpty() ||
+            localContent.forgottenFavorites.isNotEmpty()
     val isPlaying = playbackState.isPlaying
     val currentItemId = playbackState.currentItem?.metadata?.id
     val currentAlbumId = playbackState.currentItem?.metadata?.album?.id
@@ -234,7 +246,26 @@ fun DesktopHomeSurface(
                     }
                 }
 
-                if (quickPicksSection != null && heroSongs.isNotEmpty()) {
+                if (localContent.quickPicks.isNotEmpty()) {
+                    item(key = "home_local_quick_picks_header") {
+                        DesktopSectionHeader(title = "Quick picks")
+                    }
+                    item(key = "home_local_quick_picks") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(localContent.quickPicks, key = { it.id }) { song ->
+                                DesktopQuickPickHeroCard(
+                                    song = song,
+                                    isActive = song.id == currentItemId,
+                                    isPlaying = isPlaying,
+                                    onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                )
+                            }
+                        }
+                    }
+                } else if (quickPicksSection != null && heroSongs.isNotEmpty()) {
                     item(key = "home_quick_picks_header") {
                         DesktopSectionHeader(title = quickPicksSection.title)
                     }
@@ -249,6 +280,53 @@ fun DesktopHomeSurface(
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
                                     onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (
+                    localContent.keepListeningSongs.isNotEmpty() ||
+                        localContent.keepListeningAlbums.isNotEmpty() ||
+                        localContent.keepListeningArtists.isNotEmpty()
+                ) {
+                    item(key = "home_keep_listening_header") {
+                        DesktopSectionHeader(title = "Keep listening")
+                    }
+                    item(key = "home_keep_listening") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(localContent.keepListeningSongs, key = { "song:${it.id}" }) { song ->
+                                DesktopMediaGridCard(
+                                    item = song,
+                                    isActive = song.id == currentItemId,
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.width(160.dp),
+                                    onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                    onPlayNext = { onPlayNext(song) },
+                                    onAddToQueue = { onAddToQueue(song) },
+                                    onDownload = { onDownload(song) },
+                                )
+                            }
+                            items(localContent.keepListeningAlbums, key = { "album:${it.id}" }) { album ->
+                                DesktopMediaGridCard(
+                                    item = album,
+                                    isActive = album.browseId == currentAlbumId,
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.width(160.dp),
+                                    onClick = { onOpenItem(album) },
+                                )
+                            }
+                            items(localContent.keepListeningArtists, key = { "artist:${it.id}" }) { artist ->
+                                DesktopMediaGridCard(
+                                    item = artist,
+                                    isActive = false,
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.width(160.dp),
+                                    onClick = { onOpenItem(artist) },
                                 )
                             }
                         }
@@ -272,6 +350,33 @@ fun DesktopHomeSurface(
                                         onClick = { onOpenItem(playlist) },
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+
+                if (localContent.forgottenFavorites.isNotEmpty()) {
+                    item(key = "home_forgotten_favorites_header") {
+                        DesktopSectionHeader(title = "Forgotten favorites")
+                    }
+                    item(key = "home_forgotten_favorites") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(localContent.forgottenFavorites, key = { it.id }) { song ->
+                                DesktopMediaGridCard(
+                                    item = song,
+                                    isActive = song.id == currentItemId,
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.width(160.dp),
+                                    onClick = {
+                                        onPlayQueue(localContent.forgottenFavorites, localContent.forgottenFavorites.indexOf(song), "Forgotten favorites")
+                                    },
+                                    onPlayNext = { onPlayNext(song) },
+                                    onAddToQueue = { onAddToQueue(song) },
+                                    onDownload = { onDownload(song) },
+                                )
                             }
                         }
                     }

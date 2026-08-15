@@ -213,8 +213,8 @@ class ArchiveTuneJvmClient(
             )
         }
 
-    /** Returns the signed-in user's YouTube Music playlists. */
-    suspend fun libraryPlaylists(): Result<LibraryPage> = run {
+    /** Returns one account-scoped YouTube Music library page for the supplied browse id. */
+    suspend fun library(browseId: String): Result<LibraryPage> = run {
         prepareProvidedSession()
         val initial = YouTube.authState
         // The account-list response can contain both a generic main-app DataSync value and one
@@ -234,7 +234,7 @@ class ArchiveTuneJvmClient(
         for (dataSyncId in candidates.ifEmpty { listOf("") }) {
             YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
             val result =
-                YouTube.library("FEmusic_liked_playlists") { shape ->
+                YouTube.library(browseId) { shape ->
                     streamDiagnostics.record(
                         StreamResolutionDiagnostic.LibraryResponse(
                             singleTabs = shape.singleTabs,
@@ -262,6 +262,21 @@ class ArchiveTuneJvmClient(
             Result.failure(lastFailure ?: IllegalStateException("YouTube Music library is unavailable"))
         }
     }
+
+    /** Returns the signed-in user's YouTube Music playlists. */
+    suspend fun libraryPlaylists(): Result<LibraryPage> = library("FEmusic_liked_playlists")
+
+    /** Liked albums, mirroring Android's syncLikedAlbums source. */
+    suspend fun libraryAlbums(): Result<LibraryPage> = library("FEmusic_liked_albums")
+
+    /** Subscribed artists, mirroring Android's syncArtistsSubscriptions source. */
+    suspend fun libraryArtists(): Result<LibraryPage> = library("FEmusic_library_corpus_artists")
+
+    /** Library songs, mirroring Android's syncLibrarySongs source. */
+    suspend fun librarySongs(): Result<LibraryPage> = library("FEmusic_liked_videos")
+
+    /** Liked songs, mirroring Android's syncLikedSongs source (the private LM playlist). */
+    suspend fun likedSongs(): Result<PlaylistPage> = playlist("LM")
 
     /** Resolve an actual YouTube audio stream suitable for a desktop media engine. */
     suspend fun resolveAudioStream(

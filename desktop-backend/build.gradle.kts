@@ -19,6 +19,7 @@ dependencies {
     api(project(":lyrics:youlyplus"))
     api(project(":lyrics:spicylyrics"))
     implementation(libs.coroutines.core)
+    implementation(libs.json)
     testImplementation(libs.junit)
 }
 

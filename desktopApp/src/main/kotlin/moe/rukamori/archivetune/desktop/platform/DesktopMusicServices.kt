@@ -14,7 +14,16 @@ import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPresenter
 import moe.rukamori.archivetune.desktop.library.DesktopLibrary
 import moe.rukamori.archivetune.desktop.library.DesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktop.library.PropertiesDesktopLibraryFolderStore
+import moe.rukamori.archivetune.desktopauth.DesktopAccountState
+import moe.rukamori.archivetune.innertube.models.Album
+import moe.rukamori.archivetune.innertube.models.AlbumItem
+import moe.rukamori.archivetune.innertube.models.Artist
+import moe.rukamori.archivetune.innertube.models.ArtistItem
+import moe.rukamori.archivetune.innertube.models.SongItem
+import moe.rukamori.archivetune.innertube.home.DesktopHomeStore
+import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
 import moe.rukamori.archivetune.playback.api.PlaybackItem
+import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackSource
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.RepeatMode
@@ -62,6 +71,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     val lyrics = DesktopLyricsPresenter(playback, lyricsClient, lyricsScope)
     private val legacyLibraryFile = runtime.paths.data.resolve("local-library.properties")
     val library = DesktopLibrary(legacyLibraryFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
+    /** Account-scoped personalization data for the Home surface (synced + recorded locally). */
+    val homeStore = DesktopHomeStore(runtime.paths.data.resolve("home-store.json"))
+    private var playHistoryCurrent: Pair<SongItem, Long>? = null
     // This is intentionally hardware-key only. Windows SMTC/flyout publishing is not implemented.
     private val windowsMediaControls = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
         WindowsMediaControls()
@@ -78,7 +90,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.applicationScope.launch {
             account.refreshRestoredSession()
             restoreQueueIfPresent()
+            syncHomeLibrary()
         }
+        startPlayHistoryRecorder()
+        startHomeSyncObserver()
         val restored = settings.snapshot()
         runtime.applicationScope.launch {
             playback.setVolume(restored.volume)
@@ -152,6 +167,53 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         completedDownloadLookup = lookup
     }
 
+    /** Syncs liked songs, library songs, liked albums and subscribed artists into the home store. */
+    suspend fun syncHomeLibrary() {
+        if (account.state.value !is DesktopAccountState.SignedIn) {
+            homeStore.clearAccountData()
+            return
+        }
+        backend.likedSongs().onSuccess { homeStore.replaceLikedSongs(it.songs.distinctBy(SongItem::id)) }
+        backend.librarySongs().onSuccess { homeStore.replaceLibrarySongs(it.items.filterIsInstance<SongItem>().distinctBy(SongItem::id)) }
+        backend.libraryAlbums().onSuccess { homeStore.replaceLikedAlbums(it.items.filterIsInstance<AlbumItem>().distinctBy(AlbumItem::id)) }
+        backend.libraryArtists().onSuccess { homeStore.replaceSubscribedArtists(it.items.filterIsInstance<ArtistItem>().distinctBy(ArtistItem::id)) }
+    }
+
+    private fun startHomeSyncObserver() {
+        runtime.applicationScope.launch {
+            account.state.collect { state ->
+                if (state is DesktopAccountState.SignedIn) {
+                    syncHomeLibrary()
+                } else {
+                    homeStore.clearAccountData()
+                }
+            }
+        }
+    }
+
+    private fun startPlayHistoryRecorder() {
+        runtime.applicationScope.launch {
+            playback.events.collect { event ->
+                if (event !is PlaybackEvent.MediaTransition) return@collect
+                val now = System.currentTimeMillis()
+                flushPlayHistoryCurrent(now)
+                playHistoryCurrent =
+                    event.current
+                        ?.let(::songFromPlaybackItem)
+                        ?.takeIf { it.id.isNotBlank() }
+                        ?.let { it to now }
+            }
+        }
+    }
+
+    private fun flushPlayHistoryCurrent(now: Long) {
+        val current = playHistoryCurrent ?: return
+        playHistoryCurrent = null
+        val playTimeMs = (now - current.second).coerceIn(0L, MAX_PLAY_HISTORY_EVENT_MS)
+        if (playTimeMs < MIN_PLAY_HISTORY_EVENT_MS) return
+        homeStore.recordPlay(DesktopPlayEvent(current.first, current.second, playTimeMs))
+    }
+
     private suspend fun resolve(item: PlaybackItem): Result<ResolvedPlaybackSource> = when (val source = item.source) {
         is PlaybackSource.Deferred -> completedDownloadLookup?.invoke(source.key)?.let { path ->
             Result.success(ResolvedPlaybackSource(path.toUri().toASCIIString()))
@@ -213,6 +275,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     override fun close() {
         val state = playback.state.value
+        flushPlayHistoryCurrent(System.currentTimeMillis())
         queueStore.save(state)
         settings.update {
             it.copy(
@@ -239,10 +302,23 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         return JvmLyricsClient(configured.ifEmpty { defaults })
     }
 
+    private fun songFromPlaybackItem(item: PlaybackItem): SongItem =
+        SongItem(
+            id = item.metadata.id,
+            title = item.metadata.title,
+            artists = item.metadata.artists.map { Artist(id = it.id, name = it.name) },
+            album = item.metadata.album?.let { Album(id = it.id.orEmpty(), name = it.title) },
+            duration = item.metadata.durationHintMs?.div(1_000L)?.toInt(),
+            thumbnail = item.metadata.artworkUri.orEmpty(),
+            explicit = item.metadata.explicit,
+        )
+
     private companion object {
         const val MAX_RESOLVED_SOURCE_CACHE_ENTRIES = 128
         const val STREAM_CACHE_EXPIRY_LEAD_MILLIS = 60_000L
         const val POSITION_BUCKET_MS = 5_000L
+        const val MIN_PLAY_HISTORY_EVENT_MS = 5_000L
+        const val MAX_PLAY_HISTORY_EVENT_MS = 1_800_000L
     }
 }
 
