@@ -1,0 +1,243 @@
+/*
+ * Vibrant lyrics background — a faithful port of SpicyLyrics' dynamic backdrop.
+ *
+ * SpicyLyrics uses Kawarp (WebGL): the album art is Kawase-blurred down to a 128x128
+ * colour field, then domain-warped with simplex noise and pushed through
+ * `saturate(2.5) brightness(0.65)`. We replicate that exact pipeline with Skia:
+ *
+ *   1. decode artwork, draw into a 128x128 texture (Kawase blur → colour field)
+ *   2. run the SAME domain-warp shader (Ashima-arts simplex noise) via
+ *      org.jetbrains.skia.RuntimeEffect
+ *   3. apply saturation 3.75 (1.5 shader x 2.5 CSS) + brightness 0.65 + vignette
+ *
+ * The result is a saturated, multi-coloured, slowly-flowing colour field — not a
+ * static blurred box.
+ */
+package moe.rukamori.archivetune.desktop.lyrics.anim
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.asComposeShader
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.Canvas
+import org.jetbrains.skia.FilterTileMode
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageFilter
+import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.RuntimeEffect
+import org.jetbrains.skia.RuntimeShaderBuilder
+import org.jetbrains.skia.SamplingMode
+import org.jetbrains.skia.Shader
+import java.net.URI
+
+/** Same size Kawarp blurs to. */
+private const val BLUR_SIZE = 128
+
+/** Gaussian sigma that (with the multi-stage downscale) matches Kawarp's 8-pass Kawase blur. */
+private const val BLUR_SIGMA = 10f
+
+/** The domain-warp SkSL source (exposed for the compile smoke test). */
+internal fun kawarpShaderSource(): String = """
+uniform shader content;
+uniform float time;
+uniform float2 resolution;
+uniform float saturation;
+
+float mod289(float x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+float2 mod289(float2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+float3 mod289(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+float3 permute(float3 x) { return mod289(((x * 34.0) + 1.0) * x); }
+
+float snoise(float2 v) {
+    const float4 C = float4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+    float2 i = floor(v + float2(dot(v, C.yy)));
+    float2 x0 = v - i + float2(dot(i, C.xx));
+    float2 i1 = (x0.x > x0.y) ? float2(1.0, 0.0) : float2(0.0, 1.0);
+    float4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    float3 p = permute(permute(float3(i.y) + float3(0.0, i1.y, 1.0)) + float3(i.x) + float3(0.0, i1.x, 1.0));
+    float3 m = max(float3(0.5) - float3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), float3(0.0));
+    m = m * m; m = m * m;
+    float3 x = 2.0 * fract(p * C.www) - float3(1.0);
+    float3 h = abs(x) - float3(0.5);
+    float3 ox = floor(x + float3(0.5));
+    float3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+    float3 g;
+    g.x = a0.x * x0.x + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+}
+
+float4 main(float2 coord) {
+    float2 uv = coord / resolution;
+    float t = time * 0.05;
+
+    float2 center = uv - float2(0.5);
+    float centerWeight = 1.0 - smoothstep(0.0, 0.7, length(center));
+
+    // Large-scale movement (slow, big blobs)
+    float n1 = snoise(uv * 0.35 + float2(t, t * 0.7));
+    float n2 = snoise(uv * 0.35 + float2(-t * 0.8, t * 0.5) + float2(50.0, 50.0));
+    // Medium-scale detail (organic movement)
+    float n3 = snoise(uv * 0.9 + float2(t * 1.2, -t) + float2(100.0, 0.0));
+    float n4 = snoise(uv * 0.9 + float2(-t, t * 1.1) + float2(0.0, 100.0));
+
+    float2 warp = float2(n1 * 0.65 + n3 * 0.35, n2 * 0.65 + n4 * 0.35) * centerWeight;
+    float2 warpedUV = clamp(uv + warp, float2(0.0), float2(1.0));
+
+    float4 color = content.eval(warpedUV * float2(${BLUR_SIZE}.0));
+
+    // Vignette (matches Kawarp output shader)
+    float vignette = 1.0 - dot(center, center) * 0.3;
+    color.rgb *= vignette;
+
+    // Saturation then brightness (matches shader saturation x CSS saturate/brightness)
+    float gray = dot(color.rgb, float3(0.299, 0.587, 0.114));
+    color.rgb = mix(float3(gray), color.rgb, saturation);
+    color.rgb *= 0.65;
+
+    return color;
+}
+""".trimIndent()
+
+/** Convert a cover URI into a loadable http(s) URL, or null if it can't be fetched. */
+private fun resolveCoverUrl(artworkUri: String?): String? {
+    if (artworkUri.isNullOrBlank()) return null
+    return when {
+        artworkUri.startsWith("http://") || artworkUri.startsWith("https://") -> artworkUri
+        artworkUri.startsWith("spotify:image:") -> "https://i.scdn.co/image/" + artworkUri.removePrefix("spotify:image:")
+        else -> null
+    }
+}
+
+/** Decode artwork and produce the blurred 128x128 colour field Skia Image (Kawarp blur equivalent). */
+private fun makeColourField(uri: String): Image? {
+    return runCatching {
+        val bytes = URI(uri).toURL().readBytes()
+        var image = Image.makeFromEncoded(bytes)
+        val srcW = image.width
+        val srcH = image.height
+        if (srcW <= 0 || srcH <= 0) return null
+
+        // Repeatedly halve for proper area averaging until close to the target size.
+        while (image.width > BLUR_SIZE * 2 || image.height > BLUR_SIZE * 2) {
+            val w = maxOf(1, image.width / 2)
+            val h = maxOf(1, image.height / 2)
+            val bmp = Bitmap().apply { allocPixels(ImageInfo.makeN32Premul(w, h)) }
+            Canvas(bmp).drawImageRect(
+                image,
+                Rect.makeXYWH(0f, 0f, image.width.toFloat(), image.height.toFloat()),
+                Rect.makeXYWH(0f, 0f, w.toFloat(), h.toFloat()),
+                SamplingMode.LINEAR, null, false,
+            )
+            image = Image.makeFromBitmap(bmp)
+        }
+
+        // Final squish to a square colour field with a heavy Gaussian blur so the
+        // album art becomes an unrecognisable, smooth colour field.
+        val target = Bitmap().apply { allocPixels(ImageInfo.makeN32Premul(BLUR_SIZE, BLUR_SIZE)) }
+        val paint = Paint().apply {
+            imageFilter = ImageFilter.makeBlur(BLUR_SIGMA, BLUR_SIGMA, FilterTileMode.CLAMP, null, null)
+        }
+        Canvas(target).drawImageRect(
+            image,
+            Rect.makeXYWH(0f, 0f, image.width.toFloat(), image.height.toFloat()),
+            Rect.makeXYWH(0f, 0f, BLUR_SIZE.toFloat(), BLUR_SIZE.toFloat()),
+            SamplingMode.LINEAR, paint, false,
+        )
+        Image.makeFromBitmap(target)
+    }.getOrNull()
+}
+
+@Composable
+fun VibrantLyricsBackground(
+    artworkUri: String?,
+    modifier: Modifier = Modifier,
+) {
+    var effect by remember { mutableStateOf<RuntimeEffect?>(null) }
+    var childShader by remember { mutableStateOf<Shader?>(null) }
+    var time by remember { mutableFloatStateOf(0f) }
+
+    // Compile the shader once.
+    LaunchedEffect(Unit) {
+        effect = withContext(Dispatchers.IO) {
+            runCatching { RuntimeEffect.makeForShader(kawarpShaderSource()) }.getOrNull()
+        }
+    }
+
+    // Load artwork when the URI changes and build the child colour-field shader.
+    LaunchedEffect(artworkUri) {
+        val url = resolveCoverUrl(artworkUri)
+        if (url == null) {
+            childShader = null
+        } else {
+            val img = withContext(Dispatchers.IO) { makeColourField(url) }
+            childShader = img?.makeShader(
+                FilterTileMode.CLAMP,
+                FilterTileMode.CLAMP,
+                SamplingMode.LINEAR,
+                null,
+            )
+        }
+    }
+
+    // Advance the warp clock.
+    LaunchedEffect(Unit) {
+        var last = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (last != 0L) {
+                    time += ((now - last) / 1e9f).toFloat()
+                }
+                last = now
+            }
+        }
+    }
+
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0712))
+            .drawBehind {
+                val e = effect
+                val child = childShader
+                if (e != null && child != null && size.width > 0 && size.height > 0) {
+                    val builder = RuntimeShaderBuilder(e)
+                    builder.uniform("time", time)
+                    builder.uniform("resolution", size.width.toFloat(), size.height.toFloat())
+                    builder.uniform("saturation", 3.75f)
+                    builder.child("content", child)
+                    val skiaShader = builder.makeShader(null)
+                    val composeShader = skiaShader.asComposeShader()
+                    drawRect(brush = ShaderBrush(composeShader))
+                } else {
+                    // Fallback gradient when there is no artwork yet.
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF7B1FA2), Color(0xFF2A0845), Color(0xFF0A0712)),
+                        ),
+                    )
+                }
+            },
+    )
+}

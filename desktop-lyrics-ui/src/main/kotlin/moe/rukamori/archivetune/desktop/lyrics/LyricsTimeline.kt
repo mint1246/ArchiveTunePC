@@ -12,6 +12,14 @@ data class TimedLyricLine(
     val endTimeMs: Long? = null,
     val translation: String? = null,
     val romanization: String? = null,
+    val words: List<TimedWord> = emptyList(),
+)
+
+/** One word within a synced lyric line, for word-by-word highlighting. */
+data class TimedWord(
+    val text: String,
+    val startTimeMs: Long,
+    val endTimeMs: Long,
 )
 
 data class LyricsTimeline(
@@ -60,6 +68,13 @@ object LyricsTimelineParser {
                 endTimeMs = line.endTime.toMilliseconds(),
                 translation = line.providerTranslationText,
                 romanization = line.providerRomanizedText,
+                words = line.words.map { word ->
+                    TimedWord(
+                        text = word.text,
+                        startTimeMs = word.startTime.toMilliseconds(),
+                        endTimeMs = word.endTime.toMilliseconds(),
+                    )
+                },
             )
         },
     )

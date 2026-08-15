@@ -20,6 +20,7 @@ import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
 import moe.rukamori.archivetune.lyrics.LyricsRequest
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackItem
+import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 
 sealed interface DesktopLyricsState {
     data object Idle : DesktopLyricsState
@@ -59,6 +60,11 @@ class DesktopLyricsPresenter(
     val state: StateFlow<DesktopLyricsState> = _state.asStateFlow()
     private val _searchState = MutableStateFlow(DesktopLyricsSearchState())
     val searchState: StateFlow<DesktopLyricsSearchState> = _searchState.asStateFlow()
+    /** Exposed for the desktop surface to render artwork and playback-aware chrome. */
+    val playbackState: StateFlow<PlaybackSnapshot> = playback.state
+    private val _positionMs = MutableStateFlow(0L)
+    /** Hot position stream for the SpicyLyrics-style animator (per-frame consumer). */
+    val positionMsFlow: StateFlow<Long> = _positionMs.asStateFlow()
     private var searchJob: Job? = null
     private val loadGeneration = AtomicLong()
     private val itemJob: Job = scope.launch {
@@ -77,9 +83,11 @@ class DesktopLyricsPresenter(
     }
     private val positionJob: Job = scope.launch {
         playback.state.collectLatest { snapshot ->
+            val pos = snapshot.positionMs
+            _positionMs.value = pos
             val ready = _state.value as? DesktopLyricsState.Ready ?: return@collectLatest
             if (snapshot.currentItem?.metadata?.id == ready.itemId) {
-                _state.value = ready.copy(activeLineIndex = ready.timeline.activeLineIndex(snapshot.positionMs))
+                _state.value = ready.copy(activeLineIndex = ready.timeline.activeLineIndex(pos))
             }
         }
     }
@@ -163,8 +171,16 @@ class DesktopLyricsPresenter(
             supervisorScope {
                 lyricsClient.providers.mapIndexed { index, provider ->
                     launch {
-                        val result = runCatching { lyricsClient.searchLyrics(request, listOf(provider.id)).single() }
-                            .getOrElse { LyricsProviderSearchResult(provider.id, provider.name, LyricsProviderSearchStatus.FAILED) }
+                        val result = try {
+                            lyricsClient.searchLyrics(request, listOf(provider.id)).single()
+                        } catch (cancellation: CancellationException) {
+                            // A new track or a closed presenter cancels this whole search job.
+                            // Do not turn cancellation into a synthetic provider failure and keep
+                            // mutating the UI after the caller has moved on.
+                            throw cancellation
+                        } catch (_: Exception) {
+                            LyricsProviderSearchResult(provider.id, provider.name, LyricsProviderSearchStatus.FAILED)
+                        }
                         if (playback.state.value.currentItem?.metadata?.id == itemId) {
                             val current = _searchState.value
                             val updated = current.results.toMutableList().also { if (index in it.indices) it[index] = result }
@@ -190,6 +206,19 @@ class DesktopLyricsPresenter(
         val rendered = showDocument(item.metadata.id, document, playback.state.value.positionMs)
         if (rendered) synchronized(cache) { cache[item.metadata.id] = document }
         return rendered
+    }
+
+    /** Seeks the current track to a timed lyric line. Unsynchronised lines are intentionally inert. */
+    fun seekToLine(index: Int) {
+        val ready = _state.value as? DesktopLyricsState.Ready ?: return
+        val position = ready.timeline.lines.getOrNull(index)?.startTimeMs ?: return
+        scope.launch { playback.seekTo(position) }
+    }
+
+    /** Public helper used by the SpicyLyrics-style pane: seek to an arbitrary position in ms. */
+    fun seekToMs(positionMs: Long) {
+        if (positionMs < 0L) return
+        scope.launch { playback.seekTo(positionMs) }
     }
 
     override fun close() {

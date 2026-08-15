@@ -190,16 +190,33 @@ class DesktopLyricsPresenterTest {
         assertEquals(2, presenter.searchState.value.results.count { it.document != null })
         presenter.close()
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `clicking a timed line seeks playback`() = runTest {
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider { "[00:03]Timed" })))
+        val presenter = DesktopLyricsPresenter(playback, client, this)
+        playback.state.value = PlaybackSnapshot(
+            queue = listOf(PlaybackItem(PlaybackMetadata("id", "Song", artists = listOf(PlaybackArtist(name = "Artist"))))),
+            currentIndex = 0,
+        )
+        advanceUntilIdle()
+        presenter.seekToLine(0)
+        advanceUntilIdle()
+        assertEquals(3_000L, playback.lastSeekMs)
+        presenter.close()
+    }
 }
 
 private class FakePlaybackController : PlaybackController {
+    var lastSeekMs: Long? = null
     override val state = MutableStateFlow(PlaybackSnapshot())
     override val events = MutableSharedFlow<PlaybackEvent>()
     override suspend fun replaceQueue(items: List<PlaybackItem>, startIndex: Int, startPositionMs: Long, title: String?, playWhenReady: Boolean) = Unit
     override suspend fun play() = Unit
     override suspend fun pause() = Unit
     override suspend fun stop() = Unit
-    override suspend fun seekTo(positionMs: Long) = Unit
+    override suspend fun seekTo(positionMs: Long) { lastSeekMs = positionMs }
     override suspend fun seekToItem(index: Int, positionMs: Long) = Unit
     override suspend fun skipNext() = Unit
     override suspend fun skipPrevious(restartThresholdMs: Long) = Unit
