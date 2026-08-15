@@ -14,9 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
  * Complete platform playback boundary consumed by shared UI and platform integrations.
  * Implementations serialize commands and release all owned resources from [close].
  *
- * Queue index contracts follow the Android queue sheet:
- *  - [removeQueueItem], [seekToItem] and [moveQueueItemToNext] take a *logical* queue index.
- *  - [moveQueueItem] takes *visual* "up next" positions (the current item is position zero).
+ * Queue indices are all *logical* indexes into the queue (the order items were added), matching
+ * the album/playlist ordering. The UI renders [PlaybackSnapshot.queueEntries] in this same order.
  */
 interface PlaybackController : AutoCloseable {
     val state: StateFlow<PlaybackSnapshot>

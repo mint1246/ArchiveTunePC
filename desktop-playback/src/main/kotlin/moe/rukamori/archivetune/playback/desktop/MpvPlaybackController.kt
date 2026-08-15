@@ -175,6 +175,10 @@ class MpvPlaybackController(
 
     override suspend fun seekToItem(index: Int, positionMs: Long) {
         checkOpen()
+        if (index == queue.currentIndex) {
+            seekTo(positionMs.coerceAtLeast(0L))
+            return
+        }
         val request =
             commandMutex.withLock {
                 val previous = queue.current
@@ -315,7 +319,7 @@ class MpvPlaybackController(
     override suspend fun moveQueueItem(fromIndex: Int, toIndex: Int) {
         checkOpen()
         commandMutex.withLock {
-            queue.moveVisual(fromIndex, toIndex)
+            queue.move(fromIndex, toIndex)
             publishQueueLocked()
         }
     }
@@ -727,7 +731,7 @@ class MpvPlaybackController(
         _state.update {
             it.copy(
                 queue = items,
-                queueEntries = queue.visualEntries(),
+                queueEntries = queue.entries(),
                 queueTitle = title,
                 currentIndex = queue.currentIndex,
                 repeatMode = queue.repeatMode,

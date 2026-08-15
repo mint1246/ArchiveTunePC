@@ -127,7 +127,7 @@ private fun QueueHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    snapshot.queueTitle ?: "Up next",
+                    snapshot.queueTitle ?: "Queue",
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -213,6 +213,12 @@ private fun QueueList(
         order.addAll(entries)
     }
 
+    LaunchedEffect(snapshot.currentIndex) {
+        if (draggedId != null) return@LaunchedEffect
+        val currentRow = order.indexOfFirst { it.isCurrent }
+        if (currentRow >= 0) listState.scrollToItem(currentRow)
+    }
+
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 6.dp)) {
         itemsIndexed(order, key = { _, entry -> entry.id }) { index, entry ->
             QueueRow(
@@ -246,10 +252,10 @@ private fun QueueList(
                 onDragEnd = {
                     val dragged = draggedId
                     if (dragged != null) {
-                        val sourceVisual = latestEntries.indexOfFirst { it.id == dragged }
-                        val destinationVisual = order.indexOfFirst { it.id == dragged }
-                        if (sourceVisual != -1 && destinationVisual != -1 && sourceVisual != destinationVisual) {
-                            scope.launch { playback.moveQueueItem(sourceVisual, destinationVisual) }
+                        val source = latestEntries.indexOfFirst { it.id == dragged }
+                        val destination = order.indexOfFirst { it.id == dragged }
+                        if (source != -1 && destination != -1 && source != destination) {
+                            scope.launch { playback.moveQueueItem(source, destination) }
                         }
                     }
                     draggedId = null
@@ -308,7 +314,6 @@ private fun QueueRow(
     val hovered by interactionSource.collectIsHoveredAsState()
     val item = entry.item.metadata
     val isCurrent = entry.isCurrent
-    val isNextUp = snapshot.queueEntries.getOrNull(1)?.id == entry.id
     val rowBackground =
         if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
         else if (hovered) MaterialTheme.colorScheme.surfaceContainerHighest
@@ -366,7 +371,7 @@ private fun QueueRow(
                     text = { Text("Play now") },
                     onClick = { menuOpen = false; onRowClick() },
                 )
-                if (!isCurrent && !isNextUp) {
+                if (!isCurrent) {
                     DropdownMenuItem(
                         text = { Text("Play next") },
                         onClick = { menuOpen = false; onPlayNext() },

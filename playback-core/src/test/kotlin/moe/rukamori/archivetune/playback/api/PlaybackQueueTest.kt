@@ -118,15 +118,15 @@ class PlaybackQueueTest {
     }
 
     @Test
-    fun `visual entries put current first then upcoming then played`() {
+    fun `entries are returned in logical order with the current item flagged`() {
         val queue = PlaybackQueue(Random(11))
         queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
 
-        val visual = queue.visualEntries()
+        val rows = queue.entries()
 
-        assertEquals(listOf("c", "d", "e", "a", "b"), visual.map { it.item.metadata.id })
-        assertEquals(listOf(2, 3, 4, 0, 1), visual.map { it.logicalIndex })
-        assertEquals(true, visual.first().isCurrent)
+        assertEquals(listOf("a", "b", "c", "d", "e"), rows.map { it.item.metadata.id })
+        assertEquals(listOf(0, 1, 2, 3, 4), rows.map { it.logicalIndex })
+        assertEquals(listOf(false, false, true, false, false), rows.map { it.isCurrent })
     }
 
     @Test
@@ -148,25 +148,13 @@ class PlaybackQueueTest {
     }
 
     @Test
-    fun `moveVisual reorders logical order when not shuffled`() {
-        val queue = PlaybackQueue(Random(13))
-        queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
-
-        // Visual order is [c, d, e, a, b]; move visual index 1 (d) to visual index 3.
-        queue.moveVisual(fromVisual = 1, toVisual = 3)
-
-        assertEquals(listOf("c", "e", "a", "d", "b"), queue.items.map { it.metadata.id })
-        assertEquals("c", queue.current?.metadata?.id)
-    }
-
-    @Test
-    fun `moveVisual only reorders traversal when shuffled`() {
+    fun `moveInPlayOrder only reorders traversal`() {
         val queue = PlaybackQueue(Random(14))
         queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
         queue.setShuffleEnabled(true)
         val logicalBefore = queue.items.map { it.metadata.id }
 
-        queue.moveVisual(fromVisual = 1, toVisual = 2)
+        queue.moveInPlayOrder(fromVisual = 1, toVisual = 2)
 
         assertEquals(logicalBefore, queue.items.map { it.metadata.id })
         assertEquals("c", queue.current?.metadata?.id)
