@@ -1,8 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import java.io.DataOutputStream
-import java.io.FileOutputStream
-import javax.imageio.ImageIO
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -42,48 +39,10 @@ dependencies {
 
 val desktopIconPng = rootProject.file("app/src/main/res/mipmap-xxxhdpi/ic_launcher.png")
 val generatedWindowsIcon = layout.buildDirectory.file("generated/desktop/icon/ArchiveTune.ico")
-val generateWindowsIcon = tasks.register("generateWindowsIcon") {
+val generateWindowsIcon = tasks.register<GenerateWindowsIcoTask>("generateWindowsIcon") {
     description = "Wraps the ArchiveTune PNG launcher artwork in a Windows ICO container."
-    inputs.file(desktopIconPng)
-    outputs.file(generatedWindowsIcon)
-
-    doLast {
-        val image = ImageIO.read(desktopIconPng)
-            ?: error("Unable to decode ArchiveTune launcher icon: $desktopIconPng")
-        require(image.width in 1..256 && image.height in 1..256) {
-            "Windows launcher icon must be at most 256x256, but was ${image.width}x${image.height}"
-        }
-
-        val pngBytes = desktopIconPng.readBytes()
-        val output = generatedWindowsIcon.get().asFile
-        output.parentFile.mkdirs()
-        DataOutputStream(FileOutputStream(output)).use { stream ->
-            fun writeLittleEndianShort(value: Int) {
-                stream.writeByte(value and 0xFF)
-                stream.writeByte((value ushr 8) and 0xFF)
-            }
-
-            fun writeLittleEndianInt(value: Int) {
-                stream.writeByte(value and 0xFF)
-                stream.writeByte((value ushr 8) and 0xFF)
-                stream.writeByte((value ushr 16) and 0xFF)
-                stream.writeByte((value ushr 24) and 0xFF)
-            }
-
-            writeLittleEndianShort(0) // reserved
-            writeLittleEndianShort(1) // icon
-            writeLittleEndianShort(1) // one image
-            stream.writeByte(if (image.width == 256) 0 else image.width)
-            stream.writeByte(if (image.height == 256) 0 else image.height)
-            stream.writeByte(0) // palette
-            stream.writeByte(0) // reserved
-            writeLittleEndianShort(1) // color planes
-            writeLittleEndianShort(32) // bits per pixel
-            writeLittleEndianInt(pngBytes.size)
-            writeLittleEndianInt(22) // ICONDIR (6) + ICONDIRENTRY (16)
-            stream.write(pngBytes)
-        }
-    }
+    sourcePng.set(desktopIconPng)
+    outputIco.set(generatedWindowsIcon)
 }
 
 tasks.processResources {
@@ -140,25 +99,29 @@ compose.desktop {
     }
 }
 
-val verifyBundledMpvRuntime = tasks.register("verifyBundledMpvRuntime") {
+val jpackageResourceDir = layout.buildDirectory.dir("compose/tmp/resources")
+val customMsiTemplate = rootProject.layout.projectDirectory.file("packaging/windows/main.wxs")
+
+val prepareMsiWixOverride = tasks.register<Copy>("prepareMsiWixOverride") {
+    description = "Copies the custom WiX main.wxs (install-over-existing upgrade behaviour) into jpackage's resource dir."
+    from(customMsiTemplate)
+    into(jpackageResourceDir)
+}
+
+tasks.matching {
+    it.name == "packageMsi" || it.name == "packageExe" || it.name == "packageDistributionForCurrentOS"
+}.configureEach {
+    dependsOn(prepareMsiWixOverride)
+}
+
+val verifyBundledMpvRuntime = tasks.register<VerifyBundledExecutableTask>("verifyBundledMpvRuntime") {
     group = "verification"
     description = "Verifies that the Windows distribution contains a runnable bundled mpv runtime."
     dependsOn("createDistributable")
-
-    doLast {
-        val appDirectory = layout.buildDirectory.dir("compose/binaries/main/app").get().asFile
-        val runtime = fileTree(appDirectory) {
-            include("**/resources/native/windows-x64/mpv.exe")
-        }.files.singleOrNull()
-            ?: error("Bundled mpv.exe was not found below $appDirectory")
-        val process = ProcessBuilder(runtime.absolutePath, "--version")
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        check(process.waitFor() == 0 && output.contains("mpv")) {
-            "Bundled mpv runtime failed its --version smoke test: $output"
-        }
-    }
+    appDirectory.set(layout.buildDirectory.dir("compose/binaries/main/app"))
+    executablePathSuffix.set("/resources/native/windows-x64/mpv.exe")
+    arguments.set(listOf("--version"))
+    expectedOutput.set("mpv")
 }
 
 tasks.matching {
