@@ -23,9 +23,12 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -87,6 +91,10 @@ class DesktopDownloadManager(
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val permits = Semaphore(maxConcurrentDownloads.coerceAtLeast(1))
     private val jobs = ConcurrentHashMap<String, Job>()
+    /** Coroutine cancellation does not interrupt a blocking OkHttp read by itself. */
+    private val activeCalls = ConcurrentHashMap<String, Call>()
+    /** Serializes journal writes and read-modify-write state transitions. */
+    private val stateLock = Any()
     private val journal = downloadDirectory.resolve("downloads.properties")
     private val mutableDownloads = MutableStateFlow<List<DownloadSnapshot>>(emptyList())
     val downloads: StateFlow<List<DownloadSnapshot>> = mutableDownloads.asStateFlow()
@@ -99,45 +107,90 @@ class DesktopDownloadManager(
     fun enqueue(request: DownloadRequest): String {
         require(request.url.isNotBlank()) { "A resolved stream URL is required" }
         val id = UUID.randomUUID().toString()
-        val fileName = safeFileName(request.title, request.artist, request.extension, id)
-        update(
-            DownloadSnapshot(
-                id = id,
-                title = request.title,
-                artist = request.artist,
-                fileName = fileName,
-                status = DownloadStatus.QUEUED,
-                mediaId = request.mediaId,
-                albumTitle = request.albumTitle,
-                albumId = request.albumId,
-                artworkUrl = request.artworkUrl,
-                durationMs = request.durationMs,
-                explicit = request.explicit,
-            ),
-        )
-        jobs[id] = scope.launch { permits.withPermit { download(id, request, fileName) } }
+        synchronized(stateLock) {
+            val fileName = uniqueFileName(request.title, request.artist, request.extension, id)
+            // Reserve the job before publishing QUEUED. Otherwise a concurrent cancel() can
+            // observe the queued snapshot while the job is not in the map yet and incorrectly
+            // report that cancellation failed.
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                permits.withPermit { download(id, request, fileName) }
+            }
+            jobs[id] = job
+            update(
+                DownloadSnapshot(
+                    id = id,
+                    title = request.title,
+                    artist = request.artist,
+                    fileName = fileName,
+                    status = DownloadStatus.QUEUED,
+                    mediaId = request.mediaId,
+                    albumTitle = request.albumTitle,
+                    albumId = request.albumId,
+                    artworkUrl = request.artworkUrl,
+                    durationMs = request.durationMs,
+                    explicit = request.explicit,
+                ),
+            )
+            job.start()
+        }
         return id
     }
 
-    fun cancel(id: String): Boolean {
-        val cancelled = jobs.remove(id)?.cancel(CancellationException("Cancelled by user")) != null
-        if (cancelled) {
-            val previous = mutableDownloads.value.firstOrNull { it.id == id } ?: return true
-            update(previous.copy(status = DownloadStatus.CANCELLED, error = null))
-            if (partialCleanupPolicy == PartialCleanupPolicy.DELETE_ON_CANCEL) {
-                runCatching { Files.deleteIfExists(partPath(previous.fileName)) }
-            }
+    fun hasActiveWork(): Boolean =
+        jobs.isNotEmpty() || mutableDownloads.value.any {
+            it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.DOWNLOADING
         }
-        return cancelled
+
+    fun cancel(id: String): Boolean {
+        synchronized(stateLock) {
+            val previous = mutableDownloads.value.firstOrNull { it.id == id } ?: return false
+            // A completion publishes the final file and COMPLETED status atomically below. Do
+            // not let a late cancel() turn a genuinely finished download back into CANCELLED.
+            if (previous.status == DownloadStatus.COMPLETED) return false
+            activeCalls.remove(id)?.cancel()
+            val cancelled = jobs.remove(id)?.cancel(CancellationException("Cancelled by user")) != null
+            if (cancelled) {
+                update(previous.copy(status = DownloadStatus.CANCELLED, error = null))
+                if (partialCleanupPolicy == PartialCleanupPolicy.DELETE_ON_CANCEL) {
+                    runCatching { Files.deleteIfExists(partPath(previous.fileName)) }
+                }
+            }
+            return cancelled
+        }
     }
 
     fun removeFromHistory(id: String): Boolean {
-        if (jobs.containsKey(id)) return false
-        val next = mutableDownloads.value.filterNot { it.id == id }
-        if (next.size == mutableDownloads.value.size) return false
-        persist(next)
-        mutableDownloads.value = next
-        return true
+        synchronized(stateLock) {
+            if (jobs.containsKey(id)) return false
+            val current = mutableDownloads.value
+            val next = current.filterNot { it.id == id }
+            if (next.size == current.size) return false
+            persist(next)
+            mutableDownloads.value = next
+            return true
+        }
+    }
+
+    /**
+     * Returns a completed, readable file for a media id when one is available.
+     * The journal is intentionally only metadata, so stale entries are ignored.
+     */
+    fun completedFileFor(mediaId: String): Path? {
+        if (mediaId.isBlank()) return null
+        return mutableDownloads.value.asSequence()
+            .filter { it.mediaId == mediaId && it.status == DownloadStatus.COMPLETED }
+            .mapNotNull(::validatedCompletedPath)
+            .firstOrNull()
+    }
+
+    fun completedFileForDownload(id: String): Path? =
+        mutableDownloads.value.firstOrNull { it.id == id && it.status == DownloadStatus.COMPLETED }
+            ?.let(::validatedCompletedPath)
+
+    private fun validatedCompletedPath(snapshot: DownloadSnapshot): Path? {
+        val root = downloadDirectory.toAbsolutePath().normalize()
+        val candidate = root.resolve(snapshot.fileName).normalize()
+        return candidate.takeIf { it.startsWith(root) && Files.isRegularFile(it) && Files.isReadable(it) }
     }
 
     private suspend fun download(id: String, request: DownloadRequest, fileName: String) {
@@ -153,6 +206,9 @@ class DesktopDownloadManager(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: IOException) {
+                    // OkHttp reports Call.cancel() as IOException. If the owning coroutine was
+                    // cancelled, propagate cancellation instead of publishing a retry state.
+                    currentCoroutineContext().ensureActive()
                     if (attempt == retryCount) throw failure
                     update((snapshot(id) ?: initial).copy(status = DownloadStatus.QUEUED, error = "Retrying (${attempt + 1}/$retryCount)"))
                     delay(250L * (attempt + 1))
@@ -160,8 +216,15 @@ class DesktopDownloadManager(
             }
         } catch (cancelled: CancellationException) {
             if (partialCleanupPolicy == PartialCleanupPolicy.DELETE_ON_CANCEL) Files.deleteIfExists(part)
-            // cancel() has already published CANCELLED. Coroutine cancellation during close is identical.
-            update((snapshot(id) ?: initial).copy(status = DownloadStatus.CANCELLED, error = null))
+            // cancel() has already published CANCELLED. A shutdown cancellation can arrive while
+            // withContext is returning after the final file was committed, so never demote a
+            // genuinely completed entry.
+            synchronized(stateLock) {
+                val current = snapshot(id) ?: initial
+                if (current.status != DownloadStatus.COMPLETED) {
+                    update(current.copy(status = DownloadStatus.CANCELLED, error = null))
+                }
+            }
         } catch (failure: Exception) {
             update((snapshot(id) ?: initial).copy(status = DownloadStatus.FAILED, error = publicError(failure)))
         } finally {
@@ -169,62 +232,139 @@ class DesktopDownloadManager(
         }
     }
 
-    private fun streamOnce(id: String, request: DownloadRequest, part: Path, final: Path) {
+    private suspend fun streamOnce(id: String, request: DownloadRequest, part: Path, final: Path) {
+        val coroutineContext = currentCoroutineContext()
+        coroutineContext.ensureActive()
         val builder = Request.Builder().url(request.url)
         request.headers.forEach { (name, value) -> builder.header(name, value) }
-        client.newCall(builder.build()).execute().use { response ->
+        val call = client.newCall(builder.build())
+        synchronized(stateLock) {
+            coroutineContext.ensureActive()
+            // Cancellation may win just before the request starts. Avoid publishing a call after
+            // that transition without cancelling it immediately.
+            if (snapshot(id)?.status == DownloadStatus.CANCELLED) {
+                call.cancel()
+                throw CancellationException("Cancelled by user")
+            }
+            activeCalls[id] = call
+        }
+        try {
+            call.execute().use { response ->
             if (!response.isSuccessful) throw IOException("Server returned HTTP ${response.code}")
             val body = response.body
             val total = body.contentLength().takeIf { it >= 0 }
-            update((snapshot(id) ?: return).copy(status = DownloadStatus.DOWNLOADING, totalBytes = total, error = null))
+            currentCoroutineContext().ensureActive()
+            synchronized(stateLock) {
+                val current = snapshot(id) ?: return
+                if (current.status == DownloadStatus.CANCELLED) {
+                    throw CancellationException("Cancelled by user")
+                }
+                update(current.copy(status = DownloadStatus.DOWNLOADING, totalBytes = total, error = null))
+            }
             Files.newOutputStream(part).use { output ->
                 body.byteStream().use { input ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     var downloaded = 0L
                     while (true) {
+                        currentCoroutineContext().ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
+                        currentCoroutineContext().ensureActive()
                         output.write(buffer, 0, read)
                         downloaded += read
-                        update((snapshot(id) ?: return).copy(status = DownloadStatus.DOWNLOADING, bytesDownloaded = downloaded, totalBytes = total, error = null))
+                        synchronized(stateLock) {
+                            val current = snapshot(id) ?: return
+                            // cancel() publishes CANCELLED under this same lock. Never let a
+                            // late body read resurrect the transfer or make finalization win.
+                            if (current.status == DownloadStatus.CANCELLED) {
+                                throw CancellationException("Cancelled by user")
+                            }
+                            update(
+                                current.copy(
+                                    status = DownloadStatus.DOWNLOADING,
+                                    bytesDownloaded = downloaded,
+                                    totalBytes = total,
+                                    error = null,
+                                ),
+                                persistState = false,
+                            )
+                        }
                     }
                 }
             }
         }
-        moveAtomically(part, final)
-        update((snapshot(id) ?: return).copy(status = DownloadStatus.COMPLETED, bytesDownloaded = Files.size(final), error = null))
+        // Serialize final-file publication with cancel(). Whichever operation acquires the lock
+        // first wins; cancellation cannot subsequently hide a completed file.
+        currentCoroutineContext().ensureActive()
+        synchronized(stateLock) {
+            val current = snapshot(id) ?: return
+            if (current.status == DownloadStatus.CANCELLED) {
+                throw CancellationException("Cancelled by user")
+            }
+            moveAtomically(part, final)
+            update(current.copy(status = DownloadStatus.COMPLETED, bytesDownloaded = Files.size(final), error = null))
+            }
+        } finally {
+            activeCalls.remove(id, call)
+        }
     }
 
-    private fun update(snapshot: DownloadSnapshot) {
-        val next = mutableDownloads.value.filterNot { it.id == snapshot.id } + snapshot.copy(updatedAt = Instant.now())
-        persist(next)
-        mutableDownloads.value = next
+    private fun update(snapshot: DownloadSnapshot, persistState: Boolean = true) {
+        synchronized(stateLock) {
+            val next = mutableDownloads.value.filterNot { it.id == snapshot.id } + snapshot.copy(updatedAt = Instant.now())
+            if (persistState) persist(next)
+            mutableDownloads.value = next
+        }
     }
 
     private fun snapshot(id: String) = mutableDownloads.value.firstOrNull { it.id == id }
     private fun partPath(fileName: String) = downloadDirectory.resolve("$fileName.part")
 
-    private fun persist(items: List<DownloadSnapshot> = mutableDownloads.value) {
-        val properties = Properties()
-        items.forEachIndexed { index, item ->
-            val prefix = "download.$index"
-            properties["$prefix.id"] = item.id
-            properties["$prefix.title"] = item.title
-            properties["$prefix.artist"] = item.artist.orEmpty()
-            properties["$prefix.fileName"] = item.fileName
-            properties["$prefix.status"] = item.status.name
-            properties["$prefix.bytes"] = item.bytesDownloaded.toString()
-            properties["$prefix.total"] = item.totalBytes?.toString().orEmpty()
-            properties["$prefix.error"] = item.error.orEmpty()
-            properties["$prefix.updatedAt"] = item.updatedAt.toEpochMilli().toString()
-            properties["$prefix.mediaId"] = item.mediaId.orEmpty()
-            properties["$prefix.albumTitle"] = item.albumTitle.orEmpty()
-            properties["$prefix.albumId"] = item.albumId.orEmpty()
-            properties["$prefix.artworkUrl"] = item.artworkUrl.orEmpty()
-            properties["$prefix.durationMs"] = item.durationMs?.toString().orEmpty()
-            properties["$prefix.explicit"] = item.explicit.toString()
+    private fun uniqueFileName(title: String, artist: String?, extension: String, id: String): String {
+        val candidate = safeFileName(title, artist, extension, id)
+        synchronized(stateLock) {
+            val alreadyUsed = mutableDownloads.value.any { it.fileName.equals(candidate, ignoreCase = true) }
+            if (!alreadyUsed && !Files.exists(downloadDirectory.resolve(candidate))) return candidate
         }
-        Files.newOutputStream(journal).use { properties.store(it, "ArchiveTune desktop download state (no URLs or headers)") }
+        val dot = candidate.lastIndexOf('.')
+        val stem = if (dot > 0) candidate.substring(0, dot) else candidate
+        val suffix = if (dot > 0) candidate.substring(dot) else ""
+        return "$stem-${id.take(8)}$suffix"
+    }
+
+    private fun persist(items: List<DownloadSnapshot> = mutableDownloads.value) {
+        synchronized(stateLock) {
+            val properties = Properties()
+            items.forEachIndexed { index, item ->
+                val prefix = "download.$index"
+                properties["$prefix.id"] = item.id
+                properties["$prefix.title"] = item.title
+                properties["$prefix.artist"] = item.artist.orEmpty()
+                properties["$prefix.fileName"] = item.fileName
+                properties["$prefix.status"] = item.status.name
+                properties["$prefix.bytes"] = item.bytesDownloaded.toString()
+                properties["$prefix.total"] = item.totalBytes?.toString().orEmpty()
+                properties["$prefix.error"] = item.error.orEmpty()
+                properties["$prefix.updatedAt"] = item.updatedAt.toEpochMilli().toString()
+                properties["$prefix.mediaId"] = item.mediaId.orEmpty()
+                properties["$prefix.albumTitle"] = item.albumTitle.orEmpty()
+                properties["$prefix.albumId"] = item.albumId.orEmpty()
+                properties["$prefix.artworkUrl"] = item.artworkUrl.orEmpty()
+                properties["$prefix.durationMs"] = item.durationMs?.toString().orEmpty()
+                properties["$prefix.explicit"] = item.explicit.toString()
+            }
+            val temporary = Files.createTempFile(downloadDirectory, ".downloads.", ".tmp")
+            try {
+                Files.newOutputStream(temporary).use { properties.store(it, "ArchiveTune desktop download state (no URLs or headers)") }
+                try {
+                    Files.move(temporary, journal, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(temporary, journal, StandardCopyOption.REPLACE_EXISTING)
+                }
+            } finally {
+                Files.deleteIfExists(temporary)
+            }
+        }
     }
 
     private fun recoverJournal() {
@@ -245,7 +385,7 @@ class DesktopDownloadManager(
                 fileName = properties.getProperty("$prefix.fileName", "download-$id"),
                 status = status,
                 bytesDownloaded = properties.getProperty("$prefix.bytes", "0").toLongOrNull() ?: 0,
-                totalBytes = properties.getProperty("$prefix.total").toLongOrNull(),
+                totalBytes = properties.getProperty("$prefix.total").orEmpty().toLongOrNull(),
                 error = if (status == DownloadStatus.FAILED && status != prior) "Interrupted by application restart; resolve a new stream to retry" else properties.getProperty("$prefix.error").orEmpty().ifBlank { null },
                 updatedAt = Instant.ofEpochMilli(properties.getProperty("$prefix.updatedAt", "0").toLongOrNull() ?: 0),
                 mediaId = properties.getProperty("$prefix.mediaId").orEmpty().ifBlank { null },
@@ -260,13 +400,22 @@ class DesktopDownloadManager(
         mutableDownloads.value = recovered
     }
 
-    override fun close() { scope.cancel() }
+    override fun close() {
+        // Mark every child cancelled before clearing calls. A transfer that was about to register
+        // its call will then fail the context check under stateLock instead of escaping shutdown.
+        scope.cancel()
+        synchronized(stateLock) {
+            activeCalls.values.forEach(Call::cancel)
+            activeCalls.clear()
+        }
+    }
 
     private fun safeFileName(title: String, artist: String?, extension: String, id: String): String {
         val raw = listOfNotNull(artist?.trim()?.takeIf { it.isNotEmpty() }, title.trim().takeIf { it.isNotEmpty() }).joinToString(" - ")
         val base = raw.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").replace(Regex("\\s+"), " ").trim().trim('.').take(120).ifBlank { "download-$id" }
+        val safeBase = if (base.substringBefore('.').uppercase() in WINDOWS_RESERVED_NAMES) "_$base" else base
         val suffix = extension.lowercase().replace(Regex("[^a-z0-9]"), "").take(10).ifBlank { "bin" }
-        return "$base.$suffix"
+        return "$safeBase.$suffix"
     }
 
     private fun moveAtomically(source: Path, destination: Path) {
@@ -275,4 +424,14 @@ class DesktopDownloadManager(
     }
 
     private fun publicError(error: Throwable) = error.message?.replace(Regex("https?://\\S+"), "remote stream")?.take(180) ?: "Download failed"
+
+    private companion object {
+        val WINDOWS_RESERVED_NAMES = buildSet {
+            addAll(listOf("CON", "PRN", "AUX", "NUL"))
+            (1..9).forEach { index ->
+                add("COM$index")
+                add("LPT$index")
+            }
+        }
+    }
 }
