@@ -179,6 +179,9 @@ fun DesktopHomeSurface(
     val heroSongs = remember(remoteQuickPicks) {
         remoteQuickPicks?.items.orEmpty().filterIsInstance<SongItem>().distinctBy { it.id }
     }
+    val speedDial = homeSnapshot.speedDial
+    fun isPinned(item: YTItem) = services.homeStore.isSpeedDialPinned(item)
+    fun togglePin(item: YTItem) = services.homeStore.toggleSpeedDial(item)
     val hasContent =
         sections.isNotEmpty() ||
             heroSongs.isNotEmpty() ||
@@ -188,7 +191,8 @@ fun DesktopHomeSurface(
             localContent.keepListeningAlbums.isNotEmpty() ||
             localContent.keepListeningArtists.isNotEmpty() ||
             localContent.forgottenFavorites.isNotEmpty() ||
-            similarRecommendations.isNotEmpty()
+            similarRecommendations.isNotEmpty() ||
+            speedDial.isNotEmpty()
     val isPlaying = playbackState.isPlaying
     val currentItemId = playbackState.currentItem?.metadata?.id
     val currentAlbumId = playbackState.currentItem?.metadata?.album?.id
@@ -288,6 +292,40 @@ fun DesktopHomeSurface(
                     }
                 }
 
+                if (speedDial.isNotEmpty()) {
+                    item(key = "home_speed_dial_header") {
+                        DesktopSectionHeader(title = "Speed dial")
+                    }
+                    item(key = "home_speed_dial") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(speedDial, key = { "${it::class.simpleName}:${it.id}" }) { item ->
+                                val songs = speedDial.filterIsInstance<SongItem>().distinctBy { it.id }
+                                DesktopMediaGridCard(
+                                    item = item,
+                                    isActive = when (item) {
+                                        is SongItem -> item.id == currentItemId
+                                        is AlbumItem -> item.browseId == currentAlbumId
+                                        else -> false
+                                    },
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.width(160.dp),
+                                    onClick = {
+                                        when (item) {
+                                            is SongItem -> onPlayQueue(songs, songs.indexOf(item).coerceAtLeast(0), "Speed dial")
+                                            else -> onOpenItem(item)
+                                        }
+                                    },
+                                    onPin = { togglePin(item) },
+                                    isPinned = isPinned(item),
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (
                     localContent.keepListeningSongs.isNotEmpty() ||
                         localContent.keepListeningAlbums.isNotEmpty() ||
@@ -311,6 +349,8 @@ fun DesktopHomeSurface(
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
+                                    onPin = { togglePin(song) },
+                                    isPinned = isPinned(song),
                                 )
                             }
                             items(localContent.keepListeningAlbums, key = { "album:${it.id}" }) { album ->
@@ -320,6 +360,8 @@ fun DesktopHomeSurface(
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
                                     onClick = { onOpenItem(album) },
+                                    onPin = { togglePin(album) },
+                                    isPinned = isPinned(album),
                                 )
                             }
                             items(localContent.keepListeningArtists, key = { "artist:${it.id}" }) { artist ->
@@ -329,6 +371,8 @@ fun DesktopHomeSurface(
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
                                     onClick = { onOpenItem(artist) },
+                                    onPin = { togglePin(artist) },
+                                    isPinned = isPinned(artist),
                                 )
                             }
                         }
@@ -350,6 +394,8 @@ fun DesktopHomeSurface(
                                         isPlaying = isPlaying,
                                         modifier = Modifier.width(160.dp),
                                         onClick = { onOpenItem(playlist) },
+                                        onPin = { togglePin(playlist) },
+                                        isPinned = isPinned(playlist),
                                     )
                                 }
                             }
@@ -378,6 +424,8 @@ fun DesktopHomeSurface(
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
+                                    onPin = { togglePin(song) },
+                                    isPinned = isPinned(song),
                                 )
                             }
                         }
@@ -416,6 +464,8 @@ fun DesktopHomeSurface(
                                     onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                                     onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
                                     onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
+                                    onPin = { togglePin(item) },
+                                    isPinned = isPinned(item),
                                 )
                             }
                         }
@@ -433,6 +483,8 @@ fun DesktopHomeSurface(
                         onPlayNext = onPlayNext,
                         onAddToQueue = onAddToQueue,
                         onDownload = onDownload,
+                        onPin = ::togglePin,
+                        isPinned = ::isPinned,
                     )
                 }
 
@@ -620,6 +672,8 @@ private fun HomeSectionBlock(
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
     onDownload: (SongItem) -> Unit,
+    onPin: (YTItem) -> Unit,
+    isPinned: (YTItem) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     val sectionSongs = remember(section) { section.items.filterIsInstance<SongItem>().distinctBy { it.id } }
@@ -650,6 +704,8 @@ private fun HomeSectionBlock(
                     onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                     onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
                     onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
+                    onPin = { onPin(item) },
+                    isPinned = isPinned(item),
                 )
             }
         }

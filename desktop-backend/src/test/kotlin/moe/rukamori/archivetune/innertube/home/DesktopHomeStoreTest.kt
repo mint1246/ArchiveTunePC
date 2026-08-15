@@ -11,6 +11,7 @@ import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
 import moe.rukamori.archivetune.innertube.models.ArtistItem
+import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -82,5 +83,36 @@ class DesktopHomeStoreTest {
 
         assertTrue(content.quickPicks.isNotEmpty())
         assertEquals(listOf("s1"), content.forgottenFavorites.map { it.id })
+    }
+
+    @Test
+    fun `toggles and persists speed dial items`() {
+        val dir = Files.createTempDirectory("archivetune-home-store")
+        val store = DesktopHomeStore(dir.resolve("home-store.json"))
+        val song = SongItem(id = "s1", title = "Pinned Song", artists = emptyList(), thumbnail = "t")
+        val playlist =
+            PlaylistItem(
+                id = "p1",
+                title = "Pinned Playlist",
+                author = null,
+                songCountText = null,
+                thumbnail = "t",
+                playEndpoint = null,
+                shuffleEndpoint = null,
+                radioEndpoint = null,
+            )
+
+        store.toggleSpeedDial(song)
+        store.toggleSpeedDial(playlist)
+
+        assertTrue(store.isSpeedDialPinned(song))
+        assertTrue(store.isSpeedDialPinned(playlist))
+
+        val reloaded = DesktopHomeStore(dir.resolve("home-store.json"))
+        assertEquals(2, reloaded.snapshot.value.speedDial.size)
+
+        reloaded.toggleSpeedDial(song)
+        assertTrue(!reloaded.isSpeedDialPinned(song))
+        assertEquals(1, reloaded.snapshot.value.speedDial.size)
     }
 }

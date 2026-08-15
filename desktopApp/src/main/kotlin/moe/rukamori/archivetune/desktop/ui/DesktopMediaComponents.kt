@@ -141,9 +141,11 @@ fun DesktopMediaGridCard(
     onPlayNext: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
+    onPin: (() -> Unit)? = null,
+    isPinned: Boolean = false,
 ) {
     val thumbnailShape = if (item is ArtistItem) CircleShape else RoundedCornerShape(8.dp)
-    val hasSongMenu = item is SongItem && (onPlayNext != null || onAddToQueue != null || onDownload != null)
+    val hasMenu = onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null
     Column(modifier = modifier.clickable(onClick = onClick)) {
         Box {
             DesktopMediaArtwork(
@@ -155,11 +157,13 @@ fun DesktopMediaGridCard(
                         .aspectRatio(1f)
                         .clip(thumbnailShape),
             )
-            if (hasSongMenu) {
+            if (hasMenu) {
                 MediaOverflowMenu(
                     onPlayNext = onPlayNext,
                     onAddToQueue = onAddToQueue,
                     onDownload = onDownload,
+                    onPin = onPin,
+                    isPinned = isPinned,
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                 )
             }
@@ -204,6 +208,8 @@ fun DesktopMediaListRow(
     onPlayNext: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
+    onPin: (() -> Unit)? = null,
+    isPinned: Boolean = false,
 ) {
     Row(
         modifier = modifier.clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 8.dp),
@@ -248,11 +254,13 @@ fun DesktopMediaListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (onPlayNext != null || onAddToQueue != null || onDownload != null) {
+        if (onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null) {
             MediaOverflowMenu(
                 onPlayNext = onPlayNext,
                 onAddToQueue = onAddToQueue,
                 onDownload = onDownload,
+                onPin = onPin,
+                isPinned = isPinned,
             )
         }
     }
@@ -263,6 +271,8 @@ private fun MediaOverflowMenu(
     onPlayNext: (() -> Unit)?,
     onAddToQueue: (() -> Unit)?,
     onDownload: (() -> Unit)?,
+    onPin: (() -> Unit)?,
+    isPinned: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -287,6 +297,12 @@ private fun MediaOverflowMenu(
                 DropdownMenuItem(
                     text = { Text("Download") },
                     leadingIcon = { Icon(Icons.Rounded.Download, contentDescription = null) },
+                    onClick = { open = false; action() },
+                )
+            }
+            onPin?.let { action ->
+                DropdownMenuItem(
+                    text = { Text(if (isPinned) "Unpin from speed dial" else "Pin to speed dial") },
                     onClick = { open = false; action() },
                 )
             }

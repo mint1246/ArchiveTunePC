@@ -14,7 +14,9 @@ import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
 import moe.rukamori.archivetune.innertube.models.ArtistItem
+import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
+import moe.rukamori.archivetune.innertube.models.YTItem
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.file.AtomicMoveNotSupportedException
@@ -39,6 +41,7 @@ data class DesktopHomeSnapshot(
     val likedAlbums: List<AlbumItem> = emptyList(),
     val subscribedArtists: List<ArtistItem> = emptyList(),
     val playHistory: List<DesktopPlayEvent> = emptyList(),
+    val speedDial: List<YTItem> = emptyList(),
 )
 
 /** Atomic, JSON-backed persistence for desktop Home personalization data. */
@@ -61,6 +64,21 @@ class DesktopHomeStore(private val file: Path) {
                 .take(MAX_PLAY_EVENTS)
         current.copy(playHistory = merged)
     }
+
+    fun toggleSpeedDial(item: YTItem) = update { current ->
+        val pinned = current.speedDial.any { it.id == item.id && it::class == item::class }
+        current.copy(
+            speedDial =
+                if (pinned) {
+                    current.speedDial.filterNot { it.id == item.id && it::class == item::class }
+                } else {
+                    (current.speedDial + item).take(MAX_SPEED_DIAL)
+                },
+        )
+    }
+
+    fun isSpeedDialPinned(item: YTItem): Boolean =
+        _snapshot.value.speedDial.any { it.id == item.id && it::class == item::class }
 
     fun clearAccountData() = update {
         it.copy(
@@ -91,6 +109,7 @@ class DesktopHomeStore(private val file: Path) {
                 .put("librarySongs", JSONArray().apply { snapshot.librarySongs.forEach { put(songToJson(it)) } })
                 .put("likedAlbums", JSONArray().apply { snapshot.likedAlbums.forEach { put(albumToJson(it)) } })
                 .put("subscribedArtists", JSONArray().apply { snapshot.subscribedArtists.forEach { put(artistToJson(it)) } })
+                .put("speedDial", JSONArray().apply { snapshot.speedDial.forEach { put(itemToJson(it)) } })
                 .put(
                     "playHistory",
                     JSONArray().apply {
@@ -126,6 +145,7 @@ class DesktopHomeStore(private val file: Path) {
             librarySongs = songs("librarySongs"),
             likedAlbums = json.optJSONArray("likedAlbums").orEmptyObjects().mapNotNull(::albumFromJson),
             subscribedArtists = json.optJSONArray("subscribedArtists").orEmptyObjects().mapNotNull(::artistFromJson),
+            speedDial = json.optJSONArray("speedDial").orEmptyObjects().mapNotNull(::itemFromJson),
             playHistory =
                 json.optJSONArray("playHistory").orEmptyObjects().mapNotNull { event ->
                     val song = event.optJSONObject("song")?.let(::songFromJson) ?: return@mapNotNull null
@@ -140,6 +160,7 @@ class DesktopHomeStore(private val file: Path) {
 
     private companion object {
         const val MAX_PLAY_EVENTS = 2_000
+        const val MAX_SPEED_DIAL = 24
     }
 }
 
@@ -215,6 +236,55 @@ private fun artistFromJson(json: JSONObject): ArtistItem? {
         title = title,
         thumbnail = json.optString("thumbnail").takeIf(String::isNotBlank),
         channelId = json.optString("channelId").takeIf(String::isNotBlank),
+        shuffleEndpoint = null,
+        radioEndpoint = null,
+    )
+}
+
+private fun itemToJson(item: YTItem): JSONObject =
+    JSONObject()
+        .put("type", item::class.simpleName)
+        .put(
+            "value",
+            when (item) {
+                is SongItem -> songToJson(item)
+                is AlbumItem -> albumToJson(item)
+                is ArtistItem -> artistToJson(item)
+                is PlaylistItem -> playlistToJson(item)
+            },
+        )
+
+private fun itemFromJson(json: JSONObject): YTItem? =
+    json.optJSONObject("value")?.let { value ->
+        when (json.optString("type")) {
+            "SongItem" -> songFromJson(value)
+            "AlbumItem" -> albumFromJson(value)
+            "ArtistItem" -> artistFromJson(value)
+            "PlaylistItem" -> playlistFromJson(value)
+            else -> null
+        }
+    }
+
+private fun playlistToJson(playlist: PlaylistItem): JSONObject =
+    JSONObject()
+        .put("id", playlist.id)
+        .put("title", playlist.title)
+        .put("author", playlist.author?.let { JSONObject().put("id", it.id).put("name", it.name) } ?: JSONObject.NULL)
+        .put("songCountText", playlist.songCountText ?: JSONObject.NULL)
+        .put("thumbnail", playlist.thumbnail ?: JSONObject.NULL)
+
+private fun playlistFromJson(json: JSONObject): PlaylistItem? {
+    val id = json.optString("id").takeIf(String::isNotBlank) ?: return null
+    val title = json.optString("title").takeIf(String::isNotBlank) ?: return null
+    return PlaylistItem(
+        id = id,
+        title = title,
+        author = json.optJSONObject("author")?.takeUnless { it === JSONObject.NULL }?.let {
+            Artist(id = it.optString("id").takeIf(String::isNotBlank), name = it.optString("name"))
+        },
+        songCountText = json.optString("songCountText").takeIf(String::isNotBlank),
+        thumbnail = json.optString("thumbnail").takeIf(String::isNotBlank),
+        playEndpoint = null,
         shuffleEndpoint = null,
         radioEndpoint = null,
     )
