@@ -18,8 +18,6 @@
  */
 package moe.rukamori.archivetune.desktop.lyrics
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,12 +31,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +64,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.StateFlow
@@ -129,11 +130,9 @@ private fun scaleFor(distance: Float): Float = (1.05f - distance * 0.06f).coerce
 /** Subtle spatial blur, quantised to whole-line distance so it is not re-applied per frame. */
 private fun blurPxFor(dist: Int): Float = (1.15f * dist).coerceIn(0f, 3.5f)
 
-/**
- * Spring spec mirroring SpicyLyrics' letter/word springs (ScaleFrequency 0.88 Hz,
- * ScaleDamping 0.64): a slightly under-damped spring so glyphs overshoot and "bounce".
- */
-private val LETTER_SPRING = spring<Float>(dampingRatio = 0.64f, stiffness = 30f)
+/** SpicyLyrics' spring tuning for glyph scale (frequency Hz, damping ratio). */
+private const val SCALE_FREQ = 0.88
+private const val SCALE_DAMPING = 0.64
 
 /** One glyph of a timed word, addressed by its char offset into `CharLine.text`. */
 private data class Letter(
@@ -169,17 +168,17 @@ private fun sweepColorAt(wordRelX: Float, boundaryWordRel: Float, feather: Float
     else -> lerp(BrightColor, DimColor, (wordRelX - boundaryWordRel) / feather.coerceAtLeast(1f))
 }
 
-/** Letter "pop" as playback passes through a glyph: rises to ~1.175 then settles. */
-private fun bounceLetterScale(p: Float): Float {
-    val ramp = if (p < 0.7f) p / 0.7f else (1f - p) / 0.3f
-    return 1.0f + 0.175f * ramp.coerceIn(0f, 1f)
+/** Smooth C1-continuous bell (0 → 1 → 0) peaking at progress 0.7, easing the corners. */
+private fun bell(p: Float): Float {
+    val k = if (p < 0.7f) p / 0.7f else (1f - p) / 0.3f
+    return 0.5f * (1f - cos(PI * k.coerceIn(0f, 1f)).toFloat())
 }
 
+/** Letter "pop" as playback passes through a glyph: rises to ~1.175 then settles. */
+private fun bounceLetterScale(p: Float): Float = 1.0f + 0.175f * bell(p)
+
 /** Whole-word growth as playback passes through it: rises to ~1.05 then settles. */
-private fun bounceWordScale(p: Float): Float {
-    val ramp = if (p < 0.7f) p / 0.7f else (1f - p) / 0.3f
-    return 1.0f + 0.05f * ramp.coerceIn(0f, 1f)
-}
+private fun bounceWordScale(p: Float): Float = 1.0f + 0.05f * bell(p)
 
 /* ---------------------------------------------------------------------------------- */
 /*  Entry point                                                                        */
@@ -484,24 +483,50 @@ private fun BouncingWord(
     val boundaryWordRel = sweep.boundary - sweep.wordLeft
     val feather = sweep.feather
 
-    val activeIndex = letters.indexOfFirst { positionMs in it.startMs until it.endMs }
-    val activeProgress = if (activeIndex >= 0) {
-        progressOf(positionMs, letters[activeIndex].startMs, letters[activeIndex].endMs)
-    } else 0f
+    // SpicyLyrics steps each glyph's scale spring once per frame with real delta-time;
+    // do the same here so the swell is smooth rather than re-targeted by animateFloatAsState.
+    val latestPositionMs = rememberUpdatedState(positionMs)
+    val letterSprings = remember(line, word) {
+        letters.associate { it.charOffset to Spring(1.0, SCALE_FREQ, SCALE_DAMPING) }
+    }
+    val wordSpring = remember(line, word) { Spring(1.0, SCALE_FREQ, SCALE_DAMPING) }
+    val letterScales = remember(line, word) { mutableStateOf(letters.associate { it.charOffset to 1f }) }
+    val wordScale = remember(line, word) { mutableFloatStateOf(1f) }
 
-    val wordProgress = progressOf(positionMs, word.startMs, word.endMs)
-    val wordScale by animateFloatAsState(
-        targetValue = bounceWordScale(wordProgress),
-        animationSpec = LETTER_SPRING,
-    )
+    LaunchedEffect(line, word) {
+        var lastFrame = 0L
+        while (true) {
+            withFrameNanos { now ->
+                val dt = if (lastFrame == 0L) 0.0167 else ((now - lastFrame) / 1e9).coerceIn(0.0, 0.1)
+                lastFrame = now
+                val pos = latestPositionMs.value
 
-    letters.forEachIndexed { i, letter ->
+                val activeIndex = letters.indexOfFirst { pos in it.startMs until it.endMs }
+                val activeProgress = if (activeIndex >= 0) {
+                    progressOf(pos, letters[activeIndex].startMs, letters[activeIndex].endMs)
+                } else 0f
+
+                val wordProgress = progressOf(pos, word.startMs, word.endMs)
+                wordSpring.setGoal(bounceWordScale(wordProgress).toDouble())
+                wordScale.floatValue = wordSpring.step(dt).toFloat()
+
+                val baseScale = bounceLetterScale(activeProgress)
+                val updated = HashMap<Int, Float>(letters.size)
+                for ((i, letter) in letters.withIndex()) {
+                    val spring = letterSprings[letter.charOffset] ?: continue
+                    val distance = abs(i - activeIndex)
+                    val falloff = (1f / (1f + distance.toDouble().pow(2.8))).toFloat()
+                    spring.setGoal((1f + (baseScale - 1f) * falloff).toDouble())
+                    updated[letter.charOffset] = spring.step(dt).toFloat()
+                }
+                letterScales.value = updated
+            }
+        }
+    }
+
+    letters.forEachIndexed { _, letter ->
         key(letter.charOffset) {
-            val distance = abs(i - activeIndex)
-            val falloff = (1f / (1f + distance.toDouble().pow(2.8))).toFloat()
-            val baseScale = bounceLetterScale(activeProgress)
-            val targetScale = 1f + (baseScale - 1f) * falloff
-            val scale by animateFloatAsState(targetScale, LETTER_SPRING)
+            val scale = letterScales.value[letter.charOffset] ?: 1f
 
             val letterLeft = layout.getHorizontalPosition(letter.charOffset, false)
             val letterRight = layout.getHorizontalPosition(letter.charOffset + 1, false)
@@ -517,7 +542,7 @@ private fun BouncingWord(
                 modifier = Modifier
                     .offset { IntOffset((glowPaddingPx + letterLeft).roundToInt(), glowPaddingPx) }
                     .graphicsLayer {
-                        val s = wordScale * scale
+                        val s = wordScale.floatValue * scale
                         scaleX = s
                         scaleY = s
                         transformOrigin = TransformOrigin(0.5f, 1f)
