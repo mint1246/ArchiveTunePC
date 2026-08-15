@@ -201,6 +201,35 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 .take(2)
         val recommendations = mutableListOf<DesktopSimilarRecommendation>()
 
+        // Artist seeds, mirroring Android's artistRecommendations: expand the last two sections of
+        // each most-played artist's page into a "Similar to ..." shelf.
+        val playTimeByArtist = mutableMapOf<String, Pair<Artist, Long>>()
+        snapshot.playHistory.forEach { event ->
+            event.song.artists.forEach { artist ->
+                artist.id?.let { artistId ->
+                    val previous = playTimeByArtist[artistId]
+                    playTimeByArtist[artistId] = artist to ((previous?.second ?: 0L) + event.playTimeMs)
+                }
+            }
+        }
+        val mostPlayedArtists =
+            playTimeByArtist.values
+                .sortedByDescending { it.second }
+                .map { it.first }
+                .distinctBy { it.id }
+                .take(3)
+        for (artist in mostPlayedArtists) {
+            val artistId = artist.id ?: continue
+            val page = backend.artist(artistId).getOrNull() ?: continue
+            val items =
+                (page.sections.getOrNull(page.sections.size - 2)?.items.orEmpty() + page.sections.lastOrNull()?.items.orEmpty())
+                    .shuffled()
+                    .takeIf { it.isNotEmpty() }
+                    ?: continue
+            recommendations += DesktopSimilarRecommendation(title = page.artist, items = items)
+        }
+
+        // Song seeds: fetch related artists/albums/playlists through the related-items endpoint.
         for (song in mostPlayedSongs) {
             val relatedEndpoint = backend.next(song.id).getOrNull()?.relatedEndpoint ?: continue
             val page = backend.related(relatedEndpoint).getOrNull() ?: continue

@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.innertube.home.computeLocalHomeContent
@@ -322,6 +325,20 @@ fun DesktopHomeSurface(
                                     isPinned = isPinned(item),
                                 )
                             }
+                            val speedDialSongs = speedDial.filterIsInstance<SongItem>().distinctBy { it.id }
+                            if (speedDialSongs.isNotEmpty()) {
+                                item(key = "speed_dial_random") {
+                                    SpeedDialRandomTile(
+                                        onClick = {
+                                            onPlayQueue(
+                                                speedDialSongs,
+                                                Random.nextInt(speedDialSongs.size),
+                                                "Speed dial",
+                                            )
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -534,6 +551,27 @@ private fun HomeCategoryChips(
                         null
                     },
             )
+        }
+    }
+}
+
+@Composable
+private fun SpeedDialRandomTile(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+        modifier =
+            modifier
+                .width(160.dp)
+                .aspectRatio(1f)
+                .clickable(onClick = onClick),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Shuffle, contentDescription = "Play a random song", modifier = Modifier.size(40.dp))
         }
     }
 }
