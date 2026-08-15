@@ -16,6 +16,7 @@ import moe.rukamori.archivetune.innertube.models.YouTubeClient
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
+import moe.rukamori.archivetune.innertube.pages.ChartsPage
 import moe.rukamori.archivetune.innertube.pages.ExplorePage
 import moe.rukamori.archivetune.innertube.pages.HomePage
 import moe.rukamori.archivetune.innertube.pages.LibraryPage
@@ -109,6 +110,11 @@ class ArchiveTuneJvmClient(
     suspend fun explore(): Result<ExplorePage> = run {
         prepareProvidedSession()
         YouTube.explore()
+    }
+
+    suspend fun charts(continuation: String? = null): Result<ChartsPage> = run {
+        prepareProvidedSession()
+        YouTube.getChartsPage(continuation)
     }
 
     suspend fun newReleaseAlbums(): Result<List<AlbumItem>> = run {

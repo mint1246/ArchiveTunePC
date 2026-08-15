@@ -140,6 +140,24 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
             is PlaylistItem -> scope.launch { loading = true; failure = null; services.backend.playlist(item.id).onSuccess { detail = Detail.Playlist(it) }.onFailure { failure = it.message ?: "Playlist could not be loaded" }; loading = false }
         }
     }
+    fun openBrowseItem(item: YTItem) {
+        when (item) {
+            is AlbumItem -> scope.launch { loading = true; failure = null; services.backend.album(item.browseId).onSuccess { detail = Detail.Album(it) }.onFailure { failure = it.message ?: "Album could not be loaded" }; loading = false }
+            is ArtistItem -> scope.launch { loading = true; failure = null; services.backend.artist(item.id).onSuccess { detail = Detail.Artist(it) }.onFailure { failure = it.message ?: "Artist could not be loaded" }; loading = false }
+            is PlaylistItem -> scope.launch { loading = true; failure = null; services.backend.playlist(item.id).onSuccess { detail = Detail.Playlist(it) }.onFailure { failure = it.message ?: "Playlist could not be loaded" }; loading = false }
+            is SongItem -> Unit
+        }
+    }
+    fun playQueue(songs: List<SongItem>, startIndex: Int, title: String) {
+        if (songs.isEmpty()) return
+        scope.launch {
+            services.playback.replaceQueue(
+                songs.map(::toPlaybackItem),
+                startIndex.coerceIn(0, songs.lastIndex),
+                title = title,
+            )
+        }
+    }
     fun downloadSong(song: SongItem) {
         scope.launch {
             downloadServices.enqueue(song)
@@ -187,7 +205,25 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
                 onAddToQueue = ::enqueueLocal,
                 modifier,
             )
-            else -> FoundationDestinationContent(
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.HOME -> DesktopHomeSurface(
+                services,
+                onOpenItem = ::openBrowseItem,
+                onPlayQueue = ::playQueue,
+                onDownload = ::downloadSong,
+                onPlayNext = ::playNextSong,
+                onAddToQueue = ::enqueueSong,
+                modifier = modifier,
+            )
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.EXPLORE -> DesktopExploreSurface(
+                services,
+                onOpenItem = ::openBrowseItem,
+                onPlayQueue = ::playQueue,
+                onDownload = ::downloadSong,
+                onPlayNext = ::playNextSong,
+                onAddToQueue = ::enqueueSong,
+                modifier = modifier,
+            )
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.SETTINGS -> FoundationDestinationContent(
                 state,
                 paths,
                 logger,
