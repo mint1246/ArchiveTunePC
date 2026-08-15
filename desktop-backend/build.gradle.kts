@@ -17,6 +17,7 @@ dependencies {
     api(project(":lyrics:simpmusic"))
     api(project(":lyrics:unison"))
     api(project(":lyrics:youlyplus"))
+    api(project(":lyrics:spicylyrics"))
     implementation(libs.coroutines.core)
     testImplementation(libs.junit)
 }

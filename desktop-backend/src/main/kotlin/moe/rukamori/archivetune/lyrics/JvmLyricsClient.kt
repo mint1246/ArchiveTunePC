@@ -20,6 +20,7 @@ import moe.rukamori.archivetune.kugou.KuGou
 import moe.rukamori.archivetune.lrclib.LrcLib
 import moe.rukamori.archivetune.paxsenix.PaxsenixLyrics
 import moe.rukamori.archivetune.simpmusic.SimpMusicLyrics
+import moe.rukamori.archivetune.spicylyrics.SpicyLyrics
 import moe.rukamori.archivetune.unison.Unison
 import moe.rukamori.archivetune.youlyplus.YouLyPlus
 
@@ -87,6 +88,7 @@ data class LyricsProviderSearchResult(
     val providerName: String,
     val status: LyricsProviderSearchStatus,
     val document: LyricsDocument? = null,
+    val failureMessage: String? = null,
 )
 
 /**
@@ -215,6 +217,7 @@ object BuiltInLyricsProviders {
     const val PAXSENIX = "paxsenix"
     const val SIMPMUSIC = "simpmusic"
     const val UNISON = "unison"
+    const val SPICY_LYRICS = "spicylyrics"
     const val PAXSENIX_APPLE_MUSIC = "paxsenix-apple-music"
     const val PAXSENIX_NETEASE = "paxsenix-netease"
     const val PAXSENIX_SPOTIFY = "paxsenix-spotify"
@@ -256,6 +259,9 @@ object BuiltInLyricsProviders {
                 ).getOrElse { failure ->
                     if (failure.message == "Lyrics unavailable") "" else throw failure
                 }
+            },
+            named(SPICY_LYRICS, "SpicyLyrics") { request ->
+                SpicyLyrics.getLyrics(request.title, request.artist, request.album, request.durationSeconds).getOrThrow()
             },
             named(PAXSENIX_APPLE_MUSIC, "Paxsenix: Apple Music") { request ->
                 PaxsenixLyrics.getAppleMusicLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
