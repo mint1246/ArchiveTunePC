@@ -92,6 +92,7 @@ fun DesktopHomeSurface(
     val playbackState by services.playback.state.collectAsState()
     val accountState by services.account.state.collectAsState()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
+    val similarRecommendations by services.similarRecommendations.collectAsState()
     val scope = rememberCoroutineScope()
     val localContent = remember(homeSnapshot) { computeLocalHomeContent(homeSnapshot) }
 
@@ -186,7 +187,8 @@ fun DesktopHomeSurface(
             localContent.keepListeningSongs.isNotEmpty() ||
             localContent.keepListeningAlbums.isNotEmpty() ||
             localContent.keepListeningArtists.isNotEmpty() ||
-            localContent.forgottenFavorites.isNotEmpty()
+            localContent.forgottenFavorites.isNotEmpty() ||
+            similarRecommendations.isNotEmpty()
     val isPlaying = playbackState.isPlaying
     val currentItemId = playbackState.currentItem?.metadata?.id
     val currentAlbumId = playbackState.currentItem?.metadata?.album?.id
@@ -376,6 +378,44 @@ fun DesktopHomeSurface(
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                similarRecommendations.forEach { recommendation ->
+                    item(key = "home_similar_header_${recommendation.title.id}") {
+                        DesktopSectionHeader(
+                            title = recommendation.title.title,
+                            label = "Similar to",
+                        )
+                    }
+                    item(key = "home_similar_${recommendation.title.id}") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(recommendation.items, key = { "${it::class.simpleName}:${it.id}" }) { item ->
+                                val songs = recommendation.items.filterIsInstance<SongItem>().distinctBy { it.id }
+                                DesktopMediaGridCard(
+                                    item = item,
+                                    isActive = when (item) {
+                                        is SongItem -> item.id == currentItemId
+                                        is AlbumItem -> item.browseId == currentAlbumId
+                                        else -> false
+                                    },
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.width(160.dp),
+                                    onClick = {
+                                        when (item) {
+                                            is SongItem -> onPlayQueue(songs, songs.indexOf(item).coerceAtLeast(0), recommendation.title.title)
+                                            else -> onOpenItem(item)
+                                        }
+                                    },
+                                    onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
+                                    onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
+                                    onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
                                 )
                             }
                         }

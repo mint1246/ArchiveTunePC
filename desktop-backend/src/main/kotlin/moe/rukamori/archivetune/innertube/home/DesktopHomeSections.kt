@@ -10,6 +10,7 @@ package moe.rukamori.archivetune.innertube.home
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
+import moe.rukamori.archivetune.innertube.models.YTItem
 
 /** Local, account-derived content for the Home surface, mirroring Android's Room-backed sections. */
 data class DesktopHomeLocalContent(
@@ -18,6 +19,12 @@ data class DesktopHomeLocalContent(
     val keepListeningAlbums: List<AlbumItem> = emptyList(),
     val keepListeningArtists: List<ArtistItem> = emptyList(),
     val forgottenFavorites: List<SongItem> = emptyList(),
+)
+
+/** A "similar to X" shelf: a seed title plus related items fetched from YouTube. */
+data class DesktopSimilarRecommendation(
+    val title: YTItem,
+    val items: List<YTItem>,
 )
 
 fun computeLocalHomeContent(

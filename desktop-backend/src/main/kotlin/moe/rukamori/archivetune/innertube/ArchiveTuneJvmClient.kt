@@ -21,9 +21,13 @@ import moe.rukamori.archivetune.innertube.pages.ExplorePage
 import moe.rukamori.archivetune.innertube.pages.HistoryPage
 import moe.rukamori.archivetune.innertube.pages.HomePage
 import moe.rukamori.archivetune.innertube.pages.LibraryPage
+import moe.rukamori.archivetune.innertube.pages.NextResult
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
+import moe.rukamori.archivetune.innertube.pages.RelatedPage
 import moe.rukamori.archivetune.innertube.pages.SearchResult
 import moe.rukamori.archivetune.innertube.pages.SearchSummaryPage
+import moe.rukamori.archivetune.innertube.models.WatchEndpoint
+import moe.rukamori.archivetune.innertube.models.BrowseEndpoint
 import moe.rukamori.archivetune.innertube.utils.completed
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherConfig
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherRuntime
@@ -277,6 +281,18 @@ class ArchiveTuneJvmClient(
 
     /** Liked songs, mirroring Android's syncLikedSongs source (the private LM playlist). */
     suspend fun likedSongs(): Result<PlaylistPage> = playlist("LM")
+
+    /** Next/watch response used to discover the related-items endpoint. */
+    suspend fun next(videoId: String): Result<NextResult> = run {
+        prepareProvidedSession()
+        YouTube.next(WatchEndpoint(videoId = videoId))
+    }
+
+    /** Related artists/songs/albums/playlists for a seed. */
+    suspend fun related(endpoint: BrowseEndpoint): Result<RelatedPage> = run {
+        prepareProvidedSession()
+        YouTube.related(endpoint)
+    }
 
     /** Resolve an actual YouTube audio stream suitable for a desktop media engine. */
     suspend fun resolveAudioStream(

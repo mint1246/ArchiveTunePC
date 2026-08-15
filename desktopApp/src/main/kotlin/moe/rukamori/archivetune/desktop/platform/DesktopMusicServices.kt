@@ -22,6 +22,7 @@ import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.home.DesktopHomeStore
 import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
+import moe.rukamori.archivetune.innertube.home.DesktopSimilarRecommendation
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackSource
@@ -47,6 +48,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** The small desktop-only seam between ArchiveTune's backend and the native playback engine. */
 class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable {
@@ -73,6 +76,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     val library = DesktopLibrary(legacyLibraryFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
     /** Account-scoped personalization data for the Home surface (synced + recorded locally). */
     val homeStore = DesktopHomeStore(runtime.paths.data.resolve("home-store.json"))
+    private val _similarRecommendations = MutableStateFlow<List<DesktopSimilarRecommendation>>(emptyList())
+    val similarRecommendations = _similarRecommendations.asStateFlow()
     private var playHistoryCurrent: Pair<SongItem, Long>? = null
     // This is intentionally hardware-key only. Windows SMTC/flyout publishing is not implemented.
     private val windowsMediaControls = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
@@ -91,6 +96,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             account.refreshRestoredSession()
             restoreQueueIfPresent()
             syncHomeLibrary()
+            loadSimilarRecommendations()
         }
         startPlayHistoryRecorder()
         startHomeSyncObserver()
@@ -171,12 +177,42 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     suspend fun syncHomeLibrary() {
         if (account.state.value !is DesktopAccountState.SignedIn) {
             homeStore.clearAccountData()
+            _similarRecommendations.value = emptyList()
             return
         }
         backend.likedSongs().onSuccess { homeStore.replaceLikedSongs(it.songs.distinctBy(SongItem::id)) }
         backend.librarySongs().onSuccess { homeStore.replaceLibrarySongs(it.items.filterIsInstance<SongItem>().distinctBy(SongItem::id)) }
         backend.libraryAlbums().onSuccess { homeStore.replaceLikedAlbums(it.items.filterIsInstance<AlbumItem>().distinctBy(AlbumItem::id)) }
         backend.libraryArtists().onSuccess { homeStore.replaceSubscribedArtists(it.items.filterIsInstance<ArtistItem>().distinctBy(ArtistItem::id)) }
+    }
+
+    /**
+     * Builds "Similar to ..." shelves from the user's most-played artists and songs, mirroring
+     * Android's loadSimilarRecommendations. Artist seeds expand their top sections; song seeds use
+     * the related-items endpoint.
+     */
+    suspend fun loadSimilarRecommendations() {
+        val snapshot = homeStore.snapshot.value
+        val playTimeBySong =
+            snapshot.playHistory.groupBy { it.song.id }.mapValues { (_, events) -> events.sumOf { it.playTimeMs.toLong() } }
+        val mostPlayedSongs =
+            snapshot.playHistory.map { it.song }.distinctBy { it.id }
+                .sortedByDescending { playTimeBySong[it.id] ?: 0L }
+                .take(2)
+        val recommendations = mutableListOf<DesktopSimilarRecommendation>()
+
+        for (song in mostPlayedSongs) {
+            val relatedEndpoint = backend.next(song.id).getOrNull()?.relatedEndpoint ?: continue
+            val page = backend.related(relatedEndpoint).getOrNull() ?: continue
+            val items =
+                (page.songs.shuffled().take(8) + page.albums.shuffled().take(4) + page.artists.shuffled().take(4) + page.playlists.shuffled().take(4))
+                    .shuffled()
+                    .takeIf { it.isNotEmpty() }
+                    ?: continue
+            recommendations += DesktopSimilarRecommendation(title = song, items = items)
+        }
+
+        _similarRecommendations.value = recommendations
     }
 
     private fun startHomeSyncObserver() {
