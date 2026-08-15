@@ -25,7 +25,6 @@ import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.innertube.pages.SearchResult
 import moe.rukamori.archivetune.innertube.pages.SearchSummaryPage
 import moe.rukamori.archivetune.innertube.utils.completed
-import moe.rukamori.archivetune.innertube.utils.parseCookieString
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherConfig
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherRuntime
 import java.io.File
@@ -141,13 +140,21 @@ class ArchiveTuneJvmClient(
             YouTube.authState = initial.copy(dataSyncId = null)
             val account = YouTube.accountInfo().getOrThrow()
             val dataSyncId = YouTube.accountDataSyncId().getOrThrow()
-            // The browse context and X-Goog-Visitor-Id header both need the visitor identifier for
-            // personalized Home/Explore feeds. A cookie import carries it as VISITOR_INFO1_LIVE;
-            // fall back to Android's sw.js lookup only when the cookie omits it.
-            val visitorData =
-                initial.visitorData
-                    ?: initial.cookie.visitorDataFromCookie()
-                    ?: YouTube.visitorData().getOrNull()
+            // Match the browser's personalized-browse context: the region-encoded visitor
+            // identifier and the account region/language both come from the sw.js lookup. The raw
+            // VISITOR_INFO1_LIVE cookie is a different identifier and downgrades the feed.
+            val resolved =
+                YouTube.resolveVisitorContext().getOrNull()
+                    ?: YouTube.visitorData().getOrNull()?.let { visitor ->
+                        moe.rukamori.archivetune.innertube.ResolvedVisitorContext(
+                            visitorData = visitor,
+                            locale = YouTube.locale,
+                        )
+                    }
+            resolved?.let { YouTube.locale = it.locale }
+            // Always prefer the fresh sw.js visitor identifier. A persisted value may carry the
+            // raw VISITOR_INFO1_LIVE cookie from an older import, which downgrades browse results.
+            val visitorData = resolved?.visitorData ?: initial.visitorData
             val verified = initial.copy(visitorData = visitorData, dataSyncId = dataSyncId).normalized()
             YouTube.authState = verified
             Result.success(VerifiedBackendAccount(verified, account))
@@ -738,9 +745,6 @@ private fun String.patchClientVersion(clientVersion: String): String =
 
 private fun String.isHttpUrl(): Boolean =
     runCatching { URI(this).scheme?.lowercase(Locale.US) in setOf("http", "https") }.getOrDefault(false)
-
-internal fun String?.visitorDataFromCookie(): String? =
-    this?.let(::parseCookieString)?.get("VISITOR_INFO1_LIVE")?.takeIf(String::isNotBlank)
 
 private fun normalizedQuery(query: String): Result<String> =
     query.trim().takeIf(String::isNotEmpty)?.let(Result.Companion::success)
