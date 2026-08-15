@@ -83,7 +83,7 @@ class ArchiveTuneJvmClient(
         filter: YouTube.SearchFilter = YouTube.SearchFilter.FILTER_SONG,
     ): Result<SearchResult> =
         run {
-            applyProvidedSession()
+            prepareProvidedSession()
             normalizedQuery(query).fold(
             onSuccess = { YouTube.search(it, filter) },
             onFailure = { Result.failure(it) },
@@ -91,7 +91,7 @@ class ArchiveTuneJvmClient(
         }
 
     suspend fun searchSummary(query: String): Result<SearchSummaryPage> = run {
-        applyProvidedSession()
+        prepareProvidedSession()
         normalizedQuery(query).fold(
             onSuccess = { YouTube.searchSummary(it) },
             onFailure = { Result.failure(it) },
@@ -102,17 +102,17 @@ class ArchiveTuneJvmClient(
         continuation: String? = null,
         params: String? = null,
     ): Result<HomePage> = run {
-        applyProvidedSession()
+        prepareProvidedSession()
         YouTube.home(continuation, params)
     }
 
     suspend fun explore(): Result<ExplorePage> = run {
-        applyProvidedSession()
+        prepareProvidedSession()
         YouTube.explore()
     }
 
     suspend fun newReleaseAlbums(): Result<List<AlbumItem>> = run {
-        applyProvidedSession()
+        prepareProvidedSession()
         YouTube.newReleaseAlbums()
     }
 
@@ -136,7 +136,7 @@ class ArchiveTuneJvmClient(
 
     suspend fun album(browseId: String): Result<AlbumPage> =
         run {
-            applyProvidedSession()
+            prepareProvidedSession()
             normalizedId(browseId, "Album browse ID").fold(
             onSuccess = { YouTube.album(it) },
             onFailure = { Result.failure(it) },
@@ -145,7 +145,7 @@ class ArchiveTuneJvmClient(
 
     suspend fun artist(browseId: String): Result<ArtistPage> =
         run {
-            applyProvidedSession()
+            prepareProvidedSession()
             normalizedId(browseId, "Artist browse ID").fold(
             onSuccess = { YouTube.artist(it) },
             onFailure = { Result.failure(it) },
@@ -154,7 +154,7 @@ class ArchiveTuneJvmClient(
 
     suspend fun playlist(playlistId: String): Result<PlaylistPage> =
         run {
-            applyProvidedSession()
+            prepareProvidedSession()
             normalizedId(playlistId, "Playlist ID").fold(
             onSuccess = { id ->
                 val normalizedPlaylistId = id.removePrefix("VL")
@@ -185,7 +185,7 @@ class ArchiveTuneJvmClient(
 
     /** Returns the signed-in user's YouTube Music playlists. */
     suspend fun libraryPlaylists(): Result<LibraryPage> = run {
-        applyProvidedSession()
+        prepareProvidedSession()
         val initial = YouTube.authState
         // The account-list response can contain both a generic main-app DataSync value and one
         // value per YouTube channel. Private Music library pages are scoped to a channel, so use
@@ -240,7 +240,7 @@ class ArchiveTuneJvmClient(
         quality: JvmAudioQuality = JvmAudioQuality.HIGH,
     ): Result<ResolvedAudioStream> =
         try {
-            applyProvidedSession()
+            prepareProvidedSession()
             val resolvedVideoId = normalizedId(videoId, "Video ID").getOrThrow()
             val resolvedPlaylistId = playlistId?.trim()?.takeIf(String::isNotEmpty)
             val stream = resolveStreamWithinTimeout(STREAM_RESOLUTION_TIMEOUT_MILLIS) {
@@ -363,6 +363,16 @@ class ArchiveTuneJvmClient(
     }
 
     /**
+     * Gives a desktop-owned session source a chance to revalidate or renew its credentials before
+     * every suspendable backend operation. The default provider implementation is a no-op, so the
+     * Android/core callers and direct desktop authState users retain their existing behavior.
+     */
+    private suspend fun prepareProvidedSession() {
+        sessionProvider?.refreshIfNeeded()
+        applyProvidedSession()
+    }
+
+    /**
      * A restored cookie-only session can be valid for account browse calls but lacks the selected
      * YouTube channel context required by player clients. Derive it through ArchiveTune's existing
      * account-switcher endpoint; values remain in memory and are never logged or persisted here.
@@ -428,6 +438,12 @@ data class DesktopNetworkPolicy(
 fun interface DesktopSessionProvider {
     /** Never log or persist the returned value outside the provider's secure storage boundary. */
     fun currentAuthState(): PlaybackAuthState
+
+    /**
+     * Called immediately before a backend operation. Implementations may revalidate/renew a
+     * session, but should fail soft so an offline user can keep using the last verified state.
+     */
+    suspend fun refreshIfNeeded() = Unit
 }
 
 /** Redacted stream-resolution events suitable for a per-user application log. */
