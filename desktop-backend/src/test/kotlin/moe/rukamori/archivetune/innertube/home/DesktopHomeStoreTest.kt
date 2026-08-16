@@ -115,4 +115,46 @@ class DesktopHomeStoreTest {
         assertTrue(!reloaded.isSpeedDialPinned(song))
         assertEquals(1, reloaded.snapshot.value.speedDial.size)
     }
+
+    @Test
+    fun `orders new releases by favourite then most played artist`() {
+        val album = AlbumItem(
+            browseId = "album-1",
+            playlistId = "pl-1",
+            title = "Album",
+            artists = listOf(Artist(id = "artist-1", name = "Artist")),
+            thumbnail = "t",
+        )
+        val favourite =
+            ArtistItem(
+                id = "fav",
+                title = "Favourite",
+                thumbnail = null,
+                shuffleEndpoint = null,
+                radioEndpoint = null,
+            )
+        val mostPlayed = SongItem(
+            id = "song-1",
+            title = "Song",
+            artists = listOf(Artist(id = "played", name = "Played")),
+            thumbnail = "t",
+        )
+        val snapshot =
+            DesktopHomeSnapshot(
+                subscribedArtists = listOf(favourite),
+                playHistory = listOf(DesktopPlayEvent(mostPlayed, playedAtEpochMillis = 1_000L, playTimeMs = 10_000L)),
+            )
+
+        val favouriteAlbum = album.copy(browseId = "fav", playlistId = "pl-fav", artists = listOf(Artist("Favourite", "fav")))
+        val playedAlbum = album.copy(browseId = "played", playlistId = "pl-played", artists = listOf(Artist("Played", "played")))
+        val unknownAlbum = album.copy(browseId = "unknown", playlistId = "pl-unknown", artists = listOf(Artist("Unknown", "unknown")))
+
+        val sorted =
+            sortNewReleasesByArtistPreference(
+                listOf(unknownAlbum, playedAlbum, favouriteAlbum),
+                snapshot,
+            )
+
+        assertEquals(listOf("fav", "played", "unknown"), sorted.map { it.browseId })
+    }
 }

@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
+import moe.rukamori.archivetune.innertube.home.sortNewReleasesByArtistPreference
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.pages.ChartsPage
@@ -87,7 +88,11 @@ fun DesktopExploreSurface(
     val topMusicVideos = sections.firstOrNull { section ->
         section.title.equals(TOP_MUSIC_VIDEOS, ignoreCase = true)
     }
-    val newReleaseAlbums = explorePage?.newReleaseAlbums.orEmpty()
+    val newReleaseAlbums =
+        sortNewReleasesByArtistPreference(
+            albums = explorePage?.newReleaseAlbums.orEmpty(),
+            snapshot = services.homeStore.snapshot.value,
+        )
     val hasContent =
         regularSections.any { section -> section.items.filterIsInstance<SongItem>().isNotEmpty() } ||
             newReleaseAlbums.isNotEmpty() ||

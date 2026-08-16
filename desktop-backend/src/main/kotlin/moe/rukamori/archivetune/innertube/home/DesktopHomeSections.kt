@@ -69,4 +69,47 @@ fun computeLocalHomeContent(
     )
 }
 
+/**
+ * Orders new-release albums by artist preference, mirroring Android's Explore screen: favourite
+ * (subscribed) artists first, then remaining artists by total play time, then unknown artists.
+ */
+fun sortNewReleasesByArtistPreference(
+    albums: List<AlbumItem>,
+    snapshot: DesktopHomeSnapshot,
+): List<AlbumItem> {
+    if (snapshot.subscribedArtists.isEmpty() && snapshot.playHistory.isEmpty()) return albums
+
+    val playTimeByArtistId = HashMap<String, Long>()
+    snapshot.playHistory.forEach { event ->
+        event.song.artists.forEach { artist ->
+            artist.id?.takeIf(String::isNotBlank)?.let { id ->
+                playTimeByArtistId[id] = (playTimeByArtistId[id] ?: 0L) + event.playTimeMs
+            }
+        }
+    }
+
+    val favouriteArtistIds = snapshot.subscribedArtists.map(ArtistItem::id).toHashSet()
+    val favouriteRank =
+        snapshot.subscribedArtists
+            .map(ArtistItem::id)
+            .distinct()
+            .sortedByDescending { playTimeByArtistId[it] ?: 0L }
+    val nonFavouriteRank =
+        playTimeByArtistId.entries
+            .sortedByDescending { it.value }
+            .map { it.key }
+            .filterNot(favouriteArtistIds::contains)
+
+    return albums.sortedBy { album ->
+        val artistIds = album.artists.orEmpty().mapNotNull { it.id?.takeIf(String::isNotBlank) }
+        val favouriteIndex = favouriteRank.indexOfFirst(artistIds::contains)
+        if (favouriteIndex >= 0) {
+            favouriteIndex
+        } else {
+            val nonFavouriteIndex = nonFavouriteRank.indexOfFirst(artistIds::contains)
+            if (nonFavouriteIndex >= 0) favouriteRank.size + nonFavouriteIndex else Int.MAX_VALUE
+        }
+    }
+}
+
 private const val RECENT_WINDOW_MS = 86400_000L * 30L

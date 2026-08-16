@@ -125,7 +125,7 @@ fun main() = runBlocking {
             val missing = (failure as? MissingFieldException)?.missingFields.orEmpty().joinToString(",")
             println(
                 "authenticated_stream_diagnostic playlists result=FAILED type=${failure::class.simpleName} " +
-                    "status=$status missing=$missing",
+                    "status=$status missing=$missing message=${failure.message.orEmpty()}",
             )
         },
     )
