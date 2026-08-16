@@ -2,8 +2,9 @@ package moe.rukamori.archivetune.desktop.platform
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.MissingFieldException
+import moe.rukamori.archivetune.desktopauth.ArchiveTuneSessionVerifier
+import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
-import moe.rukamori.archivetune.desktopauth.DesktopSessionVerifier
 import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.StreamResolutionDiagnostic
@@ -20,27 +21,8 @@ fun main() = runBlocking {
     val videoId = System.getenv("ARCHIVETUNE_DIAGNOSTIC_VIDEO_ID")?.trim().orEmpty()
     require(videoId.isNotEmpty()) { "Set ARCHIVETUNE_DIAGNOSTIC_VIDEO_ID to run this local diagnostic" }
     val paths = AppPaths.resolve()
-    val session = DesktopSessionManager(
-        secureStore = DpapiFileSessionStore(paths.data.resolve("youtube-session.dpapi")),
-        verifier = DesktopSessionVerifier { Result.failure(IllegalStateException("Diagnostic does not verify or modify sessions")) },
-    )
-    session.restore()
-    val diagnostic = session.diagnostic
-    if (!diagnostic.signedIn) {
-        println("authenticated_stream_diagnostic session=unavailable")
-        return@runBlocking
-    }
-    val auth = session.currentAuthState()
-    // Presence flags only: never print a proof-token value or session identifier.
-    println(
-        "authenticated_stream_diagnostic auth_context " +
-            "visitor=${!auth.visitorData.isNullOrBlank()} data_sync=${!auth.dataSyncId.isNullOrBlank()} " +
-            "web_po_enabled=${auth.webClientPoTokenEnabled} player_po=${!auth.poTokenPlayer.isNullOrBlank()} " +
-            "gvs_po=${!auth.poTokenGvs.isNullOrBlank()}",
-    )
     val backend = ArchiveTuneJvmClient(
         cacheDirectory = paths.cache.resolve("cipher").toFile(),
-        sessionProvider = session,
         streamDiagnostics = StreamResolutionDiagnosticSink { event ->
             when (event) {
                 is StreamResolutionDiagnostic.Attempt -> println("authenticated_stream_diagnostic attempt client=${event.client} result=${event.classification.name}")
@@ -51,6 +33,29 @@ fun main() = runBlocking {
                 is StreamResolutionDiagnostic.Failure -> println("authenticated_stream_diagnostic failure result=${event.classification.name}")
             }
         },
+    )
+    val session = DesktopSessionManager(
+        secureStore = DpapiFileSessionStore(paths.data.resolve("youtube-session.dpapi")),
+        verifier = ArchiveTuneSessionVerifier(backend),
+    )
+    session.restore()
+    backend.bindSessionProvider(session)
+    val diagnostic = session.diagnostic
+    if (!diagnostic.signedIn) {
+        println("authenticated_stream_diagnostic session=unavailable")
+        return@runBlocking
+    }
+    if (session.state.value is DesktopAccountState.SignedIn) {
+        session.refreshRestoredSession()
+    }
+    val auth = session.currentAuthState()
+    // Presence flags only: never print a proof-token value or session identifier.
+    println(
+        "authenticated_stream_diagnostic auth_context " +
+            "visitor=${!auth.visitorData.isNullOrBlank()} data_sync=${!auth.dataSyncId.isNullOrBlank()} " +
+            "delegated=${!auth.delegatedSessionId.isNullOrBlank()} " +
+            "web_po_enabled=${auth.webClientPoTokenEnabled} player_po=${!auth.poTokenPlayer.isNullOrBlank()} " +
+            "gvs_po=${!auth.poTokenGvs.isNullOrBlank()}",
     )
     // Section titles are user-facing labels, not credentials or identifiers, and directly show
     // whether the signed-in home feed is personalized or degraded to the anonymous region feed.
