@@ -76,6 +76,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     val library = DesktopLibrary(legacyLibraryFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
     /** Account-scoped personalization data for the Home surface (synced + recorded locally). */
     val homeStore = DesktopHomeStore(runtime.paths.data.resolve("home-store.json"))
+    /** Song→album knowledge for backfilling album links on tracks served without album metadata. */
+    val albumIndex = DesktopAlbumIndex(runtime.paths.data.resolve("album-index.json"))
     private val _similarRecommendations = MutableStateFlow<List<DesktopSimilarRecommendation>>(emptyList())
     val similarRecommendations = _similarRecommendations.asStateFlow()
     private var playHistoryCurrent: Pair<SongItem, Long>? = null
@@ -353,6 +355,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         lyrics.close()
         lyricsScope.cancel()
         windowsMediaControls?.close()
+        albumIndex.close()
         playback.close()
         resolvedSourceCache.clear()
         backend.bindSessionProvider(null)

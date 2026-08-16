@@ -34,6 +34,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.coil)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.json)
     testImplementation(kotlin("test"))
 }
 
@@ -99,19 +100,43 @@ compose.desktop {
     }
 }
 
-val jpackageResourceDir = layout.buildDirectory.dir("compose/tmp/resources")
-val customMsiTemplate = rootProject.layout.projectDirectory.file("packaging/windows/main.wxs")
+val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/ArchiveTune")
+val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
+val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/windows")
+val jpackageExecutable = "${System.getProperty("java.home")}/bin/jpackage.exe"
 
-val prepareMsiWixOverride = tasks.register<Copy>("prepareMsiWixOverride") {
-    description = "Copies the custom WiX main.wxs (install-over-existing upgrade behaviour) into jpackage's resource dir."
-    from(customMsiTemplate)
-    into(jpackageResourceDir)
+fun installerJpackageArgs(type: String, dest: Provider<Directory>): List<String> = listOf(
+    "--type", type,
+    "--app-image", appImageDir.get().asFile.absolutePath,
+    "--resource-dir", customWixResourceDir.asFile.absolutePath,
+    "--dest", dest.get().asFile.absolutePath,
+    "--name", "ArchiveTune",
+    "--app-version", project.version.toString(),
+    "--vendor", "ArchiveTune",
+    "--description", "A private, feature-rich YouTube Music client and music player.",
+    "--copyright", "Copyright © 2026 Rukamori and ArchiveTune contributors",
+    "--license-file", rootProject.file("LICENSE").absolutePath,
+    "--icon", generatedWindowsIcon.get().asFile.absolutePath,
+    "--win-per-user-install",
+    "--win-upgrade-uuid", "1bfa7db8-e785-4fd2-8fb1-5debbd28ac03",
+    "--win-menu", "--win-menu-group", "ArchiveTune",
+    "--win-dir-chooser",
+)
+
+val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
+    group = "package"
+    description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
+    dependsOn("createDistributable", generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
+    commandLine(listOf(jpackageExecutable) + installerJpackageArgs("msi", layout.buildDirectory.dir("compose/binaries/main/msi")))
 }
 
-tasks.matching {
-    it.name == "packageMsi" || it.name == "packageExe" || it.name == "packageDistributionForCurrentOS"
-}.configureEach {
-    dependsOn(prepareMsiWixOverride)
+val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
+    group = "package"
+    description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
+    dependsOn("createDistributable", generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
+    commandLine(listOf(jpackageExecutable) + installerJpackageArgs("exe", layout.buildDirectory.dir("compose/binaries/main/exe")))
 }
 
 val verifyBundledMpvRuntime = tasks.register<VerifyBundledExecutableTask>("verifyBundledMpvRuntime") {

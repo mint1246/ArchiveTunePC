@@ -92,10 +92,12 @@ fun main() {
             ) {
                 var showLyrics by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }
+                val browse = remember { moe.rukamori.archivetune.desktop.ui.DesktopBrowseController() }
                 val lyricsContent: @Composable (Modifier) -> Unit = remember {
                     { modifier ->
                         moe.rukamori.archivetune.desktop.ui.DesktopLyricsView(
                             services = musicServices,
+                            browse = browse,
                             modifier = modifier,
                         )
                     }
@@ -124,11 +126,12 @@ fun main() {
                             latestTheme = theme
                         },
                         content = { contentState, modifier ->
-                            moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(contentState, musicServices, downloadServices, runtime.paths, runtime.logger, modifier)
+                            moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(contentState, musicServices, downloadServices, runtime.paths, runtime.logger, browse, modifier)
                         },
                         playerContent = { modifier ->
                             moe.rukamori.archivetune.desktop.ui.DesktopMiniPlayer(
                                 services = musicServices,
+                                browse = browse,
                                 onShowLyrics = { showLyrics = true },
                                 onShowQueue = { showQueue = !showQueue },
                                 modifier = modifier,

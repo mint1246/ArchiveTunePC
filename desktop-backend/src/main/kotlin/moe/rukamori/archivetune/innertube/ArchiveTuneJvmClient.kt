@@ -135,6 +135,12 @@ class ArchiveTuneJvmClient(
         YouTube.newReleaseAlbums()
     }
 
+    /** Sends a recommendation feedback token (for example, "Not interested"). */
+    suspend fun feedback(feedbackToken: String): Result<Unit> = run {
+        prepareProvidedSession()
+        YouTube.feedback(feedbackToken)
+    }
+
     /** Verifies a user-supplied authenticated YouTube session without exposing its secret values. */
     suspend fun verifyAccountSession(candidate: PlaybackAuthState): Result<VerifiedBackendAccount> =
         try {

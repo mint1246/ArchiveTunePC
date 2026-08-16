@@ -142,10 +142,11 @@ fun DesktopMediaGridCard(
     onAddToQueue: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
     onPin: (() -> Unit)? = null,
+    onNotInterested: (() -> Unit)? = null,
     isPinned: Boolean = false,
 ) {
     val thumbnailShape = if (item is ArtistItem) CircleShape else RoundedCornerShape(8.dp)
-    val hasMenu = onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null
+    val hasMenu = onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null || onNotInterested != null
     Column(modifier = modifier.clickable(onClick = onClick)) {
         Box {
             DesktopMediaArtwork(
@@ -163,6 +164,7 @@ fun DesktopMediaGridCard(
                     onAddToQueue = onAddToQueue,
                     onDownload = onDownload,
                     onPin = onPin,
+                    onNotInterested = onNotInterested,
                     isPinned = isPinned,
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                 )
@@ -209,6 +211,7 @@ fun DesktopMediaListRow(
     onAddToQueue: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
     onPin: (() -> Unit)? = null,
+    onNotInterested: (() -> Unit)? = null,
     isPinned: Boolean = false,
 ) {
     Row(
@@ -254,12 +257,13 @@ fun DesktopMediaListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null) {
+        if (onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null || onNotInterested != null) {
             MediaOverflowMenu(
                 onPlayNext = onPlayNext,
                 onAddToQueue = onAddToQueue,
                 onDownload = onDownload,
                 onPin = onPin,
+                onNotInterested = onNotInterested,
                 isPinned = isPinned,
             )
         }
@@ -272,6 +276,7 @@ private fun MediaOverflowMenu(
     onAddToQueue: (() -> Unit)?,
     onDownload: (() -> Unit)?,
     onPin: (() -> Unit)?,
+    onNotInterested: (() -> Unit)?,
     isPinned: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -303,6 +308,12 @@ private fun MediaOverflowMenu(
             onPin?.let { action ->
                 DropdownMenuItem(
                     text = { Text(if (isPinned) "Unpin from speed dial" else "Pin to speed dial") },
+                    onClick = { open = false; action() },
+                )
+            }
+            onNotInterested?.let { action ->
+                DropdownMenuItem(
+                    text = { Text("Not interested") },
                     onClick = { open = false; action() },
                 )
             }

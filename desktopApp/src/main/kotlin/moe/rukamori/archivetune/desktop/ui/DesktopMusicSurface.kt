@@ -15,6 +15,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -69,10 +70,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -81,8 +91,10 @@ import moe.rukamori.archivetune.desktop.library.LocalTrack
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.AppPaths
+import moe.rukamori.archivetune.desktop.platform.DesktopAlbumIndex
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPane
 import java.util.logging.Logger
+import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
@@ -95,19 +107,52 @@ import moe.rukamori.archivetune.playback.api.PlaybackAlbum
 import moe.rukamori.archivetune.playback.api.PlaybackArtist
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
+import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import kotlin.math.roundToLong
 
-private sealed interface Detail { data class Album(val page: AlbumPage) : Detail; data class Artist(val page: ArtistPage) : Detail; data class Playlist(val page: PlaylistPage) : Detail }
+internal sealed interface Detail { data class Album(val page: AlbumPage) : Detail; data class Artist(val page: ArtistPage) : Detail; data class Playlist(val page: PlaylistPage) : Detail }
+
+/**
+ * Shares the currently-viewed detail page (album/artist/playlist) between the main content area
+ * and the mini player, so the mini player can open the album of the song that is playing.
+ */
+internal class DesktopBrowseController {
+    var detail by mutableStateOf<Detail?>(null)
+    var loading by mutableStateOf(false)
+    var failure by mutableStateOf<String?>(null)
+
+    fun clear() {
+        detail = null
+        failure = null
+    }
+
+    fun openAlbum(browseId: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
+        open(scope) { backend.album(browseId).map { Detail.Album(it) } }
+
+    fun openArtist(id: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
+        open(scope) { backend.artist(id).map { Detail.Artist(it) } }
+
+    fun openPlaylist(id: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
+        open(scope) { backend.playlist(id).map { Detail.Playlist(it) } }
+
+    private fun open(scope: CoroutineScope, load: suspend () -> Result<Detail>) {
+        scope.launch {
+            loading = true
+            failure = null
+            load()
+                .onSuccess { detail = it }
+                .onFailure { failure = it.message ?: "Could not load this item" }
+            loading = false
+        }
+    }
+}
 
 @Composable
-fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, modifier: Modifier = Modifier) {
+internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var resultItems by remember { mutableStateOf<List<YTItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    var detail by remember { mutableStateOf<Detail?>(null) }
     var localTracks by remember { mutableStateOf(services.library.tracks) }
     var onlinePlaylists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
     var libraryLoading by remember { mutableStateOf(false) }
@@ -119,7 +164,7 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
     }
     LaunchedEffect(Unit) { if (services.library.folders.isNotEmpty()) rescanLibrary() }
     LaunchedEffect(state.destination) {
-        detail = null
+        browse.clear()
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
         services.backend.libraryPlaylists()
             .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
@@ -127,24 +172,24 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
     }
     LaunchedEffect(state.searchQuery, state.destination) {
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH || state.searchQuery.isBlank()) return@LaunchedEffect
-        delay(300); loading = true; failure = null
+        delay(300); browse.loading = true; browse.failure = null
         services.backend.searchSummary(state.searchQuery).onSuccess { page -> resultItems = page.summaries.flatMap { it.items }.distinctBy { it::class to it.id } }
-            .onFailure { failure = it.message ?: "Search failed. Check your connection and try again."; resultItems = emptyList() }
-        loading = false
+            .onFailure { browse.failure = it.message ?: "Search failed. Check your connection and try again."; resultItems = emptyList() }
+        browse.loading = false
     }
     fun open(item: YTItem) {
         when (item) {
-            is SongItem -> scope.launch { services.playback.replaceQueue(resultItems.filterIsInstance<SongItem>().map(::toPlaybackItem), resultItems.filterIsInstance<SongItem>().indexOf(item).coerceAtLeast(0), title = "Search results") }
-            is AlbumItem -> scope.launch { loading = true; failure = null; services.backend.album(item.browseId).onSuccess { detail = Detail.Album(it) }.onFailure { failure = it.message ?: "Album could not be loaded" }; loading = false }
-            is ArtistItem -> scope.launch { loading = true; failure = null; services.backend.artist(item.id).onSuccess { detail = Detail.Artist(it) }.onFailure { failure = it.message ?: "Artist could not be loaded" }; loading = false }
-            is PlaylistItem -> scope.launch { loading = true; failure = null; services.backend.playlist(item.id).onSuccess { detail = Detail.Playlist(it) }.onFailure { failure = it.message ?: "Playlist could not be loaded" }; loading = false }
+            is SongItem -> scope.launch { services.playback.replaceQueue(resultItems.filterIsInstance<SongItem>().map { toPlaybackItem(it, services.albumIndex) }, resultItems.filterIsInstance<SongItem>().indexOf(item).coerceAtLeast(0), title = "Search results") }
+            is AlbumItem -> browse.openAlbum(item.browseId, services.backend, scope)
+            is ArtistItem -> browse.openArtist(item.id, services.backend, scope)
+            is PlaylistItem -> browse.openPlaylist(item.id, services.backend, scope)
         }
     }
     fun openBrowseItem(item: YTItem) {
         when (item) {
-            is AlbumItem -> scope.launch { loading = true; failure = null; services.backend.album(item.browseId).onSuccess { detail = Detail.Album(it) }.onFailure { failure = it.message ?: "Album could not be loaded" }; loading = false }
-            is ArtistItem -> scope.launch { loading = true; failure = null; services.backend.artist(item.id).onSuccess { detail = Detail.Artist(it) }.onFailure { failure = it.message ?: "Artist could not be loaded" }; loading = false }
-            is PlaylistItem -> scope.launch { loading = true; failure = null; services.backend.playlist(item.id).onSuccess { detail = Detail.Playlist(it) }.onFailure { failure = it.message ?: "Playlist could not be loaded" }; loading = false }
+            is AlbumItem -> browse.openAlbum(item.browseId, services.backend, scope)
+            is ArtistItem -> browse.openArtist(item.id, services.backend, scope)
+            is PlaylistItem -> browse.openPlaylist(item.id, services.backend, scope)
             is SongItem -> Unit
         }
     }
@@ -152,7 +197,7 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
         if (songs.isEmpty()) return
         scope.launch {
             services.playback.replaceQueue(
-                songs.map(::toPlaybackItem),
+                songs.map { toPlaybackItem(it, services.albumIndex) },
                 startIndex.coerceIn(0, songs.lastIndex),
                 title = title,
             )
@@ -162,25 +207,25 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
         scope.launch {
             downloadServices.enqueue(song)
                 .onSuccess { state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS) }
-                .onFailure { failure = it.message ?: "Could not resolve a stream for download" }
+                .onFailure { browse.failure = it.message ?: "Could not resolve a stream for download" }
         }
     }
     fun downloadSongs(songs: List<SongItem>) {
         scope.launch {
             val result = downloadServices.enqueueAll(songs)
             if (result.failures.isNotEmpty()) {
-                failure = "Queued ${result.succeeded}/${result.requested} songs. ${result.failures.first()}"
+                browse.failure = "Queued ${result.succeeded}/${result.requested} songs. ${result.failures.first()}"
             } else if (result.succeeded > 0) {
                 state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS)
             }
         }
     }
-    fun playNextSong(song: SongItem) { scope.launch { services.playback.playNext(listOf(toPlaybackItem(song))) } }
-    fun enqueueSong(song: SongItem) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(song))) } }
+    fun playNextSong(song: SongItem) { scope.launch { services.playback.playNext(listOf(toPlaybackItem(song, services.albumIndex))) } }
+    fun enqueueSong(song: SongItem) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(song, services.albumIndex))) } }
     fun playNextLocal(track: LocalTrack) { scope.launch { services.playback.playNext(listOf(toPlaybackItem(track))) } }
     fun enqueueLocal(track: LocalTrack) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(track))) } }
     AnimatedContent(
-        targetState = detail,
+        targetState = browse.detail,
         transitionSpec = {
             val enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
                 slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 18 }
@@ -193,10 +238,10 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
     ) { page ->
         when (page) {
         null -> when (state.destination) {
-            moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, loading, failure, ::open, ::downloadSong, ::playNextSong, ::enqueueSong, modifier)
-            moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path)), title = "Downloads") } }, { path, item -> scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path))) } }, { path, item -> scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path))) } }, modifier)
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, browse.loading, browse.failure, ::open, ::downloadSong, ::playNextSong, ::enqueueSong, modifier)
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
-                localTracks, onlinePlaylists, services.library.folders, libraryLoading || loading, failure ?: libraryError,
+                localTracks, onlinePlaylists, services.library.folders, libraryLoading || browse.loading, browse.failure ?: libraryError,
                 onAddFolder = { scope.launch { chooseLibraryFolder()?.let { services.library.setFolders(services.library.folders + it); rescanLibrary() } } },
                 onRescan = { scope.launch { rescanLibrary() } },
                 onOpenPlaylist = ::open,
@@ -238,9 +283,9 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
         }
         is Detail.Playlist -> PlaylistDetailPage(
             page.page,
-            onBack = { detail = null },
+            onBack = { browse.clear() },
             onPlay = { songs, index, title ->
-                scope.launch { services.playback.replaceQueue(songs.map(::toPlaybackItem), index, title = title) }
+                scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
             },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
@@ -248,7 +293,7 @@ fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServic
             onAddToQueue = ::enqueueSong,
             modifier = modifier,
         )
-        else -> DetailPage(page, loading, failure, onBack = { detail = null }, onOpen = ::open, onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map(::toPlaybackItem), index, title = title) } }, onDownload = ::downloadSong, onDownloadAll = ::downloadSongs, onPlayNext = ::playNextSong, onAddToQueue = ::enqueueSong, modifier = modifier)
+        else -> DetailPage(page, browse.loading, browse.failure, onBack = { browse.clear() }, onOpen = ::open, onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } }, onDownload = ::downloadSong, onDownloadAll = ::downloadSongs, onPlayNext = ::playNextSong, onAddToQueue = ::enqueueSong, modifier = modifier)
         }
     }
 }
@@ -541,22 +586,113 @@ private fun itemSubtitle(item: YTItem) = when (item) { is SongItem -> item.artis
 @Composable private fun Loading() = Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 @Composable private fun Error(message: String) = Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) { Text(message, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer) }
 
-@Composable fun DesktopMiniPlayer(
+private const val ALBUM_LINK_TAG = "album-link"
+private const val ARTIST_LINK_TAG = "artist-link"
+
+@Composable
+private fun NowPlayingTitle(item: PlaybackItem?, onAlbumClick: (String) -> Unit, modifier: Modifier = Modifier) {
+    val albumId = item?.metadata?.album?.id?.takeIf { it.isNotBlank() }
+    Text(
+        text = item?.metadata?.title ?: "Nothing playing",
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        color = if (albumId != null) MaterialTheme.colorScheme.primary else androidx.compose.material3.LocalContentColor.current,
+        textDecoration = if (albumId != null) TextDecoration.Underline else TextDecoration.None,
+        modifier = modifier.then(
+            if (albumId == null) Modifier
+            else Modifier
+                .pointerInput(albumId) { detectTapGestures { onAlbumClick(albumId) } }
+                .pointerHoverIcon(PointerIcon.Hand),
+        ),
+    )
+}
+
+@Composable
+private fun NowPlayingSubtitle(
+    snapshot: PlaybackSnapshot,
+    item: PlaybackItem?,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val errorText = snapshot.error?.let {
+        if (it.kind.name == "ENGINE_UNAVAILABLE") "mpv is required for desktop playback — install mpv or set ARCHIVETUNE_MPV_PATH" else it.message
+    }
+    val busyText = when (snapshot.status) {
+        PlaybackStatus.RESOLVING -> "Resolving audio stream…"
+        PlaybackStatus.BUFFERING -> "Buffering…"
+        else -> null
+    }
+    if (errorText != null || busyText != null || item == null) {
+        Text(
+            text = errorText ?: busyText ?: "Choose a song to begin",
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (snapshot.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier,
+        )
+        return
+    }
+    val album = item.metadata.album
+    val albumLink = album?.takeIf { !it.id.isNullOrBlank() && !it.title.isBlank() }
+    val baseColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val linkColor = MaterialTheme.colorScheme.primary
+    val annotated = buildAnnotatedString {
+        item.metadata.artists.forEachIndexed { index, artist ->
+            val clickable = !artist.id.isNullOrBlank()
+            pushStringAnnotation(tag = ARTIST_LINK_TAG, annotation = artist.id.orEmpty())
+            withStyle(SpanStyle(color = if (clickable) linkColor else baseColor, textDecoration = if (clickable) TextDecoration.Underline else TextDecoration.None)) { append(artist.name) }
+            pop()
+            if (index != item.metadata.artists.lastIndex) append(", ")
+        }
+        if (albumLink != null) {
+            if (item.metadata.artists.isNotEmpty()) append(" • ")
+            pushStringAnnotation(tag = ALBUM_LINK_TAG, annotation = albumLink.id.orEmpty())
+            withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { append(albumLink.title) }
+            pop()
+        }
+    }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = annotated,
+        style = MaterialTheme.typography.bodySmall,
+        color = baseColor,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = { layoutResult = it },
+        modifier = modifier.pointerInput(annotated) {
+            detectTapGestures { offset ->
+                val layout = layoutResult ?: return@detectTapGestures
+                val position = layout.getOffsetForPosition(offset)
+                annotated.getStringAnnotations(position, position).firstOrNull()?.let { range ->
+                    when (range.tag) {
+                        ALBUM_LINK_TAG -> onAlbumClick(range.item)
+                        ARTIST_LINK_TAG -> if (range.item.isNotBlank()) onArtistClick(range.item)
+                    }
+                }
+            }
+        }.pointerHoverIcon(PointerIcon.Hand),
+    )
+}
+
+@Composable internal fun DesktopMiniPlayer(
     services: DesktopMusicServices,
+    browse: DesktopBrowseController,
     onShowLyrics: () -> Unit,
     onShowQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val snapshot by services.playback.state.collectAsState(); val scope = androidx.compose.runtime.rememberCoroutineScope(); val item = snapshot.currentItem
     Surface(modifier.padding(horizontal = 12.dp, vertical = 8.dp).animateContentSize(tween(220, easing = FastOutSlowInEasing)), color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text(item?.metadata?.title ?: "Nothing playing", maxLines = 1, overflow = TextOverflow.Ellipsis); Text(snapshot.error?.let { if (it.kind.name == "ENGINE_UNAVAILABLE") "mpv is required for desktop playback — install mpv or set ARCHIVETUNE_MPV_PATH" else it.message } ?: when (snapshot.status) { PlaybackStatus.RESOLVING -> "Resolving audio stream…"; PlaybackStatus.BUFFERING -> "Buffering…"; else -> item?.metadata?.artistText ?: "Choose a song to begin" }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = if (snapshot.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, services.backend, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, services.backend, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, services.backend, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
         if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth())
     } }
 }
 
 /** Immersive lyrics content rendered inside the app shell so it shares the integrated chrome. */
 @Composable
-fun DesktopLyricsView(services: DesktopMusicServices, modifier: Modifier = Modifier) {
+internal fun DesktopLyricsView(services: DesktopMusicServices, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
     val snapshot by services.playback.state.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val item = snapshot.currentItem
@@ -572,8 +708,8 @@ fun DesktopLyricsView(services: DesktopMusicServices, modifier: Modifier = Modif
                     Artwork(item?.metadata?.artworkUri, Modifier.size(42.dp))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(item?.metadata?.title ?: "Lyrics", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(item?.metadata?.artistText ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, services.backend, scope) }, Modifier.fillMaxWidth())
+                        NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, services.backend, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, services.backend, scope) }, modifier = Modifier.fillMaxWidth())
                     }
                     IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
                     FilledIconButton(onClick = { scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) {
@@ -592,14 +728,32 @@ AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(twee
             }
     }
 }
-private fun toPlaybackItem(song: SongItem) = PlaybackItem(PlaybackMetadata(song.id, song.title, song.artists.map { PlaybackArtist(it.id, it.name) }, song.album?.let { PlaybackAlbum(it.id, it.name) }, song.thumbnail, song.duration?.times(1000L), song.explicit))
+private fun toPlaybackItem(song: SongItem, albumIndex: DesktopAlbumIndex) = PlaybackItem(
+    PlaybackMetadata(
+        id = song.id,
+        title = song.title,
+        artists = song.artists.map { PlaybackArtist(it.id, it.name) },
+        album =
+            song.album?.let { PlaybackAlbum(it.id, it.name) }
+                ?.takeIf { !it.id.isNullOrBlank() && !it.title.isBlank() }
+                ?.also { albumIndex.learn(song.id, it) }
+                ?: albumIndex.albumFor(song.id),
+        artworkUri = song.thumbnail,
+        durationHintMs = song.duration?.times(1000L),
+        explicit = song.explicit,
+    ),
+)
 private fun toPlaybackItem(track: LocalTrack) = PlaybackItem(PlaybackMetadata(track.id, track.title, listOf(PlaybackArtist(name = track.artist)), track.album?.let { PlaybackAlbum(title = it) }), moe.rukamori.archivetune.playback.api.PlaybackSource.LocalFile(track.path.toString()))
-private fun toPlaybackItem(item: moe.rukamori.archivetune.downloads.DownloadSnapshot, path: java.nio.file.Path) = PlaybackItem(
+private fun toPlaybackItem(item: moe.rukamori.archivetune.downloads.DownloadSnapshot, path: java.nio.file.Path, albumIndex: DesktopAlbumIndex) = PlaybackItem(
     PlaybackMetadata(
         id = item.mediaId ?: item.id,
         title = item.title,
         artists = item.artist?.let { listOf(PlaybackArtist(name = it)) }.orEmpty(),
-        album = item.albumTitle?.let { PlaybackAlbum(item.albumId, it) },
+        album =
+            item.albumTitle?.let { PlaybackAlbum(item.albumId, it) }
+                ?.takeIf { !it.id.isNullOrBlank() && !it.title.isBlank() }
+                ?.also { albumIndex.learn(item.mediaId ?: item.id, it) }
+                ?: albumIndex.albumFor(item.mediaId ?: item.id),
         artworkUri = item.artworkUrl,
         durationHintMs = item.durationMs,
         explicit = item.explicit,
