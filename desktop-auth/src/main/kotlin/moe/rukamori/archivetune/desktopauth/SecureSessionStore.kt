@@ -120,7 +120,7 @@ class DpapiFileSessionStore(
 
 /** Binary encoding avoids accidentally writing session secrets to a text log or configuration file. */
 internal object StoredDesktopSessionCodec {
-    private const val VERSION = 2
+    private const val VERSION = 3
     private const val LEGACY_VERSION = 1
 
     fun encode(session: StoredDesktopSession): ByteArray =
@@ -130,6 +130,7 @@ internal object StoredDesktopSessionCodec {
                 output.writeString(session.authState.cookie)
                 output.writeString(session.authState.visitorData)
                 output.writeString(session.authState.dataSyncId)
+                output.writeString(session.authState.delegatedSessionId)
                 output.writeString(session.authState.poToken)
                 output.writeString(session.authState.poTokenGvs)
                 output.writeString(session.authState.poTokenPlayer)
@@ -146,12 +147,13 @@ internal object StoredDesktopSessionCodec {
     fun decode(value: ByteArray): StoredDesktopSession =
         DataInputStream(ByteArrayInputStream(value)).use { input ->
             val version = input.readInt()
-            require(version == VERSION || version == LEGACY_VERSION) { "Unsupported desktop session format" }
+            require(version in LEGACY_VERSION..VERSION) { "Unsupported desktop session format" }
             val authState =
                 moe.rukamori.archivetune.innertube.PlaybackAuthState(
                     cookie = input.readString(),
                     visitorData = input.readString(),
                     dataSyncId = input.readString(),
+                    delegatedSessionId = if (version >= 3) input.readString() else null,
                     poToken = input.readString(),
                     poTokenGvs = input.readString(),
                     poTokenPlayer = input.readString(),
@@ -161,7 +163,7 @@ internal object StoredDesktopSessionCodec {
             val name = input.readString().orEmpty()
             val email = input.readString()
             val channelHandle = input.readString()
-            val avatarUrl = if (version >= VERSION) input.readString() else null
+            val avatarUrl = if (version >= 2) input.readString() else null
             StoredDesktopSession(
                 authState = authState,
                 account = DesktopAccount(
