@@ -52,6 +52,23 @@ fun main() = runBlocking {
             }
         },
     )
+    // Section titles are user-facing labels, not credentials or identifiers, and directly show
+    // whether the signed-in home feed is personalized or degraded to the anonymous region feed.
+    backend.home().fold(
+        onSuccess = { home ->
+            val titles = home.sections.map { it.title }
+            println(
+                "authenticated_stream_diagnostic home result=OK sections=${home.sections.size} " +
+                    "titles=${titles.joinToString("|")}",
+            )
+        },
+        onFailure = { failure ->
+            val status = Regex("\\b[45]\\d\\d\\b").find(failure.message.orEmpty())?.value ?: "none"
+            println(
+                "authenticated_stream_diagnostic home result=FAILED type=${failure::class.simpleName} status=$status",
+            )
+        },
+    )
     if (!System.getenv("ARCHIVETUNE_DIAGNOSTIC_PLAYLISTS_ONLY").equals("true", ignoreCase = true)) backend.resolveAudioStream(videoId).fold(
         onSuccess = { stream ->
             val source = if (stream.format.url != null) "direct" else "cipher"
