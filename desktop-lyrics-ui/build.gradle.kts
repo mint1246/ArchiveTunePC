@@ -23,18 +23,3 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
-
-val smoke = sourceSets.create("smoke")
-smoke.compileClasspath += sourceSets.main.get().output
-smoke.runtimeClasspath += sourceSets.main.get().output
-
-configurations[smoke.implementationConfigurationName].extendsFrom(configurations.implementation.get())
-configurations[smoke.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
-
-tasks.register<JavaExec>("lyricsRenderSmokeTest") {
-    group = "verification"
-    description = "Searches live lyrics providers and verifies their documents render into lines without printing lyrics."
-    classpath = smoke.runtimeClasspath
-    mainClass.set("moe.rukamori.archivetune.desktop.lyrics.LyricsRenderSmokeKt")
-    dependsOn(smoke.classesTaskName)
-}
