@@ -294,9 +294,13 @@ class ArchiveTuneJvmClient(
                 var lastFailure: Throwable? = null
 
                 for (dataSyncId in candidates.ifEmpty { listOf("") }) {
-                    YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
+                    val candidateAuthState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
+                    YouTube.authState = candidateAuthState
                     val result = YouTube.playlist(normalizedPlaylistId).completed()
-                    if (result.isSuccess) return@fold result
+                    if (result.isSuccess) {
+                        persistProvidedSessionRepair(initial, candidateAuthState)
+                        return@fold result
+                    }
                     lastFailure = result.exceptionOrNull()
                 }
 
@@ -323,11 +327,24 @@ class ArchiveTuneJvmClient(
                 .distinct()
         var lastFailure: Throwable? = null
         val pages = mutableListOf<LibraryPage>()
+        var successfulAuthState: PlaybackAuthState? = null
 
         for (dataSyncId in candidates.ifEmpty { listOf("") }) {
             YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
             val result = YouTube.library(browseId).completed()
-            result.onSuccess(pages::add).onFailure { lastFailure = it }
+            result.onSuccess { page ->
+                pages += page
+                if (successfulAuthState == null && dataSyncId.isNotBlank()) {
+                    successfulAuthState = YouTube.currentPlaybackAuthState()
+                }
+            }.onFailure { lastFailure = it }
+        }
+
+        successfulAuthState?.let { repaired ->
+            YouTube.authState = repaired
+            persistProvidedSessionRepair(initial, repaired)
+        } ?: run {
+            YouTube.authState = initial
         }
 
         if (pages.isNotEmpty()) {
@@ -427,7 +444,7 @@ class ArchiveTuneJvmClient(
         playlistId: String?,
         quality: JvmAudioQuality,
     ): ResolvedAudioStream {
-        val authState = ensurePlaybackAuthContext(YouTube.currentPlaybackAuthState())
+        val authState = ensureSessionAuthContext(YouTube.currentPlaybackAuthState())
         val signatureTimestamp = streamUrlResolver.signatureTimestamp(videoId).getOrNull()
         val failures = mutableListOf<Throwable>()
 
@@ -504,6 +521,20 @@ class ArchiveTuneJvmClient(
         sessionProvider?.currentAuthState()?.let { YouTube.authState = it }
     }
 
+    private suspend fun persistProvidedSessionRepair(
+        initialAuthState: PlaybackAuthState,
+        repairedAuthState: PlaybackAuthState,
+    ) {
+        val provider = sessionProvider ?: return
+        try {
+            provider.persistAuthRepair(initialAuthState, repairedAuthState)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            // Repair persistence is best-effort and must never turn a successful request into a failure.
+        }
+    }
+
     /**
      * Gives a desktop-owned session source a chance to revalidate or renew its credentials before
      * every suspendable backend operation. The default provider implementation is a no-op, so the
@@ -512,17 +543,33 @@ class ArchiveTuneJvmClient(
     private suspend fun prepareProvidedSession() {
         sessionProvider?.refreshIfNeeded()
         applyProvidedSession()
+        ensureSessionAuthContext(YouTube.currentPlaybackAuthState())
     }
 
     /**
      * A restored cookie-only session can be valid for account browse calls but lacks the selected
-     * YouTube channel context required by player clients. Derive it through ArchiveTune's existing
-     * account-switcher endpoint; values remain in memory and are never logged or persisted here.
+     * YouTube channel context required by player clients. Derive missing visitor/channel context and
+     * persist the repair through the desktop session provider.
      */
-    private suspend fun ensurePlaybackAuthContext(initial: PlaybackAuthState): PlaybackAuthState {
-        if (!initial.hasLoginCookie || initial.hasPlaybackLoginContext) return initial
-        val dataSyncId = YouTube.accountDataSyncId().getOrNull() ?: return initial
-        return initial.copy(dataSyncId = dataSyncId).normalized().also { YouTube.authState = it }
+    private suspend fun ensureSessionAuthContext(initial: PlaybackAuthState): PlaybackAuthState {
+        if (!initial.hasLoginCookie) return initial
+        var repaired = initial
+
+        if (repaired.visitorData.isNullOrBlank()) {
+            YouTube.visitorData().getOrNull()
+                ?.takeIf(String::isNotBlank)
+                ?.let { repaired = repaired.copy(visitorData = it).normalized() }
+        }
+        if (!repaired.hasPlaybackLoginContext) {
+            YouTube.accountDataSyncId().getOrNull()
+                ?.takeIf(String::isNotBlank)
+                ?.let { repaired = repaired.copy(dataSyncId = it).normalized() }
+        }
+        if (repaired.fingerprint != initial.fingerprint) {
+            YouTube.authState = repaired
+            persistProvidedSessionRepair(initial, repaired)
+        }
+        return repaired
     }
 
     private fun orderedStreamClients(authState: PlaybackAuthState): List<YouTubeClient> =
@@ -569,6 +616,16 @@ fun interface DesktopSessionProvider {
      * session, but should fail soft so an offline user can keep using the last verified state.
      */
     suspend fun refreshIfNeeded() = Unit
+
+    /**
+     * Persists non-cookie auth context repaired by core/backend work. Implementations should only
+     * accept repairs that still belong to [initialAuthState]'s login cookie and must never replace
+     * the cookie itself from this callback.
+     */
+    suspend fun persistAuthRepair(
+        initialAuthState: PlaybackAuthState,
+        repairedAuthState: PlaybackAuthState,
+    ) = Unit
 }
 
 enum class StreamResolutionFailureKind(val userMessage: String) {

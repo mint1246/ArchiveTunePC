@@ -283,6 +283,70 @@ class DesktopSessionManagerTest {
     }
 
     @Test
+    fun `core auth repair persists visitor and data sync without replacing other credentials`() = runBlocking {
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(
+                authState =
+                    PlaybackAuthState(
+                        cookie = "SAPISID=secret",
+                        visitorData = "visitor-old",
+                        dataSyncId = "sync-old",
+                        poToken = "po-old",
+                    ),
+                account = DesktopAccount("Example", null, null),
+                expiresAtEpochMillis = null,
+            ),
+        )
+        val manager = manager(store = store)
+        manager.restore()
+        val initial = manager.currentAuthState()
+
+        manager.persistAuthRepair(
+            initialAuthState = initial,
+            repairedAuthState =
+                initial.copy(
+                    visitorData = "visitor-new",
+                    dataSyncId = "sync-new",
+                    poToken = "po-should-not-be-persisted",
+                ),
+        )
+
+        val repaired = manager.currentAuthState()
+        assertEquals("SAPISID=secret", repaired.cookie)
+        assertEquals("visitor-new", repaired.visitorData)
+        assertEquals("sync-new", repaired.dataSyncId)
+        assertEquals("po-old", repaired.poToken)
+        val persisted = StoredDesktopSessionCodec.decode(store.value!!).authState
+        assertEquals("visitor-new", persisted.visitorData)
+        assertEquals("sync-new", persisted.dataSyncId)
+    }
+
+    @Test
+    fun `stale or cross-account auth repair cannot overwrite newer stored context`() = runBlocking {
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(
+                PlaybackAuthState(cookie = "SAPISID=secret", visitorData = "visitor-old", dataSyncId = "sync-old"),
+                DesktopAccount("Example", null, null),
+                null,
+            ),
+        )
+        val manager = manager(store = store)
+        manager.restore()
+        val initial = manager.currentAuthState()
+
+        manager.persistAuthRepair(initial, initial.copy(visitorData = "visitor-new", dataSyncId = "sync-new"))
+        manager.persistAuthRepair(initial, initial.copy(visitorData = "visitor-stale", dataSyncId = "sync-stale"))
+        manager.persistAuthRepair(initial, initial.copy(cookie = "SAPISID=other", visitorData = "visitor-other"))
+
+        val repaired = manager.currentAuthState()
+        assertEquals("visitor-new", repaired.visitorData)
+        assertEquals("sync-new", repaired.dataSyncId)
+        assertEquals("SAPISID=secret", repaired.cookie)
+    }
+
+    @Test
     fun `expired session can be renewed by an authorized cookie source`() = runBlocking {
         val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
         val store = MemoryStore()

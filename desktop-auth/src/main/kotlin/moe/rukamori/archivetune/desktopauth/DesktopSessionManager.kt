@@ -339,6 +339,55 @@ class DesktopSessionManager(
             ?.authState
             ?: PlaybackAuthState.EMPTY
 
+    override suspend fun persistAuthRepair(
+        initialAuthState: PlaybackAuthState,
+        repairedAuthState: PlaybackAuthState,
+    ) {
+        val initial = initialAuthState.normalized()
+        val repaired = repairedAuthState.normalized()
+        if (!initial.hasLoginCookie || initial.cookie != repaired.cookie) return
+
+        val repairedVisitorData =
+            repaired.visitorData
+                ?.takeIf { it.isNotBlank() && it != initial.visitorData }
+        val repairedDataSyncId =
+            repaired.dataSyncId
+                ?.takeIf { it.isNotBlank() && it != initial.dataSyncId }
+        if (repairedVisitorData == null && repairedDataSyncId == null) return
+
+        try {
+            synchronized(stateLock) {
+                val current = active ?: return
+                val currentAuthState = current.authState.normalized()
+                if (currentAuthState.cookie != initial.cookie) return
+
+                // A concurrent request may already have persisted a newer repair. Only replace a
+                // field when the stored value still matches this request's starting point.
+                val visitorData =
+                    repairedVisitorData
+                        ?.takeIf { currentAuthState.visitorData == initial.visitorData }
+                        ?: currentAuthState.visitorData
+                val dataSyncId =
+                    repairedDataSyncId
+                        ?.takeIf { currentAuthState.dataSyncId == initial.dataSyncId }
+                        ?: currentAuthState.dataSyncId
+                val mergedAuthState =
+                    currentAuthState
+                        .copy(
+                            visitorData = visitorData,
+                            dataSyncId = dataSyncId,
+                        ).normalized()
+                if (mergedAuthState.fingerprint == currentAuthState.fingerprint) return
+
+                val updated = current.copy(authState = mergedAuthState)
+                secureStore.write(StoredDesktopSessionCodec.encode(updated))
+                active = updated
+            }
+        } catch (_: SecureStoreUnavailableException) {
+            // Match Android's fail-soft auth repair: keep using the in-memory session.
+        }
+    }
+
     private fun stateFor(
         stored: StoredDesktopSession?,
         restored: Boolean,
