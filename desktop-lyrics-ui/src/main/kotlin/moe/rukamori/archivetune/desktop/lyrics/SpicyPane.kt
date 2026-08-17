@@ -613,7 +613,6 @@ private fun LyricScene(
 
     LaunchedEffect(lyrics, isPlaying) {
         var lastFrame = 0L
-        var lastActiveIndex = -1
         // Latest position sample from the player; the backend provides controlled timing samples.
         // times per second). Between samples we dead-reckon at wall-clock rate so the
         // sweep/bounce animate smoothly instead of freezing and jumping per sample.
@@ -625,7 +624,6 @@ private fun LyricScene(
             positionMsState.collect {
                 samplePos = it
                 sampleNanos = System.nanoTime()
-                LyricsFrameStats.recordSample()
             }
         }
         try {
@@ -641,8 +639,6 @@ private fun LyricScene(
                 withFrameNanos { now ->
                     val dt = if (lastFrame == 0L) 0.0167
                     else ((now - lastFrame) / 1e9).coerceIn(0.0, 0.1)
-                    val frameMs = (now - lastFrame) / 1_000_000.0
-                    if (isPlaying) LyricsFrameStats.recordFrame(LoopId.SCENE, now - lastFrame, now)
                     lastFrame = now
 
                     val elapsedSinceSample = ((System.nanoTime() - sampleNanos) / 1_000_000.0)
@@ -674,36 +670,12 @@ private fun LyricScene(
                         .coerceAtLeast(0)
                     if (newActive != activeIndexState.intValue) {
                         activeIndexState.intValue = newActive
-                        if (newActive != lastActiveIndex) {
-                            lastActiveIndex = newActive
-                            // Geometry (layout + glyph boxes) for new lines is prewarmed
-                            // ahead of time, so this transition frame stays cheap.
-                            LyricsFrameStats.logFrame(
-                                tag = "lyrics_new_line",
-                                frameMillis = frameMs.toFloat(),
-                                message = "active_line_change index=$newActive lines=${lyrics.lines.size}",
-                                nowNanos = now,
-                            )
-                        }
                     }
 
                     anchorSpring.setGoal(activeIndexState.intValue.toDouble())
                     anchorState.floatValue = anchorSpring.step(dt).toFloat()
 
                     positionState.longValue = interpolatedPos
-
-                    // Rolling telemetry: a compact line only when the window was
-                    // janky or stalled (quiet windows log nothing).
-                    if (isPlaying) {
-                        LyricsFrameStats.maybeEmitSummary(
-                            nowNanos = now,
-                            activeLines = lyrics.lines.size,
-                            activeWordLetterCount = lyrics.lines.getOrNull(newActive)?.let { line ->
-                                line.words.lastOrNull { interpolatedPos >= it.startMs }
-                                    ?.let { lettersOf(line, it).size } ?: 0
-                            } ?: 0,
-                        )
-                    }
                 }
             }
         } finally { observer.cancel() }
@@ -953,7 +925,6 @@ private fun ActiveLineText(
             withFrameNanos { now ->
                 val elapsedNanos = if (lastFrame == 0L) 16_666_667L else now - lastFrame
                 val dt = (elapsedNanos / 1e9).coerceIn(0.001, 0.10)
-                if (isPlaying) LyricsFrameStats.recordFrame(LoopId.ACTIVE_LINE, elapsedNanos, now)
                 lastFrame = now
 
                 val pos = positionState.value

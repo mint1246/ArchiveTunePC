@@ -19,11 +19,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -53,6 +55,9 @@ private const val BLUR_SIZE = 128
 
 /** Gaussian sigma that (with the multi-stage downscale) matches Kawarp's 8-pass Kawase blur. */
 private const val BLUR_SIGMA = 10f
+
+/** Keep the ambient shader at 60 fps even on high-refresh desktop displays. */
+private const val BACKGROUND_FRAME_INTERVAL_NANOS = 1_000_000_000L / 60L
 
 /** The domain-warp SkSL source (exposed for the compile smoke test). */
 internal fun kawarpShaderSource(): String = """
@@ -135,37 +140,55 @@ private fun makeColourField(uri: String): Image? {
     return runCatching {
         val bytes = URI(uri).toURL().readBytes()
         var image = Image.makeFromEncoded(bytes)
-        val srcW = image.width
-        val srcH = image.height
-        if (srcW <= 0 || srcH <= 0) return null
+        try {
+            if (image.width <= 0 || image.height <= 0) return null
 
-        // Repeatedly halve for proper area averaging until close to the target size.
-        while (image.width > BLUR_SIZE * 2 || image.height > BLUR_SIZE * 2) {
-            val w = maxOf(1, image.width / 2)
-            val h = maxOf(1, image.height / 2)
-            val bmp = Bitmap().apply { allocPixels(ImageInfo.makeN32Premul(w, h)) }
-            Canvas(bmp).drawImageRect(
-                image,
-                Rect.makeXYWH(0f, 0f, image.width.toFloat(), image.height.toFloat()),
-                Rect.makeXYWH(0f, 0f, w.toFloat(), h.toFloat()),
-                SamplingMode.LINEAR, null, false,
-            )
-            image = Image.makeFromBitmap(bmp)
-        }
+            // Repeatedly halve for proper area averaging until close to the target size.
+            while (image.width > BLUR_SIZE * 2 || image.height > BLUR_SIZE * 2) {
+                val w = maxOf(1, image.width / 2)
+                val h = maxOf(1, image.height / 2)
+                val next = Bitmap().use { bmp ->
+                    bmp.allocPixels(ImageInfo.makeN32Premul(w, h))
+                    Canvas(bmp).use { canvas ->
+                        canvas.drawImageRect(
+                            image,
+                            Rect.makeXYWH(0f, 0f, image.width.toFloat(), image.height.toFloat()),
+                            Rect.makeXYWH(0f, 0f, w.toFloat(), h.toFloat()),
+                            SamplingMode.LINEAR,
+                            null,
+                            false,
+                        )
+                    }
+                    Image.makeFromBitmap(bmp)
+                }
+                image.close()
+                image = next
+            }
 
-        // Final squish to a square colour field with a heavy Gaussian blur so the
-        // album art becomes an unrecognisable, smooth colour field.
-        val target = Bitmap().apply { allocPixels(ImageInfo.makeN32Premul(BLUR_SIZE, BLUR_SIZE)) }
-        val paint = Paint().apply {
-            imageFilter = ImageFilter.makeBlur(BLUR_SIGMA, BLUR_SIGMA, FilterTileMode.CLAMP, null, null)
+            // Final squish to a square colour field with a heavy Gaussian blur so the
+            // album art becomes an unrecognisable, smooth colour field.
+            Bitmap().use { target ->
+                target.allocPixels(ImageInfo.makeN32Premul(BLUR_SIZE, BLUR_SIZE))
+                ImageFilter.makeBlur(BLUR_SIGMA, BLUR_SIGMA, FilterTileMode.CLAMP, null, null).use { blur ->
+                    Paint().use { paint ->
+                        paint.imageFilter = blur
+                        Canvas(target).use { canvas ->
+                            canvas.drawImageRect(
+                                image,
+                                Rect.makeXYWH(0f, 0f, image.width.toFloat(), image.height.toFloat()),
+                                Rect.makeXYWH(0f, 0f, BLUR_SIZE.toFloat(), BLUR_SIZE.toFloat()),
+                                SamplingMode.LINEAR,
+                                paint,
+                                false,
+                            )
+                        }
+                    }
+                }
+                Image.makeFromBitmap(target)
+            }
+        } finally {
+            image.close()
         }
-        Canvas(target).drawImageRect(
-            image,
-            Rect.makeXYWH(0f, 0f, image.width.toFloat(), image.height.toFloat()),
-            Rect.makeXYWH(0f, 0f, BLUR_SIZE.toFloat(), BLUR_SIZE.toFloat()),
-            SamplingMode.LINEAR, paint, false,
-        )
-        Image.makeFromBitmap(target)
     }.getOrNull()
 }
 
@@ -173,10 +196,12 @@ private fun makeColourField(uri: String): Image? {
 fun VibrantLyricsBackground(
     artworkUri: String?,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = true,
 ) {
     var effect by remember { mutableStateOf<RuntimeEffect?>(null) }
     var childShader by remember { mutableStateOf<Shader?>(null) }
     var time by remember { mutableFloatStateOf(0f) }
+    val playing by rememberUpdatedState(isPlaying)
 
     // Compile the shader once.
     LaunchedEffect(Unit) {
@@ -188,28 +213,47 @@ fun VibrantLyricsBackground(
     // Load artwork when the URI changes and build the child colour-field shader.
     LaunchedEffect(artworkUri) {
         val url = resolveCoverUrl(artworkUri)
-        if (url == null) {
-            childShader = null
+        val next = if (url == null) {
+            null
         } else {
-            val img = withContext(Dispatchers.IO) { makeColourField(url) }
-            childShader = img?.makeShader(
-                FilterTileMode.CLAMP,
-                FilterTileMode.CLAMP,
-                SamplingMode.LINEAR,
-                null,
-            )
+            withContext(Dispatchers.IO) { makeColourField(url) }?.use { img ->
+                img.makeShader(
+                    FilterTileMode.CLAMP,
+                    FilterTileMode.CLAMP,
+                    SamplingMode.LINEAR,
+                    null,
+                )
+            }
+        }
+        val previous = childShader
+        childShader = next
+        previous?.close()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            childShader?.close()
+            effect?.close()
         }
     }
 
-    // Advance the warp clock.
+    // Advance the warp clock. Paused playback freezes the flow instead of burning
+    // a full-screen RuntimeShader rebuild every frame.
     LaunchedEffect(Unit) {
-        var last = 0L
+        var lastRendered = 0L
         while (true) {
             withFrameNanos { now ->
-                if (last != 0L) {
-                    time += ((now - last) / 1e9f).toFloat()
+                if (lastRendered == 0L) {
+                    lastRendered = now
+                    return@withFrameNanos
                 }
-                last = now
+
+                if (!playing) {
+                    lastRendered = now
+                } else if (now - lastRendered >= BACKGROUND_FRAME_INTERVAL_NANOS) {
+                    time += ((now - lastRendered) / 1e9f).toFloat()
+                    lastRendered = now
+                }
             }
         }
     }
@@ -222,14 +266,15 @@ fun VibrantLyricsBackground(
                 val e = effect
                 val child = childShader
                 if (e != null && child != null && size.width > 0 && size.height > 0) {
-                    val builder = RuntimeShaderBuilder(e)
-                    builder.uniform("time", time)
-                    builder.uniform("resolution", size.width.toFloat(), size.height.toFloat())
-                    builder.uniform("saturation", 3.75f)
-                    builder.child("content", child)
-                    val skiaShader = builder.makeShader(null)
-                    val composeShader = skiaShader.asComposeShader()
-                    drawRect(brush = ShaderBrush(composeShader))
+                    RuntimeShaderBuilder(e).use { builder ->
+                        builder.uniform("time", time)
+                        builder.uniform("resolution", size.width.toFloat(), size.height.toFloat())
+                        builder.uniform("saturation", 3.75f)
+                        builder.child("content", child)
+                        builder.makeShader(null).use { skiaShader ->
+                            drawRect(brush = ShaderBrush(skiaShader.asComposeShader()))
+                        }
+                    }
                 } else {
                     // Fallback gradient when there is no artwork yet.
                     drawRect(

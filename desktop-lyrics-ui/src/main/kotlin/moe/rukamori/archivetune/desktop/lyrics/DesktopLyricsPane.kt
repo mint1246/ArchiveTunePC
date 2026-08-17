@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,6 +73,11 @@ import moe.rukamori.archivetune.lyrics.LyricsRequest
  */
 @Composable
 fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Modifier) {
+    DisposableEffect(presenter) {
+        presenter.setActive(true)
+        onDispose { presenter.setActive(false) }
+    }
+
     val state by presenter.state.collectAsState()
     val searchState by presenter.searchState.collectAsState()
     val playback by presenter.playbackState.collectAsState()
@@ -87,7 +93,7 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
     }
 
     Box(modifier.fillMaxSize()) {
-        VibrantLyricsBackground(artworkUri = artwork)
+        VibrantLyricsBackground(artworkUri = artwork, isPlaying = playback.isPlaying)
         Column(Modifier.fillMaxSize()) {
             HeaderRow(
                 title = playback.currentItem?.metadata?.title ?: "Lyrics",
@@ -134,6 +140,7 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
                                 artworkUri = artwork,
                                 modifier = Modifier.fillMaxSize(),
                                 onSeek = { presenter.seekToMs(it) },
+                                isPlaying = playback.isPlaying,
                             )
                         } else {
                             SimpleLyricsView(

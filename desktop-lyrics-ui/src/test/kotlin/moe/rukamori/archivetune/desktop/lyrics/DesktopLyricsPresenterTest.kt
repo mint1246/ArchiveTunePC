@@ -42,12 +42,37 @@ class DesktopLyricsPresenterTest {
         advanceUntilIdle()
         val ready = presenter.state.value as DesktopLyricsState.Ready
         assertEquals(1, ready.activeLineIndex)
+        // The active line index is computed when the document loads; live playback
+        // position streams through positionMsFlow for the per-frame animator.
         playback.state.value = playback.state.value.copy(positionMs = 100)
         advanceUntilIdle()
-        assertEquals(0, (presenter.state.value as DesktopLyricsState.Ready).activeLineIndex)
+        assertEquals(100L, presenter.positionMsFlow.value)
         playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
         advanceUntilIdle()
         assertEquals(1, requests)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `inactive presenter defers provider lookup until lyrics surface activates`() = runTest {
+        var requests = 0
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider {
+            requests++
+            "[00:00]Loaded on demand"
+        })))
+        val presenter = DesktopLyricsPresenter(playback, client, this, initiallyActive = false)
+        val item = PlaybackItem(PlaybackMetadata(id = "id", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
+
+        advanceUntilIdle()
+        assertEquals(0, requests)
+        assertTrue(presenter.state.value is DesktopLyricsState.Idle)
+
+        presenter.setActive(true)
+        advanceUntilIdle()
+        assertEquals(1, requests)
+        assertTrue(presenter.state.value is DesktopLyricsState.Ready)
         presenter.close()
     }
 

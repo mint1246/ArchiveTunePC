@@ -1,8 +1,6 @@
 package moe.rukamori.archivetune.desktop.platform
 
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
-import moe.rukamori.archivetune.innertube.StreamResolutionDiagnostic
-import moe.rukamori.archivetune.innertube.StreamResolutionDiagnosticSink
 import moe.rukamori.archivetune.innertube.StreamResolutionFailureKind
 import moe.rukamori.archivetune.innertube.classifyStreamResolutionFailure
 import moe.rukamori.archivetune.desktopauth.ArchiveTuneSessionVerifier
@@ -40,6 +38,7 @@ import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -55,10 +54,7 @@ import kotlinx.coroutines.flow.asStateFlow
 class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable {
     private val settings = runtime.settings
     val settingsStore get() = settings
-    val backend = ArchiveTuneJvmClient(
-        runtime.paths.cache.resolve("cipher").toFile().also(File::mkdirs),
-        streamDiagnostics = StreamResolutionDiagnosticSink(::logStreamDiagnostic),
-    )
+    val backend = ArchiveTuneJvmClient(runtime.paths.cache.resolve("cipher").toFile().also(File::mkdirs))
     /** The backend consults this provider immediately before each request, including downloads. */
     val account = DesktopSessionManager(
         secureStore = DpapiFileSessionStore(runtime.paths.data.resolve("youtube-session.dpapi")),
@@ -69,9 +65,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private val resolvedSourceCache = ConcurrentHashMap<String, CachedResolvedSource>()
     val playback = VlcjPlaybackController(PlaybackSourceResolver { item -> resolve(item) })
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
-    private val lyricsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val lyricsClient = configuredLyricsClient()
-    val lyrics = DesktopLyricsPresenter(playback, lyricsClient, lyricsScope)
+    private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    private val lyricsPresenter = lazy {
+        DesktopLyricsPresenter(playback, configuredLyricsClient(), lyricsScope.value, initiallyActive = false)
+    }
+    val lyrics: DesktopLyricsPresenter
+        get() = lyricsPresenter.value
     private val legacyLibraryFile = runtime.paths.data.resolve("local-library.properties")
     val library = DesktopLibrary(legacyLibraryFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
     /** Account-scoped personalization data for the Home surface (synced + recorded locally). */
@@ -96,8 +95,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         account.restore()
         runtime.applicationScope.launch {
             account.refreshRestoredSession()
-            syncHomeLibrary()
-            loadSimilarRecommendations()
         }
         startPlayHistoryRecorder()
         startHomeSyncObserver()
@@ -250,11 +247,16 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     private fun startHomeSyncObserver() {
         runtime.applicationScope.launch {
-            account.state.collect { state ->
-                if (state is DesktopAccountState.SignedIn) {
+            account.state
+                .map { state -> (state as? DesktopAccountState.SignedIn)?.account }
+                .distinctUntilChanged()
+                .collectLatest { signedInAccount ->
+                if (signedInAccount != null) {
                     syncHomeLibrary()
+                    loadSimilarRecommendations()
                 } else {
                     homeStore.clearAccountData()
+                    _similarRecommendations.value = emptyList()
                 }
             }
         }
@@ -331,18 +333,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         resolvedSourceCache[key] = CachedResolvedSource(source, account.currentAuthState().fingerprint)
     }
 
-    private fun logStreamDiagnostic(event: StreamResolutionDiagnostic) {
-        when (event) {
-            is StreamResolutionDiagnostic.AuthStateChange -> runtime.logger.warning("auth_state_change source=${event.source} previous=${event.previous.toLogString()} next=${event.next.toLogString()}")
-            is StreamResolutionDiagnostic.Attempt -> runtime.logger.info("stream_resolution event=attempt client=${event.client} result=${event.classification.name} status=${event.httpStatus ?: "none"} auth=${event.authState.toLogString()}")
-            is StreamResolutionDiagnostic.FormatAttempt -> runtime.logger.info("stream_resolution event=format client=${event.client} format=${event.format} result=${event.classification.name}")
-            is StreamResolutionDiagnostic.PlayerResponse -> runtime.logger.info("stream_resolution event=player client=${event.client} status=${event.status} adaptive=${event.adaptiveFormats} audio=${event.audioFormats} direct=${event.directUrls} cipher=${event.ciphers}")
-            is StreamResolutionDiagnostic.LibraryResponse -> runtime.logger.info("library_response single_tabs=${event.singleTabs} two_tabs=${event.twoColumnTabs} direct_sections=${event.directSections} secondary_sections=${event.secondarySections} selected_sections=${event.selectedSections} renderer_items=${event.rendererItems} parsed_items=${event.parsedItems} renderer_keys=${event.rendererKeys.joinToString(",")}")
-            is StreamResolutionDiagnostic.Success -> runtime.logger.info("stream_resolution event=success client=${event.client} auth=${event.authState.toLogString()}")
-            is StreamResolutionDiagnostic.Failure -> runtime.logger.warning("stream_resolution event=failure result=${event.classification.name} status=${event.httpStatus ?: "none"} auth=${event.authState.toLogString()}")
-        }
-    }
-
     override fun close() {
         val state = playback.state.value
         flushPlayHistoryCurrent(System.currentTimeMillis())
@@ -355,8 +345,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 shuffleEnabled = state.shuffleEnabled,
             )
         }
-        lyrics.close()
-        lyricsScope.cancel()
+        if (lyricsPresenter.isInitialized()) {
+            lyricsPresenter.value.close()
+            lyricsScope.value.cancel()
+        }
         windowsMediaControls?.close()
         albumIndex.close()
         playback.close()

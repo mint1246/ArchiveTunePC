@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -52,6 +53,7 @@ class DesktopLyricsPresenter(
     private val lyricsClient: JvmLyricsClient,
     private val scope: CoroutineScope,
     cacheSize: Int = 24,
+    initiallyActive: Boolean = true,
 ) : AutoCloseable {
     private val cache = object : LinkedHashMap<String, LyricsDocument>(cacheSize, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LyricsDocument>?) = size > cacheSize
@@ -67,28 +69,32 @@ class DesktopLyricsPresenter(
     val positionMsFlow: StateFlow<Long> = _positionMs.asStateFlow()
     private var searchJob: Job? = null
     private val loadGeneration = AtomicLong()
+    private val active = MutableStateFlow(initiallyActive)
     private val itemJob: Job = scope.launch {
-        playback.state.map { it.currentItem }.distinctUntilChanged().collectLatest { item ->
-            if (item == null) {
-                loadGeneration.incrementAndGet()
+        active.combine(
+            playback.state.map { it.currentItem }.distinctUntilChanged(),
+        ) { isActive, item -> isActive to item }
+            .collectLatest { (isActive, item) ->
+                if (!isActive) {
+                    loadGeneration.incrementAndGet()
+                    searchJob?.cancel()
+                    return@collectLatest
+                }
+                if (item == null) {
+                    loadGeneration.incrementAndGet()
+                    searchJob?.cancel()
+                    _state.value = DesktopLyricsState.Idle
+                    _searchState.value = DesktopLyricsSearchState()
+                    return@collectLatest
+                }
                 searchJob?.cancel()
-                _state.value = DesktopLyricsState.Idle
-                _searchState.value = DesktopLyricsSearchState()
-                return@collectLatest
+                _searchState.value = DesktopLyricsSearchState(item.metadata.id, item.toLyricsRequestOrNull())
+                load(item, playback.state.value.positionMs, loadGeneration.incrementAndGet())
             }
-            searchJob?.cancel()
-            _searchState.value = DesktopLyricsSearchState(item.metadata.id, item.toLyricsRequestOrNull())
-            load(item, playback.state.value.positionMs, loadGeneration.incrementAndGet())
-        }
     }
     private val positionJob: Job = scope.launch {
         playback.state.collectLatest { snapshot ->
-            val pos = snapshot.positionMs
-            _positionMs.value = pos
-            val ready = _state.value as? DesktopLyricsState.Ready ?: return@collectLatest
-            if (snapshot.currentItem?.metadata?.id == ready.itemId) {
-                _state.value = ready.copy(activeLineIndex = ready.timeline.activeLineIndex(pos))
-            }
+            _positionMs.value = snapshot.positionMs
         }
     }
 
@@ -154,12 +160,14 @@ class DesktopLyricsPresenter(
 
     /** Re-runs provider lookup for the current item after an Empty/Error state. */
     fun retry() {
+        if (!active.value) return
         val item = playback.state.value.currentItem ?: return
         val generation = loadGeneration.incrementAndGet()
         scope.launch { load(item, playback.state.value.positionMs, generation) }
     }
 
     fun search(request: LyricsRequest) {
+        if (!active.value) return
         val item = playback.state.value.currentItem ?: return
         val itemId = item.metadata.id
         searchJob?.cancel()
@@ -200,6 +208,7 @@ class DesktopLyricsPresenter(
     }
 
     fun select(result: LyricsProviderSearchResult): Boolean {
+        if (!active.value) return false
         val item = playback.state.value.currentItem ?: return false
         val document = result.document ?: return false
         loadGeneration.incrementAndGet()
@@ -219,6 +228,16 @@ class DesktopLyricsPresenter(
     fun seekToMs(positionMs: Long) {
         if (positionMs < 0L) return
         scope.launch { playback.seekTo(positionMs) }
+    }
+
+    /**
+     * Provider lookup is expensive and opens several HTTP engines. The desktop shell keeps the
+     * presenter alive for the full process lifetime, so only do network work while lyrics are
+     * actually visible. Re-activating immediately refreshes the current track through the flow
+     * above (and serves it from the presenter cache when available).
+     */
+    fun setActive(isActive: Boolean) {
+        active.value = isActive
     }
 
     override fun close() {

@@ -16,11 +16,9 @@ import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.DesktopSessionProvider
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.models.AccountInfo
-import moe.rukamori.archivetune.innertube.redacted
 import java.awt.Desktop
 import java.net.URI
 import java.time.Clock
-import java.util.logging.Logger
 
 /**
  * Desktop account lifecycle. Secret cookie, visitor and token values never appear in this state.
@@ -127,9 +125,7 @@ data class VerifiedDesktopSession(
 
 private sealed interface VerificationResult {
     data class Verified(val session: VerifiedDesktopSession) : VerificationResult
-
-    /** [authRejected] is true when the cookie was rejected by the server, false for transient/network failures. */
-    data class Rejected(val authRejected: Boolean) : VerificationResult
+    data object Rejected : VerificationResult
 }
 
 class ArchiveTuneSessionVerifier(
@@ -162,7 +158,6 @@ class DesktopSessionManager(
     private val refreshIntervalMillis: Long = DEFAULT_REFRESH_INTERVAL_MILLIS,
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
 ) : DesktopSessionProvider {
-    private val logger = Logger.getLogger("moe.rukamori.archivetune.desktop")
     private val refreshMutex = Mutex()
     private val stateLock = Any()
     @Volatile
@@ -268,9 +263,6 @@ class DesktopSessionManager(
             // because this probe rejects it.
             val verification = verifySafely(current.authState)
             if (verification is VerificationResult.Verified && persistVerified(current, verification.session, current.expiresAtEpochMillis)) {
-                logger.info(
-                    "session_refresh outcome=verified auth=${verification.session.authState.redacted().toLogString()}",
-                )
                 return@withLock true
             }
 
@@ -291,11 +283,6 @@ class DesktopSessionManager(
                 if (active?.authState?.fingerprint == current.authState.fingerprint) {
                     lastValidationAtEpochMillis = now
                 }
-            }
-            if (verification is VerificationResult.Rejected && verification.authRejected) {
-                logger.warning(
-                    "session_refresh outcome=auth_probe_rejected_preserved auth=${current.authState.redacted().toLogString()}",
-                )
             }
             false
         }
@@ -346,9 +333,6 @@ class DesktopSessionManager(
     fun logout(): Result<Unit> =
         try {
             synchronized(stateLock) {
-                logger.info(
-                    "session_logout auth=${active?.authState?.redacted()?.toLogString() ?: "none"}",
-                )
                 secureStore.delete()
                 active = null
                 knownExpired = false
@@ -392,12 +376,12 @@ class DesktopSessionManager(
         try {
             verifier.verify(candidate).fold(
                 onSuccess = { VerificationResult.Verified(it) },
-                onFailure = { VerificationResult.Rejected(isAuthRejection(it)) },
+                onFailure = { VerificationResult.Rejected },
             )
         } catch (cancellation: CancellationException) {
             throw cancellation
-        } catch (failure: Exception) {
-            VerificationResult.Rejected(isAuthRejection(failure))
+        } catch (_: Exception) {
+            VerificationResult.Rejected
         }
 
     private suspend fun requestCookieReplacement(
@@ -434,11 +418,6 @@ class DesktopSessionManager(
             synchronized(stateLock) {
                 if (active?.authState?.fingerprint != previous.authState.fingerprint) return false
                 secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
-                logger.info(
-                    "session_persist auth_changed=${previous.authState.fingerprint != verifiedAuthState.fingerprint} " +
-                        "previous=${previous.authState.redacted().toLogString()} " +
-                        "next=${verifiedAuthState.redacted().toLogString()}",
-                )
                 active = refreshed
                 knownExpired = false
                 lastValidationAtEpochMillis = clock.millis()
@@ -491,22 +470,6 @@ private fun SessionImportResult.asCookieJsonResult(): CookieJsonSessionImportRes
         is SessionImportResult.Success -> CookieJsonSessionImportResult.Success(account)
         is SessionImportResult.Rejected -> CookieJsonSessionImportResult.SessionRejected(reason)
     }
-
-/**
- * Distinguishes a concrete server-side auth rejection (dead cookie) from transient failures.
- * Ktor wraps a rejected request in `ClientRequestException`; a 200 response that lacks the signed-in
- * account renders as the "not be logged in" parse failure. Everything else (network, timeouts,
- * server errors) is deliberately treated as non-terminal so offline users keep their last session.
- */
-private fun isAuthRejection(failure: Throwable): Boolean {
-    val causes = generateSequence(failure) { it.cause }.toList() + failure.suppressed.toList()
-    return causes.any { cause ->
-        val name = cause::class.simpleName.orEmpty()
-        val message = cause.message.orEmpty()
-        (name.contains("ClientRequestException", ignoreCase = true) && Regex("\\b(401|403)\\b").containsMatchIn(message)) ||
-            message.contains("not be logged in", ignoreCase = true)
-    }
-}
 
 data class DesktopSessionDiagnostic(
     val signedIn: Boolean,

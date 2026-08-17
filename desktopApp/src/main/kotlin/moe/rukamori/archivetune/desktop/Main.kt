@@ -31,6 +31,9 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
@@ -50,6 +53,7 @@ import kotlin.math.min
 fun main() {
     System.setProperty("awt.useSystemAAFontSettings", "lcd")
     System.setProperty("swing.aatext", "true")
+    configureDesktopImageLoader()
     val runtime = DesktopRuntime.start()
     val musicServices = runtime.own(DesktopMusicServices(runtime))
     val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
@@ -171,6 +175,24 @@ fun main() {
     }
 }
 
+/**
+ * Coil's generic JVM defaults are intentionally broad. Album-heavy screens can otherwise retain
+ * far more decoded native Skia pixels than a music client needs, especially on machines where the
+ * JVM reports a very large available heap. Keep a useful hot artwork set without allowing the
+ * image cache to become a major part of ArchiveTune's idle working set.
+ */
+private fun configureDesktopImageLoader() {
+    SingletonImageLoader.setSafe { context ->
+        ImageLoader.Builder(context)
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizeBytes(DESKTOP_IMAGE_MEMORY_CACHE_BYTES)
+                    .build()
+            }
+            .build()
+    }
+}
+
 private fun DesktopWindowPlacement.asWindowPosition(): WindowPosition {
     val x = xDp
     val y = yDp
@@ -200,13 +222,24 @@ private fun hasVisibleTitlebar(x: Float, y: Float): Boolean = runCatching {
 
 private const val MIN_VISIBLE_TITLEBAR_WIDTH_DP = 96f
 private const val MIN_VISIBLE_TITLEBAR_HEIGHT_DP = 32f
+private const val DESKTOP_IMAGE_MEMORY_CACHE_BYTES = 64L * 1024L * 1024L
 
 private fun DesktopLastDestination.asDesktopDestination(): DesktopDestination = DesktopDestination.valueOf(name)
 
 private fun DesktopDestination.asSettingsDestination(): DesktopLastDestination = DesktopLastDestination.valueOf(name)
 
 private fun DesktopThemeMode.asDesktopThemePreference() =
-    moe.rukamori.archivetune.desktop.state.DesktopThemePreference.valueOf(name)
+    when (this) {
+        DesktopThemeMode.SYSTEM -> moe.rukamori.archivetune.desktop.state.DesktopThemePreference.SYSTEM
+        DesktopThemeMode.LIGHT -> moe.rukamori.archivetune.desktop.state.DesktopThemePreference.LIGHT
+        DesktopThemeMode.DARK -> moe.rukamori.archivetune.desktop.state.DesktopThemePreference.DARK
+        DesktopThemeMode.DYNAMIC -> moe.rukamori.archivetune.desktop.state.DesktopThemePreference.DYNAMIC
+    }
 
 private fun moe.rukamori.archivetune.desktop.state.DesktopThemePreference.asSettingsThemeMode(): DesktopThemeMode =
-    DesktopThemeMode.valueOf(name)
+    when (this) {
+        moe.rukamori.archivetune.desktop.state.DesktopThemePreference.SYSTEM -> DesktopThemeMode.SYSTEM
+        moe.rukamori.archivetune.desktop.state.DesktopThemePreference.LIGHT -> DesktopThemeMode.LIGHT
+        moe.rukamori.archivetune.desktop.state.DesktopThemePreference.DARK -> DesktopThemeMode.DARK
+        moe.rukamori.archivetune.desktop.state.DesktopThemePreference.DYNAMIC -> DesktopThemeMode.DYNAMIC
+    }

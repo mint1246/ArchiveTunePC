@@ -44,7 +44,7 @@ class SpicyPaneGlyphTest {
         )
 
     private fun geometryOf(text: String, line: CharLine, maxWidth: Int = 800) =
-        LineTextGeometry.build(measure(text, maxWidth), line)
+        LineTextGeometry.build(measure(text, maxWidth), line, measurer, style)
 
     private fun lineOf(text: String, words: List<Pair<String, Long>>) = CharLine(
         chars = emptyList(),
@@ -268,5 +268,28 @@ class SpicyPaneGlyphTest {
 
         val geometry = geometryOf(text, line)
         assertTrue(geometry.wordLetters[1][0].width > 0f)
+    }
+
+    @Test
+    fun wordStatesKeepCompletedInlineWordsBrightDuringGaps() {
+        val line = lineOf(
+            "one two",
+            listOf("one" to 0L, "two" to 2_000L),
+        )
+        val words = line.words
+
+        assertEquals(WordState.ACTIVE, wordStateAt(500L, words[0]))
+        assertEquals(WordState.SUNG, wordStateAt(1_500L, words[0]))
+        assertEquals(WordState.NOT_SUNG, wordStateAt(1_500L, words[1]))
+        assertEquals(-1, activeWordIndexAt(1_500L, words))
+    }
+
+    @Test
+    fun activeWordIndexDoesNotTreatFutureWordsAsActive() {
+        val line = lineOf("one two", listOf("one" to 0L, "two" to 2_000L))
+
+        assertEquals(-1, activeWordIndexAt(-1L, line.words))
+        assertEquals(0, activeWordIndexAt(500L, line.words))
+        assertEquals(1, activeWordIndexAt(2_500L, line.words))
     }
 }
