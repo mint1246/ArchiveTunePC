@@ -349,7 +349,7 @@ class VlcjPlaybackController(
     override suspend fun moveQueueItem(fromIndex: Int, toIndex: Int) {
         checkOpen()
         commandMutex.withLock {
-            queue.move(fromIndex, toIndex)
+            queue.moveVisual(fromIndex, toIndex)
             publishQueueLocked()
         }
     }

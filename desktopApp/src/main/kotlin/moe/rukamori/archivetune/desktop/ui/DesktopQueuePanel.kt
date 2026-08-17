@@ -83,8 +83,8 @@ import kotlin.math.floor
 private val QueueRowHeight = 56.dp
 
 /**
- * The "up next" queue panel. Renders the queue the same way the Android queue sheet does: the
- * current item first, upcoming items in play order, and already-played items at the bottom.
+ * The "up next" queue panel. Renders the queue the same way the Android queue sheet does: previous
+ * traversal items before the current item and upcoming traversal items after it.
  */
 @Composable
 fun DesktopQueuePanel(

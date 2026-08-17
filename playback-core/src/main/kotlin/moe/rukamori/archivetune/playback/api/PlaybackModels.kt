@@ -58,8 +58,8 @@ data class PlaybackItem(
 )
 
 /**
- * One row of the queue as rendered by the UI, in logical (album/playlist) order. The current item
- * is highlighted in place; played tracks stay before it and upcoming tracks after it.
+ * One row of the queue as rendered by the UI. Row order mirrors Android `getQueueWindows()`:
+ * logical album/playlist order normally and shuffle traversal order while shuffled.
  */
 data class PlaybackQueueEntry(
     /** Stable identity token. Survives reorder and disambiguates duplicate tracks. */
@@ -116,7 +116,7 @@ data class PlaybackFailure(
 
 data class PlaybackSnapshot(
     val queue: List<PlaybackItem> = emptyList(),
-    /** Queue rows in logical order, each carrying a stable identity. See [PlaybackQueueEntry]. */
+    /** Queue rows in Android/Media3 queue-sheet order. See [PlaybackQueueEntry]. */
     val queueEntries: List<PlaybackQueueEntry> = emptyList(),
     val queueTitle: String? = null,
     val currentIndex: Int = -1,

@@ -91,9 +91,7 @@ class PlaybackQueue(
         val newEntries = items.map { Entry(nextToken++, it) }
         entries += newEntries
         if (shuffleEnabled) {
-            // Media3 appends newly added items at the end of the shuffle order rather than
-            // interleaving them, so appended tracks play after everything already queued.
-            playOrder += newEntries.map(Entry::token)
+            insertIntoShuffleOrderLikeMedia3(newEntries.map(Entry::token))
         } else {
             syncLinearOrder()
         }
@@ -154,9 +152,20 @@ class PlaybackQueue(
     }
 
     /**
+     * Reorders queue rows the way the Android queue sheet does: logical order when shuffle is off,
+     * shuffle traversal order when shuffle is on.
+     */
+    fun moveVisual(fromVisual: Int, toVisual: Int): Mutation =
+        if (shuffleEnabled) {
+            moveInPlayOrder(fromVisual, toVisual)
+        } else {
+            move(fromVisual, toVisual)
+        }
+
+    /**
      * Reorders the traversal (shuffle) order only, keeping the logical list untouched. [fromVisual]
-     * and [toVisual] are positions in [visualTokens] (the current item is position zero). Used when
-     * a shuffled queue needs an existing item moved without changing the album/playlist ordering.
+     * and [toVisual] are positions in [visualTokens], matching Android's `getQueueWindows()` order.
+     * Used when a shuffled queue needs an existing item moved without changing album/playlist order.
      */
     fun moveInPlayOrder(fromVisual: Int, toVisual: Int): Mutation {
         val size = playOrder.size
@@ -187,8 +196,10 @@ class PlaybackQueue(
         if (shuffleEnabled) {
             val token = entries[index].token
             val sourceVisual = visualTokens().indexOf(token)
-            if (sourceVisual <= 0) return Mutation(false, selection())
-            return moveInPlayOrder(sourceVisual, 1)
+            if (sourceVisual < 0 || sourceVisual == cursor) return Mutation(false, selection())
+            val destinationVisual = (cursor + 1).coerceAtMost(playOrder.lastIndex)
+            if (sourceVisual == destinationVisual) return Mutation(false, selection())
+            return moveInPlayOrder(sourceVisual, destinationVisual)
         }
 
         val destination = (currentIndex + 1).coerceAtMost(entries.lastIndex)
@@ -215,32 +226,36 @@ class PlaybackQueue(
     }
 
     /**
-     * The queue's tokens in visual order: current first, then upcoming in play order, then
-     * already-played items. Equivalent to `Player.getQueueWindows()` on Android.
+     * The queue's tokens in visual order, equivalent to `Player.getQueueWindows()` on Android:
+     * already-played traversal entries first, then current, then upcoming traversal entries.
      */
-    fun visualTokens(): List<Long> {
-        if (playOrder.isEmpty()) return emptyList()
-        return buildList(playOrder.size) {
-            for (i in cursor until playOrder.size) add(playOrder[i])
-            for (i in 0 until cursor) add(playOrder[i])
-        }
-    }
+    fun visualTokens(): List<Long> = playOrder.toList()
 
     /**
-     * The queue's rows in logical order, exposing stable identity tokens for the UI to key rows on.
-     * Played tracks therefore remain visible before the current item instead of being rotated to
-     * the end of the list.
+     * Queue rows in the same order Android exposes through `Player.getQueueWindows()`. With shuffle
+     * disabled this is logical album/playlist order. With shuffle enabled this is traversal order.
+     * [PlaybackQueueEntry.logicalIndex] remains the Media3-style logical media item index used by
+     * seek/remove/play-next operations.
      */
     fun entries(): List<PlaybackQueueEntry> {
         val currentToken = currentToken
-        return entries.mapIndexed { index, entry ->
-            PlaybackQueueEntry(entry.token, entry.item, index, entry.token == currentToken)
+        return visualTokens().mapNotNull { token ->
+            val index = entries.indexOfFirst { it.token == token }
+            entries.getOrNull(index)?.let { entry ->
+                PlaybackQueueEntry(entry.token, entry.item, index, entry.token == currentToken)
+            }
         }
     }
 
     fun select(index: Int): Selection {
         require(index in entries.indices) { "Queue index $index is out of bounds" }
-        rebuildPlayOrder(entries[index].token)
+        val token = entries[index].token
+        val playOrderIndex = playOrder.indexOf(token)
+        if (playOrderIndex >= 0) {
+            cursor = playOrderIndex
+        } else {
+            rebuildPlayOrder(token)
+        }
         return requireNotNull(selection())
     }
 
@@ -291,7 +306,14 @@ class PlaybackQueue(
         if (shuffleEnabled == enabled) return
         val token = currentToken
         shuffleEnabled = enabled
-        if (token != null) rebuildPlayOrder(token)
+        if (token == null) return
+        if (enabled) {
+            playOrder.clear()
+            playOrder += entries.map(Entry::token).shuffled(random)
+            cursor = playOrder.indexOf(token)
+        } else {
+            syncLinearOrder(token)
+        }
     }
 
     private fun rebuildPlayOrder(currentToken: Long) {
@@ -310,6 +332,28 @@ class PlaybackQueue(
         playOrder.clear()
         playOrder += entries.map(Entry::token)
         cursor = preservedCurrentToken?.let(playOrder::indexOf) ?: -1
+        if (cursor < 0 && playOrder.isNotEmpty()) cursor = 0
+    }
+
+    /** Mirrors Media3 `DefaultShuffleOrder.cloneAndInsert` for token identities. */
+    private fun insertIntoShuffleOrderLikeMedia3(newTokens: List<Long>) {
+        if (newTokens.isEmpty()) return
+        val oldCurrentToken = currentToken
+        val insertionPoints = List(newTokens.size) { random.nextInt(playOrder.size + 1) }.sorted()
+        val randomizedNewTokens = newTokens.shuffled(random)
+        val oldOrder = playOrder.toList()
+
+        playOrder.clear()
+        var oldIndex = 0
+        var newIndex = 0
+        while (oldIndex < oldOrder.size || newIndex < randomizedNewTokens.size) {
+            if (newIndex < randomizedNewTokens.size && insertionPoints[newIndex] == oldIndex) {
+                playOrder += randomizedNewTokens[newIndex++]
+            } else if (oldIndex < oldOrder.size) {
+                playOrder += oldOrder[oldIndex++]
+            }
+        }
+        cursor = oldCurrentToken?.let(playOrder::indexOf) ?: -1
         if (cursor < 0 && playOrder.isNotEmpty()) cursor = 0
     }
 

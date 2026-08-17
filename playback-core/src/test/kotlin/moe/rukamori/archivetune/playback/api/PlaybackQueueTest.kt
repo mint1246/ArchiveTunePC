@@ -55,20 +55,22 @@ class PlaybackQueueTest {
     }
 
     @Test
-    fun `shuffle visits every entry once before ending`() {
+    fun `shuffle advances through the remaining media3 traversal after current`() {
         val queue = PlaybackQueue(Random(42))
         queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
         queue.setShuffleEnabled(true)
 
+        val rows = queue.entries()
+        val currentRow = rows.indexOfFirst { it.isCurrent }
+        val expected = rows.drop(currentRow).map { it.item.metadata.id }
         val visited = mutableListOf(requireNotNull(queue.current).metadata.id)
         while (true) {
             val next = queue.advance(automatic = true) ?: break
             visited += next.item.metadata.id
         }
 
-        assertEquals("c", visited.first())
-        assertEquals(setOf("a", "b", "c", "d", "e"), visited.toSet())
-        assertEquals(5, visited.size)
+        assertEquals(expected, visited)
+        assertEquals(setOf("a", "b", "c", "d", "e"), rows.map { it.item.metadata.id }.toSet())
     }
 
     @Test
@@ -118,7 +120,7 @@ class PlaybackQueueTest {
     }
 
     @Test
-    fun `entries are returned in logical order with the current item flagged`() {
+    fun `entries are returned in logical order when shuffle is disabled`() {
         val queue = PlaybackQueue(Random(11))
         queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)
 
@@ -130,21 +132,16 @@ class PlaybackQueueTest {
     }
 
     @Test
-    fun `append in shuffle order places new items at the end`() {
+    fun `append in shuffle keeps logical append while using media3 style traversal insertion`() {
         val queue = PlaybackQueue(Random(12))
         queue.replace(items("a", "b", "c"))
         queue.setShuffleEnabled(true)
         queue.append(items("x", "y"))
 
-        val visited = mutableListOf(requireNotNull(queue.current).metadata.id)
-        while (true) {
-            val next = queue.advance(automatic = true) ?: break
-            visited += next.item.metadata.id
-        }
-
-        assertEquals("a", visited.first())
-        assertEquals(setOf("a", "b", "c", "x", "y"), visited.toSet())
-        assertEquals(listOf("x", "y"), visited.takeLast(2))
+        assertEquals(listOf("a", "b", "c", "x", "y"), queue.items.map { it.metadata.id })
+        assertEquals("a", queue.current?.metadata?.id)
+        assertEquals(setOf("a", "b", "c", "x", "y"), queue.entries().map { it.item.metadata.id }.toSet())
+        assertFalse(queue.entries().takeLast(2).map { it.item.metadata.id } == listOf("x", "y"))
     }
 
     @Test
@@ -158,6 +155,53 @@ class PlaybackQueueTest {
 
         assertEquals(logicalBefore, queue.items.map { it.metadata.id })
         assertEquals("c", queue.current?.metadata?.id)
+    }
+
+    @Test
+    fun `shuffled entries keep played traversal rows before current like android`() {
+        val queue = PlaybackQueue(Random(19))
+        queue.replace(items("a", "b", "c", "d", "e"))
+        queue.setShuffleEnabled(true)
+
+        val first = requireNotNull(queue.current).metadata.id
+        val second = requireNotNull(queue.advance(automatic = false)).item.metadata.id
+        val third = requireNotNull(queue.advance(automatic = false)).item.metadata.id
+        val rows = queue.entries()
+        val currentRow = rows.indexOfFirst { it.isCurrent }
+
+        assertEquals(2, currentRow)
+        assertEquals(listOf(first, second), rows.take(currentRow).map { it.item.metadata.id })
+        assertEquals(third, rows[currentRow].item.metadata.id)
+    }
+
+    @Test
+    fun `selecting a shuffled row preserves traversal order like media3 seek`() {
+        val queue = PlaybackQueue(Random(21))
+        queue.replace(items("a", "b", "c", "d", "e"))
+        queue.setShuffleEnabled(true)
+        val rowsBefore = queue.entries()
+        val target = rowsBefore.last()
+
+        queue.select(target.logicalIndex)
+
+        assertEquals(rowsBefore.map { it.id }, queue.entries().map { it.id })
+        assertEquals(target.item.metadata.id, queue.current?.metadata?.id)
+    }
+
+    @Test
+    fun `moveVisual changes shuffle traversal without changing logical queue`() {
+        val queue = PlaybackQueue(Random(20))
+        queue.replace(items("a", "b", "c", "d", "e"))
+        queue.setShuffleEnabled(true)
+        queue.advance(automatic = false)
+        val logicalBefore = queue.items.map { it.metadata.id }
+        val rowsBefore = queue.entries()
+        val movedId = rowsBefore.last().item.metadata.id
+
+        queue.moveVisual(rowsBefore.lastIndex, 0)
+
+        assertEquals(logicalBefore, queue.items.map { it.metadata.id })
+        assertEquals(movedId, queue.entries().first().item.metadata.id)
     }
 
     @Test
