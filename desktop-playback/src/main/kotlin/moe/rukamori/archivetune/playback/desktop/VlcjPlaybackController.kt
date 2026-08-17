@@ -589,7 +589,15 @@ class VlcjPlaybackController(
                 withActivePlayerLocked {
                     _state.update { snapshot ->
                         snapshot.copy(
-                            status = if (snapshot.playWhenReady) PlaybackStatus.BUFFERING else snapshot.status,
+                            // libVLC may continue emitting cache percentages after playback is
+                            // already flowing. Do not let those informational callbacks replace a
+                            // stable READY/paused state or disable the normal player controls.
+                            status = if (
+                                snapshot.playWhenReady && snapshot.status in setOf(
+                                    PlaybackStatus.LOADING,
+                                    PlaybackStatus.BUFFERING,
+                                )
+                            ) PlaybackStatus.BUFFERING else snapshot.status,
                             bufferedPositionMs = if (snapshot.durationMs > 0L) {
                                 (snapshot.durationMs * (newCache / 100f)).roundToLong().coerceAtLeast(snapshot.positionMs)
                             } else snapshot.bufferedPositionMs,
