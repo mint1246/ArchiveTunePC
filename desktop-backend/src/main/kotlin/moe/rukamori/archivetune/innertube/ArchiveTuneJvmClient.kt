@@ -15,6 +15,8 @@ import moe.rukamori.archivetune.innertube.models.AccountInfo
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
+import moe.rukamori.archivetune.innertube.pages.ArtistItemsContinuationPage
+import moe.rukamori.archivetune.innertube.pages.ArtistItemsPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.ChartsPage
 import moe.rukamori.archivetune.innertube.pages.ExplorePage
@@ -189,6 +191,26 @@ class ArchiveTuneJvmClient(
             normalizedId(browseId, "Artist browse ID").fold(
             onSuccess = { YouTube.artist(it) },
             onFailure = { Result.failure(it) },
+            )
+        }
+
+    /** Loads the full artist section behind a section's "more" browse endpoint. */
+    suspend fun artistItems(endpoint: BrowseEndpoint): Result<ArtistItemsPage> =
+        run {
+            prepareProvidedSession()
+            normalizedId(endpoint.browseId, "Artist items browse ID").fold(
+                onSuccess = { browseId -> YouTube.artistItems(endpoint.copy(browseId = browseId)) },
+                onFailure = { Result.failure(it) },
+            )
+        }
+
+    /** Loads another page from an artist-items section. */
+    suspend fun artistItemsContinuation(continuation: String): Result<ArtistItemsContinuationPage> =
+        run {
+            prepareProvidedSession()
+            normalizedId(continuation, "Artist items continuation").fold(
+                onSuccess = { YouTube.artistItemsContinuation(it) },
+                onFailure = { Result.failure(it) },
             )
         }
 

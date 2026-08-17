@@ -96,10 +96,13 @@ import java.util.logging.Logger
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
+import moe.rukamori.archivetune.innertube.models.BrowseEndpoint
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
+import moe.rukamori.archivetune.innertube.pages.ArtistItemsContinuationPage
+import moe.rukamori.archivetune.innertube.pages.ArtistItemsPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.playback.api.PlaybackAlbum
@@ -111,7 +114,12 @@ import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import kotlin.math.roundToLong
 
-internal sealed interface Detail { data class Album(val page: AlbumPage) : Detail; data class Artist(val page: ArtistPage) : Detail; data class Playlist(val page: PlaylistPage) : Detail }
+internal sealed interface Detail {
+    data class Album(val page: AlbumPage) : Detail
+    data class Artist(val page: ArtistPage) : Detail
+    data class ArtistItems(val page: ArtistItemsPage, val parent: ArtistPage) : Detail
+    data class Playlist(val page: PlaylistPage) : Detail
+}
 
 /**
  * Shares the currently-viewed detail page (album/artist/playlist) between the main content area
@@ -132,6 +140,9 @@ internal class DesktopBrowseController {
 
     fun openArtist(id: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
         open(scope) { backend.artist(id).map { Detail.Artist(it) } }
+
+    fun openArtistItems(endpoint: BrowseEndpoint, parent: ArtistPage, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
+        open(scope) { backend.artistItems(endpoint).map { Detail.ArtistItems(it, parent) } }
 
     fun openPlaylist(id: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
         open(scope) { backend.playlist(id).map { Detail.Playlist(it) } }
@@ -322,7 +333,32 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onAddToQueue = ::enqueueSong,
             modifier = modifier,
         )
-        else -> DetailPage(page, browse.loading, browse.failure, onBack = { browse.clear() }, onOpen = ::open, onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } }, onDownload = ::downloadSong, onDownloadAll = ::downloadSongs, onPlayNext = ::playNextSong, onAddToQueue = ::enqueueSong, modifier = modifier)
+        is Detail.ArtistItems -> ArtistItemsDetailPage(
+            detail = page,
+            onBack = { browse.detail = Detail.Artist(page.parent) },
+            onOpen = ::open,
+            onDownload = ::downloadSong,
+            onPlayNext = ::playNextSong,
+            onAddToQueue = ::enqueueSong,
+            loadMore = services.backend::artistItemsContinuation,
+            modifier = modifier,
+        )
+        else -> DetailPage(
+            page,
+            browse.loading,
+            browse.failure,
+            onBack = { browse.clear() },
+            onOpen = ::open,
+            onOpenArtistItems = { endpoint ->
+                if (page is Detail.Artist) browse.openArtistItems(endpoint, page.page, services.backend, scope)
+            },
+            onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } },
+            onDownload = ::downloadSong,
+            onDownloadAll = ::downloadSongs,
+            onPlayNext = ::playNextSong,
+            onAddToQueue = ::enqueueSong,
+            modifier = modifier,
+        )
         }
     }
 }
@@ -424,11 +460,11 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     }
 }
 
-@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, modifier: Modifier) {
-    val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title }
-    val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail }
-    val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist" }
-    val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist -> emptyList() }
+@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, modifier: Modifier) {
+    val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title; is Detail.ArtistItems -> page.page.title }
+    val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail }
+    val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist" }
+    val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist, is Detail.ArtistItems -> emptyList() }
     LazyColumn(
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
@@ -462,7 +498,14 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
         error?.let { message -> item { Error(message) } }
         if (page is Detail.Artist) {
             page.page.sections.forEach { section ->
-                item { Text(section.title, style = MaterialTheme.typography.titleLarge) }
+                item {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        section.moreEndpoint?.let { endpoint ->
+                            TextButton(onClick = { onOpenArtistItems(endpoint) }) { Text("See all") }
+                        }
+                    }
+                }
                 itemsIndexed(section.items, key = { index, item -> "${section.title}:${item::class}:${item.id}:$index" }) { _, item ->
                     ResultCard(item, { onOpen(item) }, (item as? SongItem)?.let { { onDownload(it) } })
                 }
@@ -475,6 +518,78 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     }
 }
 
+@Composable
+private fun ArtistItemsDetailPage(
+    detail: Detail.ArtistItems,
+    onBack: () -> Unit,
+    onOpen: (YTItem) -> Unit,
+    onDownload: (SongItem) -> Unit,
+    onPlayNext: (SongItem) -> Unit,
+    onAddToQueue: (SongItem) -> Unit,
+    loadMore: suspend (String) -> Result<ArtistItemsContinuationPage>,
+    modifier: Modifier,
+) {
+    val page = detail.page
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var items by remember(page) { mutableStateOf(page.items) }
+    var continuation by remember(page) { mutableStateOf(page.continuation) }
+    var loadingMore by remember(page) { mutableStateOf(false) }
+    var loadMoreError by remember(page) { mutableStateOf<String?>(null) }
+
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back to ${detail.parent.artist.title}") }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    page.title.ifBlank { "More from ${detail.parent.artist.title}" },
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        itemsIndexed(items, key = { index, item -> "artist-items:${item::class}:${item.id}:$index" }) { _, item ->
+            ResultCard(
+                item = item,
+                open = { onOpen(item) },
+                download = (item as? SongItem)?.let { song -> { onDownload(song) } },
+                onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
+                onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
+            )
+        }
+        loadMoreError?.let { message -> item { Error(message) } }
+        continuation?.let { token ->
+            item {
+                TextButton(
+                    enabled = !loadingMore,
+                    onClick = {
+                        loadingMore = true
+                        loadMoreError = null
+                        scope.launch {
+                            loadMore(token)
+                                .onSuccess { next ->
+                                    items = (items + next.items).distinctBy { it::class to it.id }
+                                    continuation = next.continuation
+                                }
+                                .onFailure { loadMoreError = it.message ?: "Could not load more artist items" }
+                            loadingMore = false
+                        }
+                    },
+                ) {
+                    if (loadingMore) {
+                        CircularProgressIndicator(Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (loadingMore) "Loading…" else "Load more")
+                }
+            }
+        }
+    }
+}
 @Composable
 private fun PlaylistDetailPage(
     page: PlaylistPage,
