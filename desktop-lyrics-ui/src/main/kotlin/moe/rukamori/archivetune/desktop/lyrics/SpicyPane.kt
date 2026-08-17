@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -673,7 +674,11 @@ private fun LyricScene(
         fontWeight = FontWeight.Medium,
     )
 
-    BoxWithConstraints(modifier = modifier) {
+    // Lines are deliberately placed above/below the viewport as the active line moves.
+    // Without clipping, those off-screen composables can extend into the lyrics chrome and
+    // still participate in hit testing, so clicks on playback/search controls seek a lyric
+    // underneath instead. Keep both drawing and pointer hit-testing inside this viewport.
+    BoxWithConstraints(modifier = modifier.clipToBounds()) {
         val paddingPx = with(density) { HORIZONTAL_PADDING.roundToPx() }
         val contentWidthPx = (constraints.maxWidth - 2 * paddingPx).coerceAtLeast(0)
 
