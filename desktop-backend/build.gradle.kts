@@ -23,26 +23,3 @@ dependencies {
     implementation(libs.json)
     testImplementation(libs.junit)
 }
-
-val smoke = sourceSets.create("smoke")
-smoke.compileClasspath += sourceSets.main.get().output
-smoke.runtimeClasspath += sourceSets.main.get().output
-
-configurations[smoke.implementationConfigurationName].extendsFrom(configurations.implementation.get())
-configurations[smoke.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
-
-tasks.register<JavaExec>("smokeTest") {
-    group = "verification"
-    description = "Runs an opt-in real YouTube Music search and stream-resolution smoke test."
-    classpath = smoke.runtimeClasspath
-    mainClass.set("moe.rukamori.archivetune.backend.BackendSmokeKt")
-    dependsOn(smoke.classesTaskName)
-}
-
-tasks.register<JavaExec>("lyricsSmokeTest") {
-    group = "verification"
-    description = "Runs an opt-in live search against every built-in lyrics provider."
-    classpath = smoke.runtimeClasspath
-    mainClass.set("moe.rukamori.archivetune.backend.LyricsSmokeKt")
-    dependsOn(smoke.classesTaskName)
-}
