@@ -373,14 +373,22 @@ internal class LineTextGeometry(
     val wordLeft: List<Float>,
     /** word index -> visual right edge of the word in line-local X. */
     val wordRight: List<Float>,
+    /** word index -> visual top edge of the word in line-local Y. */
+    val wordTop: List<Float>,
+    /** word index -> visual bottom edge of the word in line-local Y. */
+    val wordBottom: List<Float>,
     /** word index -> true when the word's run reads right-to-left (Hebrew, Arabic, …). */
     val wordRtl: List<Boolean>,
     /** Canvas renderer split: timed non-RTL words >= 180 ms become letter groups. */
     val wordLetterCapable: List<Boolean>,
     /** Provider-accurate animation end for each word. */
     val wordAnimationEndMs: List<Long>,
-    /** Pre-sorted base-pass holes, built once rather than allocated every frame. */
-    val wordIntervals: List<Pair<Float, Float>>,
+    /**
+     * Rectangles where the untimed base text is allowed to paint. These are split per
+     * visual layout row so a word on a wrapped row never punches a same-X hole through
+     * every other row in the paragraph.
+     */
+    val baseTextSegments: List<Rect>,
 ) {
     companion object {
         fun build(
@@ -424,13 +432,17 @@ internal class LineTextGeometry(
                             )
                         }.getOrNull()
                     } else null
+                    val visualLine = layout.getLineForOffset(letter.charOffset)
                     LetterText(
                         letter = letter,
                         box = box,
                         x = box.left,
                         width = box.width,
                         letterLayout = letterLayout,
-                        topY = letterLayout?.let { layout.firstBaseline - it.firstBaseline } ?: 0f,
+                        lineIndex = visualLine,
+                        topY = letterLayout?.let {
+                            layout.getLineBaseline(visualLine) - it.firstBaseline
+                        } ?: box.top,
                     )
                 }
             }
@@ -440,19 +452,58 @@ internal class LineTextGeometry(
             val wordRight = line.words.mapIndexed { wi, _ ->
                 wordLetters[wi].filter { it.width > 0f }.maxOfOrNull { it.box.right } ?: 0f
             }
-            val wordIntervals = wordLeft.indices
-                .map { wordLeft[it] to wordRight[it] }
-                .filter { it.second > it.first }
-                .sortedBy { it.first }
+            val wordTop = line.words.mapIndexed { wi, _ ->
+                wordLetters[wi].filter { it.width > 0f }.minOfOrNull { it.box.top } ?: 0f
+            }
+            val wordBottom = line.words.mapIndexed { wi, _ ->
+                wordLetters[wi].filter { it.width > 0f }.maxOfOrNull { it.box.bottom } ?: 0f
+            }
+
+            // The previous base pass treated every timed word as an X-only interval.
+            // Once Compose wrapped a lyric into 2+ rows, a word on row 2 therefore cut
+            // the same horizontal band out of row 1 (and vice versa). Build the inverse
+            // clip regions per visual text row instead.
+            val wordIntervalsByLine = Array(layout.lineCount) { mutableListOf<Pair<Float, Float>>() }
+            wordLetters.forEach { letters ->
+                letters
+                    .filter { it.width > 0f }
+                    .groupBy { it.lineIndex }
+                    .forEach { (lineIndex, rowLetters) ->
+                        if (lineIndex in wordIntervalsByLine.indices) {
+                            val left = rowLetters.minOf { it.box.left }
+                            val right = rowLetters.maxOf { it.box.right }
+                            if (right > left) wordIntervalsByLine[lineIndex] += left to right
+                        }
+                    }
+            }
+            val baseTextSegments = buildList {
+                for (lineIndex in 0 until layout.lineCount) {
+                    val top = layout.getLineTop(lineIndex)
+                    val bottom = layout.getLineBottom(lineIndex)
+                    if (bottom <= top) continue
+                    var cursor = 0f
+                    wordIntervalsByLine[lineIndex]
+                        .sortedBy { it.first }
+                        .forEach { (left, right) ->
+                            if (left > cursor) add(Rect(cursor, top, left, bottom))
+                            cursor = maxOf(cursor, right)
+                        }
+                    if (cursor < layout.size.width) {
+                        add(Rect(cursor, top, layout.size.width.toFloat(), bottom))
+                    }
+                }
+            }
             return LineTextGeometry(
                 layout = layout,
                 wordLetters = wordLetters,
                 wordLeft = wordLeft,
                 wordRight = wordRight,
+                wordTop = wordTop,
+                wordBottom = wordBottom,
                 wordRtl = wordRtl,
                 wordLetterCapable = wordLetterCapable,
                 wordAnimationEndMs = wordAnimationEndMs,
-                wordIntervals = wordIntervals,
+                baseTextSegments = baseTextSegments,
             )
         }
     }
@@ -468,6 +519,8 @@ internal class LetterText(
     val width: Float,
     /** Standalone measurement of this cluster, baseline-aligned to the line (LTR words). */
     val letterLayout: TextLayoutResult?,
+    /** Visual row in the wrapped TextLayoutResult that owns this cluster. */
+    val lineIndex: Int,
     /** Y at which `letterLayout`'s baseline meets the line's baseline. */
     val topY: Float,
 )
@@ -664,6 +717,10 @@ private fun LyricScene(
             lineHeight = LYRIC_LINE_HEIGHT,
             color = Color.White,
             letterSpacing = 0.sp,
+            // This must live in the measured style as well as the Text composables.
+            // Otherwise cached geometry uses start-aligned wrapped rows while inactive
+            // Text uses centered rows, making a line jump sideways exactly when active.
+            textAlign = TextAlign.Center,
             // Content-based BiDi: Hebrew lines lay out right-to-left, English lines
             // left-to-right, mixed lines get per-run direction — never forced by locale.
             textDirection = TextDirection.Content,
@@ -1044,24 +1101,19 @@ private fun DrawScope.drawAnimatedLine(
 ) {
     val layout = geometry.layout
     val lineOffsetX = ((size.width - layout.size.width) / 2f).coerceAtLeast(0f)
-    val lineTop = 0f
-    val lineBottom = layout.size.height.toFloat()
     val topLeft = Offset(lineOffsetX, 0f)
     val native = drawContext.canvas.nativeCanvas
 
-    // Base text is painted only in the gaps between timed words. Intervals are sorted
-    // once in LineTextGeometry instead of allocating/sorting them every frame.
-    var cursor = 0f
-    geometry.wordIntervals.forEach { (left, right) ->
-        if (left > cursor) {
-            clipRect(lineOffsetX + cursor, lineTop, lineOffsetX + left, lineBottom) {
-                drawText(layout, color = DimColor, topLeft = topLeft)
-            }
-        }
-        cursor = maxOf(cursor, right)
-    }
-    if (cursor < layout.size.width) {
-        clipRect(lineOffsetX + cursor, lineTop, lineOffsetX + layout.size.width, lineBottom) {
+    // Paint untimed text through row-aware clip rectangles. An X-only mask corrupts
+    // wrapped lyrics because the same X coordinate can contain different words on
+    // different visual rows.
+    geometry.baseTextSegments.forEach { segment ->
+        clipRect(
+            lineOffsetX + segment.left,
+            segment.top,
+            lineOffsetX + segment.right,
+            segment.bottom,
+        ) {
             drawText(layout, color = DimColor, topLeft = topLeft)
         }
     }
@@ -1069,10 +1121,15 @@ private fun DrawScope.drawAnimatedLine(
     fun beginWordTransform(index: Int): Boolean {
         val left = geometry.wordLeft[index]
         val right = geometry.wordRight[index]
-        if (right <= left) return false
+        val top = geometry.wordTop[index]
+        val bottom = geometry.wordBottom[index]
+        if (right <= left || bottom <= top) return false
         val animation = animations[index]
         val centerX = lineOffsetX + (left + right) / 2f
-        val centerY = lineBottom / 2f
+        // Scale/bounce around the word's actual visual row. Using half the paragraph
+        // height is only correct for single-row lyrics; on row 2 it makes the glyphs
+        // orbit around row 1 during every spring update.
+        val centerY = (top + bottom) / 2f
         val scale = animation.scale.snapshotPosition().toFloat()
         native.save()
         native.translate(centerX, centerY)
@@ -1087,8 +1144,10 @@ private fun DrawScope.drawAnimatedLine(
     fun drawStaticWord(index: Int, color: Color) {
         val left = geometry.wordLeft[index]
         val right = geometry.wordRight[index]
+        val top = geometry.wordTop[index]
+        val bottom = geometry.wordBottom[index]
         if (!beginWordTransform(index)) return
-        clipRect(lineOffsetX + left, lineTop, lineOffsetX + right, lineBottom) {
+        clipRect(lineOffsetX + left, top, lineOffsetX + right, bottom) {
             drawText(layout, color = color, topLeft = topLeft)
         }
         native.restore()
@@ -1107,7 +1166,9 @@ private fun DrawScope.drawAnimatedLine(
                 val animation = animations[index]
                 val left = geometry.wordLeft[index]
                 val right = geometry.wordRight[index]
-                if (right <= left) return@wordLoop
+                val wordTop = geometry.wordTop[index]
+                val wordBottom = geometry.wordBottom[index]
+                if (right <= left || wordBottom <= wordTop) return@wordLoop
 
                 if (!beginWordTransform(index)) return@wordLoop
                 if (!letterCapable) {
@@ -1131,9 +1192,9 @@ private fun DrawScope.drawAnimatedLine(
                         }
                         clipRect(
                             lineOffsetX + left - 24f,
-                            lineTop - 24f,
+                            wordTop - 24f,
                             lineOffsetX + right + 24f,
-                            lineBottom + 24f,
+                            wordBottom + 24f,
                         ) {
                             if (glow > 0.01f) {
                                 drawText(
@@ -1157,7 +1218,6 @@ private fun DrawScope.drawAnimatedLine(
                         val activeLetterIndex = letters.indexOfFirst { lt ->
                             positionMs >= lt.letter.startMs && positionMs < lt.letter.endMs
                         }
-                        val centerY = lineBottom / 2f
 
                         letters.forEachIndexed letterLoop@ { letterIndex, letterText ->
                             val letterLayout = letterText.letterLayout ?: return@letterLoop
@@ -1174,6 +1234,7 @@ private fun DrawScope.drawAnimatedLine(
                             val bandLeft = lineOffsetX + letterText.box.left
                             val bandRight = lineOffsetX + letterText.box.right
                             val bandCenterX = (bandLeft + bandRight) / 2f
+                            val bandCenterY = (letterText.box.top + letterText.box.bottom) / 2f
                             val letterGlow = spring.glow.snapshotPosition().toFloat()
                             val shadow = if (letterGlow > 0.01f) {
                                 Shadow(
@@ -1187,11 +1248,11 @@ private fun DrawScope.drawAnimatedLine(
                             val letterScale = spring.scale.snapshotPosition().toFloat()
 
                             native.save()
-                            native.translate(bandCenterX, centerY)
+                            native.translate(bandCenterX, bandCenterY)
                             native.scale(letterScale, letterScale)
                             native.translate(
                                 -bandCenterX,
-                                -centerY + spring.yOffset.snapshotPosition().toFloat() * 2f,
+                                -bandCenterY + spring.yOffset.snapshotPosition().toFloat() * 2f,
                             )
                             val letterTopLeft = Offset(bandLeft, letterText.topY)
                             if (letterGlow > 0.005f) {
