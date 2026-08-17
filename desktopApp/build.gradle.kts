@@ -1,5 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.Copy
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -77,7 +78,7 @@ compose.desktop {
             vendor = "ArchiveTune"
             licenseFile.set(rootProject.file("LICENSE"))
             // Copied beside the application so the in-process VLCJ backend can find libVLC and its plugins.
-            appResourcesRootDir.set(rootProject.layout.projectDirectory.dir("packaging/vlc"))
+            appResourcesRootDir.set(rootProject.layout.projectDirectory.dir("packaging/vlc/common"))
             modules(
                 "java.desktop",
                 "java.logging",
@@ -101,6 +102,14 @@ compose.desktop {
 }
 
 val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/ArchiveTune")
+val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
+val stageBundledVlcRuntime = tasks.register<Copy>("stageBundledVlcRuntime") {
+    group = "distribution"
+    description = "Stages the verified libVLC runtime into the desktop app image."
+    dependsOn("createDistributable")
+    from(bundledVlcSourceDir)
+    into(appImageDir.map { it.dir("app/resources/native/windows-x64/vlc") })
+}
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/windows")
 val jpackageExecutable = "${System.getProperty("java.home")}/bin/jpackage.exe"
@@ -126,7 +135,7 @@ fun installerJpackageArgs(type: String, dest: Provider<Directory>): List<String>
 val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
     group = "package"
     description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", stageBundledVlcRuntime, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(listOf(jpackageExecutable) + installerJpackageArgs("msi", layout.buildDirectory.dir("compose/binaries/main/msi")))
 }
@@ -134,7 +143,7 @@ val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
 val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
     group = "package"
     description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", stageBundledVlcRuntime, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(listOf(jpackageExecutable) + installerJpackageArgs("exe", layout.buildDirectory.dir("compose/binaries/main/exe")))
 }
@@ -142,7 +151,7 @@ val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
 val verifyBundledVlcRuntime = tasks.register<VerifyBundledVlcRuntimeTask>("verifyBundledVlcRuntime") {
     group = "verification"
     description = "Verifies that the Windows distribution contains the libVLC runtime and plugin tree."
-    dependsOn("createDistributable")
+    dependsOn(stageBundledVlcRuntime)
     appDirectory.set(layout.buildDirectory.dir("compose/binaries/main/app"))
 }
 

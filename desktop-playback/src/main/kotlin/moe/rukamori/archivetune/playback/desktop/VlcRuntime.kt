@@ -7,6 +7,7 @@
 
 package moe.rukamori.archivetune.playback.desktop
 
+import com.sun.jna.NativeLibrary
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
@@ -67,6 +68,12 @@ object VlcRuntimeLocator {
                 ?.resolve("ArchiveTune")
                 ?.resolve("runtime")
                 ?.let(::add)
+            System.getenv("LOCALAPPDATA")
+                ?.takeIf(String::isNotBlank)
+                ?.let(Path::of)
+                ?.resolve("ArchiveTuneSpikes")
+                ?.resolve("runtime")
+                ?.let(::add)
 
             if (isWindows()) {
                 add(Path.of("C:\\Program Files\\VideoLAN\\VLC"))
@@ -95,14 +102,10 @@ object VlcRuntimeLocator {
         val root = layout.root.toString()
         System.setProperty("jna.library.path", root)
         System.setProperty("java.library.path", root)
-        if (isWindows()) {
-            val path = System.getenv("PATH").orEmpty()
-            if (!path.split(';').any { it.equals(root, ignoreCase = true) }) {
-                // VLC's plugin DLLs may depend on sibling runtime DLLs. JNA's library path is not
-                // sufficient for every Windows loader path, so keep the directory on PATH too.
-                System.setProperty("archivetune.vlc.path", "$root;$path")
-            }
-        }
+        // VLCJ resolves libvlc through JNA. Register both DLL names explicitly so packaged
+        // applications do not depend on a developer machine's PATH or registry state.
+        NativeLibrary.addSearchPath("libvlc", root)
+        NativeLibrary.addSearchPath("libvlccore", root)
     }
 
     private fun isLayoutRoot(path: Path): Boolean =
@@ -125,6 +128,5 @@ object VlcRuntimeLocator {
 internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(): Array<String> =
     arrayOf(
         "--no-video",
-        "--plugin-path=${plugins.toAbsolutePath().normalize()}",
         "--quiet",
     )
