@@ -672,10 +672,9 @@ class VlcjPlaybackController(
                 }
             }
 
-            override fun volumeChanged(mediaPlayer: MediaPlayer, volume: Float) = dispatch {
-                commandMutex.withLock {
-                    if (!closed.get()) _state.update { it.copy(volume = (volume / 100f).coerceIn(0f, 1f)) }
-                }
+            override fun volumeChanged(mediaPlayer: MediaPlayer, volume: Float) {
+                // ArchiveTune owns the normalized volume state. libVLC reports backend-specific
+                // values here, including transient teardown values, so do not feed them back.
             }
         }
 
@@ -759,11 +758,12 @@ class VlcjPlaybackController(
     }
 
     private fun stopActiveFileLocked() {
+        val hadActiveMedia = activeGeneration != null
         activeGeneration = null
         pendingSeek = null
         cancelLoadWatchdog()
         player?.let { activePlayer ->
-            suppressStoppedEvents++
+            if (hadActiveMedia) suppressStoppedEvents++
             runCatching { activePlayer.controls().stop() }
             runCatching { activePlayer.media().reset() }
         }
