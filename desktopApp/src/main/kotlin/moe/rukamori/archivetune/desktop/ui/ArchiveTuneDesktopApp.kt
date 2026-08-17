@@ -477,6 +477,13 @@ private fun DesktopTopBar(
     Row(
         Modifier
             .fillMaxWidth()
+            .background(
+                if (titleOverride != null && LocalDynamicThemeActive.current) {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 1f)
+                } else {
+                    Color.Transparent
+                },
+            )
             // The custom controls are part of the window edge, like a browser tab strip. Keep
             // their hit targets flush with the right/top edge while retaining shell padding when
             // the host does not provide controls (e.g. previews/tests).
