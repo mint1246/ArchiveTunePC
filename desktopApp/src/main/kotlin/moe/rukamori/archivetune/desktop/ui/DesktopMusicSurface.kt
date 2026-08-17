@@ -179,7 +179,37 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     }
     fun open(item: YTItem) {
         when (item) {
-            is SongItem -> scope.launch { services.playback.replaceQueue(resultItems.filterIsInstance<SongItem>().map { toPlaybackItem(it, services.albumIndex) }, resultItems.filterIsInstance<SongItem>().indexOf(item).coerceAtLeast(0), title = "Search results") }
+            is SongItem -> scope.launch {
+                browse.failure = null
+                services.backend.upNext(item.id)
+                    .onSuccess { next ->
+                        val songs = next.items
+                        if (songs.isEmpty()) {
+                            services.playback.replaceQueue(
+                                listOf(toPlaybackItem(item, services.albumIndex)),
+                                title = "Up next",
+                            )
+                            return@onSuccess
+                        }
+
+                        val selectedIndex =
+                            next.currentIndex
+                                ?: songs.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }
+                                ?: 0
+                        services.playback.replaceQueue(
+                            songs.map { toPlaybackItem(it, services.albumIndex) },
+                            selectedIndex.coerceIn(0, songs.lastIndex),
+                            title = next.title ?: "Up next",
+                        )
+                    }
+                    .onFailure {
+                        browse.failure = it.message ?: "Could not load Up next"
+                        services.playback.replaceQueue(
+                            listOf(toPlaybackItem(item, services.albumIndex)),
+                            title = "Up next",
+                        )
+                    }
+            }
             is AlbumItem -> browse.openAlbum(item.browseId, services.backend, scope)
             is ArtistItem -> browse.openArtist(item.id, services.backend, scope)
             is PlaylistItem -> browse.openPlaylist(item.id, services.backend, scope)

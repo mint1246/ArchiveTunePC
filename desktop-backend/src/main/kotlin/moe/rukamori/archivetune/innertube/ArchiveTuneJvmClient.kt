@@ -294,6 +294,36 @@ class ArchiveTuneJvmClient(
         YouTube.next(WatchEndpoint(videoId = videoId))
     }
 
+    /**
+     * Android-style single-song Up Next queue used by search playback.
+     *
+     * Android first loads a normal YouTubeQueue with automix-preview following disabled. When that
+     * initial queue has no continuation and is already within three songs of its end, MusicService
+     * immediately bootstraps the infinite/radio queue with automix-preview following enabled. Do
+     * the same here so desktop doesn't get stuck with the common one-song "Mix" response.
+     */
+    suspend fun upNext(videoId: String): Result<NextResult> = run {
+        prepareProvidedSession()
+        val endpoint = WatchEndpoint(videoId = videoId)
+        YouTube.next(
+            endpoint = endpoint,
+            followAutomixPreview = false,
+        ).mapCatching { initial ->
+            val currentIndex = (initial.currentIndex ?: 0).coerceAtLeast(0)
+            val remainingFromCurrent = initial.items.size - currentIndex
+            if (initial.continuation == null && remainingFromCurrent <= 3) {
+                YouTube.next(
+                    endpoint = endpoint,
+                    followAutomixPreview = true,
+                ).getOrNull()
+                    ?.takeIf { expanded -> expanded.items.size > initial.items.size }
+                    ?: initial
+            } else {
+                initial
+            }
+        }
+    }
+
     /** Related artists/songs/albums/playlists for a seed. */
     suspend fun related(endpoint: BrowseEndpoint): Result<RelatedPage> = run {
         prepareProvidedSession()
