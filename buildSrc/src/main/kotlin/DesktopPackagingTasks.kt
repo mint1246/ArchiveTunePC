@@ -128,8 +128,17 @@ abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
         val libVlc = root.resolve("libvlc.dll")
         val libVlcCore = root.resolve("libvlccore.dll")
         val plugins = root.resolve("plugins")
-        if (!libVlc.isFile || !libVlcCore.isFile || !plugins.isDirectory) {
-            throw GradleException("Incomplete libVLC runtime at ${root.absolutePath}; expected DLLs and plugins/")
+        val pluginCache = plugins.resolve("plugins.dat")
+        val accidentalNestedPlugins = plugins.resolve("plugins")
+        if (!libVlc.isFile || !libVlcCore.isFile || !plugins.isDirectory || !pluginCache.isFile) {
+            throw GradleException(
+                "Incomplete libVLC runtime at ${root.absolutePath}; expected DLLs, plugins/, and plugins/plugins.dat",
+            )
+        }
+        if (accidentalNestedPlugins.exists()) {
+            throw GradleException(
+                "Malformed libVLC runtime at ${root.absolutePath}; plugins/plugins duplicates the entire plugin tree",
+            )
         }
     }
 }
