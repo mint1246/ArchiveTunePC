@@ -126,7 +126,7 @@ fun installerJpackageArgs(type: String, dest: Provider<Directory>): List<String>
 val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
     group = "package"
     description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(listOf(jpackageExecutable) + installerJpackageArgs("msi", layout.buildDirectory.dir("compose/binaries/main/msi")))
 }
@@ -134,7 +134,7 @@ val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
 val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
     group = "package"
     description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(listOf(jpackageExecutable) + installerJpackageArgs("exe", layout.buildDirectory.dir("compose/binaries/main/exe")))
 }

@@ -66,6 +66,7 @@ class VlcjPlaybackController(
     )
     private val commandMutex = Mutex()
     private val playerMutex = Mutex()
+    private val nativeLifecycleLock = Any()
     private val queue = PlaybackQueue()
     private val _state = MutableStateFlow(PlaybackSnapshot())
     private val _events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 32)
@@ -196,6 +197,13 @@ class VlcjPlaybackController(
                 if (duration > 0L) requested.coerceAtMost(duration) else requested
             }
             latestPositionMs.set(safePosition)
+            if (activeGeneration != null && _state.value.status in setOf(
+                    PlaybackStatus.RESOLVING,
+                    PlaybackStatus.LOADING,
+                )
+            ) {
+                pendingSeek = (activeGeneration ?: generation) to safePosition
+            }
             _state.update {
                 it.copy(
                     positionMs = safePosition,
@@ -421,7 +429,7 @@ class VlcjPlaybackController(
             _state.update {
                 it.copy(
                     error = null,
-                    status = if (queue.current == null) PlaybackStatus.IDLE else PlaybackStatus.ENDED,
+                    status = if (queue.current == null) PlaybackStatus.IDLE else PlaybackStatus.IDLE,
                 )
             }
         }
@@ -517,7 +525,8 @@ class VlcjPlaybackController(
                 _state.update { it.copy(status = PlaybackStatus.LOADING, error = null) }
                 stopActiveFileLocked()
                 activeGeneration = request.generation
-                pendingSeek = request.generation to request.startPositionMs
+                pendingSeek = pendingSeek?.takeIf { it.first == request.generation }
+                    ?: (request.generation to request.startPositionMs)
                 latestPositionMs.set(request.startPositionMs)
                 val started = activePlayer.media().play(
                     resolved.uri,
@@ -551,20 +560,25 @@ class VlcjPlaybackController(
 
     private suspend fun ensurePlayer(): MediaPlayer =
         playerMutex.withLock {
+            checkOpen()
             player?.let { return@withLock it }
-            val layout = VlcRuntimeLocator.find(runtimeConfiguration)
-                ?: throw IllegalStateException(
-                    "VLC runtime not found. Set ARCHIVETUNE_VLC_DIR for development or package native/vlc.",
-                )
-            VlcRuntimeLocator.prepareNative(layout)
-            val newFactory = MediaPlayerFactory(*layout.mediaPlayerFactoryOptions())
-            val newPlayer = newFactory.mediaPlayers().newMediaPlayer()
-            val newListener = createEventListener()
-            newPlayer.events().addMediaPlayerEventListener(newListener)
-            factory = newFactory
-            player = newPlayer
-            listener = newListener
-            newPlayer
+            synchronized(nativeLifecycleLock) {
+                checkOpen()
+                player?.let { return@withLock it }
+                val layout = VlcRuntimeLocator.find(runtimeConfiguration)
+                    ?: throw IllegalStateException(
+                        "VLC runtime not found. Set ARCHIVETUNE_VLC_DIR for development or package native/vlc.",
+                    )
+                VlcRuntimeLocator.prepareNative(layout)
+                val newFactory = MediaPlayerFactory(*layout.mediaPlayerFactoryOptions())
+                val newPlayer = newFactory.mediaPlayers().newMediaPlayer()
+                val newListener = createEventListener()
+                newPlayer.events().addMediaPlayerEventListener(newListener)
+                factory = newFactory
+                player = newPlayer
+                listener = newListener
+                newPlayer
+            }
         }
 
     private fun createEventListener(): MediaPlayerEventAdapter =
@@ -771,20 +785,22 @@ class VlcjPlaybackController(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        generation++
-        activeGeneration = null
-        cancelLoadWatchdog()
-        positionTicker?.cancel()
-        listener?.let { player?.events()?.removeMediaPlayerEventListener(it) }
-        runCatching { player?.controls()?.stop() }
-        runCatching { player?.media()?.reset() }
-        runCatching { player?.release() }
-        runCatching { factory?.release() }
-        listener = null
-        player = null
-        factory = null
+        synchronized(nativeLifecycleLock) {
+            generation++
+            activeGeneration = null
+            cancelLoadWatchdog()
+            positionTicker?.cancel()
+            listener?.let { player?.events()?.removeMediaPlayerEventListener(it) }
+            runCatching { player?.controls()?.stop() }
+            runCatching { player?.media()?.reset() }
+            runCatching { player?.release() }
+            runCatching { factory?.release() }
+            listener = null
+            player = null
+            factory = null
+            _state.update { it.copy(status = PlaybackStatus.IDLE, playWhenReady = false) }
+        }
         scope.cancel()
-        _state.update { it.copy(status = PlaybackStatus.IDLE, playWhenReady = false) }
     }
 
     private fun checkOpen() = check(!closed.get()) { "Playback controller is closed" }
