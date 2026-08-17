@@ -16,9 +16,11 @@ import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.DesktopSessionProvider
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.models.AccountInfo
+import moe.rukamori.archivetune.innertube.redacted
 import java.awt.Desktop
 import java.net.URI
 import java.time.Clock
+import java.util.logging.Logger
 
 /**
  * Desktop account lifecycle. Secret cookie, visitor and token values never appear in this state.
@@ -160,6 +162,7 @@ class DesktopSessionManager(
     private val refreshIntervalMillis: Long = DEFAULT_REFRESH_INTERVAL_MILLIS,
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
 ) : DesktopSessionProvider {
+    private val logger = Logger.getLogger("moe.rukamori.archivetune.desktop")
     private val refreshMutex = Mutex()
     private val stateLock = Any()
     @Volatile
@@ -261,9 +264,13 @@ class DesktopSessionManager(
 
             // A browser-side expiry hint is not authoritative: Google can accept a cookie long
             // after its browser expiration, exactly as the Android app relies on. Re-verify against
-            // the network and only expire the session on a concrete server rejection.
+            // the network as a best-effort refresh, but do not discard a persisted session merely
+            // because this probe rejects it.
             val verification = verifySafely(current.authState)
             if (verification is VerificationResult.Verified && persistVerified(current, verification.session, current.expiresAtEpochMillis)) {
+                logger.info(
+                    "session_refresh outcome=verified auth=${verification.session.authState.redacted().toLogString()}",
+                )
                 return@withLock true
             }
 
@@ -274,13 +281,21 @@ class DesktopSessionManager(
                 }
             }
 
-            if (verification is VerificationResult.Rejected && verification.authRejected) {
-                synchronized(stateLock) {
-                    if (active?.authState?.fingerprint == current.authState.fingerprint) {
-                        knownExpired = true
-                        _state.value = DesktopAccountState.Expired(current.account)
-                    }
+            // The verifier is a best-effort account-info probe, not an authoritative cookie
+            // revocation check. YouTube can reject that probe while the exact same SAPISID cookie
+            // still works for browse/playback requests. Treating it as a logout signal made the
+            // desktop client erase its usable auth state every ~15 minutes (and on every startup).
+            // Imports are still validated before persistence; once persisted, only explicit logout
+            // or a successfully validated replacement may remove/replace the local session.
+            synchronized(stateLock) {
+                if (active?.authState?.fingerprint == current.authState.fingerprint) {
+                    lastValidationAtEpochMillis = now
                 }
+            }
+            if (verification is VerificationResult.Rejected && verification.authRejected) {
+                logger.warning(
+                    "session_refresh outcome=auth_probe_rejected_preserved auth=${current.authState.redacted().toLogString()}",
+                )
             }
             false
         }
@@ -331,6 +346,9 @@ class DesktopSessionManager(
     fun logout(): Result<Unit> =
         try {
             synchronized(stateLock) {
+                logger.info(
+                    "session_logout auth=${active?.authState?.redacted()?.toLogString() ?: "none"}",
+                )
                 secureStore.delete()
                 active = null
                 knownExpired = false
@@ -416,6 +434,11 @@ class DesktopSessionManager(
             synchronized(stateLock) {
                 if (active?.authState?.fingerprint != previous.authState.fingerprint) return false
                 secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
+                logger.info(
+                    "session_persist auth_changed=${previous.authState.fingerprint != verifiedAuthState.fingerprint} " +
+                        "previous=${previous.authState.redacted().toLogString()} " +
+                        "next=${verifiedAuthState.redacted().toLogString()}",
+                )
                 active = refreshed
                 knownExpired = false
                 lastValidationAtEpochMillis = clock.millis()

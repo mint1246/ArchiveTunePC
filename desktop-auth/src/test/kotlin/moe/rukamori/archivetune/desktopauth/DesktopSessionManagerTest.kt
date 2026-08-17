@@ -76,7 +76,7 @@ class DesktopSessionManagerTest {
     }
 
     @Test
-    fun `server auth rejection expires a restored session`() = runBlocking {
+    fun `account probe auth rejection preserves a restored session`() = runBlocking {
         val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
         val store = MemoryStore()
         store.value = StoredDesktopSessionCodec.encode(
@@ -97,8 +97,8 @@ class DesktopSessionManagerTest {
         assertTrue(manager.state.value is DesktopAccountState.SignedIn)
 
         assertFalse(manager.refreshRestoredSession())
-        assertTrue(manager.state.value is DesktopAccountState.Expired)
-        assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+        assertEquals("SAPISID=dead", manager.currentAuthState().cookie)
     }
 
     @Test
