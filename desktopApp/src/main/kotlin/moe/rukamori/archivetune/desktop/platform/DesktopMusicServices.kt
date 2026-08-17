@@ -96,7 +96,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         account.restore()
         runtime.applicationScope.launch {
             account.refreshRestoredSession()
-            restoreQueueIfPresent()
             syncHomeLibrary()
             loadSimilarRecommendations()
         }
@@ -173,6 +172,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     /** Connects the download service after both platform coordinators have been constructed. */
     fun attachCompletedDownloadLookup(lookup: (String) -> Path?) {
         completedDownloadLookup = lookup
+        // Queue restoration must happen after the download service is attached, otherwise a
+        // persisted deferred item can start remote resolution before local-first lookup exists.
+        runtime.applicationScope.launch { restoreQueueIfPresent() }
     }
 
     /** Syncs liked songs, library songs, liked albums and subscribed artists into the home store. */
