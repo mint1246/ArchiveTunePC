@@ -121,18 +121,24 @@ class VlcjPlaybackController(
             stopActiveFileLocked()
             publishQueueLocked(title)
             val position = startPositionMs.coerceAtLeast(0L)
+            val shouldLoad = playWhenReady && queue.current != null
             _state.update {
                 it.copy(
-                    playWhenReady = playWhenReady && queue.current != null,
+                    playWhenReady = shouldLoad,
                     positionMs = position,
                     bufferedPositionMs = position,
                     durationMs = queue.current?.metadata?.durationHintMs?.coerceAtLeast(0L) ?: 0L,
-                    status = if (queue.current == null) PlaybackStatus.IDLE else PlaybackStatus.RESOLVING,
+                    // A restored queue is intentionally paused. Do not spin up libVLC and begin
+                    // an asynchronous play/pause cycle merely to represent that paused state.
+                    // The first real play command will reload this item from [position]. This is
+                    // especially important during application startup: cancelling libVLC while
+                    // its first media is still opening can make stop/reset block for many seconds.
+                    status = if (shouldLoad) PlaybackStatus.RESOLVING else PlaybackStatus.IDLE,
                     error = null,
                 )
             }
             transition(previous, queue.current, TransitionReason.QUEUE_REPLACED)
-            queue.current?.let { LoadRequest(generation, it, position) }
+            queue.current?.takeIf { shouldLoad }?.let { LoadRequest(generation, it, position) }
         }
         request?.let(::enqueueLoad)
     }

@@ -9,6 +9,7 @@ package moe.rukamori.archivetune.playback.desktop
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicInteger
 import javax.sound.sampled.AudioFileFormat
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
@@ -35,6 +36,40 @@ import kotlin.test.assertTrue
  * %LOCALAPPDATA%/ArchiveTuneSpikes/runtime to run it locally.
  */
 class VlcjLocalPlaybackIntegrationTest {
+    @Test
+    fun `restoring a paused queue does not start libVLC`() = runBlocking {
+        val resolutionCalls = AtomicInteger()
+        val item = PlaybackItem(
+            metadata = PlaybackMetadata(
+                id = "paused-restore",
+                title = "Paused restore",
+                durationHintMs = 10_000L,
+            ),
+        )
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver {
+                resolutionCalls.incrementAndGet()
+                Result.failure(AssertionError("paused queue restore must not resolve media"))
+            },
+        )
+
+        try {
+            controller.replaceQueue(
+                items = listOf(item),
+                startPositionMs = 4_321L,
+                playWhenReady = false,
+            )
+
+            assertEquals(0, resolutionCalls.get())
+            assertEquals(PlaybackStatus.IDLE, controller.state.value.status)
+            assertEquals(false, controller.state.value.playWhenReady)
+            assertEquals(4_321L, controller.state.value.positionMs)
+            assertEquals(item, controller.state.value.currentItem)
+        } finally {
+            controller.close()
+        }
+    }
+
     @Test
     fun `plays and controls a local wav through libVLC`() = runBlocking {
         val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
