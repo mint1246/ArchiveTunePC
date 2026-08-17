@@ -12,6 +12,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.AccountInfo
+import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
@@ -189,10 +190,74 @@ class ArchiveTuneJvmClient(
         run {
             prepareProvidedSession()
             normalizedId(browseId, "Artist browse ID").fold(
-            onSuccess = { YouTube.artist(it) },
-            onFailure = { Result.failure(it) },
+                onSuccess = { artistId ->
+                    YouTube.artist(artistId).fold(
+                        onSuccess = { page -> Result.success(recoverUnlistedArtistAlbums(page)) },
+                        onFailure = { Result.failure(it) },
+                    )
+                },
+                onFailure = { Result.failure(it) },
             )
         }
+
+    /**
+     * Some YouTube Music artist responses expose only a fixed Albums carousel and no "more"
+     * endpoint, even while songs still point at additional valid album browse IDs. Recover those
+     * full albums from the artist's song search so desktop does not silently hide them.
+     */
+    private suspend fun recoverUnlistedArtistAlbums(page: ArtistPage): ArtistPage {
+        val albumSectionIndex = page.sections.indexOfFirst { section ->
+            section.items.any { it is AlbumItem }
+        }
+        if (albumSectionIndex < 0) return page
+
+        val albumSection = page.sections[albumSectionIndex]
+        if (albumSection.moreEndpoint != null) return page
+
+        val knownAlbumIds =
+            page.sections
+                .asSequence()
+                .flatMap { it.items.asSequence() }
+                .filterIsInstance<AlbumItem>()
+                .mapTo(mutableSetOf()) { it.browseId }
+
+        val searchItems =
+            YouTube.search(page.artist.title, YouTube.SearchFilter.FILTER_SONG)
+                .getOrNull()
+                ?.items
+                .orEmpty()
+
+        val candidateAlbumIds =
+            searchItems
+                .asSequence()
+                .filterIsInstance<SongItem>()
+                .filter { song -> song.artists.any { it.id == page.artist.id } }
+                .mapNotNull { it.album?.id }
+                .filterNot(knownAlbumIds::contains)
+                .distinct()
+                .take(MAX_RECOVERED_ARTIST_ALBUMS)
+                .toList()
+        if (candidateAlbumIds.isEmpty()) return page
+
+        val recovered =
+            candidateAlbumIds.mapNotNull { albumId ->
+                val albumPage = YouTube.album(albumId).getOrNull() ?: return@mapNotNull null
+                val belongsToArtist =
+                    albumPage.album.artists.orEmpty().any { it.id == page.artist.id } ||
+                        albumPage.songs.any { song -> song.artists.any { it.id == page.artist.id } }
+                if (!belongsToArtist || albumPage.songs.size < MIN_FULL_ALBUM_TRACKS) return@mapNotNull null
+                albumPage.album
+            }
+        if (recovered.isEmpty()) return page
+
+        val mergedItems =
+            (albumSection.items + recovered)
+                .distinctBy { it.id }
+                .sortedByDescending { (it as? AlbumItem)?.year ?: Int.MIN_VALUE }
+        val updatedSections = page.sections.toMutableList()
+        updatedSections[albumSectionIndex] = albumSection.copy(items = mergedItems)
+        return page.copy(sections = updatedSections)
+    }
 
     /** Loads the full artist section behind a section's "more" browse endpoint. */
     suspend fun artistItems(endpoint: BrowseEndpoint): Result<ArtistItemsPage> =
@@ -847,4 +912,6 @@ private fun normalizedId(
         ?: Result.failure(IllegalArgumentException("$field is required"))
 
 private const val DEFAULT_STREAM_EXPIRY_SECONDS = 300L
+private const val MAX_RECOVERED_ARTIST_ALBUMS = 4
+private const val MIN_FULL_ALBUM_TRACKS = 7
 private const val STREAM_RESOLUTION_TIMEOUT_MILLIS = 45_000L
