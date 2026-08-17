@@ -9,6 +9,7 @@ package moe.rukamori.archivetune.desktop.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -17,7 +18,9 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -106,20 +109,30 @@ private fun dynamicDarkColorScheme(palette: DynamicThemePalette) = darkColorSche
     onTertiaryContainer = palette.tertiary.dynamicTone(saturation = 0.16f, brightness = 0.94f),
     background = Color.Transparent,
     onBackground = Color(0xFFF4F4F4),
-    surface = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.12f).copy(alpha = 0.92f),
+    surface = palette.neutral.dynamicTone(saturation = 0.08f, brightness = 0.12f).copy(alpha = 0.88f),
     onSurface = Color(0xFFF1F1F1),
-    surfaceDim = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.08f).copy(alpha = 0.95f),
-    surfaceBright = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.25f).copy(alpha = 0.90f),
-    surfaceContainerLowest = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.075f).copy(alpha = 0.84f),
-    surfaceContainerLow = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.105f).copy(alpha = 0.78f),
-    surfaceContainer = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.135f).copy(alpha = 0.82f),
-    surfaceContainerHigh = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.18f).copy(alpha = 0.87f),
-    surfaceContainerHighest = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.23f).copy(alpha = 0.93f),
-    surfaceVariant = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.25f).copy(alpha = 0.90f),
+    surfaceDim = palette.neutral.dynamicTone(saturation = 0.08f, brightness = 0.08f).copy(alpha = 0.94f),
+    surfaceBright = palette.neutral.dynamicTone(saturation = 0.06f, brightness = 0.25f).copy(alpha = 0.80f),
+    surfaceContainerLowest = palette.neutral.dynamicTone(saturation = 0.06f, brightness = 0.08f).copy(alpha = 0.58f),
+    surfaceContainerLow = palette.neutral.dynamicTone(saturation = 0.07f, brightness = 0.11f).copy(alpha = 0.60f),
+    surfaceContainer = palette.neutral.dynamicTone(saturation = 0.07f, brightness = 0.14f).copy(alpha = 0.64f),
+    surfaceContainerHigh = palette.neutral.dynamicTone(saturation = 0.07f, brightness = 0.18f).copy(alpha = 0.68f),
+    surfaceContainerHighest = palette.neutral.dynamicTone(saturation = 0.06f, brightness = 0.23f).copy(alpha = 0.74f),
+    surfaceVariant = palette.neutral.dynamicTone(saturation = 0.07f, brightness = 0.25f).copy(alpha = 0.72f),
     onSurfaceVariant = Color(0xFFD5D6D8),
     outline = Color(0xFFB6B7BB).copy(alpha = 0.74f),
-    outlineVariant = Color(0xFF8C8E93).copy(alpha = 0.42f),
+    outlineVariant = Color(0xFFF0F1F4).copy(alpha = 0.16f),
 )
+
+internal val LocalDynamicThemeActive = staticCompositionLocalOf { false }
+
+@Composable
+internal fun dynamicGlassColor(base: Color, alpha: Float): Color =
+    if (LocalDynamicThemeActive.current) base.copy(alpha = alpha) else base
+
+@Composable
+internal fun dynamicGlassBorder(alpha: Float = 0.12f): BorderStroke? =
+    if (LocalDynamicThemeActive.current) BorderStroke(1.dp, Color.White.copy(alpha = alpha)) else null
 
 private fun Color.dynamicTone(saturation: Float, brightness: Float): Color {
     val hsb = AwtColor.RGBtoHSB(
@@ -203,6 +216,10 @@ fun ArchiveTuneDesktopTheme(
         colorScheme = colors,
         shapes = ArchiveTuneShapes,
         typography = ArchiveTuneTypography,
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(
+            LocalDynamicThemeActive provides (preference == DesktopThemePreference.DYNAMIC),
+            content = content,
+        )
+    }
 }

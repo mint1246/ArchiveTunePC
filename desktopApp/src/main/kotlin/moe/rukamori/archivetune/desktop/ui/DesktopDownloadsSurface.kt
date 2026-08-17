@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -95,11 +96,37 @@ fun DesktopDownloadsSurface(
     }
 }
 
-@Composable private fun EmptyDownloads() = Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(12.dp)); Text("Download songs from search to keep them available offline.") } }
+@Composable private fun EmptyDownloads() {
+    val dynamicGlass = LocalDynamicThemeActive.current
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = if (dynamicGlass) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.58f))
+        } else {
+            CardDefaults.cardColors()
+        },
+        border = dynamicGlassBorder(),
+    ) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Download, null)
+            Spacer(Modifier.width(12.dp))
+            Text("Download songs from search to keep them available offline.")
+        }
+    }
+}
 
 @Composable private fun DownloadRow(item: DownloadSnapshot, onCancel: () -> Unit, onRetry: () -> Unit, onPlay: () -> Unit, onPlayNext: () -> Unit, onAddToQueue: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+    val dynamicGlass = LocalDynamicThemeActive.current
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = if (dynamicGlass) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.58f))
+        } else {
+            CardDefaults.cardColors()
+        },
+        border = dynamicGlassBorder(),
+    ) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             item.artworkUrl?.let { artwork ->
                 AsyncImage(
