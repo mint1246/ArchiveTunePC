@@ -100,38 +100,114 @@ class Spring(
 }
 
 /**
- * Cubic-spline interpolation over (time, value) keyframes, used to map a normalised
- * lyric progress onto a non-linear animation curve (e.g. 0 → 1.05 → 1 along the
- * word timeline). Knot times must be strictly ascending and lie in `[0, 1]`.
+ * Natural cubic-spline interpolation matching the `cubic-spline` package used by
+ * SpicyLyrics. The previous implementation was only a local smoothstep-like curve,
+ * which changed the timing/overshoot of every inline lyric effect.
  */
 class CubicSpline(times: DoubleArray, values: DoubleArray) {
-    init { require(times.size == values.size) { "times and values mismatch" } }
-    private val xs: DoubleArray = times
-    private val ys: DoubleArray = values
+    private val xs = times.copyOf()
+    private val ys = values.copyOf()
+    private val ks: DoubleArray
+
+    init {
+        require(xs.size == ys.size) { "times and values mismatch" }
+        require(xs.size >= 2) { "at least two spline points are required" }
+        for (i in 1 until xs.size) {
+            require(xs[i] > xs[i - 1]) { "times must be strictly ascending" }
+        }
+        ks = naturalSlopes()
+    }
 
     fun at(progress: Double): Double {
-        val n = xs.size
-        if (n == 0) return 0.0
-        if (n == 1) return ys[0]
-        val t = progress.coerceIn(xs[0], xs[n - 1])
-        if (t <= xs[0]) return ys[0]
-        if (t >= xs[n - 1]) return ys[n - 1]
+        val x = progress.coerceIn(xs.first(), xs.last())
+        if (x <= xs.first()) return ys.first()
+        if (x >= xs.last()) return ys.last()
 
         var lo = 0
-        var hi = n - 1
+        var hi = xs.lastIndex
         while (hi - lo > 1) {
             val mid = (lo + hi) ushr 1
-            if (xs[mid] > t) hi = mid else lo = mid
+            if (xs[mid] <= x) lo = mid else hi = mid
         }
-        val h = xs[hi] - xs[lo]
-        if (h == 0.0) return ys[lo]
-        val dLo = (t - xs[lo]) / h
-        val dHi = (t - xs[hi]) / h
-        val basis00 = (1.0 + 2.0 * dLo) * dHi * dHi
-        val basis10 = dLo * dHi * dHi * h
-        val basis01 = (1.0 + 2.0 * dHi) * dLo * dLo
-        val basis11 = -dHi * dLo * dLo * h
-        val eased = (basis00 + basis10 + basis01 + basis11)
-        return eased * (ys[hi] - ys[lo]) + ys[lo]
+
+        val width = xs[hi] - xs[lo]
+        val t = (x - xs[lo]) / width
+        val delta = ys[hi] - ys[lo]
+        val a = ks[lo] * width - delta
+        val b = -ks[hi] * width + delta
+        return (1.0 - t) * ys[lo] + t * ys[hi] +
+            t * (1.0 - t) * (a * (1.0 - t) + b * t)
+    }
+
+    /** Port of cubic-spline's natural-knot solve. */
+    private fun naturalSlopes(): DoubleArray {
+        val n = xs.lastIndex
+        val matrix = Array(n + 1) { DoubleArray(n + 2) }
+
+        for (i in 1 until n) {
+            val left = xs[i] - xs[i - 1]
+            val right = xs[i + 1] - xs[i]
+            matrix[i][i - 1] = 1.0 / left
+            matrix[i][i] = 2.0 * (1.0 / left + 1.0 / right)
+            matrix[i][i + 1] = 1.0 / right
+            matrix[i][n + 1] = 3.0 * (
+                (ys[i] - ys[i - 1]) / (left * left) +
+                    (ys[i + 1] - ys[i]) / (right * right)
+                )
+        }
+
+        val firstWidth = xs[1] - xs[0]
+        matrix[0][0] = 2.0 / firstWidth
+        matrix[0][1] = 1.0 / firstWidth
+        matrix[0][n + 1] = 3.0 * (ys[1] - ys[0]) / (firstWidth * firstWidth)
+
+        val lastWidth = xs[n] - xs[n - 1]
+        matrix[n][n - 1] = 1.0 / lastWidth
+        matrix[n][n] = 2.0 / lastWidth
+        matrix[n][n + 1] = 3.0 * (ys[n] - ys[n - 1]) / (lastWidth * lastWidth)
+
+        return solve(matrix)
+    }
+
+    private fun solve(matrix: Array<DoubleArray>): DoubleArray {
+        val m = matrix.size
+        val out = DoubleArray(m)
+        var h = 0
+        var k = 0
+        while (h < m && k <= m) {
+            var pivot = h
+            var max = Double.NEGATIVE_INFINITY
+            for (i in h until m) {
+                val v = kotlin.math.abs(matrix[i][k])
+                if (v > max) {
+                    pivot = i
+                    max = v
+                }
+            }
+            if (matrix[pivot][k] == 0.0) {
+                k++
+            } else {
+                val tmp = matrix[h]
+                matrix[h] = matrix[pivot]
+                matrix[pivot] = tmp
+                for (i in h + 1 until m) {
+                    val factor = matrix[i][k] / matrix[h][k]
+                    matrix[i][k] = 0.0
+                    for (j in k + 1..m) matrix[i][j] -= matrix[h][j] * factor
+                }
+                h++
+                k++
+            }
+        }
+
+        for (i in m - 1 downTo 0) {
+            val v = if (matrix[i][i] != 0.0) matrix[i][m] / matrix[i][i] else 0.0
+            out[i] = v
+            for (j in i - 1 downTo 0) {
+                matrix[j][m] -= matrix[j][i] * v
+                matrix[j][i] = 0.0
+            }
+        }
+        return out
     }
 }
