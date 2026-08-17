@@ -30,7 +30,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import moe.rukamori.archivetune.playback.desktop.DesktopConcretePlaybackSourceResolver
-import moe.rukamori.archivetune.playback.desktop.MpvPlaybackController
+import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import moe.rukamori.archivetune.playback.desktop.PlaybackQueueStore
 import moe.rukamori.archivetune.windowsmedia.PlaybackMediaCommandRouter
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
@@ -67,7 +67,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
     /** Signed sources live only in memory and are discarded before their server expiry. */
     private val resolvedSourceCache = ConcurrentHashMap<String, CachedResolvedSource>()
-    val playback = MpvPlaybackController(PlaybackSourceResolver { item -> resolve(item) })
+    val playback = VlcjPlaybackController(PlaybackSourceResolver { item -> resolve(item) })
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lyricsClient = configuredLyricsClient()
@@ -331,12 +331,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     private fun logStreamDiagnostic(event: StreamResolutionDiagnostic) {
         when (event) {
-            is StreamResolutionDiagnostic.Attempt -> runtime.logger.info("stream_resolution event=attempt client=${event.client} result=${event.classification.name}")
+            is StreamResolutionDiagnostic.AuthStateChange -> runtime.logger.warning("auth_state_change source=${event.source} previous=${event.previous.toLogString()} next=${event.next.toLogString()}")
+            is StreamResolutionDiagnostic.Attempt -> runtime.logger.info("stream_resolution event=attempt client=${event.client} result=${event.classification.name} status=${event.httpStatus ?: "none"} auth=${event.authState.toLogString()}")
             is StreamResolutionDiagnostic.FormatAttempt -> runtime.logger.info("stream_resolution event=format client=${event.client} format=${event.format} result=${event.classification.name}")
             is StreamResolutionDiagnostic.PlayerResponse -> runtime.logger.info("stream_resolution event=player client=${event.client} status=${event.status} adaptive=${event.adaptiveFormats} audio=${event.audioFormats} direct=${event.directUrls} cipher=${event.ciphers}")
             is StreamResolutionDiagnostic.LibraryResponse -> runtime.logger.info("library_response single_tabs=${event.singleTabs} two_tabs=${event.twoColumnTabs} direct_sections=${event.directSections} secondary_sections=${event.secondarySections} selected_sections=${event.selectedSections} renderer_items=${event.rendererItems} parsed_items=${event.parsedItems} renderer_keys=${event.rendererKeys.joinToString(",")}")
-            is StreamResolutionDiagnostic.Success -> runtime.logger.info("stream_resolution event=success client=${event.client}")
-            is StreamResolutionDiagnostic.Failure -> runtime.logger.warning("stream_resolution event=failure result=${event.classification.name}")
+            is StreamResolutionDiagnostic.Success -> runtime.logger.info("stream_resolution event=success client=${event.client} auth=${event.authState.toLogString()}")
+            is StreamResolutionDiagnostic.Failure -> runtime.logger.warning("stream_resolution event=failure result=${event.classification.name} status=${event.httpStatus ?: "none"} auth=${event.authState.toLogString()}")
         }
     }
 

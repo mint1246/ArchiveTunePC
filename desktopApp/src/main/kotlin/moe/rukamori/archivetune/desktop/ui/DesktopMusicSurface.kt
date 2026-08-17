@@ -616,7 +616,11 @@ private fun NowPlayingSubtitle(
     modifier: Modifier = Modifier,
 ) {
     val errorText = snapshot.error?.let {
-        if (it.kind.name == "ENGINE_UNAVAILABLE") "mpv is required for desktop playback — install mpv or set ARCHIVETUNE_MPV_PATH" else it.message
+        if (it.kind.name == "ENGINE_UNAVAILABLE") {
+            "VLC runtime is required for desktop playback — package VLC or set ARCHIVETUNE_VLC_DIR"
+        } else {
+            it.message
+        }
     }
     val busyText = when (snapshot.status) {
         PlaybackStatus.RESOLVING -> "Resolving audio stream…"
