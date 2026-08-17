@@ -1,6 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.gradle.api.tasks.Copy
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -63,9 +62,16 @@ compose.desktop {
         jvmArgs += listOf(
             "-Dfile.encoding=UTF-8",
             "-Dsun.java2d.dpiaware=true",
+            "-Xms32m",
+            "-Xmx768m",
+            "-XX:ReservedCodeCacheSize=128m",
+            "-XX:ParallelGCThreads=4",
+            "-XX:ConcGCThreads=2",
+            "-XX:G1ConcRefinementThreads=4",
         )
 
         buildTypes.release.proguard {
+            version.set("7.9.1")
             configurationFiles.from(project.file("proguard-rules.pro"))
         }
 
@@ -102,13 +108,19 @@ compose.desktop {
 }
 
 val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/ArchiveTune")
+val releaseAppImageDir = layout.buildDirectory.dir("compose/binaries/main-release/app/ArchiveTune")
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
-val stageBundledVlcRuntime = tasks.register<Copy>("stageBundledVlcRuntime") {
+val stageBundledVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageBundledVlcRuntime") {
     group = "distribution"
     description = "Stages the verified libVLC runtime into the desktop app image."
-    dependsOn("createDistributable")
-    from(bundledVlcSourceDir)
-    into(appImageDir.map { it.dir("app/resources/native/windows-x64/vlc") })
+    sourceDirectory.set(bundledVlcSourceDir)
+    destinationDirectory.set(appImageDir.map { it.dir("app/resources/native/windows-x64/vlc") })
+}
+val stageBundledVlcRuntimeRelease = tasks.register<StageBundledVlcRuntimeTask>("stageBundledVlcRuntimeRelease") {
+    group = "distribution"
+    description = "Stages the verified libVLC runtime into the optimized desktop app image."
+    sourceDirectory.set(bundledVlcSourceDir)
+    destinationDirectory.set(releaseAppImageDir.map { it.dir("app/resources/native/windows-x64/vlc") })
 }
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/windows")
@@ -157,6 +169,7 @@ val verifyBundledVlcRuntime = tasks.register<VerifyBundledVlcRuntimeTask>("verif
 
 tasks.matching {
     it.name == "createDistributable" ||
+        it.name == "createReleaseDistributable" ||
         it.name == "packageMsi" ||
         it.name == "packageExe" ||
         it.name == "packageDistributionForCurrentOS"
@@ -164,10 +177,10 @@ tasks.matching {
     dependsOn(generateWindowsIcon)
 }
 
-tasks.register<JavaExec>("authenticatedStreamDiagnostic") {
-    group = "verification"
-    description = "Uses the current user's DPAPI session through the normal session manager and prints redacted stream diagnostics."
-    classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("moe.rukamori.archivetune.desktop.platform.AuthenticatedStreamDiagnosticKt")
-    dependsOn("classes")
+tasks.matching { it.name == "createDistributable" }.configureEach {
+    finalizedBy(stageBundledVlcRuntime)
+}
+
+tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
+    finalizedBy(stageBundledVlcRuntimeRelease)
 }

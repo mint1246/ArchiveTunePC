@@ -13,12 +13,15 @@ import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.work.DisableCachingByDefault
 import java.io.DataOutputStream
 import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import javax.imageio.ImageIO
 
 @DisableCachingByDefault(because = "The generated ICO is tiny and inexpensive to recreate.")
@@ -139,6 +142,43 @@ abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
             throw GradleException(
                 "Malformed libVLC runtime at ${root.absolutePath}; plugins/plugins duplicates the entire plugin tree",
             )
+        }
+    }
+}
+
+@DisableCachingByDefault(because = "The VLC tree is already versioned locally; staging must preserve file timestamps for plugins.dat.")
+abstract class StageBundledVlcRuntimeTask : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val destinationDirectory: DirectoryProperty
+
+    @TaskAction
+    fun stage() {
+        val source = sourceDirectory.get().asFile.toPath()
+        val destinationFile = destinationDirectory.get().asFile
+        if (destinationFile.exists() && !destinationFile.deleteRecursively()) {
+            throw GradleException("Unable to replace staged VLC runtime at ${destinationFile.absolutePath}")
+        }
+        val destination = destinationFile.toPath()
+
+        Files.walk(source).use { paths ->
+            paths.forEach { entry ->
+                val target = destination.resolve(source.relativize(entry).toString())
+                if (Files.isDirectory(entry)) {
+                    Files.createDirectories(target)
+                } else {
+                    Files.createDirectories(target.parent)
+                    Files.copy(
+                        entry,
+                        target,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.COPY_ATTRIBUTES,
+                    )
+                }
+            }
         }
     }
 }
