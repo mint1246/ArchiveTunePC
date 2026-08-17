@@ -130,7 +130,9 @@ internal object StoredDesktopSessionCodec {
                 output.writeString(session.authState.cookie)
                 output.writeString(session.authState.visitorData)
                 output.writeString(session.authState.dataSyncId)
-                output.writeString(session.authState.delegatedSessionId)
+                // v3 used to store a separately-normalized delegated id here. Keep the slot for
+                // backwards compatibility; canonical ArchiveTune keeps the combined DataSyncId.
+                output.writeString(null)
                 output.writeString(session.authState.poToken)
                 output.writeString(session.authState.poTokenGvs)
                 output.writeString(session.authState.poTokenPlayer)
@@ -148,12 +150,21 @@ internal object StoredDesktopSessionCodec {
         DataInputStream(ByteArrayInputStream(value)).use { input ->
             val version = input.readInt()
             require(version in LEGACY_VERSION..VERSION) { "Unsupported desktop session format" }
+            val cookie = input.readString()
+            val visitorData = input.readString()
+            val storedDataSyncId = input.readString()
+            val legacyDelegatedSessionId = if (version >= 3) input.readString() else null
+            val dataSyncId =
+                if (legacyDelegatedSessionId != null && storedDataSyncId?.contains("||") != true) {
+                    "$legacyDelegatedSessionId||${storedDataSyncId.orEmpty()}"
+                } else {
+                    storedDataSyncId
+                }
             val authState =
                 moe.rukamori.archivetune.innertube.PlaybackAuthState(
-                    cookie = input.readString(),
-                    visitorData = input.readString(),
-                    dataSyncId = input.readString(),
-                    delegatedSessionId = if (version >= 3) input.readString() else null,
+                    cookie = cookie,
+                    visitorData = visitorData,
+                    dataSyncId = dataSyncId,
                     poToken = input.readString(),
                     poTokenGvs = input.readString(),
                     poTokenPlayer = input.readString(),

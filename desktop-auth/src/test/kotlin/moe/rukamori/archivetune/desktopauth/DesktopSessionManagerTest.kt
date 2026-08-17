@@ -260,7 +260,7 @@ class DesktopSessionManagerTest {
     }
 
     @Test
-    fun `concurrent refresh requests are serialized`() = runBlocking {
+    fun `ordinary requests do not periodically revalidate persisted session`() = runBlocking {
         val store = MemoryStore()
         store.value = StoredDesktopSessionCodec.encode(
             StoredDesktopSession(PlaybackAuthState(cookie = "SAPISID=old"), DesktopAccount("Example", null, null), null),
@@ -278,7 +278,8 @@ class DesktopSessionManagerTest {
 
         List(8) { async { manager.refreshIfNeeded() } }.awaitAll()
 
-        assertEquals(1, calls.get())
+        assertEquals(0, calls.get())
+        assertEquals("SAPISID=old", manager.currentAuthState().cookie)
     }
 
     @Test

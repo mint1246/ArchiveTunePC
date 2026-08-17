@@ -155,17 +155,12 @@ class DesktopSessionManager(
     private val browserLauncher: SystemBrowserLauncher = DesktopSystemBrowserLauncher,
     private val clock: Clock = Clock.systemUTC(),
     private val cookieRefresher: DesktopSessionCookieRefresher? = null,
-    private val refreshIntervalMillis: Long = DEFAULT_REFRESH_INTERVAL_MILLIS,
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
 ) : DesktopSessionProvider {
     private val refreshMutex = Mutex()
     private val stateLock = Any()
     @Volatile
     private var active: StoredDesktopSession? = null
-    @Volatile
-    private var knownExpired = false
-    @Volatile
-    private var lastValidationAtEpochMillis: Long = Long.MIN_VALUE
     private val _state = MutableStateFlow<DesktopAccountState>(DesktopAccountState.SignedOut)
     val state: StateFlow<DesktopAccountState> = _state.asStateFlow()
 
@@ -215,8 +210,6 @@ class DesktopSessionManager(
             }
         synchronized(stateLock) {
             active = stored
-            knownExpired = false
-            lastValidationAtEpochMillis = Long.MIN_VALUE
             _state.value = stateFor(stored, restored = true)
         }
         return _state.value
@@ -231,7 +224,10 @@ class DesktopSessionManager(
         return refreshIfNeeded(force = true)
     }
 
-    /** Called by [ArchiveTuneJvmClient] before each request. Concurrent requests share one check. */
+    /**
+     * Android keeps its persisted YouTube session as-is between requests; desktop does the same.
+     * The only per-request renewal is an explicitly configured cookie bridge near a known expiry.
+     */
     override suspend fun refreshIfNeeded() {
         refreshIfNeeded(force = false)
     }
@@ -239,11 +235,18 @@ class DesktopSessionManager(
     private suspend fun refreshIfNeeded(force: Boolean): Boolean =
         refreshMutex.withLock {
             val current = active ?: return@withLock false
-            if (knownExpired && !force) return@withLock false
             val now = clock.millis()
             val expirySoon = current.expiresAtEpochMillis?.let { it - now <= refreshLeadMillis } == true
-            val intervalElapsed = lastValidationAtEpochMillis == Long.MIN_VALUE || now - lastValidationAtEpochMillis >= refreshIntervalMillis
-            if (!force && !expirySoon && !intervalElapsed) return@withLock true
+
+            // Do not periodically re-run account/account_menu like the old desktop lifecycle did.
+            // ArchiveTune Android does not revalidate its cookie every N minutes, and doing so here
+            // let a probe mutate shared auth context while otherwise valid browse/search calls ran.
+            if (!force) {
+                if (!expirySoon || cookieRefresher == null) return@withLock true
+                val replacement = requestCookieReplacement(current, now)
+                if (replacement != null && validateAndPersist(current, replacement)) return@withLock true
+                return@withLock true
+            }
 
             var replacementAttempted = false
             // A known near-term browser-cookie expiry is precisely when a user-authorized cookie
@@ -273,17 +276,8 @@ class DesktopSessionManager(
                 }
             }
 
-            // The verifier is a best-effort account-info probe, not an authoritative cookie
-            // revocation check. YouTube can reject that probe while the exact same SAPISID cookie
-            // still works for browse/playback requests. Treating it as a logout signal made the
-            // desktop client erase its usable auth state every ~15 minutes (and on every startup).
-            // Imports are still validated before persistence; once persisted, only explicit logout
-            // or a successfully validated replacement may remove/replace the local session.
-            synchronized(stateLock) {
-                if (active?.authState?.fingerprint == current.authState.fingerprint) {
-                    lastValidationAtEpochMillis = now
-                }
-            }
+            // A startup probe is best-effort only. Imports are validated before persistence; once
+            // persisted, a rejected probe must not erase or disable the usable local session.
             false
         }
 
@@ -323,8 +317,6 @@ class DesktopSessionManager(
                 return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
             }
             active = stored
-            knownExpired = false
-            lastValidationAtEpochMillis = clock.millis()
             _state.value = DesktopAccountState.SignedIn(stored.account, restoredFromSecureStore = false)
         }
         return SessionImportResult.Success(stored.account)
@@ -335,8 +327,6 @@ class DesktopSessionManager(
             synchronized(stateLock) {
                 secureStore.delete()
                 active = null
-                knownExpired = false
-                lastValidationAtEpochMillis = Long.MIN_VALUE
                 _state.value = DesktopAccountState.SignedOut
             }
             Result.success(Unit)
@@ -346,7 +336,6 @@ class DesktopSessionManager(
 
     override fun currentAuthState(): PlaybackAuthState =
         active
-            ?.takeUnless { knownExpired }
             ?.authState
             ?: PlaybackAuthState.EMPTY
 
@@ -419,8 +408,6 @@ class DesktopSessionManager(
                 if (active?.authState?.fingerprint != previous.authState.fingerprint) return false
                 secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
                 active = refreshed
-                knownExpired = false
-                lastValidationAtEpochMillis = clock.millis()
                 _state.value = DesktopAccountState.SignedIn(refreshed.account, restoredFromSecureStore = false)
             }
             true
@@ -454,7 +441,6 @@ class DesktopSessionManager(
 
     private companion object {
         val GOOGLE_LOGIN_URL = URI("https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com")
-        const val DEFAULT_REFRESH_INTERVAL_MILLIS = 15 * 60 * 1_000L
         const val DEFAULT_REFRESH_LEAD_MILLIS = 5 * 60 * 1_000L
     }
 }
