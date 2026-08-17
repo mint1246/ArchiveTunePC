@@ -182,8 +182,16 @@ class DesktopSettingsStore(file: Path) {
 
     private fun Float.finiteOr(default: Float): Float = takeIf(Float::isFinite) ?: default
 
-    private fun <T : Enum<T>> Properties.enumValue(key: String, default: T): T =
-        default.declaringJavaClass.enumConstants.firstOrNull { it.name == getProperty(key) } ?: default
+    private fun <T : Enum<T>> Properties.enumValue(key: String, default: T): T {
+        val persistedName = getProperty(key) ?: return default
+        // Release shrinking must not be allowed to turn one enum-backed preference into a full
+        // settings reset. If an optimizer has stripped enum metadata, Class#getEnumConstants may
+        // legally return null from our point of view even though Kotlin exposes it as a platform
+        // type. Treat that preference as unreadable and preserve the remaining settings instead of
+        // throwing out of load() and falling back to an all-default DesktopSettings instance.
+        val constants = default.declaringJavaClass.enumConstants ?: return default
+        return constants.firstOrNull { it.name == persistedName } ?: default
+    }
 
     private fun readPaths(values: Properties, prefix: String): List<Path> =
         (0 until MAX_LIBRARY_FOLDERS)

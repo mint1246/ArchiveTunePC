@@ -36,6 +36,7 @@
 -keep enum moe.rukamori.archivetune.desktop.settings.DesktopLastDestination { *; }
 -keep enum moe.rukamori.archivetune.desktop.settings.DesktopThemeMode { *; }
 -keep enum moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode { *; }
+-keep enum moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy { *; }
 -keep enum moe.rukamori.archivetune.desktop.state.DesktopDestination { *; }
 -keep enum moe.rukamori.archivetune.desktop.state.DesktopThemePreference { *; }
 -keep enum moe.rukamori.archivetune.playback.api.RepeatMode { *; }
