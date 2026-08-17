@@ -77,7 +77,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -626,8 +625,7 @@ private fun NowPlayingTitle(item: PlaybackItem?, onAlbumClick: (String) -> Unit,
         text = item?.metadata?.title ?: "Nothing playing",
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        color = if (albumId != null) MaterialTheme.colorScheme.primary else androidx.compose.material3.LocalContentColor.current,
-        textDecoration = if (albumId != null) TextDecoration.Underline else TextDecoration.None,
+        color = androidx.compose.material3.LocalContentColor.current,
         modifier = modifier.then(
             if (albumId == null) Modifier
             else Modifier
@@ -671,19 +669,17 @@ private fun NowPlayingSubtitle(
     val album = item.metadata.album
     val albumLink = album?.takeIf { !it.id.isNullOrBlank() && !it.title.isBlank() }
     val baseColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val linkColor = MaterialTheme.colorScheme.primary
     val annotated = buildAnnotatedString {
         item.metadata.artists.forEachIndexed { index, artist ->
-            val clickable = !artist.id.isNullOrBlank()
             pushStringAnnotation(tag = ARTIST_LINK_TAG, annotation = artist.id.orEmpty())
-            withStyle(SpanStyle(color = if (clickable) linkColor else baseColor, textDecoration = if (clickable) TextDecoration.Underline else TextDecoration.None)) { append(artist.name) }
+            withStyle(SpanStyle(color = baseColor)) { append(artist.name) }
             pop()
             if (index != item.metadata.artists.lastIndex) append(", ")
         }
         if (albumLink != null) {
             if (item.metadata.artists.isNotEmpty()) append(" • ")
             pushStringAnnotation(tag = ALBUM_LINK_TAG, annotation = albumLink.id.orEmpty())
-            withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { append(albumLink.title) }
+            withStyle(SpanStyle(color = baseColor)) { append(albumLink.title) }
             pop()
         }
     }
