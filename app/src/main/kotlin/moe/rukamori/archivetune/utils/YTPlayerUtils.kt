@@ -16,30 +16,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import moe.rukamori.archivetune.constants.AudioQuality
 import moe.rukamori.archivetune.constants.PlayerStreamClient
-import moe.rukamori.archivetune.innertube.NewPipeUtils
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ANDROID_CREATOR
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ANDROID_MUSIC
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ANDROID_TESTSUITE
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ANDROID_UNPLUGGED
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ANDROID_VR_1_65_10
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.IOS
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.IOS_MUSIC
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.IPADOS
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.MOBILE
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.TVHTML5
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.TVHTML5_SIMPLY_EMBEDDED_PLAYER
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.VISIONOS
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB
-import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_CREATOR
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_PRIMARY
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_REMIX
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
+import moe.rukamori.archivetune.stream.PlaybackStreamResolver
+import moe.rukamori.archivetune.stream.StreamAudioQuality
+import moe.rukamori.archivetune.stream.StreamClientPreference
 import moe.rukamori.archivetune.utils.potoken.BotGuardTokenGenerator
 import moe.rukamori.archivetune.utils.potoken.PoTokenResult
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import timber.log.Timber
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -47,42 +34,15 @@ import java.util.concurrent.ConcurrentHashMap
 object YTPlayerUtils {
     private const val logTag = "YTPlayerUtils"
     private const val FAILED_CLIENT_BACKOFF_MS = 10 * 60 * 1000L
-    private const val DEFAULT_STREAM_EXPIRE_SECONDS = 300
     private const val MAX_PLAYBACK_DATA_CACHE_ENTRIES = 128
     private const val PLAYBACK_DATA_RESOLUTION_MUTEX_COUNT = 32
-    const val STREAM_URL_EXPIRY_SAFETY_MS = 60_000L
+    const val STREAM_URL_EXPIRY_SAFETY_MS = PlaybackStreamResolver.STREAM_URL_EXPIRY_SAFETY_MS
     private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
-
-    private fun extractExpireTimestampMsFromUrl(url: String): Long? {
-        val expireTimestamp =
-            url
-                .toHttpUrlOrNull()
-                ?.queryParameter("expire")
-                ?.toLongOrNull()
-                ?: return null
-        return expireTimestamp * 1000L
-    }
-
-    private fun extractExpireSecondsFromUrl(url: String): Int? {
-        val expiresAtMs = extractExpireTimestampMsFromUrl(url) ?: return null
-        val remaining = (expiresAtMs - System.currentTimeMillis()) / 1000L
-        return remaining.toInt().takeIf { it > 0 }
-    }
 
     private fun resolveExpireSeconds(
         apiExpire: Int?,
         streamUrl: String?,
-    ): Int {
-        apiExpire?.let { return it }
-        streamUrl?.let { url ->
-            extractExpireSecondsFromUrl(url)?.let { fromUrl ->
-                Timber.tag(logTag).w("Using expire time extracted from stream URL: ${fromUrl}s")
-                return fromUrl
-            }
-        }
-        Timber.tag(logTag).w("No expire time available from API or URL, using default: ${DEFAULT_STREAM_EXPIRE_SECONDS}s")
-        return DEFAULT_STREAM_EXPIRE_SECONDS
-    }
+    ): Int = PlaybackStreamResolver.resolveExpirySeconds(apiExpire, streamUrl)
 
     class LoginRequiredForPlaybackException(
         val videoId: String,
@@ -126,23 +86,7 @@ object YTPlayerUtils {
      * Clients used for fallback streams in case the streams of the main client do not work.
      */
     private val STREAM_FALLBACK_CLIENTS: Array<YouTubeClient> =
-        arrayOf(
-            WEB_REMIX,
-            ANDROID_VR_1_65_10,
-            IOS,
-            MOBILE,
-            ANDROID_MUSIC,
-            IOS_MUSIC,
-            ANDROID_CREATOR,
-            ANDROID_TESTSUITE,
-            ANDROID_UNPLUGGED,
-            IPADOS,
-            VISIONOS,
-            TVHTML5,
-            TVHTML5_SIMPLY_EMBEDDED_PLAYER,
-            WEB,
-            WEB_CREATOR,
-        )
+        PlaybackStreamResolver.fullFallbackClients.toTypedArray()
 
     private data class CachedStreamUrl(
         val url: String,
@@ -285,9 +229,7 @@ object YTPlayerUtils {
     }
 
     private fun hasCompleteWebPlaybackPoToken(authState: PlaybackAuthState): Boolean =
-        authState.webClientPoTokenEnabled &&
-            !authState.resolvePlayerPoToken(WEB_REMIX).isNullOrBlank() &&
-            !authState.resolveGvsPoToken(WEB_REMIX).isNullOrBlank()
+        PlaybackStreamResolver.hasCompleteWebPlaybackPoToken(authState)
 
     private suspend fun mintWebPlaybackPoTokens(
         videoId: String,
@@ -366,10 +308,7 @@ object YTPlayerUtils {
     fun isExpiredOrNearExpiredStreamUrl(
         url: String,
         nowMs: Long = System.currentTimeMillis(),
-    ): Boolean {
-        val expiresAtMs = extractExpireTimestampMsFromUrl(url) ?: return false
-        return expiresAtMs <= nowMs + STREAM_URL_EXPIRY_SAFETY_MS
-    }
+    ): Boolean = PlaybackStreamResolver.isExpiredOrNearExpiredStreamUrl(url, nowMs)
 
     fun markStreamClientFailed(
         videoId: String,
@@ -409,7 +348,7 @@ object YTPlayerUtils {
         return true
     }
 
-    private fun normalizeStreamClientKey(clientKey: String?): String = StreamClientUtils.normalizeClientKey(clientKey)
+    private fun normalizeStreamClientKey(clientKey: String?): String = PlaybackStreamResolver.normalizeClientKey(clientKey)
 
     internal fun buildFailedClientKey(
         videoId: String,
@@ -420,84 +359,18 @@ object YTPlayerUtils {
     internal fun resolvePreferredPlaybackClient(
         preferredStreamClient: PlayerStreamClient,
         authState: PlaybackAuthState,
-    ): YouTubeClient =
-        when (preferredStreamClient) {
-            PlayerStreamClient.ANDROID_VR -> {
-                if (authState.hasPlaybackLoginContext && !hasCompleteWebPlaybackPoToken(authState)) {
-                    WEB_PRIMARY
-                } else {
-                    ANDROID_VR_1_65_10
-                }
-            }
-
-            PlayerStreamClient.WEB_REMIX -> {
-                if (authState.hasPlaybackLoginContext && !hasCompleteWebPlaybackPoToken(authState)) {
-                    WEB_PRIMARY
-                } else {
-                    WEB_REMIX
-                }
-            }
-
-            PlayerStreamClient.ARCHIVETUNE_EXTRACTOR -> {
-                if (authState.hasPlaybackLoginContext) ANDROID_MUSIC else WEB_REMIX
-            }
-
-            PlayerStreamClient.HI_RES_LOSSLESS -> {
-                WEB_REMIX
-            }
-
-            PlayerStreamClient.IOS -> {
-                IOS
-            }
-
-            PlayerStreamClient.TVHTML5 -> {
-                TVHTML5
-            }
-
-            PlayerStreamClient.ANDROID_MUSIC -> {
-                ANDROID_MUSIC
-            }
-
-            else -> {
-                WEB_REMIX
-            }
-        }
+    ): YouTubeClient = PlaybackStreamResolver.resolvePreferredClient(preferredStreamClient.toSharedPreference(), authState)
 
     internal fun buildStreamClientOrder(
         preferredStreamClient: PlayerStreamClient,
         authState: PlaybackAuthState,
-    ): List<YouTubeClient> {
-        val preferredYouTubeClient = resolvePreferredPlaybackClient(preferredStreamClient, authState)
-        val hasCompleteWebPoTokens = hasCompleteWebPlaybackPoToken(authState)
-        val lastSuccessfulClient =
-            lastSuccessfulClientKey?.let { key ->
-                STREAM_FALLBACK_CLIENTS.find { StreamClientUtils.buildClientKey(it) == key }
-            }
-
-        val orderedFallbackClients =
-            if (authState.hasPlaybackLoginContext && hasCompleteWebPoTokens) {
-                STREAM_FALLBACK_CLIENTS.filter { it.supportsCookieAuthentication } +
-                    STREAM_FALLBACK_CLIENTS.filterNot { it.supportsCookieAuthentication }
-            } else {
-                STREAM_FALLBACK_CLIENTS.filterNot { it.supportsCookieAuthentication } +
-                    STREAM_FALLBACK_CLIENTS.filter { it.supportsCookieAuthentication }
-            }
-
-        return buildList {
-            add(preferredYouTubeClient)
-            lastSuccessfulClient
-                ?.takeIf { it != preferredYouTubeClient }
-                ?.let { add(it) }
-            if (authState.hasPlaybackLoginContext && hasCompleteWebPoTokens) {
-                add(WEB_REMIX)
-            }
-            addAll(orderedFallbackClients)
-            if (preferredYouTubeClient != MAIN_CLIENT) add(MAIN_CLIENT)
-            if (preferredStreamClient == PlayerStreamClient.WEB_REMIX) {
-                addAll(STREAM_FALLBACK_CLIENTS)
-            }
-        }.distinct()
-    }
+    ): List<YouTubeClient> =
+        PlaybackStreamResolver.orderClients(
+            preference = preferredStreamClient.toSharedPreference(),
+            authState = authState,
+            fallbackClients = STREAM_FALLBACK_CLIENTS.toList(),
+            lastSuccessfulClientKey = lastSuccessfulClientKey,
+        )
 
     data class PlaybackData(
         val audioConfig: PlayerResponse.PlayerConfig.AudioConfig?,
@@ -1334,72 +1207,21 @@ object YTPlayerUtils {
         networkMetered: Boolean,
     ): List<PlayerResponse.StreamingData.Format> {
         Timber.tag(logTag).i("Finding format with audioQuality: $audioQuality, network metered: $networkMetered")
-
-        val audioFormats =
-            playerResponse.streamingData
-                ?.adaptiveFormats
-                ?.asSequence()
-                ?.filter { it.isAudio && it.bitrate > 0 }
-                ?.filter { it.url != null || it.signatureCipher != null || it.cipher != null }
-                ?.toList()
-                .orEmpty()
-
-        if (audioFormats.isEmpty()) return emptyList()
-
-        val effectiveQuality =
-            when (audioQuality) {
-                AudioQuality.AUTO -> if (networkMetered) AudioQuality.HIGH else AudioQuality.HIGHEST
-                else -> audioQuality
-            }
-
-        val targetBitrateBps =
-            when (effectiveQuality) {
-                AudioQuality.LOW -> 70_000
-                AudioQuality.HIGH -> 160_000
-                AudioQuality.HIGHEST -> 320_000
-                AudioQuality.AUTO -> null
-            }
-
-        val preferHigher =
-            compareByDescending<PlayerResponse.StreamingData.Format> { it.url != null }
-                .thenByDescending { it.bitrate }
-                .thenByDescending { codecRank(extractCodec(it.mimeType)) }
-                .thenByDescending { it.audioSampleRate ?: 0 }
-
-        val preferLowerAboveTarget =
-            compareByDescending<PlayerResponse.StreamingData.Format> { it.url != null }
-                .thenBy { it.bitrate }
-                .thenByDescending { codecRank(extractCodec(it.mimeType)) }
-                .thenByDescending { it.audioSampleRate ?: 0 }
-
         val candidates =
-            when {
-                targetBitrateBps == null || effectiveQuality == AudioQuality.HIGHEST -> {
-                    audioFormats.sortedWith(preferHigher)
-                }
-
-                else -> {
-                    val preferred =
-                        audioFormats
-                            .filter { it.bitrate <= targetBitrateBps }
-                            .sortedWith(preferHigher)
-                    val fallback =
-                        audioFormats
-                            .filter { it.bitrate > targetBitrateBps }
-                            .sortedWith(preferLowerAboveTarget)
-
-                    preferred + fallback
-                }
-            }
+            PlaybackStreamResolver.selectAudioFormatCandidates(
+                playerResponse = playerResponse,
+                quality = audioQuality.toSharedQuality(),
+                networkMetered = networkMetered,
+                includeMuxedFormats = false,
+            )
 
         Timber
             .tag(logTag)
             .v(
                 "Available audio formats: ${
                     candidates.take(12).map {
-                        val codec = extractCodec(it.mimeType)
                         val direct = if (it.url != null) "direct" else "cipher"
-                        "${it.mimeType} ($direct, codec=${codec ?: "unknown"}) @ ${it.bitrate}bps"
+                        "${it.mimeType} ($direct) @ ${it.bitrate}bps"
                     }
                 }",
             )
@@ -1407,36 +1229,12 @@ object YTPlayerUtils {
         return candidates
     }
 
-    private fun extractCodec(mimeType: String): String? {
-        val match = Regex("""codecs="([^"]+)"""").find(mimeType) ?: return null
-        return match.groupValues
-            .getOrNull(1)
-            ?.split(",")
-            ?.firstOrNull()
-            ?.trim()
-    }
-
-    private fun isCipheredFormat(format: PlayerResponse.StreamingData.Format): Boolean =
-        format.url == null && (format.signatureCipher != null || format.cipher != null)
-
     private fun shouldSkipCipheredWebCandidate(
         client: YouTubeClient,
         format: PlayerResponse.StreamingData.Format,
         authState: PlaybackAuthState,
     ): Boolean {
-        val isWebClient = StreamClientUtils.isWebClient(client.clientName)
-        val isCiphered = isCipheredFormat(format)
-        val hasGvsPoToken = !authState.resolveGvsPoToken(client).isNullOrBlank()
-        if (
-            !shouldSkipCipheredWebPlaybackCandidate(
-                webClientPoTokenEnabled = authState.webClientPoTokenEnabled,
-                isWebClient = isWebClient,
-                isCiphered = isCiphered,
-                hasGvsPoToken = hasGvsPoToken,
-            )
-        ) {
-            return false
-        }
+        if (!PlaybackStreamResolver.shouldSkipCipheredWebCandidate(client, format, authState)) return false
 
         Timber.tag(logTag).w(
             "Skipping ciphered %s stream candidate because Web PoToken playback is enabled but no GVS token is available",
@@ -1445,30 +1243,18 @@ object YTPlayerUtils {
         return true
     }
 
-    private fun codecRank(codec: String?): Int =
-        when {
-            codec.isNullOrBlank() -> 0
-            codec.contains("opus", ignoreCase = true) -> 3
-            codec.contains("mp4a", ignoreCase = true) -> 2
-            else -> 1
-        }
-
     private fun isLikelyPreview(
         format: PlayerResponse.StreamingData.Format,
         expectedDurationMs: Long,
-    ): Boolean {
-        val approx = format.approxDurationMs?.toLongOrNull() ?: return false
-        if (expectedDurationMs < 90_000L) return false
-        return approx in 1L..(minOf(90_000L, (expectedDurationMs * 9L) / 10L))
-    }
+    ): Boolean = PlaybackStreamResolver.isLikelyPreview(format, expectedDurationMs)
 
     /**
-     * Wrapper around the [NewPipeUtils.getSignatureTimestamp] function which reports exceptions
+     * Wrapper around the shared stream resolver which reports exceptions.
      */
     private suspend fun getSignatureTimestampOrNull(videoId: String): Int? {
         Timber.tag(logTag).i("Getting signature timestamp for videoId: $videoId")
-        return NewPipeUtils
-            .getSignatureTimestamp(videoId)
+        return PlaybackStreamResolver
+            .signatureTimestamp(videoId)
             .onSuccess { Timber.tag(logTag).i("Signature timestamp obtained: $it") }
             .onFailure {
                 Timber.tag(logTag).e(it, "Failed to get signature timestamp")
@@ -1477,21 +1263,18 @@ object YTPlayerUtils {
     }
 
     /**
-     * Wrapper around the [NewPipeUtils.getStreamUrl] function which reports exceptions.
-     * Also patches cver to match the client version.
+     * Wrapper around the shared stream resolver which reports exceptions.
      */
     private suspend fun findUrl(
         format: PlayerResponse.StreamingData.Format,
         videoId: String,
-        client: YouTubeClient? = null,
+        client: YouTubeClient,
         authState: PlaybackAuthState,
     ): Result<String> {
         Timber.tag(logTag).i("Finding stream URL for format: ${format.mimeType}, videoId: $videoId")
-        return NewPipeUtils
-            .getStreamUrl(format, videoId, client, authState)
-            .map { url ->
-                if (client == null) url else StreamClientUtils.patchClientVersion(url, client.clientVersion)
-            }.onSuccess { Timber.tag(logTag).i("Stream URL obtained successfully") }
+        return PlaybackStreamResolver
+            .resolveUrl(format, videoId, client, authState)
+            .onSuccess { Timber.tag(logTag).i("Stream URL obtained successfully") }
     }
 
     private fun Throwable.isJavaScriptPlayerExtractorFailure(): Boolean {
@@ -1617,6 +1400,25 @@ object YTPlayerUtils {
         }
         return false
     }
+
+    private fun PlayerStreamClient.toSharedPreference(): StreamClientPreference =
+        when (this) {
+            PlayerStreamClient.ANDROID_VR -> StreamClientPreference.ANDROID_VR
+            PlayerStreamClient.WEB_REMIX -> StreamClientPreference.WEB_REMIX
+            PlayerStreamClient.ARCHIVETUNE_EXTRACTOR -> StreamClientPreference.ARCHIVETUNE_EXTRACTOR
+            PlayerStreamClient.HI_RES_LOSSLESS -> StreamClientPreference.HI_RES_LOSSLESS
+            PlayerStreamClient.IOS -> StreamClientPreference.IOS
+            PlayerStreamClient.TVHTML5 -> StreamClientPreference.TVHTML5
+            PlayerStreamClient.ANDROID_MUSIC -> StreamClientPreference.ANDROID_MUSIC
+        }
+
+    private fun AudioQuality.toSharedQuality(): StreamAudioQuality =
+        when (this) {
+            AudioQuality.AUTO -> StreamAudioQuality.AUTO
+            AudioQuality.LOW -> StreamAudioQuality.LOW
+            AudioQuality.HIGH -> StreamAudioQuality.HIGH
+            AudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
+        }
 
     private fun describeClient(client: YouTubeClient): String = "${client.clientName}@${client.clientVersion}"
 }

@@ -333,6 +333,7 @@ dependencies {
     ksp(libs.kotlin.metadata.jvm)
 
     implementation(project(":core"))
+    implementation(project(":stream-resolver"))
     implementation(project(":lyrics:kugou"))
     implementation(project(":lyrics:lrclib"))
     implementation(project(":lyrics:simpmusic"))

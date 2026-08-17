@@ -34,6 +34,9 @@ import moe.rukamori.archivetune.innertube.models.BrowseEndpoint
 import moe.rukamori.archivetune.innertube.utils.completed
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherConfig
 import moe.rukamori.archivetune.morideobfuscator.MoriCipherRuntime
+import moe.rukamori.archivetune.stream.PlaybackStreamResolver
+import moe.rukamori.archivetune.stream.StreamAudioQuality
+import moe.rukamori.archivetune.stream.StreamClientPreference
 import java.io.File
 import java.net.URI
 import java.util.Locale
@@ -51,7 +54,6 @@ class ArchiveTuneJvmClient(
     private val streamUrlResolver: StreamUrlResolver = NewPipeStreamUrlResolver,
     networkPolicy: DesktopNetworkPolicy = DesktopNetworkPolicy(),
     sessionProvider: DesktopSessionProvider? = null,
-    private val streamDiagnostics: StreamResolutionDiagnosticSink = StreamResolutionDiagnosticSink { },
 ) {
     @Volatile
     private var sessionProvider: DesktopSessionProvider? = sessionProvider
@@ -136,12 +138,6 @@ class ArchiveTuneJvmClient(
     suspend fun newReleaseAlbums(): Result<List<AlbumItem>> = run {
         prepareProvidedSession()
         YouTube.newReleaseAlbums()
-    }
-
-    /** Sends a recommendation feedback token (for example, "Not interested"). */
-    suspend fun feedback(feedbackToken: String): Result<Unit> = run {
-        prepareProvidedSession()
-        YouTube.feedback(feedbackToken)
     }
 
     /** Verifies a user-supplied authenticated YouTube session without exposing its secret values. */
@@ -330,21 +326,7 @@ class ArchiveTuneJvmClient(
 
         for (dataSyncId in candidates.ifEmpty { listOf("") }) {
             YouTube.authState = initial.copy(dataSyncId = dataSyncId.ifBlank { null }).normalized()
-            val result =
-                YouTube.library(browseId) { shape ->
-                    streamDiagnostics.record(
-                        StreamResolutionDiagnostic.LibraryResponse(
-                            singleTabs = shape.singleTabs,
-                            twoColumnTabs = shape.twoColumnTabs,
-                            directSections = shape.directSections,
-                            secondarySections = shape.secondarySections,
-                            selectedSections = shape.selectedSections,
-                            rendererItems = shape.rendererItems,
-                            parsedItems = shape.parsedItems,
-                            rendererKeys = shape.rendererKeys,
-                        ),
-                    )
-                }.completed()
+            val result = YouTube.library(browseId).completed()
             result.onSuccess(pages::add).onFailure { lastFailure = it }
         }
 
@@ -430,16 +412,13 @@ class ArchiveTuneJvmClient(
             val stream = resolveStreamWithinTimeout(STREAM_RESOLUTION_TIMEOUT_MILLIS) {
                 resolveAudioStreamOrThrow(resolvedVideoId, resolvedPlaylistId, quality)
             }
-            streamDiagnostics.record(StreamResolutionDiagnostic.Success(stream.clientName))
             Result.success(stream)
         } catch (timeout: TimeoutCancellationException) {
             val failure = StreamResolutionTimeoutException()
-            streamDiagnostics.record(StreamResolutionDiagnostic.Failure(StreamResolutionFailureKind.NETWORK_TIMEOUT))
             Result.failure(failure)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
-            streamDiagnostics.record(StreamResolutionDiagnostic.Failure(classifyStreamResolutionFailure(failure)))
             Result.failure(failure)
         }
 
@@ -467,11 +446,9 @@ class ArchiveTuneJvmClient(
             val playerFailure = playerResult.exceptionOrNull()
             if (playerFailure != null) {
                 failures += playerFailure
-                streamDiagnostics.record(StreamResolutionDiagnostic.Attempt(client.clientName, classifyStreamResolutionFailure(playerFailure)))
                 continue
             }
             val playerResponse = playerResult.getOrThrow()
-            streamDiagnostics.record(playerResponse.toDiagnostic(client.clientName))
 
             if (playerResponse.playabilityStatus.status != "OK") {
                 failures +=
@@ -481,23 +458,12 @@ class ArchiveTuneJvmClient(
                         status = playerResponse.playabilityStatus.status,
                         reason = playerResponse.playabilityStatus.reason,
                     )
-                streamDiagnostics.record(
-                    StreamResolutionDiagnostic.Attempt(
-                        client.clientName,
-                        if (playerResponse.playabilityStatus.status.equals("LOGIN_REQUIRED", ignoreCase = true)) {
-                            StreamResolutionFailureKind.AUTH_REQUIRED
-                        } else {
-                            StreamResolutionFailureKind.UNAVAILABLE
-                        },
-                    ),
-                )
                 continue
             }
 
             val audioFormats = selectAudioFormatCandidates(playerResponse, quality)
             if (audioFormats.isEmpty()) {
                 failures += StreamAudioFormatUnavailableException(videoId, client.clientName)
-                streamDiagnostics.record(StreamResolutionDiagnostic.Attempt(client.clientName, StreamResolutionFailureKind.EXTRACTOR_INCOMPATIBLE))
                 continue
             }
             for (format in audioFormats) {
@@ -505,20 +471,12 @@ class ArchiveTuneJvmClient(
                 val streamUrlFailure = streamUrlResult.exceptionOrNull()
                 if (streamUrlFailure != null) {
                     failures += streamUrlFailure
-                    streamDiagnostics.record(
-                        StreamResolutionDiagnostic.FormatAttempt(
-                            client = client.clientName,
-                            format = if (format.url != null) "direct" else "cipher",
-                            classification = classifyStreamResolutionFailure(streamUrlFailure),
-                        ),
-                    )
                     continue
                 }
-                val streamUrl = streamUrlResult.getOrThrow().patchClientVersion(client.clientVersion)
+                val streamUrl = streamUrlResult.getOrThrow()
 
                 if (!streamUrl.isHttpUrl()) {
                     failures += IllegalStateException("Resolved stream URL was not HTTP(S)")
-                    streamDiagnostics.record(StreamResolutionDiagnostic.Attempt(client.clientName, StreamResolutionFailureKind.EXTRACTOR_INCOMPATIBLE))
                     continue
                 }
 
@@ -568,16 +526,12 @@ class ArchiveTuneJvmClient(
     }
 
     private fun orderedStreamClients(authState: PlaybackAuthState): List<YouTubeClient> =
-        if (!authState.hasLoginCookie) {
-            streamClients
-        } else {
-            (listOf(YouTubeClient.WEB_PRIMARY) + streamClients)
-                .distinctBy { it.clientName to it.clientVersion }
-                .sortedWith(
-                compareByDescending<YouTubeClient> { it.supportsCookieAuthentication }
-                    .thenByDescending { it.loginSupported },
-                )
-        }
+        PlaybackStreamResolver.orderClients(
+            preference = if (authState.hasLoginCookie) StreamClientPreference.WEB_REMIX else StreamClientPreference.ANDROID_VR,
+            authState = authState,
+            fallbackClients = streamClients,
+            preferCookieCapableWhenLoggedIn = true,
+        )
 
     internal fun orderedStreamClientsForTest(authState: PlaybackAuthState): List<YouTubeClient> =
         orderedStreamClients(authState)
@@ -589,20 +543,7 @@ class ArchiveTuneJvmClient(
          * a proof token; this is a compatibility fallback, not a token or login bypass.
          */
         val DEFAULT_STREAM_CLIENTS: List<YouTubeClient>
-            get() =
-                listOf(
-                    YouTubeClient.ANDROID_VR_1_65_10,
-                    YouTubeClient.IOS,
-                    YouTubeClient.ANDROID_MUSIC,
-                    YouTubeClient.IOS_MUSIC,
-                    YouTubeClient.MOBILE,
-                    YouTubeClient.WEB_REMIX,
-                    YouTubeClient.IPADOS,
-                    YouTubeClient.VISIONOS,
-                    YouTubeClient.TVHTML5,
-                    YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER,
-                    YouTubeClient.WEB,
-                )
+            get() = PlaybackStreamResolver.desktopFallbackClients
     }
 }
 
@@ -628,36 +569,6 @@ fun interface DesktopSessionProvider {
      * session, but should fail soft so an offline user can keep using the last verified state.
      */
     suspend fun refreshIfNeeded() = Unit
-}
-
-/** Redacted stream-resolution events suitable for a per-user application log. */
-fun interface StreamResolutionDiagnosticSink {
-    fun record(event: StreamResolutionDiagnostic)
-}
-
-sealed interface StreamResolutionDiagnostic {
-    data class Attempt(val client: String, val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
-    data class FormatAttempt(val client: String, val format: String, val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
-    data class PlayerResponse(
-        val client: String,
-        val status: String,
-        val adaptiveFormats: Int,
-        val audioFormats: Int,
-        val directUrls: Int,
-        val ciphers: Int,
-    ) : StreamResolutionDiagnostic
-    data class LibraryResponse(
-        val singleTabs: Int,
-        val twoColumnTabs: Int,
-        val directSections: Int,
-        val secondarySections: Int,
-        val selectedSections: Int,
-        val rendererItems: Int,
-        val parsedItems: Int,
-        val rendererKeys: List<String>,
-    ) : StreamResolutionDiagnostic
-    data class Success(val client: String) : StreamResolutionDiagnostic
-    data class Failure(val classification: StreamResolutionFailureKind) : StreamResolutionDiagnostic
 }
 
 enum class StreamResolutionFailureKind(val userMessage: String) {
@@ -695,19 +606,6 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
     }
     if (all.any { it is java.io.IOException }) return StreamResolutionFailureKind.NETWORK
     return StreamResolutionFailureKind.UNAVAILABLE
-}
-
-private fun PlayerResponse.toDiagnostic(client: String): StreamResolutionDiagnostic.PlayerResponse {
-    val formats = streamingData?.adaptiveFormats.orEmpty() + streamingData?.formats.orEmpty()
-    return StreamResolutionDiagnostic.PlayerResponse(
-        client = client,
-        // Status is a stable enum-like protocol field. Do not expose playability reason text.
-        status = playabilityStatus.status.uppercase(Locale.US).take(64),
-        adaptiveFormats = streamingData?.adaptiveFormats?.size ?: 0,
-        audioFormats = formats.count { it.isAudio },
-        directUrls = formats.count { it.url != null },
-        ciphers = formats.count { it.signatureCipher != null || it.cipher != null },
-    )
 }
 
 internal suspend fun <T> resolveStreamWithinTimeout(timeoutMillis: Long, block: suspend () -> T): T =
@@ -765,10 +663,10 @@ private object NewPipeStreamUrlResolver : StreamUrlResolver {
         videoId: String,
         client: YouTubeClient,
         authState: PlaybackAuthState,
-    ): Result<String> = NewPipeUtils.getStreamUrl(format, videoId, client, authState)
+    ): Result<String> = PlaybackStreamResolver.resolveUrl(format, videoId, client, authState)
 
     override suspend fun signatureTimestamp(videoId: String): Result<Int?> =
-        NewPipeUtils.getSignatureTimestamp(videoId).map { it }
+        PlaybackStreamResolver.signatureTimestamp(videoId)
 }
 
 class StreamPlaybackUnavailableException(
@@ -809,93 +707,24 @@ class StreamResolutionException(
 internal fun selectAudioFormatCandidates(
     playerResponse: PlayerResponse,
     quality: JvmAudioQuality,
-): List<PlayerResponse.StreamingData.Format> {
-    val audioFormats =
-        playerResponse.streamingData
-            ?.let { streamingData -> streamingData.adaptiveFormats + streamingData.formats.orEmpty() }
-            ?.filter { format ->
-                format.isAudio &&
-                    format.bitrate > 0 &&
-                    (format.url != null || format.signatureCipher != null || format.cipher != null)
-            }.orEmpty()
-    if (audioFormats.isEmpty()) {
-        return playerResponse.streamingData?.formats.orEmpty()
-            .filter { it.url != null && !it.isAudio && it.mimeType.hasAudioCodec() }
-            .sortedByDescending { it.bitrate }
-    }
-
-    val targetBitrate =
-        when (quality) {
-            JvmAudioQuality.LOW -> 70_000
-            JvmAudioQuality.HIGH -> 160_000
-            JvmAudioQuality.HIGHEST -> null
-        }
-    val preferHigher =
-        compareByDescending<PlayerResponse.StreamingData.Format> { it.url != null }
-            .thenByDescending { it.bitrate }
-            .thenByDescending { codecRank(it.mimeType) }
-            .thenByDescending { it.audioSampleRate ?: 0 }
-    if (targetBitrate == null) return audioFormats.sortedWith(preferHigher)
-
-    val preferred = audioFormats.filter { it.bitrate <= targetBitrate }.sortedWith(preferHigher)
-    val fallback =
-        audioFormats
-            .filter { it.bitrate > targetBitrate }
-            .sortedWith(
-                compareByDescending<PlayerResponse.StreamingData.Format> { it.url != null }
-                    .thenBy { it.bitrate }
-                    .thenByDescending { codecRank(it.mimeType) }
-                    .thenByDescending { it.audioSampleRate ?: 0 },
-            )
-    return preferred + fallback
-}
-
-private fun codecRank(mimeType: String): Int =
-    when {
-        mimeType.contains("opus", ignoreCase = true) -> 3
-        mimeType.contains("mp4a", ignoreCase = true) -> 2
-        else -> 1
-    }
-
-private fun String.hasAudioCodec(): Boolean =
-    contains("mp4a", ignoreCase = true) || contains("opus", ignoreCase = true) ||
-        contains("vorbis", ignoreCase = true) || contains("aac", ignoreCase = true)
+): List<PlayerResponse.StreamingData.Format> =
+    PlaybackStreamResolver.selectAudioFormatCandidates(
+        playerResponse = playerResponse,
+        quality =
+            when (quality) {
+                JvmAudioQuality.LOW -> StreamAudioQuality.LOW
+                JvmAudioQuality.HIGH -> StreamAudioQuality.HIGH
+                JvmAudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
+            },
+    )
 
 internal fun requestHeaders(client: YouTubeClient): Map<String, String> =
-    buildMap {
-        put("User-Agent", client.userAgent)
-        when {
-            client.clientName.uppercase(Locale.US).startsWith("WEB") -> {
-                put("Origin", YouTubeClient.ORIGIN_YOUTUBE_MUSIC)
-                put("Referer", YouTubeClient.REFERER_YOUTUBE_MUSIC)
-            }
-
-            client.clientName.uppercase(Locale.US).startsWith("TVHTML5") -> {
-                put("Origin", YouTubeClient.ORIGIN_YOUTUBE)
-                put("Referer", YouTubeClient.REFERER_YOUTUBE_TV)
-            }
-        }
-    }
+    PlaybackStreamResolver.requestHeaders(client)
 
 private fun resolveExpirySeconds(
     apiExpirySeconds: Int?,
     url: String,
-): Long {
-    apiExpirySeconds?.takeIf { it > 0 }?.let { return it.toLong() }
-    val expiryEpochSeconds =
-        runCatching {
-            URI(url).rawQuery
-                ?.split('&')
-                ?.firstOrNull { it.startsWith("expire=") }
-                ?.substringAfter('=')
-                ?.toLongOrNull()
-        }.getOrNull()
-    val secondsFromUrl = expiryEpochSeconds?.minus(System.currentTimeMillis() / 1_000L)
-    return secondsFromUrl?.takeIf { it > 0 } ?: DEFAULT_STREAM_EXPIRY_SECONDS
-}
-
-private fun String.patchClientVersion(clientVersion: String): String =
-    if (contains("cver=")) replace(Regex("cver=[^&]+"), "cver=$clientVersion") else this
+): Long = PlaybackStreamResolver.resolveExpirySeconds(apiExpirySeconds, url).toLong()
 
 private fun String.isHttpUrl(): Boolean =
     runCatching { URI(this).scheme?.lowercase(Locale.US) in setOf("http", "https") }.getOrDefault(false)
@@ -911,7 +740,6 @@ private fun normalizedId(
     id.trim().takeIf(String::isNotEmpty)?.let(Result.Companion::success)
         ?: Result.failure(IllegalArgumentException("$field is required"))
 
-private const val DEFAULT_STREAM_EXPIRY_SECONDS = 300L
 private const val MAX_RECOVERED_ARTIST_ALBUMS = 4
 private const val MIN_FULL_ALBUM_TRACKS = 7
 private const val STREAM_RESOLUTION_TIMEOUT_MILLIS = 45_000L
