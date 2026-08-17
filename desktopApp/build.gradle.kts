@@ -76,8 +76,8 @@ compose.desktop {
             copyright = "Copyright © 2026 Rukamori and ArchiveTune contributors"
             vendor = "ArchiveTune"
             licenseFile.set(rootProject.file("LICENSE"))
-            // Copied beside the application rather than into the JAR so mpv can be executed.
-            appResourcesRootDir.set(rootProject.layout.projectDirectory.dir("packaging/mpv"))
+            // Copied beside the application so the in-process VLCJ backend can find libVLC and its plugins.
+            appResourcesRootDir.set(rootProject.layout.projectDirectory.dir("packaging/vlc"))
             modules(
                 "java.desktop",
                 "java.logging",
@@ -139,14 +139,11 @@ val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
     commandLine(listOf(jpackageExecutable) + installerJpackageArgs("exe", layout.buildDirectory.dir("compose/binaries/main/exe")))
 }
 
-val verifyBundledMpvRuntime = tasks.register<VerifyBundledExecutableTask>("verifyBundledMpvRuntime") {
+val verifyBundledVlcRuntime = tasks.register<VerifyBundledVlcRuntimeTask>("verifyBundledVlcRuntime") {
     group = "verification"
-    description = "Verifies that the Windows distribution contains a runnable bundled mpv runtime."
+    description = "Verifies that the Windows distribution contains the libVLC runtime and plugin tree."
     dependsOn("createDistributable")
     appDirectory.set(layout.buildDirectory.dir("compose/binaries/main/app"))
-    executablePathSuffix.set("/resources/native/windows-x64/mpv.exe")
-    arguments.set(listOf("--version"))
-    expectedOutput.set("mpv")
 }
 
 tasks.matching {

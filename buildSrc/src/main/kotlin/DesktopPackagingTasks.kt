@@ -111,3 +111,25 @@ abstract class VerifyBundledExecutableTask : DefaultTask() {
         }
     }
 }
+
+@DisableCachingByDefault(because = "This verification inspects the packaged native VLC runtime.")
+abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val appDirectory: DirectoryProperty
+
+    @TaskAction
+    fun verify() {
+        val roots = appDirectory.get().asFile.walkTopDown()
+            .filter { it.isDirectory && it.path.replace('\\', '/').endsWith("/resources/native/windows-x64/vlc") }
+            .toList()
+        val root = roots.singleOrNull()
+            ?: throw GradleException("Packaged libVLC runtime directory was not found below ${appDirectory.get().asFile}")
+        val libVlc = root.resolve("libvlc.dll")
+        val libVlcCore = root.resolve("libvlccore.dll")
+        val plugins = root.resolve("plugins")
+        if (!libVlc.isFile || !libVlcCore.isFile || !plugins.isDirectory) {
+            throw GradleException("Incomplete libVLC runtime at ${root.absolutePath}; expected DLLs and plugins/")
+        }
+    }
+}
