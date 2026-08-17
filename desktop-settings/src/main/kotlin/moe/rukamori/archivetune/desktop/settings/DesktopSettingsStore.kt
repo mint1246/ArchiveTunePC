@@ -22,6 +22,7 @@ enum class DesktopThemeMode {
     SYSTEM,
     LIGHT,
     DARK,
+    DYNAMIC,
 }
 
 enum class DesktopLastDestination {

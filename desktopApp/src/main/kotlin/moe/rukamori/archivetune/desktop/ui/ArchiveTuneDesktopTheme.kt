@@ -6,6 +6,9 @@
 
 package moe.rukamori.archivetune.desktop.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -14,6 +17,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -22,6 +26,7 @@ import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import moe.rukamori.archivetune.desktop.state.DesktopThemePreference
+import java.awt.Color as AwtColor
 
 private val ArchiveTuneGreen = Color(0xFF9FC8A6)
 private val ArchiveTuneGreenContainer = Color(0xFF244C31)
@@ -86,6 +91,52 @@ private val ArchiveTuneLightColors = lightColorScheme(
     outlineVariant = Color(0xFFBFC9C0),
 )
 
+private fun dynamicDarkColorScheme(palette: DynamicThemePalette) = darkColorScheme(
+    primary = palette.primary.dynamicTone(saturation = 0.76f, brightness = 0.88f),
+    onPrimary = palette.primary.dynamicTone(saturation = 0.58f, brightness = 0.11f),
+    primaryContainer = palette.primary.dynamicTone(saturation = 0.64f, brightness = 0.28f).copy(alpha = 0.88f),
+    onPrimaryContainer = palette.primary.dynamicTone(saturation = 0.20f, brightness = 0.94f),
+    secondary = palette.secondary.dynamicTone(saturation = 0.50f, brightness = 0.84f),
+    onSecondary = palette.secondary.dynamicTone(saturation = 0.42f, brightness = 0.12f),
+    secondaryContainer = palette.secondary.dynamicTone(saturation = 0.46f, brightness = 0.27f).copy(alpha = 0.88f),
+    onSecondaryContainer = palette.secondary.dynamicTone(saturation = 0.16f, brightness = 0.93f),
+    tertiary = palette.tertiary.dynamicTone(saturation = 0.54f, brightness = 0.86f),
+    onTertiary = palette.tertiary.dynamicTone(saturation = 0.44f, brightness = 0.12f),
+    tertiaryContainer = palette.tertiary.dynamicTone(saturation = 0.48f, brightness = 0.28f).copy(alpha = 0.88f),
+    onTertiaryContainer = palette.tertiary.dynamicTone(saturation = 0.16f, brightness = 0.94f),
+    background = Color.Transparent,
+    onBackground = Color(0xFFF4F4F4),
+    surface = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.12f).copy(alpha = 0.92f),
+    onSurface = Color(0xFFF1F1F1),
+    surfaceDim = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.08f).copy(alpha = 0.95f),
+    surfaceBright = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.25f).copy(alpha = 0.90f),
+    surfaceContainerLowest = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.075f).copy(alpha = 0.84f),
+    surfaceContainerLow = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.105f).copy(alpha = 0.78f),
+    surfaceContainer = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.135f).copy(alpha = 0.82f),
+    surfaceContainerHigh = palette.neutral.dynamicTone(saturation = 0.20f, brightness = 0.18f).copy(alpha = 0.87f),
+    surfaceContainerHighest = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.23f).copy(alpha = 0.93f),
+    surfaceVariant = palette.neutral.dynamicTone(saturation = 0.18f, brightness = 0.25f).copy(alpha = 0.90f),
+    onSurfaceVariant = Color(0xFFD5D6D8),
+    outline = Color(0xFFB6B7BB).copy(alpha = 0.74f),
+    outlineVariant = Color(0xFF8C8E93).copy(alpha = 0.42f),
+)
+
+private fun Color.dynamicTone(saturation: Float, brightness: Float): Color {
+    val hsb = AwtColor.RGBtoHSB(
+        (red * 255f).toInt().coerceIn(0, 255),
+        (green * 255f).toInt().coerceIn(0, 255),
+        (blue * 255f).toInt().coerceIn(0, 255),
+        null,
+    )
+    val rgb = AwtColor.HSBtoRGB(hsb[0], saturation.coerceIn(0f, 1f), brightness.coerceIn(0f, 1f))
+    return Color(
+        red = (rgb ushr 16 and 0xFF) / 255f,
+        green = (rgb ushr 8 and 0xFF) / 255f,
+        blue = (rgb and 0xFF) / 255f,
+        alpha = 1f,
+    )
+}
+
 private val Poppins = FontFamily(
     Font("fonts/poppins.ttf", weight = FontWeight.Normal),
 )
@@ -113,15 +164,43 @@ private val ArchiveTuneShapes = Shapes(
 @Composable
 fun ArchiveTuneDesktopTheme(
     preference: DesktopThemePreference,
+    dynamicPalette: DynamicThemePalette = DynamicThemePalette.Fallback,
     content: @Composable () -> Unit,
 ) {
     val dark = when (preference) {
         DesktopThemePreference.SYSTEM -> isSystemInDarkTheme()
         DesktopThemePreference.LIGHT -> false
         DesktopThemePreference.DARK -> true
+        DesktopThemePreference.DYNAMIC -> true
+    }
+    val animatedPrimary by animateColorAsState(
+        targetValue = dynamicPalette.primary,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-primary",
+    )
+    val animatedSecondary by animateColorAsState(
+        targetValue = dynamicPalette.secondary,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-secondary",
+    )
+    val animatedTertiary by animateColorAsState(
+        targetValue = dynamicPalette.tertiary,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-tertiary",
+    )
+    val animatedNeutral by animateColorAsState(
+        targetValue = dynamicPalette.neutral,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-neutral",
+    )
+    val colors = when (preference) {
+        DesktopThemePreference.DYNAMIC -> dynamicDarkColorScheme(
+            DynamicThemePalette(animatedPrimary, animatedSecondary, animatedTertiary, animatedNeutral),
+        )
+        else -> if (dark) ArchiveTuneDarkColors else ArchiveTuneLightColors
     }
     MaterialTheme(
-        colorScheme = if (dark) ArchiveTuneDarkColors else ArchiveTuneLightColors,
+        colorScheme = colors,
         shapes = ArchiveTuneShapes,
         typography = ArchiveTuneTypography,
         content = content,

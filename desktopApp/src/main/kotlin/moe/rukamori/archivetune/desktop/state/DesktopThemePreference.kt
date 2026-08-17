@@ -11,4 +11,5 @@ enum class DesktopThemePreference {
     SYSTEM,
     LIGHT,
     DARK,
+    DYNAMIC,
 }

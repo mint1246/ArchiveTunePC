@@ -121,6 +121,7 @@ import javax.swing.filechooser.FileNameExtensionFilter
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import moe.rukamori.archivetune.desktop.state.DesktopNavigator
 import moe.rukamori.archivetune.desktop.state.DesktopThemePreference
+import moe.rukamori.archivetune.desktop.lyrics.anim.VibrantLyricsBackground
 import java.util.logging.Logger
 import coil3.compose.SubcomposeAsyncImage
 
@@ -148,6 +149,7 @@ fun ArchiveTuneDesktopApp(
     logger: Logger,
     initialDestination: DesktopDestination,
     initialThemePreference: DesktopThemePreference,
+    dynamicArtworkUri: String? = null,
     onShellStateChanged: (DesktopDestination, DesktopThemePreference) -> Unit,
     windowDragModifier: Modifier = Modifier,
     windowControls: (@Composable () -> Unit)? = null,
@@ -161,40 +163,49 @@ fun ArchiveTuneDesktopApp(
     val searchFocusRequester = remember { FocusRequester() }
     var searchQuery by remember { mutableStateOf("") }
     var themePreference by remember { mutableStateOf(initialThemePreference) }
+    val dynamicActive = themePreference == DesktopThemePreference.DYNAMIC
+    val dynamicPalette = rememberDynamicThemePalette(dynamicArtworkUri.takeIf { dynamicActive })
 
     LaunchedEffect(navigator.current, themePreference) {
         onShellStateChanged(navigator.current, themePreference)
     }
 
-    ArchiveTuneDesktopTheme(themePreference) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        immersiveContent != null &&
-                            (event.key == Key.Escape || event.isAltPressed && event.key == Key.DirectionLeft) -> {
-                            onDismissImmersive()
-                            true
+    ArchiveTuneDesktopTheme(themePreference, dynamicPalette) {
+        Box(Modifier.fillMaxSize()) {
+            if (dynamicActive && immersiveContent == null) {
+                DynamicAppBackdrop(
+                    artworkUri = dynamicArtworkUri,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when {
+                            immersiveContent != null &&
+                                (event.key == Key.Escape || event.isAltPressed && event.key == Key.DirectionLeft) -> {
+                                onDismissImmersive()
+                                true
+                            }
+                            immersiveContent == null && event.isCtrlPressed && event.key == Key.F -> {
+                                navigator.navigate(DesktopDestination.SEARCH)
+                                searchFocusRequester.requestFocus()
+                                true
+                            }
+                            event.isAltPressed && event.key == Key.DirectionLeft -> navigator.navigateBack()
+                            event.key == Key.Escape && searchQuery.isNotEmpty() -> {
+                                searchQuery = ""
+                                true
+                            }
+                            else -> false
                         }
-                        immersiveContent == null && event.isCtrlPressed && event.key == Key.F -> {
-                            navigator.navigate(DesktopDestination.SEARCH)
-                            searchFocusRequester.requestFocus()
-                            true
-                        }
-                        event.isAltPressed && event.key == Key.DirectionLeft -> navigator.navigateBack()
-                        event.key == Key.Escape && searchQuery.isNotEmpty() -> {
-                            searchQuery = ""
-                            true
-                        }
-                        else -> false
-                    }
-                },
-            color = MaterialTheme.colorScheme.background,
-            contentColor = MaterialTheme.colorScheme.onBackground,
-        ) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+                    },
+                color = if (dynamicActive) Color.Transparent else MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+            ) {
+                BoxWithConstraints(Modifier.fillMaxSize()) {
             val layout = when {
                 maxWidth >= 1_080.dp -> DesktopNavigationLayout.EXPANDED
                 maxWidth >= 760.dp -> DesktopNavigationLayout.RAIL
@@ -303,12 +314,37 @@ fun ArchiveTuneDesktopApp(
                     }
                 }
             }
-        }
+            }
         }
     }
 }
+}
 
 private enum class DesktopNavigationLayout { EXPANDED, RAIL, COMPACT }
+
+@Composable
+private fun DynamicAppBackdrop(
+    artworkUri: String?,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier) {
+        AnimatedContent(
+            targetState = artworkUri,
+            transitionSpec = {
+                fadeIn(tween(650, easing = FastOutSlowInEasing)) togetherWith
+                    fadeOut(tween(650, easing = FastOutSlowInEasing))
+            },
+            label = "dynamic-app-background",
+            modifier = Modifier.fillMaxSize(),
+        ) { artwork ->
+            VibrantLyricsBackground(
+                artworkUri = artwork,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.22f)))
+    }
+}
 
 @Composable
 private fun ExpandedSidebar(

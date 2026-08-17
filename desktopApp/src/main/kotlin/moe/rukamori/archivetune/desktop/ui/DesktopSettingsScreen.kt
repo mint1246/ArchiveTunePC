@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.VolumeUp
@@ -125,6 +126,7 @@ fun DesktopSettingsPanel(
                 ThemeChoice("System", Icons.Rounded.BrightnessAuto, DesktopThemePreference.SYSTEM, state, Modifier.weight(1f))
                 ThemeChoice("Light", Icons.Rounded.LightMode, DesktopThemePreference.LIGHT, state, Modifier.weight(1f))
                 ThemeChoice("Dark", Icons.Rounded.DarkMode, DesktopThemePreference.DARK, state, Modifier.weight(1f))
+                ThemeChoice("Dynamic", Icons.Rounded.Palette, DesktopThemePreference.DYNAMIC, state, Modifier.weight(1f))
             }
         }
 

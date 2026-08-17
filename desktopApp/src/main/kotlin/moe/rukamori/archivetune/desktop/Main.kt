@@ -8,6 +8,7 @@ package moe.rukamori.archivetune.desktop
 
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,8 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
@@ -93,6 +96,11 @@ fun main() {
                 var showLyrics by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }
                 val browse = remember { moe.rukamori.archivetune.desktop.ui.DesktopBrowseController() }
+                val dynamicArtworkUri by remember(musicServices) {
+                    musicServices.playback.state
+                        .map { it.currentItem?.metadata?.artworkUri }
+                        .distinctUntilChanged()
+                }.collectAsState(musicServices.playback.state.value.currentItem?.metadata?.artworkUri)
                 val lyricsContent: @Composable (Modifier) -> Unit = remember {
                     { modifier ->
                         moe.rukamori.archivetune.desktop.ui.DesktopLyricsView(
@@ -117,6 +125,7 @@ fun main() {
                         logger = runtime.logger,
                         initialDestination = latestDestination,
                         initialThemePreference = latestTheme,
+                        dynamicArtworkUri = dynamicArtworkUri,
                         windowDragModifier = windowDragModifier,
                         windowControls = windowControls,
                         immersiveContent = lyricsContent.takeIf { showLyrics },
