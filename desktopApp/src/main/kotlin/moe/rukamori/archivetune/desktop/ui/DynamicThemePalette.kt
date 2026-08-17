@@ -17,8 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
-import java.awt.image.ConvolveOp
-import java.awt.image.Kernel
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -88,7 +86,9 @@ private val paletteCache = object : LinkedHashMap<String, DynamicThemePalette>(P
 
 private fun cachedDynamicThemePalette(uri: String): DynamicThemePalette? {
     synchronized(paletteCache) { paletteCache[uri] }?.let { return it }
-    val extracted = extractDynamicThemePalette(uri) ?: return null
+    // Artwork decoding/processing is best-effort. A malformed or unusual cover must never
+    // cancel the Compose LaunchedEffect and take down the desktop app.
+    val extracted = runCatching { extractDynamicThemePalette(uri) }.getOrNull() ?: return null
     synchronized(paletteCache) { paletteCache[uri] = extracted }
     return extracted
 }
@@ -132,14 +132,61 @@ private fun makeSpicyColourField(source: BufferedImage): BufferedImage {
     }
     current = scale(current, FIELD_SIZE, FIELD_SIZE)
 
-    val weights = FloatArray(BLUR_KERNEL * BLUR_KERNEL) { 1f / (BLUR_KERNEL * BLUR_KERNEL).toFloat() }
-    val blur = ConvolveOp(Kernel(BLUR_KERNEL, BLUR_KERNEL, weights), ConvolveOp.EDGE_NO_OP, null)
     repeat(BLUR_PASSES) {
-        val target = BufferedImage(FIELD_SIZE, FIELD_SIZE, BufferedImage.TYPE_INT_ARGB)
-        blur.filter(current, target)
-        current = target
+        current = boxBlur(current, BLUR_KERNEL / 2)
     }
     return current
+}
+
+/**
+ * Small deterministic ARGB box blur used for dynamic-theme palette extraction.
+ *
+ * Java2D's native [java.awt.image.ConvolveOp] path can reject otherwise valid decoded artwork
+ * with `ImagingOpException: Unable to convolve src image` on Windows. The field is only 128x128,
+ * so doing the blur directly is cheap and avoids image-type/native-pipeline restrictions.
+ */
+private fun boxBlur(source: BufferedImage, radius: Int): BufferedImage {
+    if (radius <= 0) return source
+
+    val width = source.width
+    val height = source.height
+    val input = IntArray(width * height)
+    val output = IntArray(input.size)
+    source.getRGB(0, 0, width, height, input, 0, width)
+
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            var alpha = 0
+            var red = 0
+            var green = 0
+            var blue = 0
+            var samples = 0
+
+            for (dy in -radius..radius) {
+                val sampleY = (y + dy).coerceIn(0, height - 1)
+                val row = sampleY * width
+                for (dx in -radius..radius) {
+                    val sampleX = (x + dx).coerceIn(0, width - 1)
+                    val argb = input[row + sampleX]
+                    alpha += argb ushr 24 and 0xFF
+                    red += argb ushr 16 and 0xFF
+                    green += argb ushr 8 and 0xFF
+                    blue += argb and 0xFF
+                    samples++
+                }
+            }
+
+            output[y * width + x] =
+                ((alpha / samples) shl 24) or
+                    ((red / samples) shl 16) or
+                    ((green / samples) shl 8) or
+                    (blue / samples)
+        }
+    }
+
+    return BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).also { target ->
+        target.setRGB(0, 0, width, height, output, 0, width)
+    }
 }
 
 private fun scale(source: BufferedImage, width: Int, height: Int): BufferedImage {

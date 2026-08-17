@@ -151,7 +151,7 @@ class SpicyPaneGlyphTest {
 
         // RTL letters advance right-to-left in physical space: later letters have
         // smaller X within a word.
-        val xs = geometry.wordLetters[0].map { it.x }
+        val xs = geometry.wordLetters[0].map { it.box.left }
         assertTrue(xs.zipWithNext().all { (a, b) -> a > b }, "RTL letters should recede leftward")
 
         // ...and the first (logical) word is laid out to the RIGHT of the second.

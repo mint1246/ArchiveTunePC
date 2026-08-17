@@ -105,12 +105,13 @@ fun main() {
                         .map { it.currentItem?.metadata?.artworkUri }
                         .distinctUntilChanged()
                 }.collectAsState(musicServices.playback.state.value.currentItem?.metadata?.artworkUri)
-                val lyricsContent: @Composable (Modifier) -> Unit = remember {
-                    { modifier ->
+                val lyricsContent: @Composable (Modifier, Boolean) -> Unit = remember {
+                    { modifier, useShellDynamicBackdrop ->
                         moe.rukamori.archivetune.desktop.ui.DesktopLyricsView(
                             services = musicServices,
                             browse = browse,
                             modifier = modifier,
+                            useShellDynamicBackdrop = useShellDynamicBackdrop,
                         )
                     }
                 }
@@ -137,6 +138,15 @@ fun main() {
                         onShellStateChanged = { destination, theme ->
                             latestDestination = destination
                             latestTheme = theme
+                            // Theme/navigation are user preferences, not shutdown state. Persist them
+                            // as soon as Compose reports a change so an abnormal process exit, update,
+                            // or installer replacement cannot silently revert the visible selection.
+                            runtime.settings.update { settings ->
+                                settings.copy(
+                                    themeMode = theme.asSettingsThemeMode(),
+                                    lastDestination = destination.asSettingsDestination(),
+                                )
+                            }
                         },
                         content = { contentState, modifier ->
                             moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(contentState, musicServices, downloadServices, runtime.paths, runtime.logger, browse, modifier)

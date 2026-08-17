@@ -63,7 +63,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
     /** Signed sources live only in memory and are discarded before their server expiry. */
     private val resolvedSourceCache = ConcurrentHashMap<String, CachedResolvedSource>()
-    val playback = VlcjPlaybackController(PlaybackSourceResolver { item -> resolve(item) })
+    val playback = VlcjPlaybackController(
+        sourceResolver = PlaybackSourceResolver { item -> resolve(item) },
+        onStreamHttpFailure = { item, source, httpStatus ->
+            recoverFromStreamHttpFailure(item, source, httpStatus)
+        },
+    )
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     private val lyricsPresenter = lazy {
@@ -292,7 +297,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             ?: backend.resolveAudioStream(source.key).fold(
                 onSuccess = {
                     val resolved = ResolvedPlaybackSource(it.url, it.mimeType, it.requestHeaders, it.expiresAtEpochMillis)
-                    cacheSource(source.key, resolved)
+                    cacheSource(
+                        key = source.key,
+                        source = resolved,
+                        streamClientKey = it.clientKey,
+                        streamAuthFingerprint = it.authFingerprint,
+                    )
                     Result.success(resolved)
                 },
                 onFailure = { failure ->
@@ -321,16 +331,66 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         return cached.source
     }
 
-    private fun cacheSource(key: String, source: ResolvedPlaybackSource) {
+    private suspend fun recoverFromStreamHttpFailure(
+        item: PlaybackItem,
+        failedSource: ResolvedPlaybackSource,
+        httpStatus: Int,
+    ): Boolean {
+        if (httpStatus !in RETRYABLE_STREAM_RESPONSE_CODES) return false
+        val deferred = item.source as? PlaybackSource.Deferred ?: return false
+        val key = deferred.key
+        val cached = resolvedSourceCache[key]
+        val matchingCachedSource = cached?.takeIf { it.source.uri == failedSource.uri }
+
+        // Android drops every cached URL for this media ID before resolving the retry. Desktop has
+        // only this auth-scoped in-memory source cache, so remove it unconditionally as well.
+        resolvedSourceCache.remove(key)
+
+        val nearExpiry =
+            failedSource.expiresAtEpochMs?.let {
+                it <= System.currentTimeMillis() + STREAM_CACHE_EXPIRY_LEAD_MILLIS
+            } == true
+        val markedFailed =
+            if (!nearExpiry && matchingCachedSource?.streamClientKey?.isNotBlank() == true) {
+                backend.markStreamClientFailed(
+                    videoId = key,
+                    clientKey = matchingCachedSource.streamClientKey,
+                    httpStatusCode = httpStatus,
+                    authFingerprint = matchingCachedSource.streamAuthFingerprint
+                        ?: account.currentAuthState().fingerprint,
+                )
+            } else {
+                false
+            }
+
+        runtime.logger.info(
+            "stream_resolution event=media_http_failure videoId=$key http=$httpStatus " +
+                "expired=$nearExpiry clientBackoff=$markedFailed action=retry",
+        )
+        // Match Android: even an expired/unknown-profile URL gets one fresh resolve; the failed
+        // client is only backoff-marked when the concrete profile is known and the URL was current.
+        return true
+    }
+
+    private fun cacheSource(
+        key: String,
+        source: ResolvedPlaybackSource,
+        streamClientKey: String,
+        streamAuthFingerprint: String,
+    ) {
         val expiresAt = source.expiresAtEpochMs ?: return
-        if (expiresAt <= System.currentTimeMillis() + STREAM_CACHE_EXPIRY_LEAD_MILLIS) return
         if (resolvedSourceCache.size >= MAX_RESOLVED_SOURCE_CACHE_ENTRIES) {
             resolvedSourceCache.entries.removeIf { (_, value) ->
                 value.source.expiresAtEpochMs?.let { it <= System.currentTimeMillis() + STREAM_CACHE_EXPIRY_LEAD_MILLIS } != false
             }
         }
         if (resolvedSourceCache.size >= MAX_RESOLVED_SOURCE_CACHE_ENTRIES) resolvedSourceCache.clear()
-        resolvedSourceCache[key] = CachedResolvedSource(source, account.currentAuthState().fingerprint)
+        resolvedSourceCache[key] = CachedResolvedSource(
+            source = source,
+            sessionFingerprint = account.currentAuthState().fingerprint,
+            streamClientKey = streamClientKey,
+            streamAuthFingerprint = streamAuthFingerprint,
+        )
     }
 
     override fun close() {
@@ -382,6 +442,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         const val POSITION_BUCKET_MS = 5_000L
         const val MIN_PLAY_HISTORY_EVENT_MS = 5_000L
         const val MAX_PLAY_HISTORY_EVENT_MS = 1_800_000L
+        val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
 }
 
@@ -402,6 +463,8 @@ private data class PersistedQueueKey(
 private data class CachedResolvedSource(
     val source: ResolvedPlaybackSource,
     val sessionFingerprint: String?,
+    val streamClientKey: String,
+    val streamAuthFingerprint: String?,
 )
 
 private fun moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode.toPlaybackMode(): RepeatMode =

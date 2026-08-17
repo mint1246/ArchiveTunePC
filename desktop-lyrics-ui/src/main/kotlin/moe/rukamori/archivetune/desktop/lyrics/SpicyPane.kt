@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -39,6 +40,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -79,10 +81,16 @@ import kotlin.math.sin
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.desktop.lyrics.anim.CubicSpline
 import moe.rukamori.archivetune.desktop.lyrics.anim.Spring
-import moe.rukamori.archivetune.desktop.lyrics.anim.VibrantLyricsBackground
+import org.jetbrains.skia.BlendMode
+import org.jetbrains.skia.ImageFilter
+import org.jetbrains.skia.Paint as SkiaPaint
+import org.jetbrains.skia.Point
+import org.jetbrains.skia.Rect as SkiaRect
+import org.jetbrains.skia.Shader
 
 /* ---------------------------------------------------------------------------------- */
 /*  Typography / layout constants                                                      */
@@ -99,11 +107,9 @@ private val lyricsFontFamily: FontFamily = run {
     for (path in candidates) {
         val stream = ClassLoader.getSystemClassLoader().getResourceAsStream(path) ?: continue
         val family = runCatching {
-            stream.use {
-                val awtFont = java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, it)
+                val awtFont = stream.use { java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, it) }
                 java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(awtFont)
                 FontFamily(awtFont.family)
-            }
         }.getOrNull()
         if (family != null) return@run family
     }
@@ -235,6 +241,8 @@ private fun glowCurve(p: Float): Float = GlowSpline.at(p.toDouble()).toFloat()
 private const val LETTER_ANIMATION_MIN_MS = 180L
 private const val FAR_WORD_SNAP_MS = 500L
 private const val SUNG_LETTER_GLOW_PROGRESS = 0.2f
+private const val GEOMETRY_PREWARM_BEHIND = 2
+private const val GEOMETRY_PREWARM_AHEAD = 6
 
 
 private fun containsStrongRtl(text: String): Boolean {
@@ -367,6 +375,9 @@ private fun clusterRanges(text: String, start: Int, end: Int): List<IntRange> {
  */
 internal class LineTextGeometry(
     val layout: TextLayoutResult,
+    /** Stable-color layouts: painting these without overrides avoids dirtying/re-laying out the paragraph. */
+    val dimLayout: TextLayoutResult,
+    val brightLayout: TextLayoutResult,
     /** word index -> per-cluster glyph box + timing. */
     val wordLetters: List<List<LetterText>>,
     /** word index -> visual left edge of the word in line-local X. */
@@ -397,6 +408,18 @@ internal class LineTextGeometry(
             measurer: TextMeasurer,
             style: TextStyle,
         ): LineTextGeometry {
+            val text = AnnotatedString(line.text)
+            val constraints = layout.layoutInput.constraints
+            val dimLayout = measurer.measure(
+                text = text,
+                style = style.copy(color = DimColor),
+                constraints = constraints,
+            )
+            val brightLayout = measurer.measure(
+                text = text,
+                style = style.copy(color = BrightColor),
+                constraints = constraints,
+            )
             val rawLetters = line.words.map { word -> lettersOf(line, word) }
             val rawBoxes = rawLetters.map { letters -> letters.map { layout.getBoundingBox(it.charOffset) } }
             val wordRtl = rawBoxes.mapIndexed { wi, boxes ->
@@ -420,29 +443,12 @@ internal class LineTextGeometry(
                 val boxes = rawBoxes[wi]
                 letters.mapIndexed { i, letter ->
                     val box = boxes[i]
-                    // SpicyLyrics only creates per-letter inline elements for emphasis
-                    // words. Short words stay a single word element; avoiding standalone
-                    // shaping for them removes most of the desktop port's hot-path work.
-                    val letterLayout = if (wordLetterCapable[wi]) {
-                        runCatching {
-                            measurer.measure(
-                                text = AnnotatedString(letter.ch),
-                                style = style,
-                                constraints = Constraints(),
-                            )
-                        }.getOrNull()
-                    } else null
                     val visualLine = layout.getLineForOffset(letter.charOffset)
                     LetterText(
                         letter = letter,
                         box = box,
-                        x = box.left,
                         width = box.width,
-                        letterLayout = letterLayout,
                         lineIndex = visualLine,
-                        topY = letterLayout?.let {
-                            layout.getLineBaseline(visualLine) - it.firstBaseline
-                        } ?: box.top,
                     )
                 }
             }
@@ -495,6 +501,8 @@ internal class LineTextGeometry(
             }
             return LineTextGeometry(
                 layout = layout,
+                dimLayout = dimLayout,
+                brightLayout = brightLayout,
                 wordLetters = wordLetters,
                 wordLeft = wordLeft,
                 wordRight = wordRight,
@@ -514,16 +522,99 @@ internal class LetterText(
     val letter: Letter,
     /** Glyph cluster box in line-local coordinates (living in `geometry.layout`). */
     val box: Rect,
-    /** Line-local X of the cluster's left edge. */
-    val x: Float,
     val width: Float,
-    /** Standalone measurement of this cluster, baseline-aligned to the line (LTR words). */
-    val letterLayout: TextLayoutResult?,
     /** Visual row in the wrapped TextLayoutResult that owns this cluster. */
     val lineIndex: Int,
-    /** Y at which `letterLayout`'s baseline meets the line's baseline. */
-    val topY: Float,
 )
+
+/**
+ * Native effects around immutable, already-shaped Compose paragraphs.
+ *
+ * The expensive/leaky path was repeatedly calling drawText with a new brush/shadow,
+ * which dirties the paragraph foreground and creates fresh native paragraph state.
+ * Here the paragraph itself is never mutated: we only draw the cached dim/bright layouts
+ * and use Skia layers as masks/effects around those draws.
+ */
+private class NativeTextEffects : AutoCloseable {
+    private val layerPaint = SkiaPaint().apply { isAntiAlias = true }
+    private val maskPaint = SkiaPaint().apply {
+        isAntiAlias = true
+        blendMode = BlendMode.DST_IN
+    }
+
+    fun drawBrightSweep(
+        canvas: org.jetbrains.skia.Canvas,
+        bounds: SkiaRect,
+        startX: Float,
+        endX: Float,
+        t: Float,
+        drawBright: () -> Unit,
+    ) {
+        if (t <= -GLYPH_FADE_FRACTION) return
+        if (t >= 1f) {
+            drawBright()
+            return
+        }
+
+        val p1 = t.coerceIn(0f, 1f)
+        val p2 = (t + GLYPH_FADE_FRACTION).coerceIn(0f, 1f)
+        // BrightLayout is already alpha 0xD9. Over the dim 0x59 base, ~90.6% layer
+        // opacity lands back at the intended 0xD9 composite alpha rather than over-brightening.
+        val brightOverlayAlpha = 0xE7
+        val colors = intArrayOf(
+            (brightOverlayAlpha shl 24) or 0x00FFFFFF,
+            (brightOverlayAlpha shl 24) or 0x00FFFFFF,
+            0x00FFFFFF,
+            0x00FFFFFF,
+        )
+        val positions = floatArrayOf(0f, p1, p2, 1f)
+        Shader.makeLinearGradient(
+            Point(startX, 0f),
+            Point(endX, 0f),
+            colors,
+            positions,
+        ).use { shader ->
+            canvas.saveLayer(bounds, layerPaint)
+            try {
+                drawBright()
+                maskPaint.shader = shader
+                canvas.drawRect(bounds, maskPaint)
+                maskPaint.shader = null
+            } finally {
+                canvas.restore()
+                maskPaint.shader = null
+            }
+        }
+    }
+
+    fun drawGlow(
+        canvas: org.jetbrains.skia.Canvas,
+        bounds: SkiaRect,
+        sigma: Float,
+        argb: Int,
+        drawSource: () -> Unit,
+    ) {
+        if (sigma <= 0f || (argb ushr 24) == 0) return
+        ImageFilter.makeDropShadowOnly(0f, 0f, sigma, sigma, argb).use { glow ->
+            layerPaint.imageFilter = glow
+            canvas.saveLayer(bounds, layerPaint)
+            try {
+                drawSource()
+            } finally {
+                canvas.restore()
+                layerPaint.imageFilter = null
+            }
+        }
+    }
+
+    override fun close() {
+        layerPaint.close()
+        maskPaint.close()
+    }
+}
+
+private fun whiteArgb(alpha: Float): Int =
+    ((alpha.coerceIn(0f, 1f) * 255f).roundToInt() shl 24) or 0x00FFFFFF
 
 /**
  * Position of a cluster's centre inside its word, measured from the visual edge the
@@ -553,6 +644,10 @@ private class LineGeometryCache(
 
     fun get(index: Int): LineTextGeometry? = entries[index]
 
+    fun retainRange(range: IntRange) {
+        entries.keys.removeAll { it !in range }
+    }
+
     fun geometryFor(lines: List<CharLine>, index: Int): LineTextGeometry {
         val existing = entries[index]
         if (existing != null) return existing
@@ -574,21 +669,17 @@ private class LineGeometryCache(
 fun SpicyLyricsView(
     lyrics: CharLyrics,
     positionMsState: StateFlow<Long>,
-    artworkUri: String? = null,
     modifier: Modifier = Modifier,
     onSeek: (Long) -> Unit = {},
     isPlaying: Boolean = true,
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
-        VibrantLyricsBackground(artworkUri = artworkUri, isPlaying = isPlaying)
-        LyricScene(
-            lyrics = lyrics,
-            positionMsState = positionMsState,
-            modifier = Modifier.fillMaxSize(),
-            onSeek = onSeek,
-            isPlaying = isPlaying,
-        )
-    }
+    LyricScene(
+        lyrics = lyrics,
+        positionMsState = positionMsState,
+        modifier = modifier.fillMaxSize(),
+        onSeek = onSeek,
+        isPlaying = isPlaying,
+    )
 }
 
 /* ---------------------------------------------------------------------------------- */
@@ -710,28 +801,42 @@ private fun LyricScene(
     BoxWithConstraints(modifier = modifier.clipToBounds()) {
         val paddingPx = with(density) { HORIZONTAL_PADDING.roundToPx() }
         val contentWidthPx = (constraints.maxWidth - 2 * paddingPx).coerceAtLeast(0)
+        // Keep a couple of lyric rows mounted just outside the clipped viewport so
+        // their layers are ready before they slide into view. Lines farther away are
+        // still measured (the anchor math needs their heights), but are not placed and
+        // therefore don't need live graphics/blur layers while completely invisible.
+        val placementOverscanPx = with(density) { (LYRIC_LINE_HEIGHT.toPx() * 2f).roundToInt() }
 
-        // One shared geometry store for every line. Building a line's layout + glyph
-        // boxes on the frame it becomes active stalls the whole render loop (visible
-        // in the logs as `lyrics_new_line` frames of tens of ms to seconds with fps
-        // collapsing afterwards), so all lines are prewarmed here, one per frame.
+        // Building a line's layout + glyph boxes on the exact frame it becomes active
+        // can stall the animation. Keep only a small moving window around the current
+        // line prewarmed instead of retaining every line in the song for the lifetime
+        // of the lyrics screen.
         val textMeasurer = rememberTextMeasurer()
         val geometryCache = remember(lyrics, textStyle, contentWidthPx) {
             LineGeometryCache(textMeasurer, textStyle, contentWidthPx)
         }
         LaunchedEffect(lyrics, textStyle, contentWidthPx, geometryCache) {
-            // Prewarm from the current active line outward (those are the transitions
-            // about to happen), then cover the rest from the start of the song.
             val all = lyrics.lines
-            val start = activeIndexState.intValue.coerceIn(0, (all.size - 1).coerceAtLeast(0))
-            val order = (start until all.size) + (0 until start)
-            for (next in order) {
-                withFrameNanos {
-                    if (next in all.indices && geometryCache.get(next) == null) {
-                        geometryCache.geometryFor(all, next)
+            snapshotFlow { activeIndexState.intValue }
+                .collectLatest { active ->
+                    if (all.isEmpty()) return@collectLatest
+                    val clamped = active.coerceIn(0, all.lastIndex)
+                    val first = (clamped - GEOMETRY_PREWARM_BEHIND).coerceAtLeast(0)
+                    val last = (clamped + GEOMETRY_PREWARM_AHEAD).coerceAtMost(all.lastIndex)
+                    geometryCache.retainRange(first..last)
+
+                    // Current/next lines first, then the small look-behind window. One
+                    // geometry build per frame keeps the UI responsive while ensuring
+                    // sequential playback normally reaches an already-shaped line.
+                    val order = (clamped..last) + (first until clamped)
+                    for (next in order) {
+                        withFrameNanos {
+                            if (geometryCache.get(next) == null) {
+                                geometryCache.geometryFor(all, next)
+                            }
+                        }
                     }
                 }
-            }
         }
 
         Layout(
@@ -779,7 +884,13 @@ private fun LyricScene(
             layout(constraints.maxWidth, constraints.maxHeight) {
                 placeables.forEachIndexed { i, p ->
                     val top = (centers[i] - focalCenter + focalY - p.height / 2f).roundToInt()
-                    p.placeRelative(paddingPx, top)
+                    val bottom = top + p.height
+                    if (
+                        bottom >= -placementOverscanPx &&
+                        top <= constraints.maxHeight + placementOverscanPx
+                    ) {
+                        p.placeRelative(paddingPx, top)
+                    }
                 }
             }
         }
@@ -905,6 +1016,10 @@ private fun ActiveLineText(
             )
     }
     val fontPx = with(density) { textStyle.fontSize.toPx() }
+    val nativeTextEffects = remember { NativeTextEffects() }
+    DisposableEffect(nativeTextEffects) {
+        onDispose { nativeTextEffects.close() }
+    }
 
     // Reuse the geometry's already-built timing. Short words intentionally get zero
     // per-letter spring objects because SpicyLyrics renders them as one word element.
@@ -928,6 +1043,7 @@ private fun ActiveLineText(
                 lastFrame = now
 
                 val pos = positionState.value
+                val positionChanged = pos != runtime.positionMs
                 runtime.positionMs = pos
 
                 animations.forEachIndexed { wordIndex, animation ->
@@ -1032,9 +1148,14 @@ private fun ActiveLineText(
                     }
                 }
 
-                // Draw invalidation happens AFTER every spring has advanced. This keeps
-                // paint and physics on the same frame instead of racing the position flow.
-                drawTick.intValue++
+                // While playing, draw invalidation happens AFTER every spring has
+                // advanced. When paused the springs intentionally do not advance, so
+                // repeatedly invalidating the exact same frame only recreates Skia
+                // gradient/shadow state for no visual change. A paused seek still
+                // redraws immediately because the player position changed.
+                if (isPlaying || positionChanged) {
+                    drawTick.intValue++
+                }
             }
         }
     }
@@ -1056,7 +1177,7 @@ private fun ActiveLineText(
                     animations = animations,
                     words = line.words,
                     positionMs = runtime.positionMs,
-                    fontPx = fontPx,
+                    nativeTextEffects = nativeTextEffects,
                 )
             },
     )
@@ -1068,7 +1189,7 @@ private fun DrawScope.drawAnimatedLine(
     animations: List<WordAnimationState>,
     words: List<WordSpan>,
     positionMs: Long,
-    fontPx: Float,
+    nativeTextEffects: NativeTextEffects,
 ) {
     val layout = geometry.layout
     val lineOffsetX = ((size.width - layout.size.width) / 2f).coerceAtLeast(0f)
@@ -1085,7 +1206,7 @@ private fun DrawScope.drawAnimatedLine(
             lineOffsetX + segment.right,
             segment.bottom,
         ) {
-            drawText(layout, color = DimColor, topLeft = topLeft)
+            drawText(geometry.dimLayout, topLeft = topLeft)
         }
     }
 
@@ -1112,16 +1233,72 @@ private fun DrawScope.drawAnimatedLine(
         return true
     }
 
-    fun drawStaticWord(index: Int, color: Color) {
+    fun drawStaticWord(index: Int, bright: Boolean) {
         val left = geometry.wordLeft[index]
         val right = geometry.wordRight[index]
         val top = geometry.wordTop[index]
         val bottom = geometry.wordBottom[index]
         if (!beginWordTransform(index)) return
         clipRect(lineOffsetX + left, top, lineOffsetX + right, bottom) {
-            drawText(layout, color = color, topLeft = topLeft)
+            drawText(if (bright) geometry.brightLayout else geometry.dimLayout, topLeft = topLeft)
         }
         native.restore()
+    }
+
+    fun drawProgressiveRegion(
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        t: Float,
+        rtl: Boolean,
+        glow: Float,
+    ) {
+        if (right <= left || bottom <= top) return
+
+        fun drawDim() {
+            clipRect(left, top, right, bottom) {
+                drawText(geometry.dimLayout, topLeft = topLeft)
+            }
+        }
+
+        fun drawBright() {
+            clipRect(left, top, right, bottom) {
+                drawText(geometry.brightLayout, topLeft = topLeft)
+            }
+        }
+
+        if (glow > 0.01f) {
+            val pad = 24f
+            val glowBounds = SkiaRect(left - pad, top - pad, right + pad, bottom + pad)
+            clipRect(glowBounds.left, glowBounds.top, glowBounds.right, glowBounds.bottom) {
+                nativeTextEffects.drawGlow(
+                    canvas = native,
+                    bounds = glowBounds,
+                    sigma = 4f + 12f * glow,
+                    argb = whiteArgb((glow * 0.82f).coerceIn(0f, 0.92f)),
+                ) {
+                    drawBright()
+                }
+            }
+        }
+
+        when {
+            t <= -GLYPH_FADE_FRACTION -> drawDim()
+            t >= 1f -> drawBright()
+            else -> {
+                drawDim()
+                nativeTextEffects.drawBrightSweep(
+                    canvas = native,
+                    bounds = SkiaRect(left, top, right, bottom),
+                    startX = if (rtl) right else left,
+                    endX = if (rtl) left else right,
+                    t = t,
+                ) {
+                    drawBright()
+                }
+            }
+        }
     }
 
     words.forEachIndexed wordLoop@ { index, word ->
@@ -1131,8 +1308,8 @@ private fun DrawScope.drawAnimatedLine(
         val letterCapable = geometry.wordLetterCapable[index]
 
         when (state) {
-            WordState.NOT_SUNG -> drawStaticWord(index, DimColor)
-            WordState.SUNG -> drawStaticWord(index, BrightColor)
+            WordState.NOT_SUNG -> drawStaticWord(index, bright = false)
+            WordState.SUNG -> drawStaticWord(index, bright = true)
             WordState.ACTIVE -> {
                 val animation = animations[index]
                 val left = geometry.wordLeft[index]
@@ -1143,45 +1320,18 @@ private fun DrawScope.drawAnimatedLine(
 
                 if (!beginWordTransform(index)) return@wordLoop
                 if (!letterCapable) {
-                        // Short words are one SpicyLyrics word element: one gradient,
-                        // one spring transform and one inexpensive word shadow. The old
-                        // port incorrectly exploded EVERY LTR word into per-letter draws.
-                        val progress = progressOf(positionMs, word.startMs, endMs)
-                        val t = -GLYPH_FADE_FRACTION + (1f + GLYPH_FADE_FRACTION) * progress
-                        val glow = animation.glow.snapshotPosition().toFloat()
-                        val shadow = if (glow > 0.01f) {
-                            Shadow(
-                                color = Color.White.copy(alpha = (glow * 0.35f).coerceIn(0f, 1f)),
-                                offset = Offset.Zero,
-                                blurRadius = 4f + 2f * glow,
-                            )
-                        } else null
-                        val brush = if (geometry.wordRtl[index]) {
-                            glyphProgressBrush(lineOffsetX + right, lineOffsetX + left, t)
-                        } else {
-                            glyphProgressBrush(lineOffsetX + left, lineOffsetX + right, t)
-                        }
-                        clipRect(
-                            lineOffsetX + left - 24f,
-                            wordTop - 24f,
-                            lineOffsetX + right + 24f,
-                            wordBottom + 24f,
-                        ) {
-                            if (glow > 0.01f) {
-                                drawText(
-                                    layout,
-                                    color = Color.White.copy(alpha = 0.035f * glow),
-                                    topLeft = topLeft,
-                                    shadow = Shadow(
-                                        color = Color.White.copy(alpha = (glow * 0.40f).coerceIn(0f, 1f)),
-                                        offset = Offset.Zero,
-                                        blurRadius = 5f + 5f * glow,
-                                    ),
-                                )
-                            }
-                            drawText(layout, brush = brush, topLeft = topLeft, shadow = shadow)
-                        }
-                    } else {
+                    val progress = progressOf(positionMs, word.startMs, endMs)
+                    val t = -GLYPH_FADE_FRACTION + (1f + GLYPH_FADE_FRACTION) * progress
+                    drawProgressiveRegion(
+                        left = lineOffsetX + left,
+                        top = wordTop,
+                        right = lineOffsetX + right,
+                        bottom = wordBottom,
+                        t = t,
+                        rtl = geometry.wordRtl[index],
+                        glow = animation.glow.snapshotPosition().toFloat(),
+                    )
+                } else {
                         // Only true SpicyLyrics emphasis words reach this path. The word
                         // wrapper has its own spring above; each letter then adds its own
                         // scale/Y/glow and only the actually sung letter moves the sweep.
@@ -1191,7 +1341,6 @@ private fun DrawScope.drawAnimatedLine(
                         }
 
                         letters.forEachIndexed letterLoop@ { letterIndex, letterText ->
-                            val letterLayout = letterText.letterLayout ?: return@letterLoop
                             val spring = animation.letters[letterIndex]
                             val timed = letterText.letter
                             val t = when {
@@ -1207,15 +1356,6 @@ private fun DrawScope.drawAnimatedLine(
                             val bandCenterX = (bandLeft + bandRight) / 2f
                             val bandCenterY = (letterText.box.top + letterText.box.bottom) / 2f
                             val letterGlow = spring.glow.snapshotPosition().toFloat()
-                            val shadow = if (letterGlow > 0.01f) {
-                                Shadow(
-                                    color = Color.White.copy(
-                                        alpha = (letterGlow * 1.85f).coerceIn(0f, 1f),
-                                    ),
-                                    offset = Offset.Zero,
-                                    blurRadius = 4f + 12f * letterGlow,
-                                )
-                            } else null
                             val letterScale = spring.scale.snapshotPosition().toFloat()
 
                             native.save()
@@ -1225,29 +1365,14 @@ private fun DrawScope.drawAnimatedLine(
                                 -bandCenterX,
                                 -bandCenterY + spring.yOffset.snapshotPosition().toFloat() * 2f,
                             )
-                            val letterTopLeft = Offset(bandLeft, letterText.topY)
-                            if (letterGlow > 0.005f) {
-                                // Compose/Skia text shadows are intentionally drawn as a
-                                // separate halo pass. Relying on the main gradient paint's
-                                // shadow made the glow nearly disappear on some desktop
-                                // backends, especially with translucent glyph brushes.
-                                val haloAlpha = (letterGlow * 1.85f).coerceIn(0f, 1f)
-                                drawText(
-                                    letterLayout,
-                                    color = Color.White.copy(alpha = 0.055f * haloAlpha),
-                                    topLeft = letterTopLeft,
-                                    shadow = Shadow(
-                                        color = Color.White.copy(alpha = 0.92f * haloAlpha),
-                                        offset = Offset.Zero,
-                                        blurRadius = 5f + 14f * letterGlow,
-                                    ),
-                                )
-                            }
-                            drawText(
-                                letterLayout,
-                                brush = glyphProgressBrush(bandLeft, bandRight, t),
-                                topLeft = letterTopLeft,
-                                shadow = shadow,
+                            drawProgressiveRegion(
+                                left = bandLeft,
+                                top = letterText.box.top,
+                                right = bandRight,
+                                bottom = letterText.box.bottom,
+                                t = t,
+                                rtl = false,
+                                glow = letterGlow,
                             )
                             native.restore()
                         }

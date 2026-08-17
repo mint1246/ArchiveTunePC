@@ -72,7 +72,11 @@ import moe.rukamori.archivetune.lyrics.LyricsRequest
  * fallback for plain (unsynchronised) lyrics.
  */
 @Composable
-fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Modifier) {
+fun DesktopLyricsPane(
+    presenter: DesktopLyricsPresenter,
+    modifier: Modifier = Modifier,
+    drawBackground: Boolean = true,
+) {
     DisposableEffect(presenter) {
         presenter.setActive(true)
         onDispose { presenter.setActive(false) }
@@ -93,7 +97,9 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
     }
 
     Box(modifier.fillMaxSize()) {
-        VibrantLyricsBackground(artworkUri = artwork, isPlaying = playback.isPlaying)
+        if (drawBackground) {
+            VibrantLyricsBackground(artworkUri = artwork, isPlaying = playback.isPlaying)
+        }
         Column(Modifier.fillMaxSize()) {
             HeaderRow(
                 title = playback.currentItem?.metadata?.title ?: "Lyrics",
@@ -137,7 +143,6 @@ fun DesktopLyricsPane(presenter: DesktopLyricsPresenter, modifier: Modifier = Mo
                             SpicyLyricsView(
                                 lyrics = built,
                                 positionMsState = presenter.positionMsFlow,
-                                artworkUri = artwork,
                                 modifier = Modifier.fillMaxSize(),
                                 onSeek = { presenter.seekToMs(it) },
                                 isPlaying = playback.isPlaying,

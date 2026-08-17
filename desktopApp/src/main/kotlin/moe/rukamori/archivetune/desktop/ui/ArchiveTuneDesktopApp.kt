@@ -153,7 +153,7 @@ fun ArchiveTuneDesktopApp(
     onShellStateChanged: (DesktopDestination, DesktopThemePreference) -> Unit,
     windowDragModifier: Modifier = Modifier,
     windowControls: (@Composable () -> Unit)? = null,
-    immersiveContent: (@Composable (Modifier) -> Unit)? = null,
+    immersiveContent: (@Composable (Modifier, Boolean) -> Unit)? = null,
     onDismissImmersive: () -> Unit = {},
     content: (@Composable (DesktopContentState, Modifier) -> Unit)? = null,
     playerContent: (@Composable (Modifier) -> Unit)? = null,
@@ -172,7 +172,7 @@ fun ArchiveTuneDesktopApp(
 
     ArchiveTuneDesktopTheme(themePreference, dynamicPalette) {
         Box(Modifier.fillMaxSize()) {
-            if (dynamicActive && immersiveContent == null) {
+            if (dynamicActive) {
                 DynamicAppBackdrop(
                     artworkUri = dynamicArtworkUri,
                     modifier = Modifier.fillMaxSize(),
@@ -247,7 +247,7 @@ fun ArchiveTuneDesktopApp(
                             onNavigateBackOverride = onDismissImmersive,
                             showSearch = false,
                         )
-                        immersive(Modifier.weight(1f).fillMaxWidth())
+                        immersive(Modifier.weight(1f).fillMaxWidth(), dynamicActive)
                     }
                 } else Row(Modifier.fillMaxSize()) {
                     when (layout) {

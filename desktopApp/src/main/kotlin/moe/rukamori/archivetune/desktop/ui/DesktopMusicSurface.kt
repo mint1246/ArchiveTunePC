@@ -842,13 +842,18 @@ private fun NowPlayingSubtitle(
 
 /** Immersive lyrics content rendered inside the app shell so it shares the integrated chrome. */
 @Composable
-internal fun DesktopLyricsView(services: DesktopMusicServices, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
+internal fun DesktopLyricsView(
+    services: DesktopMusicServices,
+    browse: DesktopBrowseController,
+    modifier: Modifier = Modifier,
+    useShellDynamicBackdrop: Boolean = false,
+) {
     val snapshot by services.playback.state.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val item = snapshot.currentItem
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (useShellDynamicBackdrop) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.surface,
     ) {
             Column(Modifier.fillMaxSize()) {
                 Row(
@@ -874,7 +879,11 @@ AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(twee
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
                     )
                 }
-                DesktopLyricsPane(services.lyrics, Modifier.weight(1f).fillMaxWidth())
+                DesktopLyricsPane(
+                    presenter = services.lyrics,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    drawBackground = !useShellDynamicBackdrop,
+                )
             }
     }
 }

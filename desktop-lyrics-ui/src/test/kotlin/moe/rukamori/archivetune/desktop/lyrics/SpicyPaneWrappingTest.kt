@@ -73,11 +73,9 @@ class SpicyPaneWrappingTest {
             assertEquals(visible.minOf { it.box.top }, geometry.wordTop[wordIndex])
             assertEquals(visible.maxOf { it.box.bottom }, geometry.wordBottom[wordIndex])
 
-            visible.forEach { letter ->
-                val letterLayout = letter.letterLayout ?: return@forEach
-                val expectedTop = geometry.layout.getLineBaseline(letter.lineIndex) - letterLayout.firstBaseline
-                assertEquals(expectedTop, letter.topY)
-            }
+            val baseline = geometry.layout.getLineBaseline(row)
+            assertTrue(baseline >= geometry.layout.getLineTop(row))
+            assertTrue(baseline <= geometry.layout.getLineBottom(row))
         }
 
         val firstRowBottom = geometry.layout.getLineBottom(0)

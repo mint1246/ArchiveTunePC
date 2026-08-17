@@ -71,6 +71,36 @@ class ArchiveTuneJvmClientTest {
     }
 
     @Test
+    fun retryableMediaHttpFailureTemporarilyRemovesThatClientForTheVideo() {
+        val client = ArchiveTuneJvmClient(Files.createTempDirectory("archivetune-test-").toFile())
+        val auth = PlaybackAuthState().normalized()
+        val videoId = "video"
+        val first = client.orderedStreamClientsForTest(auth, videoId).first()
+        val firstKey = "${first.clientName}@${first.clientVersion}"
+
+        assertTrue(client.markStreamClientFailed(videoId, firstKey, 403, auth.fingerprint))
+
+        val retriedOrder = client.orderedStreamClientsForTest(auth, videoId)
+        assertFalse(retriedOrder.any { it.clientName == first.clientName && it.clientVersion == first.clientVersion })
+        assertTrue(retriedOrder.isNotEmpty())
+    }
+
+    @Test
+    fun nonRetryableMediaHttpFailureDoesNotRemoveTheClient() {
+        val client = ArchiveTuneJvmClient(Files.createTempDirectory("archivetune-test-").toFile())
+        val auth = PlaybackAuthState().normalized()
+        val videoId = "video"
+        val first = client.orderedStreamClientsForTest(auth, videoId).first()
+        val firstKey = "${first.clientName}@${first.clientVersion}"
+
+        assertFalse(client.markStreamClientFailed(videoId, firstKey, 500, auth.fingerprint))
+
+        val retriedOrder = client.orderedStreamClientsForTest(auth, videoId)
+        assertEquals(first.clientName, retriedOrder.first().clientName)
+        assertEquals(first.clientVersion, retriedOrder.first().clientVersion)
+    }
+
+    @Test
     fun highQualityPrefersBestDirectFormatAtOrBelowTarget() {
         val response =
             playerResponse(

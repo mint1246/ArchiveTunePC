@@ -10,6 +10,13 @@ plugins {
 group = "moe.rukamori.archivetune"
 version = "14.1.0"
 
+// Set only by the OpenJ9 release wrapper task below. Normal HotSpot/dev builds keep their existing
+// JVM behaviour, while the canonical OpenJ9 release disables runtime JIT but keeps AOT/shared-class
+// support. This preserves the low-memory behaviour without paying the full -Xint startup penalty
+// on every launch.
+val openJ9NoJitRelease =
+    providers.gradleProperty("archivetune.openj9NoJit").map(String::toBoolean).orElse(false)
+
 kotlin {
     jvmToolchain(21)
     compilerOptions {
@@ -69,6 +76,9 @@ compose.desktop {
             "-XX:ConcGCThreads=2",
             "-XX:G1ConcRefinementThreads=4",
         )
+        if (openJ9NoJitRelease.get()) {
+            jvmArgs += "-Xnojit"
+        }
 
         buildTypes.release.proguard {
             version.set("7.9.1")
@@ -126,9 +136,73 @@ val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/windows")
 val jpackageExecutable = "${System.getProperty("java.home")}/bin/jpackage.exe"
 
-fun installerJpackageArgs(type: String, dest: Provider<Directory>): List<String> = listOf(
+/**
+ * Canonical low-memory Windows release build.
+ *
+ * This intentionally starts a nested Gradle invocation under IBM Semeru/OpenJ9 because the JVM
+ * running Gradle is also the JDK Compose uses for jlink/jpackage. The produced app remains in the
+ * standard Compose release location (`compose/binaries/main-release`) rather than a custom folder.
+ *
+ * Override JDK discovery with either:
+ *   -Parchivetune.openj9Home=C:\path\to\jdk
+ *   ARCHIVETUNE_OPENJ9_HOME=C:\path\to\jdk
+ */
+val configuredOpenJ9Home =
+    providers.gradleProperty("archivetune.openj9Home").orNull
+        ?: System.getenv("ARCHIVETUNE_OPENJ9_HOME")
+val programFilesDir = System.getenv("ProgramFiles")?.let(::File) ?: File("C:/Program Files")
+val semeruRoot = File(programFilesDir, "Semeru")
+val discoveredOpenJ9Homes =
+    semeruRoot.listFiles()
+        ?.filter { it.isDirectory && it.name.contains("openj9", ignoreCase = true) }
+        ?.sortedByDescending(File::lastModified)
+        .orEmpty()
+val openJ9HomeForRelease =
+    buildList {
+        configuredOpenJ9Home?.let { add(File(it)) }
+        addAll(discoveredOpenJ9Homes)
+    }.firstOrNull { candidate ->
+        File(candidate, "bin/java.exe").isFile && File(candidate, "bin/jpackage.exe").isFile
+    }
+val gradlewBatPath = rootProject.file("gradlew.bat").absolutePath
+
+val createOpenJ9ReleaseDistributable = tasks.register<Exec>("createOpenJ9ReleaseDistributable") {
+    group = "distribution"
+    description = "Builds the canonical main-release app image with Semeru/OpenJ9 and runtime JIT disabled."
+    workingDir(rootProject.projectDir)
+
+    if (openJ9HomeForRelease != null) {
+        environment("JAVA_HOME", openJ9HomeForRelease.absolutePath)
+        environment(
+            "PATH",
+            File(openJ9HomeForRelease, "bin").absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""),
+        )
+        commandLine(
+            "cmd.exe",
+            "/d",
+            "/c",
+            gradlewBatPath,
+            "--no-daemon",
+            "-Parchivetune.openj9NoJit=true",
+            ":desktopApp:createReleaseDistributable",
+        )
+    } else {
+        commandLine(
+            "cmd.exe",
+            "/d",
+            "/c",
+            "echo OpenJ9 JDK not found. Install IBM Semeru OpenJ9 or set ARCHIVETUNE_OPENJ9_HOME / -Parchivetune.openj9Home=^<jdk^>. 1>&2 & exit /b 1",
+        )
+    }
+}
+
+fun installerJpackageArgs(
+    type: String,
+    appImage: Provider<Directory>,
+    dest: Provider<Directory>,
+): List<String> = listOf(
     "--type", type,
-    "--app-image", appImageDir.get().asFile.absolutePath,
+    "--app-image", appImage.get().asFile.absolutePath,
     "--resource-dir", customWixResourceDir.asFile.absolutePath,
     "--dest", dest.get().asFile.absolutePath,
     "--name", "ArchiveTune",
@@ -149,7 +223,10 @@ val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
     description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
     dependsOn("createDistributable", stageBundledVlcRuntime, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
-    commandLine(listOf(jpackageExecutable) + installerJpackageArgs("msi", layout.buildDirectory.dir("compose/binaries/main/msi")))
+    commandLine(
+        listOf(jpackageExecutable) +
+            installerJpackageArgs("msi", appImageDir, layout.buildDirectory.dir("compose/binaries/main/msi")),
+    )
 }
 
 val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
@@ -157,7 +234,39 @@ val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
     description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
     dependsOn("createDistributable", stageBundledVlcRuntime, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
-    commandLine(listOf(jpackageExecutable) + installerJpackageArgs("exe", layout.buildDirectory.dir("compose/binaries/main/exe")))
+    commandLine(
+        listOf(jpackageExecutable) +
+            installerJpackageArgs("exe", appImageDir, layout.buildDirectory.dir("compose/binaries/main/exe")),
+    )
+}
+
+val openJ9JpackageExecutable =
+    openJ9HomeForRelease?.let { File(it, "bin/jpackage.exe").absolutePath } ?: jpackageExecutable
+
+val packageOpenJ9MsiUpgradable = tasks.register<Exec>("packageOpenJ9MsiUpgradable") {
+    group = "package"
+    description = "Builds an upgradable MSI from the canonical OpenJ9 no-JIT main-release app image."
+    dependsOn(createOpenJ9ReleaseDistributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    environment(
+        "PATH",
+        buildString {
+            openJ9HomeForRelease?.let {
+                append(File(it, "bin").absolutePath)
+                append(File.pathSeparator)
+            }
+            append(wixToolsetDir.get().asFile.absolutePath)
+            append(File.pathSeparator)
+            append(System.getenv("PATH") ?: "")
+        },
+    )
+    commandLine(
+        listOf(openJ9JpackageExecutable) +
+            installerJpackageArgs(
+                "msi",
+                releaseAppImageDir,
+                layout.buildDirectory.dir("compose/binaries/main-release/msi"),
+            ),
+    )
 }
 
 val verifyBundledVlcRuntime = tasks.register<VerifyBundledVlcRuntimeTask>("verifyBundledVlcRuntime") {

@@ -40,6 +40,7 @@ import moe.rukamori.archivetune.stream.StreamClientPreference
 import java.io.File
 import java.net.URI
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * JVM entry point for ArchiveTune's real YouTube Music backend.
@@ -57,6 +58,7 @@ class ArchiveTuneJvmClient(
 ) {
     @Volatile
     private var sessionProvider: DesktopSessionProvider? = sessionProvider
+    private val failedStreamClientsUntil = ConcurrentHashMap<String, Long>()
 
     init {
         require(cacheDirectory.path.isNotBlank()) { "Cipher cache directory is required" }
@@ -448,7 +450,7 @@ class ArchiveTuneJvmClient(
         val signatureTimestamp = streamUrlResolver.signatureTimestamp(videoId).getOrNull()
         val failures = mutableListOf<Throwable>()
 
-        for (client in orderedStreamClients(authState)) {
+        for (client in orderedStreamClients(authState, videoId)) {
             if (client.loginRequired && !authState.hasPlaybackLoginContext) continue
             val useLogin = authState.hasLoginCookie && client.supportsCookieAuthentication
             val playerResult =
@@ -572,16 +574,67 @@ class ArchiveTuneJvmClient(
         return repaired
     }
 
-    private fun orderedStreamClients(authState: PlaybackAuthState): List<YouTubeClient> =
+    /**
+     * Mirrors Android's failed-stream-client backoff. A googlevideo URL can be syntactically valid
+     * yet return 403/404/410/416 when the media engine actually opens it. Once desktop reports that
+     * concrete failure, keep that client out of the candidate order for this video/session for ten
+     * minutes so the transparent retry resolves through another client instead of returning the
+     * same rejected URL again.
+     */
+    fun markStreamClientFailed(
+        videoId: String,
+        clientKey: String?,
+        httpStatusCode: Int?,
+        authFingerprint: String = YouTube.currentPlaybackAuthState().fingerprint,
+    ): Boolean {
+        if (httpStatusCode != null && httpStatusCode !in RETRYABLE_STREAM_RESPONSE_CODES) return false
+        val normalizedClientKey = PlaybackStreamResolver.normalizeClientKey(clientKey)
+        if (normalizedClientKey.isEmpty()) return false
+        failedStreamClientsUntil[failedStreamClientKey(videoId, normalizedClientKey, authFingerprint)] =
+            System.currentTimeMillis() + FAILED_CLIENT_BACKOFF_MS
+        return true
+    }
+
+    private fun orderedStreamClients(
+        authState: PlaybackAuthState,
+        videoId: String? = null,
+    ): List<YouTubeClient> =
         PlaybackStreamResolver.orderClients(
             preference = if (authState.hasLoginCookie) StreamClientPreference.WEB_REMIX else StreamClientPreference.ANDROID_VR,
             authState = authState,
             fallbackClients = streamClients,
             preferCookieCapableWhenLoggedIn = true,
-        )
+        ).filterNot { client ->
+            videoId != null && isStreamClientTemporarilyBlocked(
+                videoId = videoId,
+                clientKey = PlaybackStreamResolver.clientKey(client),
+                authFingerprint = authState.fingerprint,
+            )
+        }
 
-    internal fun orderedStreamClientsForTest(authState: PlaybackAuthState): List<YouTubeClient> =
-        orderedStreamClients(authState)
+    private fun isStreamClientTemporarilyBlocked(
+        videoId: String,
+        clientKey: String?,
+        authFingerprint: String,
+    ): Boolean {
+        val normalizedClientKey = PlaybackStreamResolver.normalizeClientKey(clientKey)
+        if (normalizedClientKey.isEmpty()) return false
+        val key = failedStreamClientKey(videoId, normalizedClientKey, authFingerprint)
+        val until = failedStreamClientsUntil[key] ?: return false
+        if (until <= System.currentTimeMillis()) {
+            failedStreamClientsUntil.remove(key, until)
+            return false
+        }
+        return true
+    }
+
+    private fun failedStreamClientKey(videoId: String, clientKey: String, authFingerprint: String): String =
+        "$authFingerprint:$videoId:${PlaybackStreamResolver.normalizeClientKey(clientKey)}"
+
+    internal fun orderedStreamClientsForTest(
+        authState: PlaybackAuthState,
+        videoId: String? = null,
+    ): List<YouTubeClient> = orderedStreamClients(authState, videoId)
 
     companion object {
         /**
@@ -695,6 +748,9 @@ data class ResolvedAudioStream(
 
     val contentLength: Long?
         get() = format.contentLength
+
+    val clientKey: String
+        get() = PlaybackStreamResolver.normalizeClientKey("$clientName@$clientVersion")
 }
 
 /** A successfully validated account session. Do not log [authState]. */
@@ -800,3 +856,5 @@ private fun normalizedId(
 private const val MAX_RECOVERED_ARTIST_ALBUMS = 4
 private const val MIN_FULL_ALBUM_TRACKS = 7
 private const val STREAM_RESOLUTION_TIMEOUT_MILLIS = 45_000L
+private const val FAILED_CLIENT_BACKOFF_MS = 10 * 60 * 1000L
+private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
