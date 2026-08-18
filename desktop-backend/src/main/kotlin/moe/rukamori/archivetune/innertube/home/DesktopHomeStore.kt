@@ -42,6 +42,7 @@ data class DesktopHomeSnapshot(
     val subscribedArtists: List<ArtistItem> = emptyList(),
     val playHistory: List<DesktopPlayEvent> = emptyList(),
     val speedDial: List<YTItem> = emptyList(),
+    val dismissedLocalRecommendations: Set<String> = emptySet(),
 )
 
 /** Atomic, JSON-backed persistence for desktop Home personalization data. */
@@ -80,6 +81,19 @@ class DesktopHomeStore(private val file: Path) {
     fun isSpeedDialPinned(item: YTItem): Boolean =
         _snapshot.value.speedDial.any { it.id == item.id && it::class == item::class }
 
+    fun dismissLocalRecommendation(item: YTItem) = update { current ->
+        current.copy(
+            dismissedLocalRecommendations =
+                (current.dismissedLocalRecommendations + homeItemKey(item))
+                    .toList()
+                    .takeLast(MAX_DISMISSED_LOCAL_RECOMMENDATIONS)
+                    .toSet(),
+        )
+    }
+
+    fun isLocalRecommendationDismissed(item: YTItem): Boolean =
+        homeItemKey(item) in _snapshot.value.dismissedLocalRecommendations
+
     fun clearAccountData() = update {
         it.copy(
             likedSongs = emptyList(),
@@ -110,6 +124,7 @@ class DesktopHomeStore(private val file: Path) {
                 .put("likedAlbums", JSONArray().apply { snapshot.likedAlbums.forEach { put(albumToJson(it)) } })
                 .put("subscribedArtists", JSONArray().apply { snapshot.subscribedArtists.forEach { put(artistToJson(it)) } })
                 .put("speedDial", JSONArray().apply { snapshot.speedDial.forEach { put(itemToJson(it)) } })
+                .put("dismissedLocalRecommendations", JSONArray().apply { snapshot.dismissedLocalRecommendations.forEach(::put) })
                 .put(
                     "playHistory",
                     JSONArray().apply {
@@ -146,6 +161,7 @@ class DesktopHomeStore(private val file: Path) {
             likedAlbums = json.optJSONArray("likedAlbums").orEmptyObjects().mapNotNull(::albumFromJson),
             subscribedArtists = json.optJSONArray("subscribedArtists").orEmptyObjects().mapNotNull(::artistFromJson),
             speedDial = json.optJSONArray("speedDial").orEmptyObjects().mapNotNull(::itemFromJson),
+            dismissedLocalRecommendations = json.optJSONArray("dismissedLocalRecommendations").orEmptyStrings().toSet(),
             playHistory =
                 json.optJSONArray("playHistory").orEmptyObjects().mapNotNull { event ->
                     val song = event.optJSONObject("song")?.let(::songFromJson) ?: return@mapNotNull null
@@ -161,11 +177,17 @@ class DesktopHomeStore(private val file: Path) {
     private companion object {
         const val MAX_PLAY_EVENTS = 2_000
         const val MAX_SPEED_DIAL = 24
+        const val MAX_DISMISSED_LOCAL_RECOMMENDATIONS = 500
     }
 }
 
 private fun JSONArray.orEmptyObjects(): List<JSONObject> =
     buildList(length()) { for (i in 0 until length()) optJSONObject(i)?.let(::add) }
+
+private fun JSONArray?.orEmptyStrings(): List<String> =
+    if (this == null) emptyList() else buildList(length()) { for (i in 0 until length()) optString(i).takeIf(String::isNotBlank)?.let(::add) }
+
+private fun homeItemKey(item: YTItem): String = "${item::class.simpleName}:${item.id}"
 
 private fun songToJson(song: SongItem): JSONObject =
     JSONObject()
