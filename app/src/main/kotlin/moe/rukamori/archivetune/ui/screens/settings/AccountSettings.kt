@@ -909,7 +909,7 @@ private fun AccountSwitcherSheet(
                     key = { index, channel -> "${channel.dataSyncId}:${channel.name}:$index" },
                     contentType = { _, _ -> "channel" },
                 ) { index, channel ->
-                    val isActive = channel.isSelected || channel.dataSyncId == activeDataSyncId
+                    val isActive = channel.dataSyncId == activeDataSyncId
                     SegmentedListItem(
                         selected = isActive,
                         onClick = {
