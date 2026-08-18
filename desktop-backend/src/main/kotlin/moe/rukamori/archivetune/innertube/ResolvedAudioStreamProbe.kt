@@ -18,6 +18,11 @@ data class AudioStreamProbeResult(
     val rangedResponse: Boolean,
 )
 
+/** HTTP-only probe failure; deliberately carries no signed URL or request headers. */
+class AudioStreamProbeHttpException(
+    val httpStatus: Int,
+) : IllegalStateException("Resolved audio stream probe returned HTTP $httpStatus")
+
 /**
  * Verifies that the exact URL and headers handed to the desktop player are usable. It requests at
  * most [MAX_PROBE_BYTES] bytes, follows no redirects, and never includes the signed URL, headers,
@@ -32,7 +37,7 @@ fun probeResolvedAudioStream(stream: ResolvedAudioStream): Result<AudioStreamPro
                 .apply { stream.requestHeaders.forEach { (name, value) -> header(name, value) } }
                 .build()
         PROBE_CLIENT.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Resolved audio stream probe returned HTTP ${response.code}" }
+            if (!response.isSuccessful) throw AudioStreamProbeHttpException(response.code)
             val bytesRead = response.body.byteStream().readNBytes(MAX_PROBE_BYTES).size
             check(bytesRead > 0) { "Resolved audio stream probe returned no audio bytes" }
             AudioStreamProbeResult(

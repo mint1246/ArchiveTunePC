@@ -276,6 +276,55 @@ class ArchiveTuneJvmClientTest {
         assertEquals(StreamResolutionFailureKind.UNAVAILABLE, classifyStreamResolutionFailure(failure))
     }
 
+    @Test
+    fun explicitUnavailableFailureWinsOverParallelClientTimeout() {
+        val failure =
+            StreamResolutionException(
+                "video",
+                listOf(
+                    StreamClientTimeoutException("WEB_REMIX"),
+                    StreamPlaybackUnavailableException("video", "ANDROID_VR", "ERROR", "This video is unavailable"),
+                ),
+            )
+
+        assertEquals(StreamResolutionFailureKind.UNAVAILABLE, classifyStreamResolutionFailure(failure))
+        assertTrue(isExplicitlyUnavailableStreamFailure(failure))
+    }
+
+    @Test
+    fun streamProbeReturnsTypedHttpFailureWithoutUrl() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/rejected") { exchange ->
+            exchange.sendResponseHeaders(403, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val stream =
+                ResolvedAudioStream(
+                    videoId = "test",
+                    url = "http://127.0.0.1:${server.address.port}/rejected",
+                    format = format(251, 155_000, "audio/webm", direct = true),
+                    videoDetails = null,
+                    playbackTracking = null,
+                    audioConfig = null,
+                    clientName = "test",
+                    clientVersion = "test",
+                    requestHeaders = emptyMap(),
+                    expiresAtEpochMillis = System.currentTimeMillis() + 60_000,
+                    authFingerprint = "test",
+                )
+
+            val failure = probeResolvedAudioStream(stream).exceptionOrNull()
+
+            assertTrue(failure is AudioStreamProbeHttpException)
+            assertEquals(403, (failure as AudioStreamProbeHttpException).httpStatus)
+            assertFalse(failure.message.orEmpty().contains("127.0.0.1"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
     private fun playerResponse(vararg formats: PlayerResponse.StreamingData.Format) =
         PlayerResponse(
             responseContext = ResponseContext(visitorData = null, serviceTrackingParams = null),

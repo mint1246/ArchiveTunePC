@@ -345,10 +345,16 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         is PlaybackSource.Deferred -> completedDownloadLookup?.invoke(source.key)?.let { path ->
             Result.success(ResolvedPlaybackSource(path.toUri().toASCIIString()))
         } ?: cachedSourceFor(source.key)?.let { Result.success(it) }
-            ?: backend.resolveAudioStream(source.key).fold(
+            ?: backend.resolveAudioStreamWithMetadataFallback(
+                videoId = source.key,
+                title = item.metadata.title,
+                artistNames = item.metadata.artists.map { it.name },
+                albumTitle = item.metadata.album?.title,
+                durationHintMs = item.metadata.durationHintMs,
+            ).fold(
                 onSuccess = {
                     runtime.logger.info(
-                        "stream_resolution event=resolved videoId=${source.key} client=${it.clientKey} " +
+                        "stream_resolution event=resolved videoId=${source.key} resolvedVideoId=${it.videoId} client=${it.clientKey} " +
                             "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
                             "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
                     )
@@ -356,6 +362,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     cacheSource(
                         key = source.key,
                         source = resolved,
+                        resolvedVideoId = it.videoId,
                         streamClientKey = it.clientKey,
                         streamAuthFingerprint = it.authFingerprint,
                     )
@@ -400,6 +407,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         val key = deferred.key
         val cached = resolvedSourceCache[key]
         val matchingCachedSource = cached?.takeIf { it.source.uri == failedSource.uri }
+        val resolvedVideoId = matchingCachedSource?.resolvedVideoId ?: key
 
         // Android drops every cached URL for this media ID before resolving the retry. Desktop has
         // only this auth-scoped in-memory source cache, so remove it unconditionally as well.
@@ -412,7 +420,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         val recoveryAction =
             if (!nearExpiry && matchingCachedSource?.streamClientKey?.isNotBlank() == true) {
                 backend.prepareStreamHttpRecovery(
-                    videoId = key,
+                    videoId = resolvedVideoId,
                     clientKey = matchingCachedSource.streamClientKey,
                     httpStatusCode = httpStatus,
                     authFingerprint = matchingCachedSource.streamAuthFingerprint
@@ -435,6 +443,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private fun cacheSource(
         key: String,
         source: ResolvedPlaybackSource,
+        resolvedVideoId: String,
         streamClientKey: String,
         streamAuthFingerprint: String,
     ) {
@@ -448,6 +457,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         resolvedSourceCache[key] = CachedResolvedSource(
             source = source,
             sessionFingerprint = account.currentAuthState().fingerprint,
+            resolvedVideoId = resolvedVideoId,
             streamClientKey = streamClientKey,
             streamAuthFingerprint = streamAuthFingerprint,
         )
@@ -523,6 +533,7 @@ private data class PersistedQueueKey(
 private data class CachedResolvedSource(
     val source: ResolvedPlaybackSource,
     val sessionFingerprint: String?,
+    val resolvedVideoId: String,
     val streamClientKey: String,
     val streamAuthFingerprint: String?,
 )

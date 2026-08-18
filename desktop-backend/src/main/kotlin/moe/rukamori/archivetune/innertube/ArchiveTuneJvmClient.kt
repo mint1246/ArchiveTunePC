@@ -9,6 +9,9 @@ package moe.rukamori.archivetune.innertube
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.AccountInfo
@@ -60,6 +63,8 @@ class ArchiveTuneJvmClient(
     @Volatile
     private var sessionProvider: DesktopSessionProvider? = sessionProvider
     private val failedStreamClientsUntil = ConcurrentHashMap<String, Long>()
+    @Volatile
+    private var lastSuccessfulStreamClientKey: String? = null
 
     init {
         require(cacheDirectory.path.isNotBlank()) { "Cipher cache directory is required" }
@@ -527,82 +532,243 @@ class ArchiveTuneJvmClient(
             Result.failure(failure)
         }
 
+    /**
+     * Resolves a stream and, only when YouTube explicitly says the stored video id is unavailable,
+     * performs one strict metadata lookup for a replacement upload of the same song. This is aimed
+     * at persisted queues/library rows whose old YouTube Music id was retired while the track itself
+     * still exists under a new upload. Network/extractor/auth failures never trigger title matching.
+     */
+    suspend fun resolveAudioStreamWithMetadataFallback(
+        videoId: String,
+        title: String,
+        artistNames: List<String>,
+        albumTitle: String? = null,
+        durationHintMs: Long? = null,
+        playlistId: String? = null,
+        quality: JvmAudioQuality = JvmAudioQuality.HIGH,
+    ): Result<ResolvedAudioStream> {
+        val original = resolveAudioStream(videoId, playlistId, quality)
+        val originalFailure = original.exceptionOrNull() ?: return original
+        if (!isExplicitlyUnavailableStreamFailure(originalFailure)) return original
+
+        val normalizedTitle = normalizeStreamIdentity(title)
+        val normalizedArtists = artistNames.map(::normalizeStreamIdentity).filter(String::isNotEmpty).toSet()
+        if (normalizedTitle.isEmpty() || normalizedArtists.isEmpty()) return original
+
+        val query = listOf(title, artistNames.first()).joinToString(" ")
+        val candidates =
+            searchSongs(query)
+                .getOrNull()
+                .orEmpty()
+                .asSequence()
+                .filter { it.id != videoId }
+                .filter { normalizeStreamIdentity(it.title) == normalizedTitle }
+                .filter { song -> song.artists.any { normalizeStreamIdentity(it.name) in normalizedArtists } }
+                .filter { song ->
+                    val candidateDurationMs = song.duration?.times(1_000L)
+                    durationHintMs == null || candidateDurationMs == null ||
+                        kotlin.math.abs(candidateDurationMs - durationHintMs) <= STREAM_REPLACEMENT_DURATION_TOLERANCE_MS
+                }
+                .sortedWith(
+                    compareByDescending<SongItem> { song ->
+                        albumTitle != null && normalizeStreamIdentity(song.album?.name.orEmpty()) == normalizeStreamIdentity(albumTitle)
+                    }.thenBy { song ->
+                        val candidateDurationMs = song.duration?.times(1_000L)
+                        if (durationHintMs == null || candidateDurationMs == null) Long.MAX_VALUE
+                        else kotlin.math.abs(candidateDurationMs - durationHintMs)
+                    },
+                )
+                .take(MAX_STREAM_REPLACEMENT_CANDIDATES)
+                .toList()
+
+        for (candidate in candidates) {
+            val replacement = resolveAudioStream(candidate.id, playlistId, quality)
+            if (replacement.isSuccess) return replacement
+        }
+        return original
+    }
+
     private suspend fun resolveAudioStreamOrThrow(
         videoId: String,
         playlistId: String?,
         quality: JvmAudioQuality,
     ): ResolvedAudioStream {
-        val authState = ensureSessionAuthContext(YouTube.currentPlaybackAuthState())
-        val signatureTimestamp = streamUrlResolver.signatureTimestamp(videoId).getOrNull()
+        var authState = ensureSessionAuthContext(YouTube.currentPlaybackAuthState())
+        authState = preparePlaybackAuth(videoId, authState)
+        val signatureTimestamp = resolveSignatureTimestamp(videoId)
         val failures = mutableListOf<Throwable>()
 
-        for (client in orderedStreamClients(authState, videoId)) {
-            if (client.loginRequired && !authState.hasPlaybackLoginContext) continue
-            val useLogin = authState.hasLoginCookie && client.supportsCookieAuthentication
-            val playerResult =
-                YouTube.player(
+        val clients = orderedStreamClients(authState, videoId)
+        for (wave in clients.chunked(MAX_PARALLEL_STREAM_CLIENTS)) {
+            val waveResult =
+                resolveStreamClientWave(
+                    clients = wave,
                     videoId = videoId,
                     playlistId = playlistId,
-                    client = client,
-                    signatureTimestamp = signatureTimestamp.takeIf { client.useSignatureTimestamp },
-                    setLogin = useLogin,
+                    quality = quality,
                     authState = authState,
+                    signatureTimestamp = signatureTimestamp,
                 )
-            val playerFailure = playerResult.exceptionOrNull()
-            if (playerFailure != null) {
-                failures += playerFailure
-                continue
-            }
-            val playerResponse = playerResult.getOrThrow()
-
-            if (playerResponse.playabilityStatus.status != "OK") {
-                failures +=
-                    StreamPlaybackUnavailableException(
-                        videoId = videoId,
-                        clientName = client.clientName,
-                        status = playerResponse.playabilityStatus.status,
-                        reason = playerResponse.playabilityStatus.reason,
-                    )
-                continue
-            }
-
-            val audioFormats = selectAudioFormatCandidates(playerResponse, quality)
-            if (audioFormats.isEmpty()) {
-                failures += StreamAudioFormatUnavailableException(videoId, client.clientName)
-                continue
-            }
-            for (format in audioFormats) {
-                val streamUrlResult = streamUrlResolver.resolve(format, videoId, client, authState)
-                val streamUrlFailure = streamUrlResult.exceptionOrNull()
-                if (streamUrlFailure != null) {
-                    failures += streamUrlFailure
-                    continue
-                }
-                val streamUrl = streamUrlResult.getOrThrow()
-
-                if (!streamUrl.isHttpUrl()) {
-                    failures += IllegalStateException("Resolved stream URL was not HTTP(S)")
-                    continue
-                }
-
-                val expiresInSeconds = resolveExpirySeconds(playerResponse.streamingData?.expiresInSeconds, streamUrl)
-                return ResolvedAudioStream(
-                    videoId = videoId,
-                    url = streamUrl,
-                    format = format,
-                    videoDetails = playerResponse.videoDetails,
-                    playbackTracking = playerResponse.playbackTracking,
-                    audioConfig = playerResponse.playerConfig?.audioConfig,
-                    clientName = client.clientName,
-                    clientVersion = client.clientVersion,
-                    requestHeaders = requestHeaders(client),
-                    expiresAtEpochMillis = System.currentTimeMillis() + expiresInSeconds * 1_000L,
-                    authFingerprint = authState.fingerprint,
-                )
+            failures += waveResult.failures
+            waveResult.stream?.let { stream ->
+                lastSuccessfulStreamClientKey = stream.clientKey
+                return stream
             }
         }
 
         throw StreamResolutionException(videoId, failures)
+    }
+
+    private suspend fun resolveSignatureTimestamp(videoId: String): Int? =
+        try {
+            withTimeout(SIGNATURE_TIMESTAMP_TIMEOUT_MILLIS) {
+                streamUrlResolver.signatureTimestamp(videoId).getOrNull()
+            }
+        } catch (_: TimeoutCancellationException) {
+            null
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        }
+
+    private suspend fun preparePlaybackAuth(
+        videoId: String,
+        initial: PlaybackAuthState,
+    ): PlaybackAuthState =
+        try {
+            withTimeout(PLAYBACK_AUTH_PREP_TIMEOUT_MILLIS) {
+                ensurePlaybackAuth(videoId, initial)
+            }
+        } catch (_: TimeoutCancellationException) {
+            initial
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        }
+
+    private suspend fun resolveStreamClientWave(
+        clients: List<YouTubeClient>,
+        videoId: String,
+        playlistId: String?,
+        quality: JvmAudioQuality,
+        authState: PlaybackAuthState,
+        signatureTimestamp: Int?,
+    ): StreamClientWaveResult = coroutineScope {
+        if (clients.isEmpty()) return@coroutineScope StreamClientWaveResult()
+
+        val results = Channel<StreamClientAttempt>(capacity = clients.size)
+        val jobs =
+            clients.map { client ->
+                launch {
+                    results.send(
+                        StreamClientAttempt(
+                            result =
+                                try {
+                                    Result.success(
+                                        withTimeout(STREAM_CLIENT_TIMEOUT_MILLIS) {
+                                            resolveAudioStreamForClient(
+                                                client = client,
+                                                videoId = videoId,
+                                                playlistId = playlistId,
+                                                quality = quality,
+                                                authState = authState,
+                                                signatureTimestamp = signatureTimestamp,
+                                            )
+                                        },
+                                    )
+                                } catch (_: TimeoutCancellationException) {
+                                    Result.failure(StreamClientTimeoutException(client.clientName))
+                                } catch (cancellation: CancellationException) {
+                                    throw cancellation
+                                } catch (failure: Throwable) {
+                                    Result.failure(failure)
+                                },
+                        ),
+                    )
+                }
+            }
+
+        val failures = mutableListOf<Throwable>()
+        try {
+            repeat(clients.size) {
+                val attempt = results.receive()
+                val stream = attempt.result.getOrNull()
+                if (stream != null) {
+                    jobs.forEach { job -> if (job.isActive) job.cancel() }
+                    return@coroutineScope StreamClientWaveResult(stream = stream, failures = failures)
+                }
+                attempt.result.exceptionOrNull()?.let(failures::add)
+            }
+            StreamClientWaveResult(failures = failures)
+        } finally {
+            jobs.forEach { job -> if (job.isActive) job.cancel() }
+            results.close()
+        }
+    }
+
+    private suspend fun resolveAudioStreamForClient(
+        client: YouTubeClient,
+        videoId: String,
+        playlistId: String?,
+        quality: JvmAudioQuality,
+        authState: PlaybackAuthState,
+        signatureTimestamp: Int?,
+    ): ResolvedAudioStream {
+        if (client.loginRequired && !authState.hasPlaybackLoginContext) {
+            throw StreamPlaybackUnavailableException(videoId, client.clientName, "LOGIN_REQUIRED", null)
+        }
+        val useLogin = authState.hasLoginCookie && client.supportsCookieAuthentication
+        val playerResponse =
+            YouTube.player(
+                videoId = videoId,
+                playlistId = playlistId,
+                client = client,
+                signatureTimestamp = signatureTimestamp.takeIf { client.useSignatureTimestamp },
+                setLogin = useLogin,
+                authState = authState,
+            ).getOrThrow()
+
+        if (playerResponse.playabilityStatus.status != "OK") {
+            throw StreamPlaybackUnavailableException(
+                videoId = videoId,
+                clientName = client.clientName,
+                status = playerResponse.playabilityStatus.status,
+                reason = playerResponse.playabilityStatus.reason,
+            )
+        }
+
+        val audioFormats = selectAudioFormatCandidates(playerResponse, quality)
+        if (audioFormats.isEmpty()) throw StreamAudioFormatUnavailableException(videoId, client.clientName)
+
+        val formatFailures = mutableListOf<Throwable>()
+        for (format in audioFormats) {
+            val streamUrlResult = streamUrlResolver.resolve(format, videoId, client, authState)
+            val streamUrlFailure = streamUrlResult.exceptionOrNull()
+            if (streamUrlFailure != null) {
+                formatFailures += streamUrlFailure
+                continue
+            }
+            val streamUrl = streamUrlResult.getOrThrow()
+            if (!streamUrl.isHttpUrl()) {
+                formatFailures += IllegalStateException("Resolved stream URL was not HTTP(S)")
+                continue
+            }
+
+            val expiresInSeconds = resolveExpirySeconds(playerResponse.streamingData?.expiresInSeconds, streamUrl)
+            return ResolvedAudioStream(
+                videoId = videoId,
+                url = streamUrl,
+                format = format,
+                videoDetails = playerResponse.videoDetails,
+                playbackTracking = playerResponse.playbackTracking,
+                audioConfig = playerResponse.playerConfig?.audioConfig,
+                clientName = client.clientName,
+                clientVersion = client.clientVersion,
+                requestHeaders = requestHeaders(client),
+                expiresAtEpochMillis = System.currentTimeMillis() + expiresInSeconds * 1_000L,
+                authFingerprint = authState.fingerprint,
+            )
+        }
+
+        throw StreamResolutionException(videoId, formatFailures)
     }
 
     private fun applyProvidedSession() {
@@ -765,6 +931,7 @@ class ArchiveTuneJvmClient(
             preference = if (authState.hasLoginCookie) StreamClientPreference.WEB_REMIX else StreamClientPreference.ANDROID_VR,
             authState = authState,
             fallbackClients = streamClients,
+            lastSuccessfulClientKey = lastSuccessfulStreamClientKey,
         ).filterNot { client ->
             videoId != null && isStreamClientTemporarilyBlocked(
                 videoId = videoId,
@@ -868,10 +1035,19 @@ enum class StreamHttpRecoveryAction {
 
 class StreamResolutionTimeoutException : IllegalStateException("YouTube stream resolution timed out")
 
+class StreamClientTimeoutException(clientName: String) : IllegalStateException("YouTube player client timed out: $clientName")
+
+private data class StreamClientAttempt(val result: Result<ResolvedAudioStream>)
+
+private data class StreamClientWaveResult(
+    val stream: ResolvedAudioStream? = null,
+    val failures: List<Throwable> = emptyList(),
+)
+
 /** Classifies only exception types and explicit playability states; never inspect/log URL-bearing messages. */
 fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailureKind {
     val all = generateSequence(failure) { it.cause }.toList() + failure.suppressed.toList()
-    if (all.any { it is StreamResolutionTimeoutException || it::class.simpleName.orEmpty().contains("Timeout", ignoreCase = true) }) {
+    if (all.any { it is StreamResolutionTimeoutException }) {
         return StreamResolutionFailureKind.NETWORK_TIMEOUT
     }
     if (all.any { throwable ->
@@ -891,8 +1067,19 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
     if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
         return StreamResolutionFailureKind.AUTH_REQUIRED
     }
+    if (all.any { it::class.simpleName.orEmpty().contains("Timeout", ignoreCase = true) }) {
+        return StreamResolutionFailureKind.NETWORK_TIMEOUT
+    }
     if (all.any { it is java.io.IOException }) return StreamResolutionFailureKind.NETWORK
     return StreamResolutionFailureKind.UNAVAILABLE
+}
+
+internal fun isExplicitlyUnavailableStreamFailure(failure: Throwable): Boolean {
+    val all = generateSequence(failure) { it.cause }.toList() + failure.suppressed.toList()
+    return all.filterIsInstance<StreamPlaybackUnavailableException>().any { unavailable ->
+        !unavailable.status.equals("LOGIN_REQUIRED", ignoreCase = true) &&
+            unavailable.reason.orEmpty().contains("unavailable", ignoreCase = true)
+    }
 }
 
 internal suspend fun <T> resolveStreamWithinTimeout(timeoutMillis: Long, block: suspend () -> T): T =
@@ -1030,8 +1217,22 @@ private fun normalizedId(
     id.trim().takeIf(String::isNotEmpty)?.let(Result.Companion::success)
         ?: Result.failure(IllegalArgumentException("$field is required"))
 
+private fun normalizeStreamIdentity(value: String): String =
+    value
+        .lowercase(Locale.US)
+        .map { if (it.isLetterOrDigit()) it else ' ' }
+        .joinToString("")
+        .trim()
+        .replace(Regex("\\s+"), " ")
+
 private const val MAX_RECOVERED_ARTIST_ALBUMS = 4
 private const val MIN_FULL_ALBUM_TRACKS = 7
+private const val MAX_STREAM_REPLACEMENT_CANDIDATES = 3
+private const val STREAM_REPLACEMENT_DURATION_TOLERANCE_MS = 12_000L
 private const val STREAM_RESOLUTION_TIMEOUT_MILLIS = 45_000L
+private const val STREAM_CLIENT_TIMEOUT_MILLIS = 12_000L
+private const val SIGNATURE_TIMESTAMP_TIMEOUT_MILLIS = 5_000L
+private const val PLAYBACK_AUTH_PREP_TIMEOUT_MILLIS = 15_000L
+private const val MAX_PARALLEL_STREAM_CLIENTS = 4
 private const val FAILED_CLIENT_BACKOFF_MS = 10 * 60 * 1000L
 private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)

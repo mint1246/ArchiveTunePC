@@ -25,7 +25,10 @@ import moe.rukamori.archivetune.downloads.DownloadSnapshot
 import moe.rukamori.archivetune.downloads.DownloadStatus
 import moe.rukamori.archivetune.downloads.PartialCleanupPolicy
 import moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy
+import moe.rukamori.archivetune.innertube.AudioStreamProbeHttpException
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
+import moe.rukamori.archivetune.innertube.ResolvedAudioStream
+import moe.rukamori.archivetune.innertube.probeResolvedAudioStream
 import moe.rukamori.archivetune.innertube.models.SongItem
 
 /** Desktop-only coordinator: resolves fresh URLs just-in-time, never persists them. */
@@ -66,7 +69,7 @@ class DesktopDownloadServices(
                         directory.resolve(it.fileName) == completedFile
                 }?.let { return@withLock Result.success(it.id) }
             }
-            backend.resolveAudioStream(song.id).map { stream ->
+            runCatching { resolveValidatedStream(song) }.map { stream ->
                 val request = DownloadRequest(
                     url = stream.url,
                     headers = stream.requestHeaders,
@@ -86,6 +89,43 @@ class DesktopDownloadServices(
             synchronized(operationLock) { inFlightEnqueues-- }
         }
     }
+
+    /**
+     * Validate the exact signed URL before a large transfer starts. A freshly resolved URL can be
+     * rejected by the media CDN even though the player response itself succeeded; on those concrete
+     * 403/404/410/416 responses, back off that client/proof generation and resolve once more.
+     */
+    private suspend fun resolveValidatedStream(song: SongItem): ResolvedAudioStream {
+        var stream =
+            backend.resolveAudioStreamWithMetadataFallback(
+                videoId = song.id,
+                title = song.title,
+                artistNames = song.artists.map { it.name },
+                albumTitle = song.album?.name,
+                durationHintMs = song.duration?.times(1_000L),
+            ).getOrThrow()
+
+        val initialProbeFailure = probeResolvedAudioStream(stream).exceptionOrNull()
+        val httpFailure = initialProbeFailure as? AudioStreamProbeHttpException
+        if (httpFailure == null || httpFailure.httpStatus !in RETRYABLE_STREAM_RESPONSE_CODES) {
+            if (initialProbeFailure != null) throw initialProbeFailure
+            return stream
+        }
+
+        backend.prepareStreamHttpRecovery(
+            videoId = stream.videoId,
+            clientKey = stream.clientKey,
+            httpStatusCode = httpFailure.httpStatus,
+            authFingerprint = stream.authFingerprint,
+            failedUrlHadPoToken = stream.url.hasQueryParameter("pot"),
+        )
+        stream = backend.resolveAudioStream(stream.videoId).getOrThrow()
+        probeResolvedAudioStream(stream).getOrThrow()
+        return stream
+    }
+
+    private fun String.hasQueryParameter(name: String): Boolean =
+        contains("?$name=") || contains("&$name=")
 
     /**
      * Queue every distinct song in a playlist. Resolution is deliberately sequential so a
@@ -182,6 +222,10 @@ class DesktopDownloadServices(
         downloadsJob.cancel()
         manager.close()
         serviceScope.cancel()
+    }
+
+    private companion object {
+        val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
 }
 
