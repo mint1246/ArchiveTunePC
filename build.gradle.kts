@@ -12,6 +12,18 @@ tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
 
+tasks.register("releaseJ9") {
+    group = "distribution"
+    description = "Builds the canonical OpenJ9 desktop release."
+    dependsOn(":desktopApp:createOpenJ9ReleaseDistributable")
+}
+
+tasks.register("msiJ9") {
+    group = "distribution"
+    description = "Builds the upgradable OpenJ9 desktop MSI."
+    dependsOn(":desktopApp:packageOpenJ9MsiUpgradable")
+}
+
 if (tasks.findByName("prepareKotlinBuildScriptModel") == null) {
     tasks.register("prepareKotlinBuildScriptModel") {}
 }
