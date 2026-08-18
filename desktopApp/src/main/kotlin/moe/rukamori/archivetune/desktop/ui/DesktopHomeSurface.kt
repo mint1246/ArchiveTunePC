@@ -293,6 +293,14 @@ fun DesktopHomeSurface(
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
                                     onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                    onPlayNext = { onPlayNext(song) },
+                                    onAddToQueue = { onAddToQueue(song) },
+                                    onDownload = { onDownload(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
+                                    onSetLiked = { onSetLiked(song, it) },
+                                    isLiked = liked(song),
+                                    onPin = { togglePin(song) },
+                                    isPinned = isPinned(song),
                                 )
                             }
                         }
@@ -312,6 +320,15 @@ fun DesktopHomeSurface(
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
                                     onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                    onPlayNext = { onPlayNext(song) },
+                                    onAddToQueue = { onAddToQueue(song) },
+                                    onDownload = { onDownload(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
+                                    onSetLiked = { onSetLiked(song, it) },
+                                    isLiked = liked(song),
+                                    onPin = { togglePin(song) },
+                                    onNotInterested = song.feedbackToken?.let { { dismiss(song) } },
+                                    isPinned = isPinned(song),
                                 )
                             }
                         }
@@ -620,6 +637,15 @@ private fun DesktopQuickPickHeroCard(
     isActive: Boolean,
     isPlaying: Boolean,
     onClick: () -> Unit,
+    onPlayNext: (() -> Unit)? = null,
+    onAddToQueue: (() -> Unit)? = null,
+    onDownload: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onSetLiked: ((Boolean) -> Unit)? = null,
+    onPin: (() -> Unit)? = null,
+    onNotInterested: (() -> Unit)? = null,
+    isLiked: Boolean = false,
+    isPinned: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -648,12 +674,24 @@ private fun DesktopQuickPickHeroCard(
                         ),
                     ),
         )
+        MediaOverflowMenu(
+            onPlayNext = onPlayNext,
+            onAddToQueue = onAddToQueue,
+            onDownload = onDownload,
+            onAddToPlaylist = onAddToPlaylist,
+            onSetLiked = onSetLiked,
+            onPin = onPin,
+            onNotInterested = onNotInterested,
+            isLiked = isLiked,
+            isPinned = isPinned,
+            modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+        )
         if (isActive && isPlaying) {
             Surface(
                 color = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 shape = CircleShape,
-                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(30.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(12.dp).size(30.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.VolumeUp, contentDescription = "Now playing", modifier = Modifier.size(17.dp))

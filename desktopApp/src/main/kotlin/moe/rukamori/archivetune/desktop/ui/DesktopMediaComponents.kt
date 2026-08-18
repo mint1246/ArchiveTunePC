@@ -291,7 +291,7 @@ fun DesktopMediaListRow(
 }
 
 @Composable
-private fun MediaOverflowMenu(
+internal fun MediaOverflowMenu(
     onPlayNext: (() -> Unit)?,
     onAddToQueue: (() -> Unit)?,
     onDownload: (() -> Unit)?,
