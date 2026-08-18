@@ -6,8 +6,10 @@
 
 package moe.rukamori.archivetune.desktop.platform
 
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import kotlin.io.path.absolute
 import kotlin.io.path.pathString
 
@@ -19,9 +21,44 @@ data class AppPaths(
     val cache: Path,
     val logs: Path,
     val downloads: Path,
+    internal val legacyData: Path? = null,
 ) {
     fun createDirectories(): AppPaths = apply {
+        migrateLegacyDataIfNeeded()
         listOf(config, data, database, cache, logs, downloads).forEach(Files::createDirectories)
+    }
+
+    private fun migrateLegacyDataIfNeeded() {
+        val source = legacyData?.absolute()?.normalize() ?: return
+        if (source == data || !Files.isDirectory(source)) return
+
+        val marker = data.resolve(".legacy-local-data-migrated")
+        if (Files.exists(marker)) return
+
+        try {
+            Files.createDirectories(data)
+            Files.walk(source).use { entries ->
+                entries.forEach { sourcePath ->
+                    val target = data.resolve(source.relativize(sourcePath))
+                    if (Files.isDirectory(sourcePath)) {
+                        Files.createDirectories(target)
+                    } else if (!Files.exists(target)) {
+                        target.parent?.let(Files::createDirectories)
+                        Files.copy(sourcePath, target)
+                    }
+                }
+            }
+            Files.writeString(
+                marker,
+                "ArchiveTune persistent data migrated from the legacy per-user install directory.",
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE,
+            )
+        } catch (_: IOException) {
+            // Best-effort compatibility path only. A bad legacy file must never prevent startup;
+            // without the marker, the migration will retry on the next launch.
+        }
     }
 
     fun logSummary(): String =
@@ -54,12 +91,17 @@ data class AppPaths(
                         ?: home.resolve("AppData/Roaming")
                     val local = environment.value("LOCALAPPDATA")?.let(Path::of)
                         ?: home.resolve("AppData/Local")
+                    // jpackage's default per-user install directory is %LOCALAPPDATA%/ArchiveTune.
+                    // Never put mutable state there: an MSI major upgrade removes the previous
+                    // product before installing the replacement and can therefore remove it too.
+                    val persistentRoot = local.resolve("Rukamori/$AppDirectoryName")
                     fromRoots(
                         configRoot = roaming.resolve(AppDirectoryName),
-                        dataRoot = local.resolve("$AppDirectoryName/data"),
-                        cacheRoot = local.resolve("$AppDirectoryName/cache"),
-                        logsRoot = local.resolve("$AppDirectoryName/logs"),
+                        dataRoot = persistentRoot.resolve("data"),
+                        cacheRoot = persistentRoot.resolve("cache"),
+                        logsRoot = persistentRoot.resolve("logs"),
                         downloadsRoot = home.resolve("Music/$AppDirectoryName"),
+                        legacyDataRoot = local.resolve("$AppDirectoryName/data"),
                     )
                 }
 
@@ -100,6 +142,7 @@ data class AppPaths(
             cacheRoot: Path,
             logsRoot: Path,
             downloadsRoot: Path,
+            legacyDataRoot: Path? = null,
         ): AppPaths =
             AppPaths(
                 config = configRoot.absolute().normalize(),
@@ -108,6 +151,7 @@ data class AppPaths(
                 cache = cacheRoot.absolute().normalize(),
                 logs = logsRoot.absolute().normalize(),
                 downloads = downloadsRoot.absolute().normalize(),
+                legacyData = legacyDataRoot?.absolute()?.normalize(),
             )
 
         private fun Map<String, String>.value(name: String): String? =

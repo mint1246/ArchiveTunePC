@@ -75,8 +75,23 @@
 
     <CustomAction Id="JpFindRelatedProducts" BinaryKey="JpCaDll" DllEntry="FindRelatedProductsEx" />
 
-    <!-- Standard required root -->
-    <Directory Id="TARGETDIR" Name="SourceDir"/>
+    <!--
+      Older per-user builds installed into %LOCALAPPDATA%\ArchiveTune and also wrote mutable
+      application data beneath that same directory. Copy that data to the new vendor-namespaced
+      root before the old MSI is removed so the first fixed upgrade preserves login, queue, library,
+      Home state, and any other files stored under data/.
+    -->
+    <CustomAction
+      Id="JpMigrateLegacyUserData"
+      Directory="SystemFolder"
+      ExeCommand="&quot;[SystemFolder]xcopy.exe&quot; &quot;[LocalAppDataFolder]ArchiveTune\data\*&quot; &quot;[LocalAppDataFolder]Rukamori\ArchiveTune\data\&quot; /D /E /I /H /R /Y /Q"
+      Execute="immediate"
+      Return="ignore" />
+
+    <!-- Standard required root plus the system directory used by the migration custom action. -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="SystemFolder" />
+    </Directory>
 
     <Feature Id="DefaultFeature" Title="!(loc.MainFeatureTitle)" Level="1">
       <ComponentGroupRef Id="Shortcuts"/>
@@ -129,8 +144,11 @@
       <?ifndef JpAllowDowngrades ?>
       <Custom Action="JpDisallowDowngrade" After="JpFindRelatedProducts">JP_DOWNGRADABLE_FOUND</Custom>
       <?endif?>
-      <RemoveExistingProducts Before="CostInitialize"/>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
+      <Custom Action="JpMigrateLegacyUserData" After="CostFinalize">
+        NOT Installed AND (JP_UPGRADABLE_FOUND OR JP_DOWNGRADABLE_FOUND)
+      </Custom>
+      <RemoveExistingProducts After="InstallValidate"/>
     </InstallExecuteSequence>
 
     <InstallUISequence>

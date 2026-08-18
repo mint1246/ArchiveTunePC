@@ -9,6 +9,7 @@ plugins {
 
 group = "moe.rukamori.archivetune"
 version = "14.1.0"
+val windowsInstallationPath = "ArchiveTune App"
 
 // Set only by the OpenJ9 release wrapper task below. Normal HotSpot/dev builds keep their existing
 // JVM behaviour, while the canonical OpenJ9 release disables runtime JIT but keeps AOT/shared-class
@@ -110,6 +111,10 @@ compose.desktop {
                 console = false
                 dirChooser = true
                 perUserInstall = true
+                // Keep installed binaries away from the stable user-data roots. jpackage otherwise
+                // defaults a per-user install to %LOCALAPPDATA%/ArchiveTune, which used to collide
+                // with ArchiveTune's mutable data directory during MSI upgrades.
+                installationPath = windowsInstallationPath
                 menuGroup = "ArchiveTune"
                 upgradeUuid = "1bfa7db8-e785-4fd2-8fb1-5debbd28ac03"
             }
@@ -213,6 +218,7 @@ fun installerJpackageArgs(
     "--license-file", rootProject.file("LICENSE").absolutePath,
     "--icon", generatedWindowsIcon.get().asFile.absolutePath,
     "--win-per-user-install",
+    "--install-dir", windowsInstallationPath,
     "--win-upgrade-uuid", "1bfa7db8-e785-4fd2-8fb1-5debbd28ac03",
     "--win-menu", "--win-menu-group", "ArchiveTune",
     "--win-dir-chooser",
