@@ -110,6 +110,7 @@ fun DesktopHomeSurface(
     var previousHomePage by remember { mutableStateOf<HomePage?>(null) }
     var previousQuickPicks by remember { mutableStateOf<HomePage.Section?>(null) }
     var isLoadingMore by remember { mutableStateOf(false) }
+    var feedbackHiddenItems by remember { mutableStateOf(emptySet<String>()) }
     val listState = rememberLazyListState()
 
     suspend fun loadInitial() {
@@ -180,8 +181,16 @@ fun DesktopHomeSurface(
         }
     }
 
-    fun visible(item: YTItem) = !services.homeStore.isHomeItemDismissed(item)
-    fun dismiss(item: YTItem) = services.homeStore.dismissHomeItem(item)
+    fun itemKey(item: YTItem) = "${item::class.simpleName}:${item.id}"
+    fun visible(item: YTItem) = itemKey(item) !in feedbackHiddenItems
+    fun dismiss(item: YTItem) {
+        if (item.feedbackToken.isNullOrBlank()) return
+        scope.launch {
+            services.backend.sendNotInterestedFeedback(item).onSuccess {
+                feedbackHiddenItems = feedbackHiddenItems + itemKey(item)
+            }
+        }
+    }
     fun liked(song: SongItem) = homeSnapshot.likedSongs.any { it.id == song.id }
     val sections =
         homePage?.sections.orEmpty()
@@ -192,11 +201,11 @@ fun DesktopHomeSurface(
     }
     val visibleHeroSongs = heroSongs.filter(::visible)
     val speedDial = homeSnapshot.speedDial
-    val localQuickPicks = localContent.quickPicks.filter(::visible)
-    val keepListeningSongs = localContent.keepListeningSongs.filter(::visible)
-    val keepListeningAlbums = localContent.keepListeningAlbums.filter(::visible)
-    val keepListeningArtists = localContent.keepListeningArtists.filter(::visible)
-    val forgottenFavorites = localContent.forgottenFavorites.filter(::visible)
+    val localQuickPicks = localContent.quickPicks
+    val keepListeningSongs = localContent.keepListeningSongs
+    val keepListeningAlbums = localContent.keepListeningAlbums
+    val keepListeningArtists = localContent.keepListeningArtists
+    val forgottenFavorites = localContent.forgottenFavorites
     fun isPinned(item: YTItem) = services.homeStore.isSpeedDialPinned(item)
     fun togglePin(item: YTItem) = services.homeStore.toggleSpeedDial(item)
     val hasContent =
@@ -384,7 +393,6 @@ fun DesktopHomeSurface(
                                     onSetLiked = { onSetLiked(song, it) },
                                     isLiked = liked(song),
                                     onPin = { togglePin(song) },
-                                    onNotInterested = { dismiss(song) },
                                     isPinned = isPinned(song),
                                 )
                             }
@@ -396,7 +404,6 @@ fun DesktopHomeSurface(
                                     modifier = Modifier.width(160.dp),
                                     onClick = { onOpenItem(album) },
                                     onPin = { togglePin(album) },
-                                    onNotInterested = { dismiss(album) },
                                     isPinned = isPinned(album),
                                 )
                             }
@@ -408,7 +415,6 @@ fun DesktopHomeSurface(
                                     modifier = Modifier.width(160.dp),
                                     onClick = { onOpenItem(artist) },
                                     onPin = { togglePin(artist) },
-                                    onNotInterested = { dismiss(artist) },
                                     isPinned = isPinned(artist),
                                 )
                             }
@@ -465,7 +471,6 @@ fun DesktopHomeSurface(
                                     onSetLiked = { onSetLiked(song, it) },
                                     isLiked = liked(song),
                                     onPin = { togglePin(song) },
-                                    onNotInterested = { dismiss(song) },
                                     isPinned = isPinned(song),
                                 )
                             }
@@ -474,7 +479,7 @@ fun DesktopHomeSurface(
                 }
 
                 similarRecommendations.forEach { recommendation ->
-                    val visibleItems = recommendation.items.filter(::visible)
+                    val visibleItems = recommendation.items
                     if (visibleItems.isEmpty()) return@forEach
                     item(key = "home_similar_header_${recommendation.title.id}") {
                         DesktopSectionHeader(
@@ -511,7 +516,6 @@ fun DesktopHomeSurface(
                                     onSetLiked = (item as? SongItem)?.let { song -> { value -> onSetLiked(song, value) } },
                                     isLiked = (item as? SongItem)?.let(::liked) == true,
                                     onPin = { togglePin(item) },
-                                    onNotInterested = { dismiss(item) },
                                     isPinned = isPinned(item),
                                 )
                             }
@@ -784,7 +788,7 @@ private fun HomeSectionBlock(
                     onSetLiked = (item as? SongItem)?.let { song -> { value -> onSetLiked(song, value) } },
                     isLiked = (item as? SongItem)?.let(isLiked) == true,
                     onPin = { onPin(item) },
-                    onNotInterested = { onNotInterested(item) },
+                    onNotInterested = item.feedbackToken?.let { { onNotInterested(item) } },
                     isPinned = isPinned(item),
                 )
             }

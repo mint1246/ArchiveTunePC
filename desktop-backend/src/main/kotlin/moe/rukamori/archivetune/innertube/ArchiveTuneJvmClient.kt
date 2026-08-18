@@ -13,6 +13,7 @@ import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.AccountInfo
 import moe.rukamori.archivetune.innertube.models.SongItem
+import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
@@ -425,6 +426,14 @@ class ArchiveTuneJvmClient(
     suspend fun setSongLiked(videoId: String, liked: Boolean): Result<Unit> = run {
         prepareProvidedSession()
         YouTube.likeVideo(videoId, liked).map { Unit }
+    }
+
+    suspend fun sendNotInterestedFeedback(item: YTItem): Result<Unit> = run {
+        val feedbackToken =
+            item.feedbackToken?.takeIf(String::isNotBlank)
+                ?: return Result.failure(IllegalArgumentException("This recommendation has no YouTube feedback token"))
+        prepareProvidedSession()
+        YouTube.sendFeedback(feedbackToken).map { Unit }
     }
 
     suspend fun setArtistSubscribed(channelId: String, subscribed: Boolean): Result<Unit> = run {
