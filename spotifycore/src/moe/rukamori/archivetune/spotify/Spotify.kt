@@ -432,9 +432,11 @@ object Spotify {
     /**
      * Extracts track duration in ms from GQL track payload.
      * Tries multiple keys because different operations may return duration
-     * as nested (duration.totalMilliseconds) or flat (durationMs / duration_ms).
+     * as nested (trackDuration.totalMilliseconds / duration.totalMilliseconds)
+     * or flat (durationMs / duration_ms).
      */
     private fun parseGqlTrackDurationMs(trackData: JsonObject): Int {
+        trackData.obj("trackDuration")?.int("totalMilliseconds")?.let { if (it > 0) return it }
         trackData.obj("duration")?.int("totalMilliseconds")?.let { if (it > 0) return it }
         trackData.int("durationMs")?.let { if (it > 0) return it }
         trackData.int("duration_ms")?.let { if (it > 0) return it }

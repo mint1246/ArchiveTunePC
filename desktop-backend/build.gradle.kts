@@ -8,6 +8,7 @@ kotlin {
 
 dependencies {
     api(project(":core"))
+    implementation(project(":spotifycore"))
     implementation(project(":stream-resolver"))
     implementation(project(":morideobfuscator"))
     implementation(libs.okhttp)

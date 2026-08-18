@@ -114,6 +114,18 @@ class ArchiveTuneJvmClient(
         )
     }
 
+    /** Song-only search used by desktop importers that need Android-equivalent source matching. */
+    suspend fun searchSongs(query: String): Result<List<SongItem>> = run {
+        prepareProvidedSession()
+        normalizedQuery(query).fold(
+            onSuccess = { normalized ->
+                YouTube.search(normalized, YouTube.SearchFilter.FILTER_SONG)
+                    .map { page -> page.items.filterIsInstance<SongItem>().distinctBy(SongItem::id) }
+            },
+            onFailure = { Result.failure(it) },
+        )
+    }
+
     suspend fun home(
         continuation: String? = null,
         params: String? = null,
@@ -363,6 +375,33 @@ class ArchiveTuneJvmClient(
 
     /** Returns the signed-in user's YouTube Music playlists. */
     suspend fun libraryPlaylists(): Result<LibraryPage> = library("FEmusic_liked_playlists")
+
+    /** Creates a playlist in the currently selected signed-in YouTube Music account. */
+    suspend fun createPlaylist(
+        title: String,
+        videoIds: List<String> = emptyList(),
+    ): Result<String> = run {
+        prepareProvidedSession()
+        YouTube.createPlaylist(title, videoIds)
+    }
+
+    /** Adds one song to an existing playlist through Android/core's normal mutation path. */
+    suspend fun addSongToPlaylist(
+        playlistId: String,
+        videoId: String,
+    ): Result<String> = run {
+        prepareProvidedSession()
+        YouTube.addToPlaylist(playlistId, videoId)
+    }
+
+    /** Copies an externally supplied image into YouTube Music's custom playlist-cover endpoint. */
+    suspend fun uploadCustomPlaylistCover(
+        playlistId: String,
+        image: ByteArray,
+    ): Result<String> = run {
+        prepareProvidedSession()
+        YouTube.uploadCustomPlaylistCover(playlistId, image)
+    }
 
     /** Liked albums, mirroring Android's syncLikedAlbums source. */
     suspend fun libraryAlbums(): Result<LibraryPage> = library("FEmusic_liked_albums")

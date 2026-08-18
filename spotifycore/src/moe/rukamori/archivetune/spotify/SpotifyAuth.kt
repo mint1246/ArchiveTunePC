@@ -80,6 +80,36 @@ object SpotifyAuth {
         spDc: String,
         spKey: String = "",
     ): Result<SpotifyInternalToken> =
+        fetchInternalAccessToken(
+            cookieHeader =
+                buildString {
+                    append("sp_dc=$spDc")
+                    if (spKey.isNotEmpty()) append("; sp_key=$spKey")
+                },
+        ).mapCatching { token ->
+            if (token.isAnonymous || token.accessToken.isBlank()) {
+                throw Spotify.SpotifyException(
+                    401,
+                    "Received anonymous token — sp_dc cookie is invalid or expired",
+                )
+            }
+            token
+        }
+
+    /**
+     * Fetches the same short-lived web-player token without Spotify account cookies.
+     * This token can only access content Spotify exposes publicly, which makes it suitable
+     * for importing public playlist links without requiring a Spotify sign-in.
+     */
+    suspend fun fetchAnonymousAccessToken(): Result<SpotifyInternalToken> =
+        fetchInternalAccessToken(cookieHeader = null).mapCatching { token ->
+            if (!token.isAnonymous || token.accessToken.isBlank()) {
+                throw Spotify.SpotifyException(401, "Spotify did not return an anonymous web-player token")
+            }
+            token
+        }
+
+    private suspend fun fetchInternalAccessToken(cookieHeader: String?): Result<SpotifyInternalToken> =
         try {
             val nuance = fetchNuance()
             val serverTimeSec = fetchServerTime()
@@ -95,29 +125,15 @@ object SpotifyAuth {
                     append("&totpVer=${nuance.v}")
                 }
 
-            val cookieHeader =
-                buildString {
-                    append("sp_dc=$spDc")
-                    if (spKey.isNotEmpty()) {
-                        append("; sp_key=$spKey")
-                    }
-                }
-
             val body =
                 withContext(Dispatchers.IO) {
-                    httpGet(tokenUrl, mapOf("Cookie" to cookieHeader))
+                    httpGet(
+                        tokenUrl,
+                        cookieHeader?.let { mapOf("Cookie" to it) }.orEmpty(),
+                    )
                 }
 
-            val token = json.decodeFromString<SpotifyInternalToken>(body)
-
-            if (token.isAnonymous || token.accessToken.isBlank()) {
-                throw Spotify.SpotifyException(
-                    401,
-                    "Received anonymous token — sp_dc cookie is invalid or expired",
-                )
-            }
-
-            Result.success(token)
+            Result.success(json.decodeFromString<SpotifyInternalToken>(body))
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {

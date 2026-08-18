@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -87,6 +88,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.desktop.library.LocalTrack
+import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.AppPaths
@@ -162,11 +164,13 @@ internal class DesktopBrowseController {
 @Composable
 internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val accountState by services.account.state.collectAsState()
     var resultItems by remember { mutableStateOf<List<YTItem>>(emptyList()) }
     var localTracks by remember { mutableStateOf(services.library.tracks) }
     var onlinePlaylists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
+    var showSpotifyImport by remember { mutableStateOf(false) }
     suspend fun rescanLibrary() {
         libraryLoading = true; libraryError = null
         runCatching { services.library.rescan() }.onSuccess { localTracks = it }.onFailure { libraryError = it.message ?: "Library scan failed" }
@@ -284,6 +288,8 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 localTracks, onlinePlaylists, services.library.folders, libraryLoading || browse.loading, browse.failure ?: libraryError,
                 onAddFolder = { scope.launch { chooseLibraryFolder()?.let { services.library.setFolders(services.library.folders + it); rescanLibrary() } } },
                 onRescan = { scope.launch { rescanLibrary() } },
+                spotifyImportEnabled = accountState is DesktopAccountState.SignedIn,
+                onImportSpotify = { showSpotifyImport = true },
                 onOpenPlaylist = ::open,
                 onPlay = { selected -> scope.launch { val items = localTracks.map(::toPlaybackItem); services.playback.replaceQueue(items, localTracks.indexOf(selected).coerceAtLeast(0), title = "Local library") } },
                 onPlayNext = ::playNextLocal,
@@ -361,15 +367,36 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         )
         }
     }
+
+    if (showSpotifyImport) {
+        SpotifyPlaylistImportDialog(
+            services = services,
+            onDismiss = { showSpotifyImport = false },
+            onImported = { result ->
+                showSpotifyImport = false
+                libraryError = result.warning
+                scope.launch {
+                    services.backend.libraryPlaylists()
+                        .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
+                        .onFailure { libraryError = "Playlist imported, but the library could not be refreshed." }
+                }
+            },
+        )
+    }
 }
 
-@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
+@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
     LazyColumn(
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { Text("YouTube Music playlists", style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("YouTube Music playlists", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = onImportSpotify, enabled = spotifyImportEnabled) { Text("Import Spotify") }
+            }
+        }
         if (onlinePlaylists.isEmpty()) {
             item { Text("No signed-in playlists found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else {
@@ -414,6 +441,64 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             }
         }
     }
+}
+
+@Composable
+private fun SpotifyPlaylistImportDialog(
+    services: DesktopMusicServices,
+    onDismiss: () -> Unit,
+    onImported: (moe.rukamori.archivetune.spotify.SpotifyPlaylistImportResult) -> Unit,
+) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var link by remember { mutableStateOf("") }
+    var importing by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!importing) onDismiss() },
+        title = { Text("Import Spotify playlist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Paste a public Spotify playlist link. ArchiveTune will match the songs on YouTube Music and copy the playlist name and image.")
+                OutlinedTextField(
+                    value = link,
+                    onValueChange = { link = it; error = null },
+                    enabled = !importing,
+                    singleLine = true,
+                    label = { Text("Spotify playlist link") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (importing) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text(progress ?: "Importing…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !importing) { Text("Cancel") }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !importing && link.isNotBlank(),
+                onClick = {
+                    importing = true
+                    error = null
+                    scope.launch {
+                        services.importSpotifyPlaylist(link) { update -> progress = update.message }
+                            .onSuccess(onImported)
+                            .onFailure { failure ->
+                                error = failure.message ?: "Spotify playlist import failed"
+                                importing = false
+                            }
+                    }
+                },
+            ) { Text(if (importing) "Importing…" else "Import") }
+        },
+    )
 }
 
 private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dispatchers.IO) {

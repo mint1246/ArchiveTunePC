@@ -21,6 +21,9 @@ import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.home.DesktopHomeStore
 import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
 import moe.rukamori.archivetune.innertube.home.DesktopSimilarRecommendation
+import moe.rukamori.archivetune.spotify.DesktopSpotifyPlaylistImporter
+import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportProgress
+import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportResult
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackSource
@@ -78,6 +81,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         get() = lyricsPresenter.value
     private val legacyLibraryFile = runtime.paths.data.resolve("local-library.properties")
     val library = DesktopLibrary(legacyLibraryFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
+    private val spotifyPlaylistImporter =
+        DesktopSpotifyPlaylistImporter(
+            backend = backend,
+            diagnostic = runtime.logger::info,
+        )
     /** Account-scoped personalization data for the Home surface (synced + recorded locally). */
     val homeStore = DesktopHomeStore(runtime.paths.data.resolve("home-store.json"))
     /** Song→album knowledge for backfilling album links on tracks served without album metadata. */
@@ -85,6 +93,16 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private val _similarRecommendations = MutableStateFlow<List<DesktopSimilarRecommendation>>(emptyList())
     val similarRecommendations = _similarRecommendations.asStateFlow()
     private var playHistoryCurrent: Pair<SongItem, Long>? = null
+
+    suspend fun importSpotifyPlaylist(
+        link: String,
+        onProgress: (SpotifyPlaylistImportProgress) -> Unit = {},
+    ): Result<SpotifyPlaylistImportResult> {
+        if (account.state.value !is DesktopAccountState.SignedIn) {
+            return Result.failure(IllegalStateException("Sign in to YouTube Music before importing a Spotify playlist"))
+        }
+        return spotifyPlaylistImporter.import(link, onProgress)
+    }
     // This is intentionally hardware-key only. Windows SMTC/flyout publishing is not implemented.
     private val windowsMediaControls = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
         WindowsMediaControls()
