@@ -31,22 +31,32 @@ fun computeLocalHomeContent(
     snapshot: DesktopHomeSnapshot,
     now: Long = System.currentTimeMillis(),
 ): DesktopHomeLocalContent {
-    val playTimeBySong =
+    val eventsBySong =
         snapshot.playHistory
             .groupBy { it.song.id }
-            .mapValues { (_, events) -> events.sumOf { it.playTimeMs.toLong() } }
+
+    val recencyWeightedPlayTimeBySong =
+        eventsBySong.mapValues { (_, events) ->
+            events.sumOf { event ->
+                event.playTimeMs * recencyMultiplier(now - event.playedAtEpochMillis)
+            }
+        }
+    val lastPlayedAtBySong =
+        eventsBySong.mapValues { (_, events) -> events.maxOf { it.playedAtEpochMillis } }
 
     val rankedSongs =
         snapshot.playHistory
             .map { it.song }
             .distinctBy { it.id }
-            .sortedByDescending { playTimeBySong[it.id] ?: 0L }
+            .sortedWith(
+                compareByDescending<SongItem> { recencyWeightedPlayTimeBySong[it.id] ?: 0L }
+                    .thenByDescending { lastPlayedAtBySong[it.id] ?: 0L },
+            )
 
-    val quickPicks =
-        (snapshot.likedSongs + rankedSongs)
-            .distinctBy { it.id }
-            .shuffled()
-            .take(20)
+    // Liked Songs has no listening timestamp, so mixing the entire YouTube liked-song archive into
+    // Quick Picks made years-old likes just as likely as something played today. Only actual desktop
+    // listening history is eligible here, with the last week weighted 10x over old plays.
+    val quickPicks = rankedSongs.take(20)
 
     val forgottenFavorites =
         snapshot.playHistory
@@ -113,3 +123,12 @@ fun sortNewReleasesByArtistPreference(
 }
 
 private const val RECENT_WINDOW_MS = 86400_000L * 30L
+private const val DAY_MS = 86400_000L
+
+private fun recencyMultiplier(ageMs: Long): Long =
+    when {
+        ageMs <= DAY_MS * 7 -> 10L
+        ageMs <= DAY_MS * 30 -> 5L
+        ageMs <= DAY_MS * 90 -> 2L
+        else -> 1L
+    }
