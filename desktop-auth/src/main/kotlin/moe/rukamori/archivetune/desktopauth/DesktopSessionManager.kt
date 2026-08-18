@@ -188,6 +188,9 @@ class DesktopSessionManager(
         )
     }
 
+    /** Signals that the user has completed sign-in in the isolated managed browser. */
+    fun completeManagedBrowserLogin(): Boolean = interactiveLoginSource.completeLogin()
+
     /** Parses a browser cookie export without retaining its raw JSON or exposing cookie values. */
     fun inspectCookieJson(rawJson: String): YouTubeCookieJsonInspection =
         YouTubeCookieJsonImporter.inspect(rawJson, clock.millis())

@@ -799,6 +799,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
     var handoffNotice by remember { mutableStateOf<String?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var managedLoginRunning by remember { mutableStateOf(false) }
+    var managedLoginCompleting by remember { mutableStateOf(false) }
 
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
         Column(
@@ -841,34 +842,52 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    enabled = !managedLoginRunning,
+                    enabled = !managedLoginCompleting,
                     onClick = {
                         actionError = null
-                        handoffNotice = "A separate ArchiveTune sign-in browser will open with browser sync disabled. Finish Google sign-in and make sure YouTube Music is signed in, then close that browser window. ArchiveTune will read the session afterward."
-                        managedLoginRunning = true
-                        scope.launch {
-                            try {
-                                account.signInWithManagedBrowser().fold(
-                                    onSuccess = { result ->
-                                        when (result) {
-                                            is SessionImportResult.Success -> {
-                                                handoffNotice = "YouTube Music account signed in and stored with Windows protection."
+                        if (managedLoginRunning) {
+                            if (!account.completeManagedBrowserLogin()) {
+                                actionError = "The managed sign-in browser is not ready yet. Try again in a moment."
+                            } else {
+                                managedLoginCompleting = true
+                                handoffNotice = "Finishing sign-in and importing your YouTube Music session…"
+                            }
+                        } else {
+                            handoffNotice = "A separate ArchiveTune sign-in browser will open with browser sync disabled. Finish Google sign-in and make sure YouTube Music is signed in, then click Done signing in here. ArchiveTune will close only that temporary browser and read the session afterward."
+                            managedLoginRunning = true
+                            scope.launch {
+                                try {
+                                    account.signInWithManagedBrowser().fold(
+                                        onSuccess = { result ->
+                                            when (result) {
+                                                is SessionImportResult.Success -> {
+                                                    handoffNotice = "YouTube Music account signed in and stored with Windows protection."
+                                                }
+                                                is SessionImportResult.Rejected -> {
+                                                    actionError = sessionImportMessage(result.reason)
+                                                }
                                             }
-                                            is SessionImportResult.Rejected -> {
-                                                actionError = sessionImportMessage(result.reason)
-                                            }
-                                        }
-                                    },
-                                    onFailure = { failure ->
-                                        actionError = failure.message ?: "Could not complete browser sign-in."
-                                    },
-                                )
-                            } finally {
-                                managedLoginRunning = false
+                                        },
+                                        onFailure = { failure ->
+                                            actionError = failure.message ?: "Could not complete browser sign-in."
+                                        },
+                                    )
+                                } finally {
+                                    managedLoginRunning = false
+                                    managedLoginCompleting = false
+                                }
                             }
                         }
                     },
-                ) { Text(if (managedLoginRunning) "Waiting for browser to close…" else "Sign in with browser") }
+                ) {
+                    Text(
+                        when {
+                            managedLoginCompleting -> "Finishing…"
+                            managedLoginRunning -> "Done signing in"
+                            else -> "Sign in with browser"
+                        },
+                    )
+                }
                 OutlinedButton(
                     enabled = !managedLoginRunning,
                     onClick = { showImport = true },

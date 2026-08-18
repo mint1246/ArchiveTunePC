@@ -7,6 +7,7 @@
 package moe.rukamori.archivetune.desktopauth
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -26,6 +27,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Interactive browser login used by desktop as the closest analogue to Android's login WebView.
@@ -34,13 +36,16 @@ import java.util.concurrent.atomic.AtomicLong
  * later. A copied Cookie-Editor snapshot cannot perform that rotation, so it may authenticate only
  * briefly. This flow launches a fresh, ArchiveTune-owned Chromium profile with the bound-session
  * feature and browser sync disabled. Google sign-in happens without DevTools/remote debugging.
- * After the user closes that login window, ArchiveTune briefly relaunches the same isolated profile
- * with local DevTools enabled only to read cookies applicable to YouTube.
+ * After the user confirms that sign-in is complete, ArchiveTune closes only that isolated browser
+ * process tree and briefly relaunches the same profile with local DevTools enabled to read cookies
+ * applicable to YouTube.
  *
  * The user's normal browser profile is never opened, inspected, or modified by this class.
  */
 fun interface DesktopInteractiveLoginSource {
     suspend fun acquireSession(): Result<YouTubeSessionImport>
+
+    fun completeLogin(): Boolean = false
 }
 
 class ManagedChromiumLoginSource(
@@ -50,6 +55,8 @@ class ManagedChromiumLoginSource(
     private val startupTimeout: Duration = Duration.ofSeconds(20),
     private val pollDelayMillis: Long = 750L,
 ) : DesktopInteractiveLoginSource {
+    private val pendingCompletion = AtomicReference<CompletableDeferred<Unit>?>(null)
+
     override suspend fun acquireSession(): Result<YouTubeSessionImport> =
         withContext(Dispatchers.IO) {
             try {
@@ -60,6 +67,8 @@ class ManagedChromiumLoginSource(
                 Result.failure(failure)
             }
         }
+
+    override fun completeLogin(): Boolean = pendingCompletion.get()?.complete(Unit) ?: false
 
     private suspend fun acquireSessionOrThrow(): YouTubeSessionImport {
         check(System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
@@ -72,6 +81,8 @@ class ManagedChromiumLoginSource(
         var extractionProcess: Process? = null
         var browserClient: CdpClient? = null
         var pageClient: CdpClient? = null
+        val completion = CompletableDeferred<Unit>()
+        check(pendingCompletion.compareAndSet(null, completion)) { "A managed browser sign-in is already running" }
 
         try {
             loginProcess = ProcessBuilder(managedLoginBrowserCommand(browser, profile))
@@ -80,9 +91,17 @@ class ManagedChromiumLoginSource(
                 .start()
                 .also { process -> process.outputStream.close() }
 
-            if (!loginProcess.waitFor(loginTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                throw IllegalStateException("Timed out waiting for YouTube Music sign-in")
+            val loginDeadlineNanos = System.nanoTime() + loginTimeout.toNanos()
+            while (!completion.isCompleted) {
+                if (System.nanoTime() >= loginDeadlineNanos) {
+                    throw IllegalStateException("Timed out waiting for YouTube Music sign-in")
+                }
+                delay(pollDelayMillis)
             }
+
+            stopManagedBrowser(loginProcess)
+            loginProcess = null
+            delay(PROFILE_RELEASE_DELAY_MILLIS)
 
             extractionProcess = ProcessBuilder(managedExtractionBrowserCommand(browser, profile))
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
@@ -108,6 +127,7 @@ class ManagedChromiumLoginSource(
             browserClient?.close()
             stopManagedBrowser(extractionProcess)
             stopManagedBrowser(loginProcess)
+            pendingCompletion.compareAndSet(completion, null)
             cleanupManagedProfile(profile)
         }
     }
@@ -208,6 +228,7 @@ class ManagedChromiumLoginSource(
             )
         private const val PROFILE_DELETE_ATTEMPTS = 20
         private const val PROFILE_DELETE_RETRY_MILLIS = 100L
+        private const val PROFILE_RELEASE_DELAY_MILLIS = 250L
         private const val PROCESS_EXIT_POLL_MILLIS = 50L
         private val PROCESS_EXIT_GRACE = Duration.ofSeconds(2)
     }
