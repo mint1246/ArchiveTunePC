@@ -54,7 +54,9 @@ private val PROBE_CLIENT: OkHttpClient =
     OkHttpClient.Builder()
         .followRedirects(false)
         .followSslRedirects(false)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)
+        // This probe runs inside the per-client resolver race. A CDN that cannot serve the first
+        // kilobyte promptly should lose to another YouTube client instead of stalling the wave.
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)
         .build()

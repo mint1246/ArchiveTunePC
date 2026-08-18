@@ -10,6 +10,7 @@ package moe.rukamori.archivetune.playback.desktop
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.LongByReference
 import com.sun.jna.ptr.PointerByReference
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -21,8 +22,9 @@ import uk.co.caprica.vlcj.binding.support.types.size_t
 import uk.co.caprica.vlcj.media.callback.CallbackMedia
 
 /**
- * Optional application-provided transport for streams that cannot be played through libVLC's
- * direct URL access. It is intentionally not used by [VlcjPlaybackController] by default.
+ * Application-provided ranged HTTP transport used by [VlcjPlaybackController] for signed
+ * Googlevideo streams. OkHttp owns the request headers/range semantics while libVLC only receives
+ * the resulting bytes through its callback-media API.
  */
 class VlcjRangeCallbackMedia(
     private val url: String,
@@ -30,6 +32,7 @@ class VlcjRangeCallbackMedia(
     private val windowSize: Int = DEFAULT_WINDOW_SIZE,
 ) : CallbackMedia, AutoCloseable {
     private val source = RangeMediaSource(url, headers, windowSize)
+    private val closed = AtomicBoolean(false)
 
     private val openCallback = object : libvlc_media_open_cb {
         override fun `open`(
@@ -37,7 +40,8 @@ class VlcjRangeCallbackMedia(
             datap: PointerByReference?,
             sizep: LongByReference?,
         ): Int {
-            sizep?.value = source.open() ?: 0L
+            val contentLength = source.open() ?: return -1
+            sizep?.value = contentLength
             return 0
         }
     }
@@ -71,7 +75,7 @@ class VlcjRangeCallbackMedia(
     override fun getOpaque(): Pointer? = Pointer.NULL
 
     override fun close() {
-        source.close()
+        if (closed.compareAndSet(false, true)) source.close()
     }
 
     private class RangeMediaSource(

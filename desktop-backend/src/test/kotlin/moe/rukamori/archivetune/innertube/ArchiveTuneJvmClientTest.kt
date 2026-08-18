@@ -205,11 +205,11 @@ class ArchiveTuneJvmClientTest {
     }
 
     @Test
-    fun muxedAudioOnlyFormatsRemainPlayableFallbacks() {
+    fun muxedVideoFormatsAreNotDesktopAudioFallbacks() {
         val muxedAudio = format(itag = 18, bitrate = 96_000, mimeType = "video/mp4; codecs=\"avc1, mp4a.40.2\"", direct = true, width = 640)
 
         val response = playerResponse().copy(streamingData = PlayerResponse.StreamingData(formats = listOf(muxedAudio), adaptiveFormats = emptyList()))
-        assertEquals(listOf(muxedAudio), selectAudioFormatCandidates(response, JvmAudioQuality.HIGHEST))
+        assertTrue(selectAudioFormatCandidates(response, JvmAudioQuality.HIGHEST).isEmpty())
     }
 
     @Test

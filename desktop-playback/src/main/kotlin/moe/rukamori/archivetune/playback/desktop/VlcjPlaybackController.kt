@@ -52,9 +52,10 @@ import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 /**
  * In-process desktop playback backed by one application-scoped VLCJ/libVLC player.
  *
- * ArchiveTune resolves deferred YouTube items before this class is called. The normal path hands
- * the resolved URI directly to libVLC; no process, IPC pipe, JSON command protocol, or extractor
- * lives in this backend.
+ * ArchiveTune resolves deferred YouTube items before this class is called. Local/general media is
+ * handed directly to libVLC; signed Googlevideo media uses the application HTTP callback transport
+ * so the exact resolver headers/range semantics are preserved instead of relying on libVLC's HTTP
+ * implementation. No process, IPC pipe, JSON command protocol, or extractor lives in this backend.
  */
 class VlcjPlaybackController(
     private val sourceResolver: PlaybackSourceResolver,
@@ -86,6 +87,7 @@ class VlcjPlaybackController(
     private var nativeLogListener: LogEventListener? = null
     private var player: MediaPlayer? = null
     private var listener: MediaPlayerEventAdapter? = null
+    private var activeCallbackMedia: VlcjRangeCallbackMedia? = null
     private var generation = 0L
     @Volatile private var activeGeneration: Long? = null
     @Volatile private var activeResolvedSource: ResolvedPlaybackSource? = null
@@ -578,16 +580,30 @@ class VlcjPlaybackController(
                 pendingSeek = pendingSeek?.takeIf { it.first == request.generation }
                     ?: (request.generation to request.startPositionMs)
                 latestPositionMs.set(request.startPositionMs)
-                val started = activePlayer.media().play(
-                    resolved.uri,
-                    *resolved.headers.toVlcMediaOptions().toTypedArray(),
-                )
+                val callbackMedia =
+                    if (resolved.shouldUseApplicationHttpTransport()) {
+                        VlcjRangeCallbackMedia(resolved.uri, resolved.headers).also {
+                            activeCallbackMedia = it
+                            logger.info("Using application HTTP transport for ${request.item.logLabel()}")
+                        }
+                    } else {
+                        null
+                    }
+                val started =
+                    if (callbackMedia != null) {
+                        activePlayer.media().play(callbackMedia)
+                    } else {
+                        activePlayer.media().play(
+                            resolved.uri,
+                            *resolved.headers.toVlcMediaOptions().toTypedArray(),
+                        )
+                    }
                 if (!started) {
                     logger.severe(
                         "libVLC rejected media.play for ${request.item.logLabel()}: " +
                             "location=${resolved.uri.toLogMediaLocation()}",
                     )
-                    activeGeneration = null
+                    stopActiveFileLocked()
                     failLocked(
                         PlaybackFailure(
                             message = "libVLC rejected the resolved audio stream",
@@ -607,7 +623,7 @@ class VlcjPlaybackController(
                         "location=${resolved.uri.toLogMediaLocation()}",
                     error,
                 )
-                activeGeneration = null
+                stopActiveFileLocked()
                 failLocked(
                     PlaybackFailure(
                         message = "libVLC could not start the resolved audio stream",
@@ -1032,8 +1048,10 @@ class VlcjPlaybackController(
 
     private fun stopActiveFileLocked() {
         val hadActiveMedia = activeGeneration != null
+        val callbackMedia = activeCallbackMedia
         activeGeneration = null
         activeResolvedSource = null
+        activeCallbackMedia = null
         httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
         pendingSeek = null
         cancelLoadWatchdog()
@@ -1042,6 +1060,7 @@ class VlcjPlaybackController(
             runCatching { activePlayer.controls().stop() }
             runCatching { activePlayer.media().reset() }
         }
+        runCatching { callbackMedia?.close() }
     }
 
     override fun close() {
@@ -1057,6 +1076,7 @@ class VlcjPlaybackController(
             }
             runCatching { player?.controls()?.stop() }
             runCatching { player?.media()?.reset() }
+            runCatching { activeCallbackMedia?.close() }
             runCatching { player?.release() }
             runCatching { nativeLog?.release() }
             runCatching { factory?.release() }
@@ -1064,6 +1084,7 @@ class VlcjPlaybackController(
             nativeLogListener = null
             nativeLog = null
             player = null
+            activeCallbackMedia = null
             factory = null
             _state.update { it.copy(status = PlaybackStatus.IDLE, playWhenReady = false) }
         }
@@ -1088,6 +1109,14 @@ class VlcjPlaybackController(
 
 private fun PlaybackItem.logLabel(): String =
     "id=${metadata.id} title=\"${metadata.title.replace('\n', ' ').replace('\r', ' ').take(160)}\""
+
+private fun ResolvedPlaybackSource.shouldUseApplicationHttpTransport(): Boolean =
+    runCatching {
+        val parsed = URI(uri)
+        val host = parsed.host?.lowercase().orEmpty()
+        parsed.scheme?.lowercase() in setOf("http", "https") &&
+            (host == "googlevideo.com" || host.endsWith(".googlevideo.com"))
+    }.getOrDefault(false)
 
 private fun String.toLogMediaLocation(): String {
     if (isBlank()) return "<blank>"

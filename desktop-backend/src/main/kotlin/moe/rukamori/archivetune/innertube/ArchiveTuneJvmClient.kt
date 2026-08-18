@@ -753,7 +753,7 @@ class ArchiveTuneJvmClient(
             }
 
             val expiresInSeconds = resolveExpirySeconds(playerResponse.streamingData?.expiresInSeconds, streamUrl)
-            return ResolvedAudioStream(
+            val stream = ResolvedAudioStream(
                 videoId = videoId,
                 url = streamUrl,
                 format = format,
@@ -766,6 +766,19 @@ class ArchiveTuneJvmClient(
                 expiresAtEpochMillis = System.currentTimeMillis() + expiresInSeconds * 1_000L,
                 authFingerprint = authState.fingerprint,
             )
+            val probeFailure = probeResolvedAudioStream(stream).exceptionOrNull()
+            if (probeFailure == null) return stream
+
+            val probeHttpStatus = (probeFailure as? AudioStreamProbeHttpException)?.httpStatus
+            if (probeHttpStatus != null && probeHttpStatus in RETRYABLE_STREAM_RESPONSE_CODES) {
+                markStreamClientFailed(
+                    videoId = videoId,
+                    clientKey = stream.clientKey,
+                    httpStatusCode = probeHttpStatus,
+                    authFingerprint = authState.fingerprint,
+                )
+            }
+            formatFailures += probeFailure
         }
 
         throw StreamResolutionException(videoId, formatFailures)
@@ -1193,6 +1206,7 @@ internal fun selectAudioFormatCandidates(
                 JvmAudioQuality.HIGH -> StreamAudioQuality.HIGH
                 JvmAudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
             },
+        includeMuxedFormats = false,
     )
 
 internal fun requestHeaders(client: YouTubeClient): Map<String, String> =
