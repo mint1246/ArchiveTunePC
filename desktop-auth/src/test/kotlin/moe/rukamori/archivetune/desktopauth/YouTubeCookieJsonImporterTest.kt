@@ -43,6 +43,17 @@ class YouTubeCookieJsonImporterTest {
     }
 
     @Test
+    fun `google domain login cookies are not sent to YouTube`() {
+        val result =
+            YouTubeCookieJsonImporter.parse(
+                """[{"name":"SAPISID","value":"google-only","domain":".google.com","path":"/","expirationDate":1900000000}]""",
+                now,
+            )
+
+        assertEquals(YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES), result)
+    }
+
+    @Test
     fun `expired and unrelated cookies cannot create a session`() {
         val result =
             YouTubeCookieJsonImporter.parse(

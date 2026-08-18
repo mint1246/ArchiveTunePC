@@ -153,6 +153,7 @@ class DesktopSessionManager(
     private val secureStore: SecureSessionStore,
     private val verifier: DesktopSessionVerifier,
     private val browserLauncher: SystemBrowserLauncher = DesktopSystemBrowserLauncher,
+    private val interactiveLoginSource: DesktopInteractiveLoginSource = ManagedChromiumLoginSource(),
     private val clock: Clock = Clock.systemUTC(),
     private val cookieRefresher: DesktopSessionCookieRefresher? = null,
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
@@ -172,6 +173,19 @@ class DesktopSessionManager(
     fun beginBrowserLogin(): Result<BrowserLoginHandoff> {
         val handoff = BrowserLoginHandoff(GOOGLE_LOGIN_URL)
         return browserLauncher.open(handoff.url).map { handoff }
+    }
+
+    /**
+     * Runs the desktop analogue of Android's login WebView in an isolated Chromium profile. The
+     * interactive source returns only a YouTube-applicable cookie header; account context is still
+     * derived and validated through the same backend path used by manual imports.
+     */
+    suspend fun signInWithManagedBrowser(): Result<SessionImportResult> {
+        val imported = interactiveLoginSource.acquireSession()
+        return imported.fold(
+            onSuccess = { Result.success(importAndValidate(it)) },
+            onFailure = { Result.failure(it) },
+        )
     }
 
     /** Parses a browser cookie export without retaining its raw JSON or exposing cookie values. */

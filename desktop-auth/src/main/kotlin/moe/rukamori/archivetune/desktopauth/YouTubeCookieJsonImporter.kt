@@ -87,7 +87,10 @@ object YouTubeCookieJsonImporter {
         var encounteredUnsafeValue = false
         rawCookies.take(MAX_EXPORTED_COOKIES).forEachIndexed { index, json ->
             val candidate = parseCookie(json, index) ?: return@forEachIndexed
-            if (!candidate.domain.isPermittedYouTubeOrGoogleDomain()) return@forEachIndexed
+            // Match Android's CookieManager.getCookie(YouTube URL) behavior: only cookies that
+            // belong to YouTube are eligible for the Cookie header sent to music.youtube.com.
+            // Google-domain cookies are browser-login state, not YouTube request cookies.
+            if (!candidate.domain.isPermittedYouTubeDomain()) return@forEachIndexed
             if (!candidate.name.isSafeCookieName() || !candidate.value.isSafeCookieValue()) {
                 encounteredUnsafeValue = true
                 return@forEachIndexed
@@ -195,8 +198,8 @@ object YouTubeCookieJsonImporter {
     private fun String.normalizeDomain(): String? =
         trim().lowercase(Locale.US).removePrefix(".").takeIf { it.isNotBlank() && it.none(Char::isWhitespace) }
 
-    private fun String.isPermittedYouTubeOrGoogleDomain(): Boolean =
-        this == "youtube.com" || this.endsWith(".youtube.com") || this == "google.com" || this.endsWith(".google.com")
+    private fun String.isPermittedYouTubeDomain(): Boolean =
+        this == "youtube.com" || this.endsWith(".youtube.com")
 
     private fun String.displayDomain(): String = ".$this"
 

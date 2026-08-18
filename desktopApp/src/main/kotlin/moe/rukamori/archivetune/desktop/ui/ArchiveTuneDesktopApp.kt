@@ -109,6 +109,7 @@ import moe.rukamori.archivetune.desktopauth.CookieJsonSessionImportResult
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.desktopauth.SessionImportFailure
+import moe.rukamori.archivetune.desktopauth.SessionImportResult
 import moe.rukamori.archivetune.desktopauth.YouTubeCookieJsonFailure
 import moe.rukamori.archivetune.desktopauth.YouTubeCookieJsonInspection
 import kotlinx.coroutines.launch
@@ -797,6 +798,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
     var showImport by remember { mutableStateOf(false) }
     var handoffNotice by remember { mutableStateOf<String?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var managedLoginRunning by remember { mutableStateOf(false) }
 
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
         Column(
@@ -838,17 +840,39 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
+                Button(
+                    enabled = !managedLoginRunning,
                     onClick = {
                         actionError = null
-                        account.beginBrowserLogin().onSuccess {
-                            handoffNotice = "Google sign-in opened in your browser. For privacy, browsers do not return Google cookies to ArchiveTune automatically. After signing in, use Import session below with a session export you control."
-                        }.onFailure {
-                            actionError = "Could not open your system browser."
+                        handoffNotice = "A separate ArchiveTune sign-in browser will open. Finish Google sign-in there; it closes automatically after YouTube Music is authenticated."
+                        managedLoginRunning = true
+                        scope.launch {
+                            try {
+                                account.signInWithManagedBrowser().fold(
+                                    onSuccess = { result ->
+                                        when (result) {
+                                            is SessionImportResult.Success -> {
+                                                handoffNotice = "YouTube Music account signed in and stored with Windows protection."
+                                            }
+                                            is SessionImportResult.Rejected -> {
+                                                actionError = sessionImportMessage(result.reason)
+                                            }
+                                        }
+                                    },
+                                    onFailure = { failure ->
+                                        actionError = failure.message ?: "Could not complete browser sign-in."
+                                    },
+                                )
+                            } finally {
+                                managedLoginRunning = false
+                            }
                         }
                     },
-                ) { Text("Open Google sign-in") }
-                Button(onClick = { showImport = true }) { Text("Import session") }
+                ) { Text(if (managedLoginRunning) "Waiting for sign-in…" else "Sign in with browser") }
+                OutlinedButton(
+                    enabled = !managedLoginRunning,
+                    onClick = { showImport = true },
+                ) { Text("Import Cookie-Editor JSON") }
                 if (accountState is DesktopAccountState.SignedIn || accountState is DesktopAccountState.Expired) {
                     TextButton(
                         onClick = {
@@ -932,7 +956,7 @@ private fun DesktopSessionImportDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    "After signing in at music.youtube.com, export that site's cookies as JSON using your browser's developer tools or a trusted cookie-export extension. ArchiveTune accepts common Cookie-Editor, EditThisCookie and Chrome DevTools JSON exports. It never receives browser cookies automatically.",
+                    "Manual fallback only. After signing in at music.youtube.com, export that site's cookies as JSON using Cookie-Editor or another trusted cookie-export tool. Modern Chromium browsers can rotate device-bound Google credentials, so a copied cookie snapshot may stop authenticating later; prefer Sign in with browser when possible.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
@@ -958,7 +982,7 @@ private fun DesktopSessionImportDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                     null -> Text(
-                        "Only youtube.com and google.com cookies are considered; unrelated and expired cookies are discarded.",
+                        "Only YouTube-domain cookies are considered, matching Android's YouTube WebView cookie header; unrelated, Google-domain-only, and expired cookies are discarded.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1032,7 +1056,7 @@ private fun cookieJsonMessage(reason: YouTubeCookieJsonFailure): String =
         YouTubeCookieJsonFailure.EMPTY -> "Paste a cookie JSON export or choose a .json file."
         YouTubeCookieJsonFailure.TOO_LARGE -> "That export is too large to import safely."
         YouTubeCookieJsonFailure.MALFORMED_JSON -> "The selected text is not a supported JSON export."
-        YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES -> "No live youtube.com or google.com cookies were found."
+        YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES -> "No live YouTube-domain cookies were found."
         YouTubeCookieJsonFailure.MISSING_LOGIN_COOKIE -> "The export does not contain a usable YouTube login cookie."
         YouTubeCookieJsonFailure.UNSAFE_COOKIE_VALUE -> "The export contains an unsafe cookie value and was rejected."
         YouTubeCookieJsonFailure.HEADER_TOO_LARGE -> "The selected login cookies are too large to import safely."
