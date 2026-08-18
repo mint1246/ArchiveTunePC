@@ -53,10 +53,48 @@ fun computeLocalHomeContent(
                     .thenByDescending { lastPlayedAtBySong[it.id] ?: 0L },
             )
 
-    // Liked Songs has no listening timestamp, so mixing the entire YouTube liked-song archive into
-    // Quick Picks made years-old likes just as likely as something played today. Only actual desktop
-    // listening history is eligible here, with the last week weighted 10x over old plays.
-    val quickPicks = rankedSongs.take(20)
+    // Match Android's quickPicks() seed selection:
+    //   - last 5 play events
+    //   - top 5 songs by play time during the last 7 days
+    //   - top 10 songs by all-time play time
+    // Candidates are related songs for those seeds, ranked by how many seeds refer to them.
+    val quickPickSeedIds = quickPickSeedIds(snapshot, now)
+
+    val quickPickCandidates =
+        quickPickSeedIds
+            .flatMap { seedId -> snapshot.relatedSongsBySeed[seedId].orEmpty() }
+            .groupBy(SongItem::id)
+            .values
+            .sortedByDescending(List<SongItem>::size)
+            .take(100)
+            .map(List<SongItem>::first)
+
+    // Android's HomeViewModel samples 20 at random after the DAO returns its top 100 candidates.
+    // It falls back to recent/all-known songs only when no related candidates exist yet.
+    val quickPicks =
+        if (quickPickCandidates.isNotEmpty()) {
+            quickPickCandidates.shuffled().take(20)
+        } else {
+            val recentFallback =
+                snapshot.playHistory
+                    .sortedByDescending { it.playedAtEpochMillis }
+                    .map { it.song }
+                    .distinctBy(SongItem::id)
+                    .take(60)
+                    .shuffled()
+                    .take(20)
+            recentFallback.ifEmpty {
+                (
+                    snapshot.playHistory.map { it.song } +
+                        snapshot.likedSongs +
+                        snapshot.librarySongs +
+                        snapshot.relatedSongsBySeed.values.flatten()
+                )
+                    .distinctBy(SongItem::id)
+                    .shuffled()
+                    .take(20)
+            }
+        }
 
     val forgottenFavorites =
         snapshot.playHistory
@@ -77,6 +115,36 @@ fun computeLocalHomeContent(
         keepListeningArtists = snapshot.subscribedArtists.shuffled().take(5),
         forgottenFavorites = forgottenFavorites,
     )
+}
+
+/** Exact seed buckets used by Android's DatabaseDao.quickPicks(). */
+fun quickPickSeedIds(
+    snapshot: DesktopHomeSnapshot,
+    now: Long = System.currentTimeMillis(),
+): Set<String> {
+    val recentCutoff = now - QUICK_PICKS_RECENT_WINDOW_MS
+    val lastFiveSeedIds = snapshot.playHistory.take(5).map { it.song.id }
+    val recentTopFiveSeedIds =
+        snapshot.playHistory
+            .filter { it.playedAtEpochMillis > recentCutoff }
+            .groupBy { it.song.id }
+            .entries
+            .sortedByDescending { (_, events) -> events.sumOf { it.playTimeMs } }
+            .take(5)
+            .map { it.key }
+    val allTimeTopTenSeedIds =
+        snapshot.playHistory
+            .groupBy { it.song.id }
+            .entries
+            .sortedByDescending { (_, events) -> events.sumOf { it.playTimeMs } }
+            .take(10)
+            .map { it.key }
+
+    return linkedSetOf<String>().apply {
+        addAll(lastFiveSeedIds)
+        addAll(recentTopFiveSeedIds)
+        addAll(allTimeTopTenSeedIds)
+    }
 }
 
 /**
@@ -123,6 +191,7 @@ fun sortNewReleasesByArtistPreference(
 }
 
 private const val RECENT_WINDOW_MS = 86400_000L * 30L
+private const val QUICK_PICKS_RECENT_WINDOW_MS = 86400_000L * 7L
 private const val DAY_MS = 86400_000L
 
 private fun recencyMultiplier(ageMs: Long): Long =

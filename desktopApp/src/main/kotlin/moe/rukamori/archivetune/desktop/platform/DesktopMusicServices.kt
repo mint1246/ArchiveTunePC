@@ -23,6 +23,7 @@ import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.home.DesktopHomeStore
 import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
 import moe.rukamori.archivetune.innertube.home.DesktopSimilarRecommendation
+import moe.rukamori.archivetune.innertube.home.quickPickSeedIds
 import moe.rukamori.archivetune.spotify.DesktopSpotifyPlaylistImporter
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportProgress
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportResult
@@ -71,6 +72,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
     /** Signed sources live only in memory and are discarded before their server expiry. */
     private val resolvedSourceCache = ConcurrentHashMap<String, CachedResolvedSource>()
+    private val relatedSongFetches = ConcurrentHashMap.newKeySet<String>()
     val playback = VlcjPlaybackController(
         sourceResolver = PlaybackSourceResolver { item -> resolve(item) },
         onStreamHttpFailure = { item, source, httpStatus ->
@@ -281,6 +283,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 .collectLatest { signedInAccount ->
                 if (signedInAccount != null) {
                     syncHomeLibrary()
+                    runtime.applicationScope.launch { warmQuickPickRelatedCache() }
                     loadSimilarRecommendations()
                 } else {
                     homeStore.clearAccountData()
@@ -300,8 +303,33 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     event.current
                         ?.let(::songFromPlaybackItem)
                         ?.takeIf { it.id.isNotBlank() }
+                        ?.also { song ->
+                            runtime.applicationScope.launch { cacheRelatedSongsIfNeeded(song.id) }
+                        }
                         ?.let { it to now }
             }
+        }
+    }
+
+    /** Mirrors Android MusicService: cache related songs the first time a played seed is seen. */
+    private suspend fun cacheRelatedSongsIfNeeded(videoId: String) {
+        if (homeStore.hasRelatedSongs(videoId)) return
+        if (!relatedSongFetches.add(videoId)) return
+        try {
+            val relatedEndpoint = backend.next(videoId).getOrNull()?.relatedEndpoint ?: return
+            val relatedSongs = backend.related(relatedEndpoint).getOrNull()?.songs.orEmpty()
+            if (relatedSongs.isNotEmpty()) {
+                homeStore.replaceRelatedSongs(videoId, relatedSongs)
+            }
+        } finally {
+            relatedSongFetches.remove(videoId)
+        }
+    }
+
+    /** Backfills Android-style related rows for desktop listens recorded before this cache existed. */
+    private suspend fun warmQuickPickRelatedCache() {
+        for (videoId in quickPickSeedIds(homeStore.snapshot.value)) {
+            cacheRelatedSongsIfNeeded(videoId)
         }
     }
 

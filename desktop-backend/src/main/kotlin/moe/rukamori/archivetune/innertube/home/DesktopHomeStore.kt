@@ -41,6 +41,7 @@ data class DesktopHomeSnapshot(
     val likedAlbums: List<AlbumItem> = emptyList(),
     val subscribedArtists: List<ArtistItem> = emptyList(),
     val playHistory: List<DesktopPlayEvent> = emptyList(),
+    val relatedSongsBySeed: Map<String, List<SongItem>> = emptyMap(),
     val speedDial: List<YTItem> = emptyList(),
     val dismissedLocalRecommendations: Set<String> = emptySet(),
 )
@@ -64,6 +65,18 @@ class DesktopHomeStore(private val file: Path) {
                 .sortedByDescending { it.playedAtEpochMillis }
                 .take(MAX_PLAY_EVENTS)
         current.copy(playHistory = merged)
+    }
+
+    fun hasRelatedSongs(seedId: String): Boolean =
+        _snapshot.value.relatedSongsBySeed[seedId].orEmpty().isNotEmpty()
+
+    fun replaceRelatedSongs(seedId: String, songs: List<SongItem>) = update { current ->
+        if (songs.isEmpty()) return@update current
+        current.copy(
+            relatedSongsBySeed =
+                current.relatedSongsBySeed +
+                    (seedId to songs.distinctBy(SongItem::id)),
+        )
     }
 
     fun toggleSpeedDial(item: YTItem) = update { current ->
@@ -126,6 +139,18 @@ class DesktopHomeStore(private val file: Path) {
                 .put("speedDial", JSONArray().apply { snapshot.speedDial.forEach { put(itemToJson(it)) } })
                 .put("dismissedLocalRecommendations", JSONArray().apply { snapshot.dismissedLocalRecommendations.forEach(::put) })
                 .put(
+                    "relatedSongsBySeed",
+                    JSONArray().apply {
+                        snapshot.relatedSongsBySeed.forEach { (seedId, songs) ->
+                            put(
+                                JSONObject()
+                                    .put("seedId", seedId)
+                                    .put("songs", JSONArray().apply { songs.forEach { put(songToJson(it)) } }),
+                            )
+                        }
+                    },
+                )
+                .put(
                     "playHistory",
                     JSONArray().apply {
                         snapshot.playHistory.forEach { event ->
@@ -162,6 +187,12 @@ class DesktopHomeStore(private val file: Path) {
             subscribedArtists = json.optJSONArray("subscribedArtists").orEmptyObjects().mapNotNull(::artistFromJson),
             speedDial = json.optJSONArray("speedDial").orEmptyObjects().mapNotNull(::itemFromJson),
             dismissedLocalRecommendations = json.optJSONArray("dismissedLocalRecommendations").orEmptyStrings().toSet(),
+            relatedSongsBySeed =
+                json.optJSONArray("relatedSongsBySeed").orEmptyObjects().mapNotNull { entry ->
+                    val seedId = entry.optString("seedId").takeIf(String::isNotBlank) ?: return@mapNotNull null
+                    val songs = entry.optJSONArray("songs").orEmptyObjects().mapNotNull(::songFromJson)
+                    seedId to songs
+                }.toMap(),
             playHistory =
                 json.optJSONArray("playHistory").orEmptyObjects().mapNotNull { event ->
                     val song = event.optJSONObject("song")?.let(::songFromJson) ?: return@mapNotNull null
