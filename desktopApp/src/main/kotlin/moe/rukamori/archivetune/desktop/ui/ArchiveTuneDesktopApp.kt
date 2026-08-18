@@ -844,7 +844,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                     enabled = !managedLoginRunning,
                     onClick = {
                         actionError = null
-                        handoffNotice = "A separate ArchiveTune sign-in browser will open. Finish Google sign-in there; it closes automatically after YouTube Music is authenticated."
+                        handoffNotice = "A separate ArchiveTune sign-in browser will open with browser sync disabled. Finish Google sign-in and make sure YouTube Music is signed in, then close that browser window. ArchiveTune will read the session afterward."
                         managedLoginRunning = true
                         scope.launch {
                             try {
@@ -868,7 +868,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                             }
                         }
                     },
-                ) { Text(if (managedLoginRunning) "Waiting for sign-in…" else "Sign in with browser") }
+                ) { Text(if (managedLoginRunning) "Waiting for browser to close…" else "Sign in with browser") }
                 OutlinedButton(
                     enabled = !managedLoginRunning,
                     onClick = { showImport = true },

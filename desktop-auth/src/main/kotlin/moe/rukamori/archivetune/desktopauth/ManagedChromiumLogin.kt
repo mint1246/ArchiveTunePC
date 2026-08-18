@@ -33,8 +33,9 @@ import java.util.concurrent.atomic.AtomicLong
  * Chromium on Windows can bind Google authentication cookies to the browser/device and rotate them
  * later. A copied Cookie-Editor snapshot cannot perform that rotation, so it may authenticate only
  * briefly. This flow launches a fresh, ArchiveTune-owned Chromium profile with the bound-session
- * feature disabled, waits for the user to finish the normal Google login, and reads only cookies
- * applicable to YouTube through the local DevTools protocol.
+ * feature and browser sync disabled. Google sign-in happens without DevTools/remote debugging.
+ * After the user closes that login window, ArchiveTune briefly relaunches the same isolated profile
+ * with local DevTools enabled only to read cookies applicable to YouTube.
  *
  * The user's normal browser profile is never opened, inspected, or modified by this class.
  */
@@ -67,12 +68,23 @@ class ManagedChromiumLoginSource(
         val browser = browserFinder() ?: throw IllegalStateException("Microsoft Edge or Google Chrome was not found")
         Files.createDirectories(tempRoot)
         val profile = Files.createTempDirectory(tempRoot, "archivetune-login-")
-        var browserProcess: Process? = null
+        var loginProcess: Process? = null
+        var extractionProcess: Process? = null
         var browserClient: CdpClient? = null
         var pageClient: CdpClient? = null
 
         try {
-            browserProcess = ProcessBuilder(managedBrowserCommand(browser, profile))
+            loginProcess = ProcessBuilder(managedLoginBrowserCommand(browser, profile))
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+                .also { process -> process.outputStream.close() }
+
+            if (!loginProcess.waitFor(loginTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                throw IllegalStateException("Timed out waiting for YouTube Music sign-in")
+            }
+
+            extractionProcess = ProcessBuilder(managedExtractionBrowserCommand(browser, profile))
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
                 .start()
@@ -80,44 +92,22 @@ class ManagedChromiumLoginSource(
 
             val endpoint = waitForDevTools(profile)
             browserClient = CdpClient.connect(endpoint.browserWebSocketUrl)
-            val deadlineNanos = System.nanoTime() + loginTimeout.toNanos()
+            val pageTarget = waitForPageTarget(endpoint.port)
+            pageClient = CdpClient.connect(pageTarget.webSocketDebuggerUrl)
+            val cookies =
+                pageClient.call(
+                    "Network.getCookies",
+                    JSONObject().put("urls", JSONArray(YOUTUBE_COOKIE_URLS)),
+                ).getJSONArray("cookies")
 
-            while (System.nanoTime() < deadlineNanos) {
-                if (browserClient.isClosed) {
-                    throw IllegalStateException("The ArchiveTune sign-in browser was closed before login completed")
-                }
-                val musicTarget = runCatching { findMusicTarget(endpoint.port) }.getOrNull()
-                if (musicTarget == null) {
-                    delay(pollDelayMillis)
-                    continue
-                }
-
-                if (pageClient == null || pageClient.isClosed) {
-                    pageClient?.close()
-                    pageClient = CdpClient.connect(musicTarget.webSocketDebuggerUrl)
-                }
-
-                val cookies =
-                    runCatching {
-                        pageClient.call(
-                            "Network.getCookies",
-                            JSONObject().put("urls", JSONArray(YOUTUBE_COOKIE_URLS)),
-                        ).getJSONArray("cookies")
-                    }.getOrNull()
-
-                val session = cookies?.let(::sessionFromYouTubeCookies)
-                if (session != null) {
-                    return session
-                }
-                delay(pollDelayMillis)
-            }
-
-            throw IllegalStateException("Timed out waiting for YouTube Music sign-in")
+            return sessionFromYouTubeCookies(cookies)
+                ?: throw IllegalStateException("YouTube Music sign-in did not produce a usable account session")
         } finally {
             pageClient?.close()
             runCatching { browserClient?.call("Browser.close") }
             browserClient?.close()
-            stopManagedBrowser(browserProcess)
+            stopManagedBrowser(extractionProcess)
+            stopManagedBrowser(loginProcess)
             cleanupManagedProfile(profile)
         }
     }
@@ -154,7 +144,16 @@ class ManagedChromiumLoginSource(
         throw IllegalStateException("The ArchiveTune sign-in browser did not start")
     }
 
-    private fun findMusicTarget(port: Int): PageTarget? {
+    private suspend fun waitForPageTarget(port: Int): PageTarget {
+        val deadlineNanos = System.nanoTime() + startupTimeout.toNanos()
+        while (System.nanoTime() < deadlineNanos) {
+            findPageTarget(port)?.let { return it }
+            delay(pollDelayMillis)
+        }
+        throw IllegalStateException("The ArchiveTune cookie reader did not start")
+    }
+
+    private fun findPageTarget(port: Int): PageTarget? {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://127.0.0.1:$port/json/list"))
@@ -169,8 +168,6 @@ class ManagedChromiumLoginSource(
             .mapNotNull { targets.optJSONObject(it) }
             .filter { it.optString("type") == "page" }
             .firstNotNullOfOrNull { target ->
-                val url = target.optString("url")
-                if (!url.startsWith("https://music.youtube.com", ignoreCase = true)) return@firstNotNullOfOrNull null
                 target.optString("webSocketDebuggerUrl")
                     .takeIf(String::isNotBlank)
                     ?.let { PageTarget(it) }
@@ -216,18 +213,32 @@ class ManagedChromiumLoginSource(
     }
 }
 
-internal fun managedBrowserCommand(browser: Path, profile: Path): List<String> =
+internal fun managedLoginBrowserCommand(browser: Path, profile: Path): List<String> =
     listOf(
         browser.toString(),
         "--user-data-dir=$profile",
         "--profile-directory=Default",
+        "--disable-sync",
+        "--disable-features=EnableBoundSessionCredentials",
+        "--disable-background-mode",
+        "--no-first-run",
+        "--no-default-browser-check",
+        MANAGED_LOGIN_URL,
+    )
+
+internal fun managedExtractionBrowserCommand(browser: Path, profile: Path): List<String> =
+    listOf(
+        browser.toString(),
+        "--user-data-dir=$profile",
+        "--profile-directory=Default",
+        "--disable-sync",
         "--remote-debugging-port=0",
         "--remote-debugging-address=127.0.0.1",
         "--disable-features=EnableBoundSessionCredentials",
         "--disable-background-mode",
         "--no-first-run",
         "--no-default-browser-check",
-        MANAGED_LOGIN_URL,
+        "about:blank",
     )
 
 internal fun sessionFromYouTubeCookies(cookies: JSONArray): YouTubeSessionImport? {
