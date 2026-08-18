@@ -1,69 +1,63 @@
-name: Build Pull Request
+name: Build Pull Request Windows MSI
 
 on:
   pull_request:
     branches:
       - "**"
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build Windows MSI
+    runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
-          submodules: true
+          submodules: recursive
 
-      - name: Set up JDK 21
+      - name: Set up IBM Semeru OpenJ9 21
         uses: actions/setup-java@v5
         with:
-          java-version: 21
-          distribution: "temurin"
+          java-version: '21'
+          distribution: 'semeru'
+          architecture: 'x64'
 
-      - name: Set Up Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: true
           cache-cleanup: on-success
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Verify Java runtime
+        shell: pwsh
+        run: java -version
 
-      - name: Generate debug.keystore if not exists
+      - name: Build upgradable Windows MSI
+        shell: pwsh
         run: |
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkey -v \
-              -keystore ~/.android/debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          $env:ARCHIVETUNE_OPENJ9_HOME = $env:JAVA_HOME
+          .\gradlew.bat :msiJ9 --stacktrace
 
-      - name: Build and Lint Mobile Universal Debug APK
-        shell: bash
+      - name: Locate MSI
+        id: msi
+        shell: pwsh
         run: |
-          set -euo pipefail
-          ./gradlew --console=plain assembleGmsMobileUniversalDebug :app:lintGmsMobileUniversalDebug --warning-mode summary 2>&1 | python3 -c "import re,sys;p=re.compile(r'^(WARNING: )?\[CXX5202\] This app only has 32-bit \[(armeabi-v7a|x86)\] native libraries\. Beginning August 1, 2019 Google Play store requires that all apps that include native libraries must provide 64-bit versions\. For more information, visit https://g\.co/64-bit-requirement\$');[sys.stdout.write(l) for l in sys.stdin if not p.match(l.rstrip())]"
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PULL_REQUEST: "true"
-          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
-          LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
-          API_BEARER_TOKEN: ${{ secrets.API_BEARER_TOKEN }}
-          CANVAS_BEARER_TOKEN: ${{ secrets.CANVAS_BEARER_TOKEN }}
-          EXTRACTOR_BEARER: ${{ secrets.EXTRACTOR_BEARER }}
+          $msi = Get-ChildItem 'desktopApp\build\compose\binaries\main-release\msi' -Filter '*.msi' -File |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $msi) {
+            throw 'Windows MSI was not produced.'
+          }
+          "path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Host "Built $($msi.FullName)"
 
-      - name: Upload APK
+      - name: Upload Windows MSI
         uses: actions/upload-artifact@v7
         with:
-          name: app-mobile-universal-debug-pr-${{ github.event.number }}
-          path: |
-            app/build/outputs/apk/gms/mobile/universal/debug/*.apk
-            app/build/outputs/apk/gmsMobileUniversal/debug/*.apk
-            app/build/outputs/apk/mobile/universal/debug/*.apk
-            app/build/outputs/apk/mobileUniversal/debug/*.apk
+          name: ArchiveTune-Windows-MSI-PR-${{ github.event.number }}
+          path: ${{ steps.msi.outputs.path }}
+          if-no-files-found: error
