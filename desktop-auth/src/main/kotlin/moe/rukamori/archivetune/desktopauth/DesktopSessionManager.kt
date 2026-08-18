@@ -158,11 +158,14 @@ class DesktopSessionManager(
     private val clock: Clock = Clock.systemUTC(),
     private val cookieRefresher: DesktopSessionCookieRefresher? = null,
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
+    private val cookieRefreshIntervalMillis: Long = DEFAULT_COOKIE_REFRESH_INTERVAL_MILLIS,
 ) : DesktopSessionProvider {
     private val refreshMutex = Mutex()
     private val stateLock = Any()
     @Volatile
     private var active: StoredDesktopSession? = null
+    @Volatile
+    private var lastCookieRefreshAtEpochMillis: Long? = null
     private val _state = MutableStateFlow<DesktopAccountState>(DesktopAccountState.SignedOut)
     val state: StateFlow<DesktopAccountState> = _state.asStateFlow()
 
@@ -228,6 +231,7 @@ class DesktopSessionManager(
             }
         synchronized(stateLock) {
             active = stored
+            lastCookieRefreshAtEpochMillis = stored?.let { clock.millis() }
             _state.value = stateFor(stored, restored = true)
         }
         return _state.value
@@ -243,8 +247,9 @@ class DesktopSessionManager(
     }
 
     /**
-     * Android keeps its persisted YouTube session as-is between requests; desktop does the same.
-     * The only per-request renewal is an explicitly configured cookie bridge near a known expiry.
+     * A plain imported session remains static like Android's persisted WebView cookie. When desktop
+     * has an authoritative browser-backed source, the first request after its refresh interval may
+     * renew the cookie jar without periodically probing account endpoints.
      */
     override suspend fun refreshIfNeeded() {
         refreshIfNeeded(force = false)
@@ -255,12 +260,15 @@ class DesktopSessionManager(
             val current = active ?: return@withLock false
             val now = clock.millis()
             val expirySoon = current.expiresAtEpochMillis?.let { it - now <= refreshLeadMillis } == true
+            val browserRefreshDue =
+                cookieRefresher != null &&
+                    lastCookieRefreshAtEpochMillis?.let { now - it >= cookieRefreshIntervalMillis } != false
 
-            // Do not periodically re-run account/account_menu like the old desktop lifecycle did.
-            // ArchiveTune Android does not revalidate its cookie every N minutes, and doing so here
-            // let a probe mutate shared auth context while otherwise valid browse/search calls ran.
+            // Never periodically probe account/account_menu just to see whether the cookie still
+            // works. A configured browser-backed refresher is different: it is an authoritative
+            // source capable of evolving the cookie jar before we validate the replacement.
             if (!force) {
-                if (!expirySoon || cookieRefresher == null) return@withLock true
+                if ((!expirySoon && !browserRefreshDue) || cookieRefresher == null) return@withLock true
                 val replacement = requestCookieReplacement(current, now)
                 if (replacement != null && validateAndPersist(current, replacement)) return@withLock true
                 return@withLock true
@@ -335,6 +343,7 @@ class DesktopSessionManager(
                 return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
             }
             active = stored
+            lastCookieRefreshAtEpochMillis = clock.millis()
             _state.value = DesktopAccountState.SignedIn(stored.account, restoredFromSecureStore = false)
         }
         return SessionImportResult.Success(stored.account)
@@ -345,10 +354,14 @@ class DesktopSessionManager(
             synchronized(stateLock) {
                 secureStore.delete()
                 active = null
+                lastCookieRefreshAtEpochMillis = null
                 _state.value = DesktopAccountState.SignedOut
             }
+            interactiveLoginSource.clearSession().getOrThrow()
             Result.success(Unit)
         } catch (failure: SecureStoreUnavailableException) {
+            Result.failure(failure)
+        } catch (failure: Exception) {
             Result.failure(failure)
         }
 
@@ -482,6 +495,7 @@ class DesktopSessionManager(
         now: Long,
     ): YouTubeSessionImport? =
         try {
+            lastCookieRefreshAtEpochMillis = now
             cookieRefresher
                 ?.refresh(current.toImport())
                 ?.getOrNull()
@@ -546,6 +560,7 @@ class DesktopSessionManager(
     private companion object {
         val GOOGLE_LOGIN_URL = URI("https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com")
         const val DEFAULT_REFRESH_LEAD_MILLIS = 5 * 60 * 1_000L
+        const val DEFAULT_COOKIE_REFRESH_INTERVAL_MILLIS = 30 * 60 * 1_000L
     }
 }
 

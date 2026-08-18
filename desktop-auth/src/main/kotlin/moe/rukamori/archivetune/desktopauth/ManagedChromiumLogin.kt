@@ -22,6 +22,7 @@ import java.net.http.WebSocket
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -34,8 +35,9 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Chromium on Windows can bind Google authentication cookies to the browser/device and rotate them
  * later. A copied Cookie-Editor snapshot cannot perform that rotation, so it may authenticate only
- * briefly. This flow launches a fresh, ArchiveTune-owned Chromium profile with the bound-session
- * feature and browser sync disabled. Google sign-in happens without DevTools/remote debugging.
+ * briefly. This flow keeps a dedicated ArchiveTune-owned Chromium profile so the browser can retain
+ * and renew its own Google session. Browser sync stays disabled and Google sign-in happens without
+ * DevTools/remote debugging.
  * After the user confirms that sign-in is complete, ArchiveTune closes only that isolated browser
  * process tree and briefly relaunches the same profile with local DevTools enabled to read cookies
  * applicable to YouTube.
@@ -46,15 +48,17 @@ fun interface DesktopInteractiveLoginSource {
     suspend fun acquireSession(): Result<YouTubeSessionImport>
 
     fun completeLogin(): Boolean = false
+
+    fun clearSession(): Result<Unit> = Result.success(Unit)
 }
 
 class ManagedChromiumLoginSource(
+    private val profile: Path = Paths.get(System.getProperty("java.io.tmpdir"), "archivetune-youtube-profile"),
     private val browserFinder: () -> Path? = ::findSupportedChromiumBrowser,
-    private val tempRoot: Path = Paths.get(System.getProperty("java.io.tmpdir")),
     private val loginTimeout: Duration = Duration.ofMinutes(10),
     private val startupTimeout: Duration = Duration.ofSeconds(20),
     private val pollDelayMillis: Long = 750L,
-) : DesktopInteractiveLoginSource {
+) : DesktopInteractiveLoginSource, DesktopSessionCookieRefresher {
     private val pendingCompletion = AtomicReference<CompletableDeferred<Unit>?>(null)
 
     override suspend fun acquireSession(): Result<YouTubeSessionImport> =
@@ -70,17 +74,44 @@ class ManagedChromiumLoginSource(
 
     override fun completeLogin(): Boolean = pendingCompletion.get()?.complete(Unit) ?: false
 
+    override fun clearSession(): Result<Unit> =
+        runCatching {
+            check(pendingCompletion.get() == null) { "Cannot clear the managed browser profile while sign-in is running" }
+            check(deleteManagedProfile(profile)) { "Could not remove the managed YouTube browser profile" }
+        }
+
+    override suspend fun refresh(previous: YouTubeSessionImport): Result<YouTubeSessionImport> =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!Files.isDirectory(profile)) {
+                    return@withContext Result.failure(IllegalStateException("Managed YouTube browser profile is unavailable"))
+                }
+                val previousFingerprint = cookieFingerprint(previous.cookieHeader)
+                if (previousFingerprint !in readProfileSessionFingerprints()) {
+                    return@withContext Result.failure(IllegalStateException("Managed browser profile belongs to a different YouTube session"))
+                }
+                val browser = browserFinder()
+                    ?: return@withContext Result.failure(IllegalStateException("Microsoft Edge or Google Chrome was not found"))
+                val refreshed = extractBrowserSession(browser, refreshPage = true)
+                writeProfileSessionFingerprints(previousFingerprint, cookieFingerprint(refreshed.cookieHeader))
+                Result.success(refreshed)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                Result.failure(failure)
+            }
+        }
+
     private suspend fun acquireSessionOrThrow(): YouTubeSessionImport {
         check(System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
             "Managed YouTube sign-in currently requires Windows"
         }
         val browser = browserFinder() ?: throw IllegalStateException("Microsoft Edge or Google Chrome was not found")
-        Files.createDirectories(tempRoot)
-        val profile = Files.createTempDirectory(tempRoot, "archivetune-login-")
+        profile.parent?.let(Files::createDirectories)
+        check(deleteManagedProfile(profile)) { "The previous managed YouTube browser profile is still in use" }
+        Files.createDirectories(profile)
         var loginProcess: Process? = null
-        var extractionProcess: Process? = null
-        var browserClient: CdpClient? = null
-        var pageClient: CdpClient? = null
+        var keepProfile = false
         val completion = CompletableDeferred<Unit>()
         check(pendingCompletion.compareAndSet(null, completion)) { "A managed browser sign-in is already running" }
 
@@ -102,7 +133,23 @@ class ManagedChromiumLoginSource(
             stopManagedBrowser(loginProcess)
             loginProcess = null
             delay(PROFILE_RELEASE_DELAY_MILLIS)
+            val session = extractBrowserSession(browser, refreshPage = true)
+            writeProfileSessionFingerprints(cookieFingerprint(session.cookieHeader))
+            keepProfile = true
+            return session
+        } finally {
+            stopManagedBrowser(loginProcess)
+            pendingCompletion.compareAndSet(completion, null)
+            if (!keepProfile) deleteManagedProfile(profile)
+        }
+    }
 
+    private suspend fun extractBrowserSession(browser: Path, refreshPage: Boolean): YouTubeSessionImport {
+        Files.deleteIfExists(profile.resolve("DevToolsActivePort"))
+        var extractionProcess: Process? = null
+        var browserClient: CdpClient? = null
+        var pageClient: CdpClient? = null
+        try {
             extractionProcess = ProcessBuilder(managedExtractionBrowserCommand(browser, profile))
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
@@ -113,22 +160,41 @@ class ManagedChromiumLoginSource(
             browserClient = CdpClient.connect(endpoint.browserWebSocketUrl)
             val pageTarget = waitForPageTarget(endpoint.port)
             pageClient = CdpClient.connect(pageTarget.webSocketDebuggerUrl)
+            if (refreshPage) {
+                pageClient.call("Page.navigate", JSONObject().put("url", MANAGED_MUSIC_URL))
+                waitForDocumentReady(pageClient)
+                delay(SESSION_SETTLE_DELAY_MILLIS)
+            }
             val cookies =
                 pageClient.call(
                     "Network.getCookies",
                     JSONObject().put("urls", JSONArray(YOUTUBE_COOKIE_URLS)),
                 ).getJSONArray("cookies")
-
             return sessionFromYouTubeCookies(cookies)
-                ?: throw IllegalStateException("YouTube Music sign-in did not produce a usable account session")
+                ?: throw IllegalStateException("The managed browser no longer has a usable YouTube Music session")
         } finally {
             pageClient?.close()
             runCatching { browserClient?.call("Browser.close") }
             browserClient?.close()
             stopManagedBrowser(extractionProcess)
-            stopManagedBrowser(loginProcess)
-            pendingCompletion.compareAndSet(completion, null)
-            cleanupManagedProfile(profile)
+        }
+    }
+
+    private suspend fun waitForDocumentReady(pageClient: CdpClient) {
+        val deadlineNanos = System.nanoTime() + PAGE_LOAD_TIMEOUT.toNanos()
+        while (System.nanoTime() < deadlineNanos) {
+            val readyState =
+                runCatching {
+                    pageClient.call(
+                        "Runtime.evaluate",
+                        JSONObject()
+                            .put("expression", "document.readyState")
+                            .put("returnByValue", true),
+                    ).optJSONObject("result")
+                        ?.optString("value")
+                }.getOrNull()
+            if (readyState == "complete" || readyState == "interactive") return
+            delay(150L)
         }
     }
 
@@ -194,19 +260,33 @@ class ManagedChromiumLoginSource(
             }
     }
 
-    private fun cleanupManagedProfile(profile: Path) {
+    private fun deleteManagedProfile(profile: Path): Boolean {
         repeat(PROFILE_DELETE_ATTEMPTS) {
-            if (!Files.exists(profile)) return
+            if (!Files.exists(profile)) return true
             runCatching {
                 Files.walk(profile).use { paths ->
                     paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
                 }
             }
-            if (!Files.exists(profile)) return
+            if (!Files.exists(profile)) return true
             Thread.sleep(PROFILE_DELETE_RETRY_MILLIS)
         }
-        // A browser process can take a moment longer to release its profile. Leaving an isolated
-        // temp profile behind is safer than ever targeting unrelated browser processes by name.
+        return !Files.exists(profile)
+    }
+
+    private fun readProfileSessionFingerprints(): Set<String> =
+        runCatching {
+            Files.readAllLines(profile.resolve(PROFILE_SESSION_MARKER))
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .toSet()
+        }.getOrDefault(emptySet())
+
+    private fun writeProfileSessionFingerprints(vararg fingerprints: String) {
+        Files.writeString(
+            profile.resolve(PROFILE_SESSION_MARKER),
+            fingerprints.distinct().joinToString("\n", postfix = "\n"),
+        )
     }
 
     private data class DevToolsEndpoint(
@@ -228,9 +308,12 @@ class ManagedChromiumLoginSource(
             )
         private const val PROFILE_DELETE_ATTEMPTS = 20
         private const val PROFILE_DELETE_RETRY_MILLIS = 100L
+        private const val PROFILE_SESSION_MARKER = ".archivetune-session-fingerprints"
         private const val PROFILE_RELEASE_DELAY_MILLIS = 250L
+        private const val SESSION_SETTLE_DELAY_MILLIS = 1_500L
         private const val PROCESS_EXIT_POLL_MILLIS = 50L
         private val PROCESS_EXIT_GRACE = Duration.ofSeconds(2)
+        private val PAGE_LOAD_TIMEOUT = Duration.ofSeconds(10)
     }
 }
 
@@ -240,7 +323,6 @@ internal fun managedLoginBrowserCommand(browser: Path, profile: Path): List<Stri
         "--user-data-dir=$profile",
         "--profile-directory=Default",
         "--disable-sync",
-        "--disable-features=EnableBoundSessionCredentials",
         "--disable-background-mode",
         "--no-first-run",
         "--no-default-browser-check",
@@ -253,9 +335,9 @@ internal fun managedExtractionBrowserCommand(browser: Path, profile: Path): List
         "--user-data-dir=$profile",
         "--profile-directory=Default",
         "--disable-sync",
+        "--headless=new",
         "--remote-debugging-port=0",
         "--remote-debugging-address=127.0.0.1",
-        "--disable-features=EnableBoundSessionCredentials",
         "--disable-background-mode",
         "--no-first-run",
         "--no-default-browser-check",
@@ -423,4 +505,10 @@ private fun String.isSafeCookieValue(): Boolean =
 
 private val COOKIE_NAME = Regex("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
 private val LOGIN_COOKIE_NAMES = setOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID", "APISID")
+private const val MANAGED_MUSIC_URL = "https://music.youtube.com/"
 private const val MANAGED_LOGIN_URL = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com"
+
+private fun cookieFingerprint(cookieHeader: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(cookieHeader.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }

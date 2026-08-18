@@ -7,6 +7,7 @@ import moe.rukamori.archivetune.innertube.classifyStreamResolutionFailure
 import moe.rukamori.archivetune.desktopauth.ArchiveTuneSessionVerifier
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
+import moe.rukamori.archivetune.desktopauth.ManagedChromiumLoginSource
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPresenter
@@ -59,10 +60,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private val settings = runtime.settings
     val settingsStore get() = settings
     val backend = ArchiveTuneJvmClient(runtime.paths.cache.resolve("cipher").toFile().also(File::mkdirs))
+    private val managedYouTubeBrowser = ManagedChromiumLoginSource(runtime.paths.data.resolve("youtube-browser-profile"))
     /** The backend consults this provider immediately before each request, including downloads. */
     val account = DesktopSessionManager(
         secureStore = DpapiFileSessionStore(runtime.paths.data.resolve("youtube-session.dpapi")),
         verifier = ArchiveTuneSessionVerifier(backend),
+        interactiveLoginSource = managedYouTubeBrowser,
+        cookieRefresher = managedYouTubeBrowser,
     )
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
     /** Signed sources live only in memory and are discarded before their server expiry. */

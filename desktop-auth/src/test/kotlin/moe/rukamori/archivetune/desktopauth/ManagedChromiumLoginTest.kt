@@ -31,7 +31,7 @@ class ManagedChromiumLoginTest {
     }
 
     @Test
-    fun `login browser disables sync and bound sessions without remote debugging`() {
+    fun `login browser disables sync without remote debugging`() {
         val browser = Paths.get("C:\\Browser\\msedge.exe")
         val profile = Paths.get("C:\\Temp\\archivetune-login-test")
         val command = managedLoginBrowserCommand(browser, profile)
@@ -39,7 +39,7 @@ class ManagedChromiumLoginTest {
         assertEquals(browser.toString(), command.first())
         assertTrue(command.contains("--user-data-dir=$profile"))
         assertTrue(command.contains("--disable-sync"))
-        assertTrue(command.contains("--disable-features=EnableBoundSessionCredentials"))
+        assertFalse(command.contains("--disable-features=EnableBoundSessionCredentials"))
         assertFalse(command.any { it.startsWith("--remote-debugging") })
         assertFalse(command.any { it.contains("Microsoft\\Edge\\User Data") })
     }
@@ -53,9 +53,10 @@ class ManagedChromiumLoginTest {
         assertEquals(browser.toString(), command.first())
         assertTrue(command.contains("--user-data-dir=$profile"))
         assertTrue(command.contains("--disable-sync"))
+        assertTrue(command.contains("--headless=new"))
         assertTrue(command.contains("--remote-debugging-port=0"))
         assertTrue(command.contains("--remote-debugging-address=127.0.0.1"))
-        assertTrue(command.contains("--disable-features=EnableBoundSessionCredentials"))
+        assertFalse(command.contains("--disable-features=EnableBoundSessionCredentials"))
         assertEquals("about:blank", command.last())
     }
 }

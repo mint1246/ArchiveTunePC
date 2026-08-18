@@ -283,6 +283,34 @@ class DesktopSessionManagerTest {
     }
 
     @Test
+    fun `configured browser source refreshes ordinary requests when its interval is due`() = runBlocking {
+        val clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC)
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(PlaybackAuthState(cookie = "SAPISID=old"), DesktopAccount("Example", null, null), null),
+        )
+        val refreshCalls = AtomicInteger()
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { candidate ->
+                Result.success(VerifiedDesktopSession(candidate, DesktopAccount("Example", null, null)))
+            },
+            cookieRefresher = DesktopSessionCookieRefresher {
+                refreshCalls.incrementAndGet()
+                Result.success(YouTubeSessionImport("SAPISID=fresh"))
+            },
+            clock = clock,
+            cookieRefreshIntervalMillis = 0L,
+        )
+        manager.restore()
+
+        manager.refreshIfNeeded()
+
+        assertEquals(1, refreshCalls.get())
+        assertEquals("SAPISID=fresh", manager.currentAuthState().cookie)
+    }
+
+    @Test
     fun `core auth repair persists only explicitly changed auth fields`() = runBlocking {
         val store = MemoryStore()
         store.value = StoredDesktopSessionCodec.encode(
