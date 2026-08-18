@@ -283,7 +283,7 @@ class DesktopSessionManagerTest {
     }
 
     @Test
-    fun `core auth repair persists visitor and data sync without replacing other credentials`() = runBlocking {
+    fun `core auth repair persists only explicitly changed auth fields`() = runBlocking {
         val store = MemoryStore()
         store.value = StoredDesktopSessionCodec.encode(
             StoredDesktopSession(
@@ -308,7 +308,7 @@ class DesktopSessionManagerTest {
                 initial.copy(
                     visitorData = "visitor-new",
                     dataSyncId = "sync-new",
-                    poToken = "po-should-not-be-persisted",
+                    poToken = "po-new",
                 ),
         )
 
@@ -316,10 +316,59 @@ class DesktopSessionManagerTest {
         assertEquals("SAPISID=secret", repaired.cookie)
         assertEquals("visitor-new", repaired.visitorData)
         assertEquals("sync-new", repaired.dataSyncId)
-        assertEquals("po-old", repaired.poToken)
+        assertEquals("po-new", repaired.poToken)
         val persisted = StoredDesktopSessionCodec.decode(store.value!!).authState
         assertEquals("visitor-new", persisted.visitorData)
         assertEquals("sync-new", persisted.dataSyncId)
+        assertEquals("po-new", persisted.poToken)
+    }
+
+    @Test
+    fun `playback proof is video bound and persisted`() = runBlocking {
+        val store = MemoryStore()
+        store.value = StoredDesktopSessionCodec.encode(
+            StoredDesktopSession(
+                PlaybackAuthState(
+                    cookie = "SAPISID=secret",
+                    visitorData = "visitor",
+                    dataSyncId = "sync-id",
+                ),
+                DesktopAccount("Example", null, null),
+                null,
+            ),
+        )
+        val manager = DesktopSessionManager(
+            secureStore = store,
+            verifier = DesktopSessionVerifier { candidate ->
+                Result.success(VerifiedDesktopSession(candidate, DesktopAccount("Example", null, null)))
+            },
+            poTokenProvider = DesktopPlaybackPoTokenProvider { videoId, sessionId ->
+                assertEquals("video-123", videoId)
+                assertEquals("sync-id", sessionId)
+                DesktopPoTokenResult(playerToken = "player-proof", sessionToken = "session-proof")
+            },
+        )
+        manager.restore()
+        val initial = manager.currentAuthState()
+
+        val repaired = manager.ensurePlaybackAuth("video-123", initial)
+        manager.persistAuthRepair(initial, repaired)
+
+        assertTrue(repaired.webClientPoTokenEnabled)
+        assertEquals("player-proof", repaired.poTokenGvs)
+        assertEquals("session-proof", repaired.poTokenGvsSession)
+        assertEquals("video-123", repaired.poTokenGvsVideoId)
+        assertEquals("player-proof", repaired.poTokenPlayer)
+        assertEquals("video-123", repaired.poTokenPlayerVideoId)
+        assertEquals("player-proof", repaired.poTokenSubs)
+        assertEquals("video-123", repaired.poTokenSubsVideoId)
+
+        val persisted = StoredDesktopSessionCodec.decode(store.value!!).authState
+        assertEquals("player-proof", persisted.poTokenGvs)
+        assertEquals("session-proof", persisted.poTokenGvsSession)
+        assertEquals("video-123", persisted.poTokenGvsVideoId)
+        assertEquals("video-123", persisted.poTokenPlayerVideoId)
+        assertEquals("video-123", persisted.poTokenSubsVideoId)
     }
 
     @Test

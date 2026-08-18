@@ -42,10 +42,22 @@ object PlaybackStreamResolver {
     const val STREAM_URL_EXPIRY_SAFETY_MS = 60_000L
     private const val DEFAULT_STREAM_EXPIRY_SECONDS = 300
 
+    /** Mirrors YTPlayerUtils.STREAM_FALLBACK_CLIENTS on Android. */
     val fullFallbackClients: List<YouTubeClient> =
         listOf(
-            YouTubeClient.WEB_REMIX,
+            YouTubeClient.ANDROID_VR_NO_AUTH,
             YouTubeClient.ANDROID_VR_1_65_10,
+            YouTubeClient.ANDROID_VR_1_61_48,
+            YouTubeClient.ANDROID_VR_1_43_32,
+            YouTubeClient.TVHTML5_DOWNGRADED,
+            YouTubeClient.WEB_EMBEDDED,
+            YouTubeClient.WEB_CREATOR,
+            YouTubeClient.WEB_REMIX,
+            YouTubeClient.MWEB,
+            YouTubeClient.WEB,
+            YouTubeClient.WEB_PRIMARY,
+            YouTubeClient.TVHTML5,
+            YouTubeClient.TVHTML5_SIMPLY,
             YouTubeClient.IOS,
             YouTubeClient.MOBILE,
             YouTubeClient.ANDROID_MUSIC,
@@ -55,27 +67,11 @@ object PlaybackStreamResolver {
             YouTubeClient.ANDROID_UNPLUGGED,
             YouTubeClient.IPADOS,
             YouTubeClient.VISIONOS,
-            YouTubeClient.TVHTML5,
             YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER,
-            YouTubeClient.WEB,
-            YouTubeClient.WEB_CREATOR,
         )
 
-    /** Smaller profile used by desktop to avoid needless slow fallbacks while keeping the same policy code. */
-    val desktopFallbackClients: List<YouTubeClient> =
-        listOf(
-            YouTubeClient.ANDROID_VR_1_65_10,
-            YouTubeClient.IOS,
-            YouTubeClient.ANDROID_MUSIC,
-            YouTubeClient.IOS_MUSIC,
-            YouTubeClient.MOBILE,
-            YouTubeClient.WEB_REMIX,
-            YouTubeClient.IPADOS,
-            YouTubeClient.VISIONOS,
-            YouTubeClient.TVHTML5,
-            YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER,
-            YouTubeClient.WEB,
-        )
+    /** Desktop intentionally uses the same order so one HTTP retry reaches Android VR, as on Android. */
+    val desktopFallbackClients: List<YouTubeClient> = fullFallbackClients
 
     fun hasCompleteWebPlaybackPoToken(authState: PlaybackAuthState): Boolean =
         authState.webClientPoTokenEnabled &&
@@ -87,21 +83,8 @@ object PlaybackStreamResolver {
         authState: PlaybackAuthState,
     ): YouTubeClient =
         when (preference) {
-            StreamClientPreference.ANDROID_VR -> {
-                if (authState.hasPlaybackLoginContext && !hasCompleteWebPlaybackPoToken(authState)) {
-                    YouTubeClient.WEB_PRIMARY
-                } else {
-                    YouTubeClient.ANDROID_VR_1_65_10
-                }
-            }
-
-            StreamClientPreference.WEB_REMIX -> {
-                if (authState.hasPlaybackLoginContext && !hasCompleteWebPlaybackPoToken(authState)) {
-                    YouTubeClient.WEB_PRIMARY
-                } else {
-                    YouTubeClient.WEB_REMIX
-                }
-            }
+            StreamClientPreference.ANDROID_VR -> YouTubeClient.ANDROID_VR_NO_AUTH
+            StreamClientPreference.WEB_REMIX -> YouTubeClient.WEB_REMIX
 
             StreamClientPreference.ARCHIVETUNE_EXTRACTOR -> {
                 if (authState.hasPlaybackLoginContext) YouTubeClient.ANDROID_MUSIC else YouTubeClient.WEB_REMIX
@@ -118,33 +101,18 @@ object PlaybackStreamResolver {
         authState: PlaybackAuthState,
         fallbackClients: List<YouTubeClient> = fullFallbackClients,
         lastSuccessfulClientKey: String? = null,
-        preferCookieCapableWhenLoggedIn: Boolean = false,
     ): List<YouTubeClient> {
         val preferred = resolvePreferredClient(preference, authState)
-        val completeWebPoTokens = hasCompleteWebPlaybackPoToken(authState)
         val lastSuccessful =
             lastSuccessfulClientKey
                 ?.let(::normalizeClientKey)
                 ?.takeIf(String::isNotEmpty)
                 ?.let { key -> fallbackClients.firstOrNull { clientKey(it) == key } }
 
-        val orderedFallbacks =
-            if (
-                authState.hasPlaybackLoginContext &&
-                (completeWebPoTokens || preferCookieCapableWhenLoggedIn)
-            ) {
-                fallbackClients.filter { it.supportsCookieAuthentication } +
-                    fallbackClients.filterNot { it.supportsCookieAuthentication }
-            } else {
-                fallbackClients.filterNot { it.supportsCookieAuthentication } +
-                    fallbackClients.filter { it.supportsCookieAuthentication }
-            }
-
         return buildList {
             add(preferred)
             lastSuccessful?.takeIf { it != preferred }?.let(::add)
-            if (authState.hasPlaybackLoginContext && completeWebPoTokens) add(YouTubeClient.WEB_REMIX)
-            addAll(orderedFallbacks)
+            addAll(fallbackClients)
             if (preferred != YouTubeClient.WEB_REMIX) add(YouTubeClient.WEB_REMIX)
         }.distinctBy { it.clientName to it.clientVersion }
     }

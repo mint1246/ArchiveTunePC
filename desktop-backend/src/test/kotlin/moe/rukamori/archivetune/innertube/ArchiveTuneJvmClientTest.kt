@@ -60,14 +60,86 @@ class ArchiveTuneJvmClientTest {
     }
 
     @Test
-    fun signedInResolutionPrefersCookieCapableThenLoginCapableClients() {
+    fun signedInResolutionMatchesAndroidWebThenNativeFallbackOrder() {
         val client = ArchiveTuneJvmClient(Files.createTempDirectory("archivetune-test-").toFile())
         val auth = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
 
         val ordered = client.orderedStreamClientsForTest(auth)
 
-        assertEquals(YouTubeClient.WEB_PRIMARY.clientName, ordered.first().clientName)
-        assertTrue(ordered.take(2).all { it.supportsCookieAuthentication })
+        assertEquals(YouTubeClient.WEB_REMIX.clientName, ordered[0].clientName)
+        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientName, ordered[1].clientName)
+        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientVersion, ordered[1].clientVersion)
+    }
+
+    @Test
+    fun signedInHttp403BackoffMakesAndroidVrTheRetryClient() {
+        val client = ArchiveTuneJvmClient(Files.createTempDirectory("archivetune-test-").toFile())
+        val auth = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
+        val videoId = "fresh-release"
+        val first = client.orderedStreamClientsForTest(auth, videoId).first()
+
+        assertEquals(YouTubeClient.WEB_REMIX.clientName, first.clientName)
+        assertTrue(
+            client.markStreamClientFailed(
+                videoId,
+                "${first.clientName}@${first.clientVersion}",
+                403,
+                auth.fingerprint,
+            ),
+        )
+
+        val retry = client.orderedStreamClientsForTest(auth, videoId).first()
+        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientName, retry.clientName)
+        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientVersion, retry.clientVersion)
+    }
+
+    @Test
+    fun signedInWeb403WithoutProofRefreshesProofBeforeClientBackoff() = runBlocking {
+        val initial = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
+        var current = initial
+        val provider =
+            object : DesktopSessionProvider {
+                override fun currentAuthState(): PlaybackAuthState = current
+
+                override suspend fun ensurePlaybackAuth(
+                    videoId: String,
+                    authState: PlaybackAuthState,
+                ): PlaybackAuthState =
+                    authState
+                        .copy(
+                            poTokenGvs = "video-proof",
+                            poTokenGvsSession = "session-proof",
+                            poTokenGvsVideoId = videoId,
+                            webClientPoTokenEnabled = true,
+                        ).normalized()
+
+                override suspend fun persistAuthRepair(
+                    initialAuthState: PlaybackAuthState,
+                    repairedAuthState: PlaybackAuthState,
+                ) {
+                    current = repairedAuthState
+                }
+            }
+        val client =
+            ArchiveTuneJvmClient(
+                cacheDirectory = Files.createTempDirectory("archivetune-test-").toFile(),
+                sessionProvider = provider,
+            )
+        val videoId = "needs-proof"
+        val web = client.orderedStreamClientsForTest(initial, videoId).first()
+
+        val action =
+            client.prepareStreamHttpRecovery(
+                videoId = videoId,
+                clientKey = "${web.clientName}@${web.clientVersion}",
+                httpStatusCode = 403,
+                authFingerprint = initial.fingerprint,
+                failedUrlHadPoToken = false,
+            )
+
+        assertEquals(StreamHttpRecoveryAction.PROOF_REFRESHED, action)
+        assertEquals("video-proof", current.resolveGvsPoToken(YouTubeClient.WEB_REMIX, videoId))
+        assertEquals(YouTubeClient.WEB_REMIX.clientName, client.orderedStreamClientsForTest(current, videoId).first().clientName)
     }
 
     @Test

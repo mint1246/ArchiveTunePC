@@ -297,7 +297,7 @@ internal fun sessionFromYouTubeCookies(cookies: JSONArray): YouTubeSessionImport
     )
 }
 
-private fun findSupportedChromiumBrowser(): Path? {
+internal fun findSupportedChromiumBrowser(): Path? {
     val candidates = buildList {
         System.getenv("ProgramFiles(x86)")?.let { root ->
             add(Paths.get(root, "Microsoft", "Edge", "Application", "msedge.exe"))
@@ -321,7 +321,7 @@ private data class BrowserCookie(
     val expiresAtMillis: Long?,
 )
 
-private class CdpClient private constructor(
+internal class CdpClient private constructor(
     private val socket: WebSocket,
     private val listener: Listener,
 ) : AutoCloseable {
@@ -330,14 +330,18 @@ private class CdpClient private constructor(
     val isClosed: Boolean
         get() = listener.closed
 
-    fun call(method: String, params: JSONObject? = null): JSONObject {
+    fun call(
+        method: String,
+        params: JSONObject? = null,
+        timeoutSeconds: Long = CDP_TIMEOUT_SECONDS,
+    ): JSONObject {
         check(!listener.closed) { "DevTools connection is closed" }
         val id = ids.incrementAndGet()
         val response = listener.expect(id)
         val message = JSONObject().put("id", id).put("method", method)
         if (params != null) message.put("params", params)
-        socket.sendText(message.toString(), true).get(CDP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        val payload = response.get(CDP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        socket.sendText(message.toString(), true).get(timeoutSeconds, TimeUnit.SECONDS)
+        val payload = response.get(timeoutSeconds, TimeUnit.SECONDS)
         payload.optJSONObject("error")?.let { error ->
             throw IllegalStateException(error.optString("message", "DevTools command failed"))
         }

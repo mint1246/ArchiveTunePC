@@ -120,7 +120,7 @@ class DpapiFileSessionStore(
 
 /** Binary encoding avoids accidentally writing session secrets to a text log or configuration file. */
 internal object StoredDesktopSessionCodec {
-    private const val VERSION = 3
+    private const val VERSION = 4
     private const val LEGACY_VERSION = 1
 
     fun encode(session: StoredDesktopSession): ByteArray =
@@ -137,6 +137,13 @@ internal object StoredDesktopSessionCodec {
                 output.writeString(session.authState.poTokenGvs)
                 output.writeString(session.authState.poTokenPlayer)
                 output.writeBoolean(session.authState.webClientPoTokenEnabled)
+                // v4 preserves binding metadata for generated playback proof. Without these fields,
+                // a video-bound token restored after restart could be mistaken for a generic token.
+                output.writeString(session.authState.poTokenGvsSession)
+                output.writeString(session.authState.poTokenGvsVideoId)
+                output.writeString(session.authState.poTokenPlayerVideoId)
+                output.writeString(session.authState.poTokenSubs)
+                output.writeString(session.authState.poTokenSubsVideoId)
                 output.writeString(session.account.name)
                 output.writeString(session.account.email)
                 output.writeString(session.account.channelHandle)
@@ -160,15 +167,29 @@ internal object StoredDesktopSessionCodec {
                 } else {
                     storedDataSyncId
                 }
+            val poToken = input.readString()
+            val poTokenGvs = input.readString()
+            val poTokenPlayer = input.readString()
+            val webClientPoTokenEnabled = input.readBoolean()
+            val poTokenGvsSession = if (version >= 4) input.readString() else null
+            val poTokenGvsVideoId = if (version >= 4) input.readString() else null
+            val poTokenPlayerVideoId = if (version >= 4) input.readString() else null
+            val poTokenSubs = if (version >= 4) input.readString() else null
+            val poTokenSubsVideoId = if (version >= 4) input.readString() else null
             val authState =
                 moe.rukamori.archivetune.innertube.PlaybackAuthState(
                     cookie = cookie,
                     visitorData = visitorData,
                     dataSyncId = dataSyncId,
-                    poToken = input.readString(),
-                    poTokenGvs = input.readString(),
-                    poTokenPlayer = input.readString(),
-                    webClientPoTokenEnabled = input.readBoolean(),
+                    poToken = poToken,
+                    poTokenGvs = poTokenGvs,
+                    poTokenGvsSession = poTokenGvsSession,
+                    poTokenGvsVideoId = poTokenGvsVideoId,
+                    poTokenPlayer = poTokenPlayer,
+                    poTokenPlayerVideoId = poTokenPlayerVideoId,
+                    poTokenSubs = poTokenSubs,
+                    poTokenSubsVideoId = poTokenSubsVideoId,
+                    webClientPoTokenEnabled = webClientPoTokenEnabled,
                 ).normalized()
             require(authState.hasLoginCookie) { "Stored session has no YouTube login cookie" }
             val name = input.readString().orEmpty()

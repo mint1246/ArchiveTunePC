@@ -1,6 +1,7 @@
 package moe.rukamori.archivetune.desktop.platform
 
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
+import moe.rukamori.archivetune.innertube.StreamHttpRecoveryAction
 import moe.rukamori.archivetune.innertube.StreamResolutionFailureKind
 import moe.rukamori.archivetune.innertube.classifyStreamResolutionFailure
 import moe.rukamori.archivetune.desktopauth.ArchiveTuneSessionVerifier
@@ -314,6 +315,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         } ?: cachedSourceFor(source.key)?.let { Result.success(it) }
             ?: backend.resolveAudioStream(source.key).fold(
                 onSuccess = {
+                    runtime.logger.info(
+                        "stream_resolution event=resolved videoId=${source.key} client=${it.clientKey} " +
+                            "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
+                            "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
+                    )
                     val resolved = ResolvedPlaybackSource(it.url, it.mimeType, it.requestHeaders, it.expiresAtEpochMillis)
                     cacheSource(
                         key = source.key,
@@ -331,6 +337,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             )
         is PlaybackSource.Remote, is PlaybackSource.LocalFile -> DesktopConcretePlaybackSourceResolver.resolve(item)
     }
+
+    private fun String.hasQueryParameter(name: String): Boolean =
+        contains("?$name=") || contains("&$name=")
 
     private fun cachedSourceFor(key: String): ResolvedPlaybackSource? {
         val cached = resolvedSourceCache[key] ?: return null
@@ -368,22 +377,23 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             failedSource.expiresAtEpochMs?.let {
                 it <= System.currentTimeMillis() + STREAM_CACHE_EXPIRY_LEAD_MILLIS
             } == true
-        val markedFailed =
+        val recoveryAction =
             if (!nearExpiry && matchingCachedSource?.streamClientKey?.isNotBlank() == true) {
-                backend.markStreamClientFailed(
+                backend.prepareStreamHttpRecovery(
                     videoId = key,
                     clientKey = matchingCachedSource.streamClientKey,
                     httpStatusCode = httpStatus,
                     authFingerprint = matchingCachedSource.streamAuthFingerprint
                         ?: account.currentAuthState().fingerprint,
+                    failedUrlHadPoToken = failedSource.uri.hasQueryParameter("pot"),
                 )
             } else {
-                false
+                StreamHttpRecoveryAction.RETRY_ONLY
             }
 
         runtime.logger.info(
             "stream_resolution event=media_http_failure videoId=$key http=$httpStatus " +
-                "expired=$nearExpiry clientBackoff=$markedFailed action=retry",
+                "expired=$nearExpiry recovery=${recoveryAction.name} action=retry",
         )
         // Match Android: even an expired/unknown-profile URL gets one fresh resolve; the failed
         // client is only backoff-marked when the concrete profile is known and the URL was current.

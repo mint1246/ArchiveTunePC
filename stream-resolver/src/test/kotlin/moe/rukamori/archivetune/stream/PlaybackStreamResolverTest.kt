@@ -58,7 +58,7 @@ class PlaybackStreamResolverTest {
     }
 
     @Test
-    fun loggedInWithoutWebProofTokenUsesWebPrimaryAsPreferredClient() {
+    fun loggedInWebPlaybackKeepsAndroidWebRemixPreference() {
         val auth = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
 
         val ordered =
@@ -67,11 +67,11 @@ class PlaybackStreamResolverTest {
                 authState = auth,
             )
 
-        assertEquals(YouTubeClient.WEB_PRIMARY.clientName, ordered.first().clientName)
+        assertEquals(YouTubeClient.WEB_REMIX.clientName, ordered.first().clientName)
     }
 
     @Test
-    fun desktopProfileCanKeepCookieCapableFallbacksFirst() {
+    fun desktopRetryOrderMovesFromWebRemixStraightToAndroidVr() {
         val auth = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
 
         val ordered =
@@ -79,10 +79,11 @@ class PlaybackStreamResolverTest {
                 preference = StreamClientPreference.WEB_REMIX,
                 authState = auth,
                 fallbackClients = PlaybackStreamResolver.desktopFallbackClients,
-                preferCookieCapableWhenLoggedIn = true,
             )
 
-        assertTrue(ordered.take(2).all { it.supportsCookieAuthentication })
+        assertEquals(YouTubeClient.WEB_REMIX.clientName, ordered[0].clientName)
+        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientName, ordered[1].clientName)
+        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientVersion, ordered[1].clientVersion)
     }
 
     @Test

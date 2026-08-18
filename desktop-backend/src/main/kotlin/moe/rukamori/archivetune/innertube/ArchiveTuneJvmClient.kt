@@ -613,6 +613,30 @@ class ArchiveTuneJvmClient(
         return repaired
     }
 
+    private suspend fun ensurePlaybackAuth(
+        videoId: String,
+        initial: PlaybackAuthState,
+    ): PlaybackAuthState {
+        val provider = sessionProvider ?: return initial
+        val repaired =
+            try {
+                provider.ensurePlaybackAuth(videoId, initial).normalized()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                return initial
+            }
+
+        // A proof provider may enrich the current session, but it must never switch accounts or
+        // replace the login cookie while a request is being prepared.
+        if (repaired.cookie != initial.cookie) return initial
+        if (repaired.fingerprint != initial.fingerprint) {
+            YouTube.authState = repaired
+            persistProvidedSessionRepair(initial, repaired)
+        }
+        return repaired
+    }
+
     /**
      * Mirrors Android's failed-stream-client backoff. A googlevideo URL can be syntactically valid
      * yet return 403/404/410/416 when the media engine actually opens it. Once desktop reports that
@@ -634,6 +658,58 @@ class ArchiveTuneJvmClient(
         return true
     }
 
+    /**
+     * Handles a concrete media-CDN failure before desktop performs its one transparent retry.
+     *
+     * A logged-in Web stream that was resolved without GVS proof gets one chance to mint the same
+     * per-video proof Android uses and retry the same client. If proof was already present (or the
+     * client cannot use Web proof), fall back to the normal failed-client backoff instead.
+     */
+    suspend fun prepareStreamHttpRecovery(
+        videoId: String,
+        clientKey: String?,
+        httpStatusCode: Int,
+        authFingerprint: String,
+        failedUrlHadPoToken: Boolean,
+    ): StreamHttpRecoveryAction {
+        if (httpStatusCode !in RETRYABLE_STREAM_RESPONSE_CODES) return StreamHttpRecoveryAction.RETRY_ONLY
+
+        prepareProvidedSession()
+        val normalizedClientKey = PlaybackStreamResolver.normalizeClientKey(clientKey)
+        val currentAuth = YouTube.currentPlaybackAuthState()
+        val sameAuthGeneration = currentAuth.fingerprint == authFingerprint
+        val failedClient =
+            orderedStreamClients(currentAuth)
+                .firstOrNull { PlaybackStreamResolver.clientKey(it) == normalizedClientKey }
+
+        if (
+            httpStatusCode == 403 &&
+                !failedUrlHadPoToken &&
+                currentAuth.hasPlaybackLoginContext &&
+                failedClient != null &&
+                PlaybackAuthState.supportsGvsPoToken(failedClient)
+        ) {
+            val repaired = ensurePlaybackAuth(videoId, currentAuth)
+            if (
+                repaired.fingerprint != currentAuth.fingerprint &&
+                    !repaired.resolveGvsPoToken(failedClient, videoId).isNullOrBlank()
+            ) {
+                return StreamHttpRecoveryAction.PROOF_REFRESHED
+            }
+        }
+
+        // Only back off a client when the failed URL still belongs to this exact auth generation.
+        // A visitor-data/session repair can legitimately evolve the current fingerprint between URL
+        // resolution and recovery; in that case a fresh retry is safer than poisoning either state.
+        if (!sameAuthGeneration) return StreamHttpRecoveryAction.RETRY_ONLY
+
+        return if (markStreamClientFailed(videoId, normalizedClientKey, httpStatusCode, authFingerprint)) {
+            StreamHttpRecoveryAction.CLIENT_BACKOFF
+        } else {
+            StreamHttpRecoveryAction.RETRY_ONLY
+        }
+    }
+
     private fun orderedStreamClients(
         authState: PlaybackAuthState,
         videoId: String? = null,
@@ -642,7 +718,6 @@ class ArchiveTuneJvmClient(
             preference = if (authState.hasLoginCookie) StreamClientPreference.WEB_REMIX else StreamClientPreference.ANDROID_VR,
             authState = authState,
             fallbackClients = streamClients,
-            preferCookieCapableWhenLoggedIn = true,
         ).filterNot { client ->
             videoId != null && isStreamClientTemporarilyBlocked(
                 videoId = videoId,
@@ -710,6 +785,16 @@ fun interface DesktopSessionProvider {
     suspend fun refreshIfNeeded() = Unit
 
     /**
+     * Gives the desktop session owner a chance to attach per-video playback proof (for example a
+     * Web/GVS PO Token) before a signed media URL is resolved. The default is deliberately a no-op
+     * so non-browser providers and tests retain their existing behavior.
+     */
+    suspend fun ensurePlaybackAuth(
+        videoId: String,
+        authState: PlaybackAuthState,
+    ): PlaybackAuthState = authState
+
+    /**
      * Persists non-cookie auth context repaired by core/backend work. Implementations should only
      * accept repairs that still belong to [initialAuthState]'s login cookie and must never replace
      * the cookie itself from this callback.
@@ -726,6 +811,12 @@ enum class StreamResolutionFailureKind(val userMessage: String) {
     NETWORK_TIMEOUT("YouTube did not respond in time; check your connection and retry"),
     NETWORK("Could not reach YouTube; check your connection and retry"),
     UNAVAILABLE("This YouTube track is currently unavailable for playback"),
+}
+
+enum class StreamHttpRecoveryAction {
+    PROOF_REFRESHED,
+    CLIENT_BACKOFF,
+    RETRY_ONLY,
 }
 
 class StreamResolutionTimeoutException : IllegalStateException("YouTube stream resolution timed out")

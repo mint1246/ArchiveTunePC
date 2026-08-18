@@ -154,6 +154,7 @@ class DesktopSessionManager(
     private val verifier: DesktopSessionVerifier,
     private val browserLauncher: SystemBrowserLauncher = DesktopSystemBrowserLauncher,
     private val interactiveLoginSource: DesktopInteractiveLoginSource = ManagedChromiumLoginSource(),
+    private val poTokenProvider: DesktopPlaybackPoTokenProvider = ChromiumBotGuardPoTokenProvider(),
     private val clock: Clock = Clock.systemUTC(),
     private val cookieRefresher: DesktopSessionCookieRefresher? = null,
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
@@ -356,6 +357,38 @@ class DesktopSessionManager(
             ?.authState
             ?: PlaybackAuthState.EMPTY
 
+    override suspend fun ensurePlaybackAuth(
+        videoId: String,
+        authState: PlaybackAuthState,
+    ): PlaybackAuthState {
+        val initial = authState.normalized()
+        if (!initial.hasPlaybackLoginContext || videoId.isBlank()) return initial
+        if (
+            initial.webClientPoTokenEnabled &&
+                !initial.poTokenGvs.isNullOrBlank() &&
+                initial.poTokenGvsVideoId == videoId
+        ) {
+            return initial
+        }
+
+        val sessionId = initial.sessionId ?: return initial
+        val minted = poTokenProvider.mint(videoId, sessionId) ?: return initial
+        return initial
+            .copy(
+                // Match Android's BotGuardTokenGenerator.withGeneratedPoTokens(): the per-video
+                // token is preferred for GVS/player/subtitle requests and the session token remains
+                // available to clients that still accept session-bound GVS proof.
+                poTokenGvs = minted.playerToken,
+                poTokenGvsSession = minted.sessionToken,
+                poTokenGvsVideoId = videoId,
+                poTokenPlayer = minted.playerToken,
+                poTokenPlayerVideoId = videoId,
+                poTokenSubs = minted.playerToken,
+                poTokenSubsVideoId = videoId,
+                webClientPoTokenEnabled = true,
+            ).normalized()
+    }
+
     override suspend fun persistAuthRepair(
         initialAuthState: PlaybackAuthState,
         repairedAuthState: PlaybackAuthState,
@@ -364,13 +397,7 @@ class DesktopSessionManager(
         val repaired = repairedAuthState.normalized()
         if (!initial.hasLoginCookie || initial.cookie != repaired.cookie) return
 
-        val repairedVisitorData =
-            repaired.visitorData
-                ?.takeIf { it.isNotBlank() && it != initial.visitorData }
-        val repairedDataSyncId =
-            repaired.dataSyncId
-                ?.takeIf { it.isNotBlank() && it != initial.dataSyncId }
-        if (repairedVisitorData == null && repairedDataSyncId == null) return
+        if (repaired.fingerprint == initial.fingerprint) return
 
         try {
             synchronized(stateLock) {
@@ -380,19 +407,30 @@ class DesktopSessionManager(
 
                 // A concurrent request may already have persisted a newer repair. Only replace a
                 // field when the stored value still matches this request's starting point.
-                val visitorData =
-                    repairedVisitorData
-                        ?.takeIf { currentAuthState.visitorData == initial.visitorData }
-                        ?: currentAuthState.visitorData
-                val dataSyncId =
-                    repairedDataSyncId
-                        ?.takeIf { currentAuthState.dataSyncId == initial.dataSyncId }
-                        ?: currentAuthState.dataSyncId
                 val mergedAuthState =
                     currentAuthState
                         .copy(
-                            visitorData = visitorData,
-                            dataSyncId = dataSyncId,
+                            visitorData = mergeRepair(initial.visitorData, repaired.visitorData, currentAuthState.visitorData),
+                            dataSyncId = mergeRepair(initial.dataSyncId, repaired.dataSyncId, currentAuthState.dataSyncId),
+                            poToken = mergeRepair(initial.poToken, repaired.poToken, currentAuthState.poToken),
+                            poTokenGvs = mergeRepair(initial.poTokenGvs, repaired.poTokenGvs, currentAuthState.poTokenGvs),
+                            poTokenGvsSession =
+                                mergeRepair(initial.poTokenGvsSession, repaired.poTokenGvsSession, currentAuthState.poTokenGvsSession),
+                            poTokenGvsVideoId =
+                                mergeRepair(initial.poTokenGvsVideoId, repaired.poTokenGvsVideoId, currentAuthState.poTokenGvsVideoId),
+                            poTokenPlayer =
+                                mergeRepair(initial.poTokenPlayer, repaired.poTokenPlayer, currentAuthState.poTokenPlayer),
+                            poTokenPlayerVideoId =
+                                mergeRepair(initial.poTokenPlayerVideoId, repaired.poTokenPlayerVideoId, currentAuthState.poTokenPlayerVideoId),
+                            poTokenSubs = mergeRepair(initial.poTokenSubs, repaired.poTokenSubs, currentAuthState.poTokenSubs),
+                            poTokenSubsVideoId =
+                                mergeRepair(initial.poTokenSubsVideoId, repaired.poTokenSubsVideoId, currentAuthState.poTokenSubsVideoId),
+                            webClientPoTokenEnabled =
+                                mergeRepair(
+                                    initial.webClientPoTokenEnabled,
+                                    repaired.webClientPoTokenEnabled,
+                                    currentAuthState.webClientPoTokenEnabled,
+                                ),
                         ).normalized()
                 if (mergedAuthState.fingerprint == currentAuthState.fingerprint) return
 
@@ -510,6 +548,12 @@ class DesktopSessionManager(
         const val DEFAULT_REFRESH_LEAD_MILLIS = 5 * 60 * 1_000L
     }
 }
+
+private fun <T> mergeRepair(
+    initial: T,
+    repaired: T,
+    current: T,
+): T = if (repaired != initial && current == initial) repaired else current
 
 sealed interface CookieJsonSessionImportResult {
     data class Success(val account: DesktopAccount) : CookieJsonSessionImportResult
