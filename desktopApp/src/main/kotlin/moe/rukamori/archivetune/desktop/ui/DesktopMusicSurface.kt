@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -165,24 +166,32 @@ internal class DesktopBrowseController {
 internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val accountState by services.account.state.collectAsState()
+    val homeSnapshot by services.homeStore.snapshot.collectAsState()
     var resultItems by remember { mutableStateOf<List<YTItem>>(emptyList()) }
     var localTracks by remember { mutableStateOf(services.library.tracks) }
     var onlinePlaylists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     var showSpotifyImport by remember { mutableStateOf(false) }
+    var showCreatePlaylist by remember { mutableStateOf(false) }
+    var createPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
+    var addToPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
+    var playlistPickerLoading by remember { mutableStateOf(false) }
     suspend fun rescanLibrary() {
         libraryLoading = true; libraryError = null
         runCatching { services.library.rescan() }.onSuccess { localTracks = it }.onFailure { libraryError = it.message ?: "Library scan failed" }
         libraryLoading = false
     }
+    suspend fun refreshOnlinePlaylists() {
+        services.backend.libraryPlaylists()
+            .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
+            .onFailure { libraryError = "Could not load your YouTube Music playlists." }
+    }
     LaunchedEffect(Unit) { if (services.library.folders.isNotEmpty()) rescanLibrary() }
     LaunchedEffect(state.destination) {
         browse.clear()
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
-        services.backend.libraryPlaylists()
-            .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
-            .onFailure { libraryError = "Could not load your YouTube Music playlists." }
+        refreshOnlinePlaylists()
     }
     LaunchedEffect(state.searchQuery, state.destination) {
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH || state.searchQuery.isBlank()) return@LaunchedEffect
@@ -268,6 +277,27 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     fun enqueueSong(song: SongItem) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(song, services.albumIndex))) } }
     fun playNextLocal(track: LocalTrack) { scope.launch { services.playback.playNext(listOf(toPlaybackItem(track))) } }
     fun enqueueLocal(track: LocalTrack) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(track))) } }
+    fun isLiked(song: SongItem) = homeSnapshot.likedSongs.any { it.id == song.id }
+    fun setLiked(song: SongItem, liked: Boolean) {
+        scope.launch {
+            services.backend.setSongLiked(song.id, liked)
+                .onSuccess { services.syncHomeLibrary() }
+                .onFailure { browse.failure = it.message ?: "Could not update like" }
+        }
+    }
+    fun choosePlaylist(song: SongItem) {
+        addToPlaylistSong = song
+        scope.launch {
+            playlistPickerLoading = true
+            refreshOnlinePlaylists()
+            playlistPickerLoading = false
+        }
+    }
+    fun createPlaylist(song: SongItem? = null) {
+        addToPlaylistSong = null
+        createPlaylistSong = song
+        showCreatePlaylist = true
+    }
     AnimatedContent(
         targetState = browse.detail,
         transitionSpec = {
@@ -282,7 +312,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     ) { page ->
         when (page) {
         null -> when (state.destination) {
-            moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, browse.loading, browse.failure, ::open, ::downloadSong, ::playNextSong, ::enqueueSong, modifier)
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, browse.loading, browse.failure, ::open, ::downloadSong, ::playNextSong, ::enqueueSong, ::choosePlaylist, ::setLiked, ::isLiked, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
                 localTracks, onlinePlaylists, services.library.folders, libraryLoading || browse.loading, browse.failure ?: libraryError,
@@ -290,6 +320,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onRescan = { scope.launch { rescanLibrary() } },
                 spotifyImportEnabled = accountState is DesktopAccountState.SignedIn,
                 onImportSpotify = { showSpotifyImport = true },
+                onCreatePlaylist = { createPlaylist() },
                 onOpenPlaylist = ::open,
                 onPlay = { selected -> scope.launch { val items = localTracks.map(::toPlaybackItem); services.playback.replaceQueue(items, localTracks.indexOf(selected).coerceAtLeast(0), title = "Local library") } },
                 onPlayNext = ::playNextLocal,
@@ -303,6 +334,8 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onDownload = ::downloadSong,
                 onPlayNext = ::playNextSong,
                 onAddToQueue = ::enqueueSong,
+                onAddToPlaylist = ::choosePlaylist,
+                onSetLiked = ::setLiked,
                 modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.EXPLORE -> DesktopExploreSurface(
@@ -312,6 +345,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onDownload = ::downloadSong,
                 onPlayNext = ::playNextSong,
                 onAddToQueue = ::enqueueSong,
+                onAddToPlaylist = ::choosePlaylist,
+                onSetLiked = ::setLiked,
+                isLiked = ::isLiked,
                 modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SETTINGS -> FoundationDestinationContent(
@@ -337,6 +373,36 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onDownloadAll = ::downloadSongs,
             onPlayNext = ::playNextSong,
             onAddToQueue = ::enqueueSong,
+            onAddToPlaylist = ::choosePlaylist,
+            onSetLiked = ::setLiked,
+            isLiked = ::isLiked,
+            onRemoveFromPlaylist = { song ->
+                scope.launch {
+                    services.backend.removeSongFromPlaylist(page.page.playlist.id, song)
+                        .onSuccess { browse.openPlaylist(page.page.playlist.id, services.backend, scope) }
+                        .onFailure { browse.failure = it.message ?: "Could not remove song from playlist" }
+                }
+            },
+            onRenamePlaylist = { name ->
+                scope.launch {
+                    services.backend.renamePlaylist(page.page.playlist.id, name)
+                        .onSuccess {
+                            refreshOnlinePlaylists()
+                            browse.openPlaylist(page.page.playlist.id, services.backend, scope)
+                        }
+                        .onFailure { browse.failure = it.message ?: "Could not rename playlist" }
+                }
+            },
+            onDeletePlaylist = {
+                scope.launch {
+                    services.backend.deletePlaylist(page.page.playlist.id)
+                        .onSuccess {
+                            refreshOnlinePlaylists()
+                            browse.clear()
+                        }
+                        .onFailure { browse.failure = it.message ?: "Could not delete playlist" }
+                }
+            },
             modifier = modifier,
         )
         is Detail.ArtistItems -> ArtistItemsDetailPage(
@@ -346,6 +412,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onDownload = ::downloadSong,
             onPlayNext = ::playNextSong,
             onAddToQueue = ::enqueueSong,
+            onAddToPlaylist = ::choosePlaylist,
+            onSetLiked = ::setLiked,
+            isLiked = ::isLiked,
             loadMore = services.backend::artistItemsContinuation,
             modifier = modifier,
         )
@@ -363,6 +432,18 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onDownloadAll = ::downloadSongs,
             onPlayNext = ::playNextSong,
             onAddToQueue = ::enqueueSong,
+            onAddToPlaylist = ::choosePlaylist,
+            onSetLiked = ::setLiked,
+            isLiked = ::isLiked,
+            isArtistSubscribed = { artist -> homeSnapshot.subscribedArtists.any { it.id == artist.id || (it.channelId != null && it.channelId == artist.channelId) } },
+            onSetArtistSubscribed = { artist, subscribed ->
+                scope.launch {
+                    val channelId = artist.channelId ?: artist.id
+                    services.backend.setArtistSubscribed(channelId, subscribed)
+                        .onSuccess { services.syncHomeLibrary() }
+                        .onFailure { browse.failure = it.message ?: "Could not update artist subscription" }
+                }
+            },
             modifier = modifier,
         )
         }
@@ -383,9 +464,43 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             },
         )
     }
+
+    addToPlaylistSong?.let { song ->
+        AddToPlaylistDialog(
+            song = song,
+            playlists = onlinePlaylists.filter { it.isEditable },
+            loading = playlistPickerLoading,
+            onDismiss = { addToPlaylistSong = null },
+            onCreate = { createPlaylist(song) },
+            onAdd = { playlist ->
+                addToPlaylistSong = null
+                scope.launch {
+                    services.backend.addSongToPlaylist(playlist.id, song.id)
+                        .onFailure { browse.failure = it.message ?: "Could not add song to playlist" }
+                }
+            },
+        )
+    }
+
+    if (showCreatePlaylist) {
+        CreatePlaylistDialog(
+            song = createPlaylistSong,
+            onDismiss = { showCreatePlaylist = false; createPlaylistSong = null },
+            onCreate = { name ->
+                val song = createPlaylistSong
+                showCreatePlaylist = false
+                createPlaylistSong = null
+                scope.launch {
+                    services.backend.createPlaylist(name, song?.let { listOf(it.id) }.orEmpty())
+                        .onSuccess { refreshOnlinePlaylists() }
+                        .onFailure { browse.failure = it.message ?: "Could not create playlist" }
+                }
+            },
+        )
+    }
 }
 
-@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
+@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
     LazyColumn(
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
@@ -394,6 +509,8 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("YouTube Music playlists", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = onCreatePlaylist, enabled = spotifyImportEnabled) { Text("Create playlist") }
+                Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = onImportSpotify, enabled = spotifyImportEnabled) { Text("Import Spotify") }
             }
         }
@@ -441,6 +558,68 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             }
         }
     }
+}
+
+@Composable
+private fun AddToPlaylistDialog(
+    song: SongItem,
+    playlists: List<PlaylistItem>,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onCreate: () -> Unit,
+    onAdd: (PlaylistItem) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add to playlist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(song.title, style = MaterialTheme.typography.titleMedium)
+                when {
+                    loading -> Loading()
+                    playlists.isEmpty() -> Text("No editable playlists found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                        items(playlists, key = { it.id }) { playlist ->
+                            TextButton(onClick = { onAdd(playlist) }, modifier = Modifier.fillMaxWidth()) {
+                                Text(playlist.title, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onCreate) { Text("New playlist") } },
+    )
+}
+
+@Composable
+private fun CreatePlaylistDialog(
+    song: SongItem?,
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var name by remember(song?.id) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create playlist") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("Playlist name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                song?.let { Text("${it.title} will be added to the new playlist.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            TextButton(onClick = { onCreate(name.trim()) }, enabled = name.isNotBlank()) { Text("Create") }
+        },
+    )
 }
 
 @Composable
@@ -514,7 +693,7 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     selected?.toPath()
 }
 
-@Composable private fun SearchResults(query: String, items: List<YTItem>, loading: Boolean, error: String?, open: (YTItem) -> Unit, download: (SongItem) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, modifier: Modifier) {
+@Composable private fun SearchResults(query: String, items: List<YTItem>, loading: Boolean, error: String?, open: (YTItem) -> Unit, download: (SongItem) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, modifier: Modifier) {
     LazyColumn(
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
@@ -540,12 +719,15 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
                 (item as? SongItem)?.let { song -> { download(song) } },
                 (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                 (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
+                (item as? SongItem)?.let { song -> { onAddToPlaylist(song) } },
+                (item as? SongItem)?.let { song -> { liked -> onSetLiked(song, liked) } },
+                (item as? SongItem)?.let(isLiked) == true,
             )
         }
     }
 }
 
-@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, modifier: Modifier) {
+@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, isArtistSubscribed: (ArtistItem) -> Boolean, onSetArtistSubscribed: (ArtistItem, Boolean) -> Unit, modifier: Modifier) {
     val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title; is Detail.ArtistItems -> page.page.title }
     val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail }
     val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist" }
@@ -570,6 +752,13 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = { onDownloadAll(tracks) }) { Icon(Icons.Rounded.Download, "Download all"); Spacer(Modifier.width(6.dp)); Text("Download all") }
                 }
+                if (page is Detail.Artist) {
+                    val subscribed = isArtistSubscribed(page.page.artist)
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { onSetArtistSubscribed(page.page.artist, !subscribed) }) {
+                        Text(if (subscribed) "Unsubscribe" else "Subscribe")
+                    }
+                }
             }
         }
         item {
@@ -592,12 +781,22 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
                     }
                 }
                 itemsIndexed(section.items, key = { index, item -> "${section.title}:${item::class}:${item.id}:$index" }) { _, item ->
-                    ResultCard(item, { onOpen(item) }, (item as? SongItem)?.let { { onDownload(it) } })
+                    val song = item as? SongItem
+                    ResultCard(
+                        item,
+                        { onOpen(item) },
+                        song?.let { { onDownload(it) } },
+                        song?.let { { onPlayNext(it) } },
+                        song?.let { { onAddToQueue(it) } },
+                        song?.let { { onAddToPlaylist(it) } },
+                        song?.let { { liked -> onSetLiked(it, liked) } },
+                        song?.let(isLiked) == true,
+                    )
                 }
             }
         } else {
             itemsIndexed(tracks, key = { index, song -> "${song.id}:$index" }) { index, song ->
-                ResultCard(song, { onPlay(tracks, title, index) }, { onDownload(song) }, { onPlayNext(song) }, { onAddToQueue(song) })
+                ResultCard(song, { onPlay(tracks, title, index) }, { onDownload(song) }, { onPlayNext(song) }, { onAddToQueue(song) }, { onAddToPlaylist(song) }, { onSetLiked(song, it) }, isLiked(song))
             }
         }
     }
@@ -611,6 +810,9 @@ private fun ArtistItemsDetailPage(
     onDownload: (SongItem) -> Unit,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
+    onAddToPlaylist: (SongItem) -> Unit,
+    onSetLiked: (SongItem, Boolean) -> Unit,
+    isLiked: (SongItem) -> Boolean,
     loadMore: suspend (String) -> Result<ArtistItemsContinuationPage>,
     modifier: Modifier,
 ) {
@@ -644,6 +846,9 @@ private fun ArtistItemsDetailPage(
                 download = (item as? SongItem)?.let { song -> { onDownload(song) } },
                 onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                 onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
+                onAddToPlaylist = (item as? SongItem)?.let { song -> { onAddToPlaylist(song) } },
+                onSetLiked = (item as? SongItem)?.let { song -> { liked -> onSetLiked(song, liked) } },
+                isLiked = (item as? SongItem)?.let(isLiked) == true,
             )
         }
         loadMoreError?.let { message -> item { Error(message) } }
@@ -684,9 +889,17 @@ private fun PlaylistDetailPage(
     onDownloadAll: (List<SongItem>) -> Unit,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
+    onAddToPlaylist: (SongItem) -> Unit,
+    onSetLiked: (SongItem, Boolean) -> Unit,
+    isLiked: (SongItem) -> Boolean,
+    onRemoveFromPlaylist: (SongItem) -> Unit,
+    onRenamePlaylist: (String) -> Unit,
+    onDeletePlaylist: () -> Unit,
     modifier: Modifier,
 ) {
     var query by remember(page.playlist.id) { mutableStateOf("") }
+    var showRename by remember(page.playlist.id) { mutableStateOf(false) }
+    var showDeleteConfirm by remember(page.playlist.id) { mutableStateOf(false) }
     val filtered = remember(page.songs, query) {
         if (query.isBlank()) page.songs else page.songs.filter { song ->
             song.title.contains(query, ignoreCase = true) ||
@@ -720,13 +933,13 @@ private fun PlaylistDetailPage(
                     if (narrow) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Artwork(page.playlist.thumbnail, Modifier.size(140.dp))
-                            PlaylistHeroDetails(page, subtitle, onPlay, onDownloadAll)
+                            PlaylistHeroDetails(page, subtitle, onPlay, onDownloadAll, onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
                         }
                     } else {
                         Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                             Artwork(page.playlist.thumbnail, Modifier.size(180.dp))
                             Spacer(Modifier.width(24.dp))
-                            PlaylistHeroDetails(page, subtitle, onPlay, onDownloadAll, Modifier.weight(1f))
+                            PlaylistHeroDetails(page, subtitle, onPlay, onDownloadAll, Modifier.weight(1f), onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
                         }
                     }
                 }
@@ -752,8 +965,51 @@ private fun PlaylistDetailPage(
         }
         itemsIndexed(filtered, key = { index, song -> "${song.id}:$index" }) { _, song ->
             val queueIndex = queueIndices[song.id] ?: 0
-            ResultCard(song, { onPlay(page.songs, queueIndex, page.playlist.title) }, { onDownload(song) }, { onPlayNext(song) }, { onAddToQueue(song) })
+            ResultCard(
+                song,
+                { onPlay(page.songs, queueIndex, page.playlist.title) },
+                { onDownload(song) },
+                { onPlayNext(song) },
+                { onAddToQueue(song) },
+                { onAddToPlaylist(song) },
+                { onSetLiked(song, it) },
+                isLiked(song),
+                if (page.playlist.isEditable) ({ onRemoveFromPlaylist(song) }) else null,
+            )
         }
+    }
+
+    if (showRename) {
+        var name by remember(page.playlist.id) { mutableStateOf(page.playlist.title) }
+        AlertDialog(
+            onDismissRequest = { showRename = false },
+            title = { Text("Rename playlist") },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("Playlist name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            dismissButton = { TextButton(onClick = { showRename = false }) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(
+                    enabled = name.isNotBlank() && name.trim() != page.playlist.title,
+                    onClick = { showRename = false; onRenamePlaylist(name.trim()) },
+                ) { Text("Rename") }
+            },
+        )
+    }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete playlist?") },
+            text = { Text("${page.playlist.title} will be permanently deleted from YouTube Music.") },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { showDeleteConfirm = false; onDeletePlaylist() }) { Text("Delete") } },
+        )
     }
 }
 
@@ -764,6 +1020,8 @@ private fun PlaylistHeroDetails(
     onPlay: (List<SongItem>, Int, String) -> Unit,
     onDownloadAll: (List<SongItem>) -> Unit,
     modifier: Modifier = Modifier,
+    onRename: () -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("PLAYLIST", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
@@ -790,16 +1048,26 @@ private fun PlaylistHeroDetails(
                 onClick = { onDownloadAll(page.songs) },
                 enabled = page.songs.isNotEmpty(),
             ) { Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(8.dp)); Text("Download all") }
+            if (page.playlist.isEditable) {
+                var menuOpen by remember(page.playlist.id) { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, "Playlist actions") }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Rename playlist") }, onClick = { menuOpen = false; onRename() })
+                        DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { menuOpen = false; onDelete() })
+                    }
+                }
+            }
         }
     }
 }
 
-@Composable private fun ResultCard(item: YTItem, open: () -> Unit, download: (() -> Unit)? = null, onPlayNext: (() -> Unit)? = null, onAddToQueue: (() -> Unit)? = null) {
-    Card(Modifier.fillMaxWidth().animateContentSize(tween(180, easing = FastOutSlowInEasing)).clickable(onClick = open)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Artwork(item.thumbnail, Modifier.size(58.dp)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium); Text(itemSubtitle(item), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (download != null) IconButton(onClick = download) { Icon(Icons.Rounded.Download, "Download") }; if (item is SongItem) SongQueueMenu(onPlayNext = onPlayNext, onAddToQueue = onAddToQueue); Icon(if (item is SongItem) Icons.Rounded.PlayArrow else Icons.Rounded.MusicNote, null) } }
+@Composable private fun ResultCard(item: YTItem, open: () -> Unit, download: (() -> Unit)? = null, onPlayNext: (() -> Unit)? = null, onAddToQueue: (() -> Unit)? = null, onAddToPlaylist: (() -> Unit)? = null, onSetLiked: ((Boolean) -> Unit)? = null, isLiked: Boolean = false, onRemoveFromPlaylist: (() -> Unit)? = null) {
+    Card(Modifier.fillMaxWidth().animateContentSize(tween(180, easing = FastOutSlowInEasing)).clickable(onClick = open)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Artwork(item.thumbnail, Modifier.size(58.dp)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium); Text(itemSubtitle(item), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (download != null) IconButton(onClick = download) { Icon(Icons.Rounded.Download, "Download") }; if (item is SongItem) SongQueueMenu(onPlayNext = onPlayNext, onAddToQueue = onAddToQueue, onAddToPlaylist = onAddToPlaylist, onSetLiked = onSetLiked, isLiked = isLiked, onRemoveFromPlaylist = onRemoveFromPlaylist); Icon(if (item is SongItem) Icons.Rounded.PlayArrow else Icons.Rounded.MusicNote, null) } }
 }
 
 @Composable
-private fun SongQueueMenu(onPlayNext: (() -> Unit)? = null, onAddToQueue: (() -> Unit)? = null, onDownload: (() -> Unit)? = null) {
+private fun SongQueueMenu(onPlayNext: (() -> Unit)? = null, onAddToQueue: (() -> Unit)? = null, onDownload: (() -> Unit)? = null, onAddToPlaylist: (() -> Unit)? = null, onSetLiked: ((Boolean) -> Unit)? = null, isLiked: Boolean = false, onRemoveFromPlaylist: (() -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Rounded.MoreVert, "More actions") }
@@ -807,6 +1075,9 @@ private fun SongQueueMenu(onPlayNext: (() -> Unit)? = null, onAddToQueue: (() ->
             onPlayNext?.let { action -> DropdownMenuItem(text = { Text("Play next") }, onClick = { open = false; action() }) }
             onAddToQueue?.let { action -> DropdownMenuItem(text = { Text("Add to queue") }, onClick = { open = false; action() }) }
             onDownload?.let { action -> DropdownMenuItem(text = { Text("Download") }, onClick = { open = false; action() }) }
+            onSetLiked?.let { action -> DropdownMenuItem(text = { Text(if (isLiked) "Remove like" else "Like song") }, onClick = { open = false; action(!isLiked) }) }
+            onAddToPlaylist?.let { action -> DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { open = false; action() }) }
+            onRemoveFromPlaylist?.let { action -> DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = { open = false; action() }) }
         }
     }
 }

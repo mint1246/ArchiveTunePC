@@ -394,6 +394,44 @@ class ArchiveTuneJvmClient(
         YouTube.addToPlaylist(playlistId, videoId)
     }
 
+    /** Removes the selected playlist entry, resolving its setVideoId if the page omitted it. */
+    suspend fun removeSongFromPlaylist(
+        playlistId: String,
+        song: SongItem,
+    ): Result<Unit> = run {
+        prepareProvidedSession()
+        val setVideoId =
+            song.setVideoId?.takeIf(String::isNotBlank)
+                ?: YouTube.playlistEntrySetVideoIds(playlistId, song.id)
+                    .getOrElse { return Result.failure(it) }
+                    .firstOrNull()
+                    ?.takeIf(String::isNotBlank)
+                ?: return Result.failure(IllegalStateException("Could not identify this playlist entry"))
+        YouTube.removeFromPlaylist(playlistId, song.id, setVideoId).map { Unit }
+    }
+
+    suspend fun renamePlaylist(playlistId: String, name: String): Result<Unit> = run {
+        prepareProvidedSession()
+        val normalizedName = name.trim()
+        if (normalizedName.isEmpty()) return Result.failure(IllegalArgumentException("Playlist name is required"))
+        YouTube.renamePlaylist(playlistId, normalizedName).map { Unit }
+    }
+
+    suspend fun deletePlaylist(playlistId: String): Result<Unit> = run {
+        prepareProvidedSession()
+        YouTube.deletePlaylist(playlistId).map { Unit }
+    }
+
+    suspend fun setSongLiked(videoId: String, liked: Boolean): Result<Unit> = run {
+        prepareProvidedSession()
+        YouTube.likeVideo(videoId, liked).map { Unit }
+    }
+
+    suspend fun setArtistSubscribed(channelId: String, subscribed: Boolean): Result<Unit> = run {
+        prepareProvidedSession()
+        YouTube.subscribeChannel(channelId, subscribed).map { Unit }
+    }
+
     /** Copies an externally supplied image into YouTube Music's custom playlist-cover endpoint. */
     suspend fun uploadCustomPlaylistCover(
         playlistId: String,

@@ -90,6 +90,8 @@ fun DesktopHomeSurface(
     onDownload: (SongItem) -> Unit,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
+    onAddToPlaylist: (SongItem) -> Unit,
+    onSetLiked: (SongItem, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val playbackState by services.playback.state.collectAsState()
@@ -178,22 +180,34 @@ fun DesktopHomeSurface(
         }
     }
 
-    val sections = homePage?.sections.orEmpty()
+    fun visible(item: YTItem) = !services.homeStore.isHomeItemDismissed(item)
+    fun dismiss(item: YTItem) = services.homeStore.dismissHomeItem(item)
+    fun liked(song: SongItem) = homeSnapshot.likedSongs.any { it.id == song.id }
+    val sections =
+        homePage?.sections.orEmpty()
+            .map { section -> section.copy(items = section.items.filter(::visible)) }
+            .filter { it.items.isNotEmpty() }
     val heroSongs = remember(remoteQuickPicks) {
         remoteQuickPicks?.items.orEmpty().filterIsInstance<SongItem>().distinctBy { it.id }
     }
+    val visibleHeroSongs = heroSongs.filter(::visible)
     val speedDial = homeSnapshot.speedDial
+    val localQuickPicks = localContent.quickPicks.filter(::visible)
+    val keepListeningSongs = localContent.keepListeningSongs.filter(::visible)
+    val keepListeningAlbums = localContent.keepListeningAlbums.filter(::visible)
+    val keepListeningArtists = localContent.keepListeningArtists.filter(::visible)
+    val forgottenFavorites = localContent.forgottenFavorites.filter(::visible)
     fun isPinned(item: YTItem) = services.homeStore.isSpeedDialPinned(item)
     fun togglePin(item: YTItem) = services.homeStore.toggleSpeedDial(item)
     val hasContent =
         sections.isNotEmpty() ||
-            heroSongs.isNotEmpty() ||
+            visibleHeroSongs.isNotEmpty() ||
             playlists.isNotEmpty() ||
-            localContent.quickPicks.isNotEmpty() ||
-            localContent.keepListeningSongs.isNotEmpty() ||
-            localContent.keepListeningAlbums.isNotEmpty() ||
-            localContent.keepListeningArtists.isNotEmpty() ||
-            localContent.forgottenFavorites.isNotEmpty() ||
+            localQuickPicks.isNotEmpty() ||
+            keepListeningSongs.isNotEmpty() ||
+            keepListeningAlbums.isNotEmpty() ||
+            keepListeningArtists.isNotEmpty() ||
+            forgottenFavorites.isNotEmpty() ||
             similarRecommendations.isNotEmpty() ||
             speedDial.isNotEmpty()
     val isPlaying = playbackState.isPlaying
@@ -255,7 +269,7 @@ fun DesktopHomeSurface(
                     }
                 }
 
-                if (localContent.quickPicks.isNotEmpty()) {
+                if (localQuickPicks.isNotEmpty()) {
                     item(key = "home_local_quick_picks_header") {
                         DesktopSectionHeader(title = "Quick picks")
                     }
@@ -264,7 +278,7 @@ fun DesktopHomeSurface(
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(localContent.quickPicks, key = { it.id }) { song ->
+                            items(localQuickPicks, key = { it.id }) { song ->
                                 DesktopQuickPickHeroCard(
                                     song = song,
                                     isActive = song.id == currentItemId,
@@ -274,7 +288,7 @@ fun DesktopHomeSurface(
                             }
                         }
                     }
-                } else if (quickPicksSection != null && heroSongs.isNotEmpty()) {
+                } else if (quickPicksSection != null && visibleHeroSongs.isNotEmpty()) {
                     item(key = "home_quick_picks_header") {
                         DesktopSectionHeader(title = quickPicksSection.title)
                     }
@@ -283,7 +297,7 @@ fun DesktopHomeSurface(
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(heroSongs, key = { it.id }) { song ->
+                            items(visibleHeroSongs, key = { it.id }) { song ->
                                 DesktopQuickPickHeroCard(
                                     song = song,
                                     isActive = song.id == currentItemId,
@@ -344,9 +358,9 @@ fun DesktopHomeSurface(
                 }
 
                 if (
-                    localContent.keepListeningSongs.isNotEmpty() ||
-                        localContent.keepListeningAlbums.isNotEmpty() ||
-                        localContent.keepListeningArtists.isNotEmpty()
+                    keepListeningSongs.isNotEmpty() ||
+                        keepListeningAlbums.isNotEmpty() ||
+                        keepListeningArtists.isNotEmpty()
                 ) {
                     item(key = "home_keep_listening_header") {
                         DesktopSectionHeader(title = "Keep listening")
@@ -356,7 +370,7 @@ fun DesktopHomeSurface(
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(localContent.keepListeningSongs, key = { "song:${it.id}" }) { song ->
+                            items(keepListeningSongs, key = { "song:${it.id}" }) { song ->
                                 DesktopMediaGridCard(
                                     item = song,
                                     isActive = song.id == currentItemId,
@@ -366,11 +380,15 @@ fun DesktopHomeSurface(
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
+                                    onSetLiked = { onSetLiked(song, it) },
+                                    isLiked = liked(song),
                                     onPin = { togglePin(song) },
+                                    onNotInterested = { dismiss(song) },
                                     isPinned = isPinned(song),
                                 )
                             }
-                            items(localContent.keepListeningAlbums, key = { "album:${it.id}" }) { album ->
+                            items(keepListeningAlbums, key = { "album:${it.id}" }) { album ->
                                 DesktopMediaGridCard(
                                     item = album,
                                     isActive = album.browseId == currentAlbumId,
@@ -378,10 +396,11 @@ fun DesktopHomeSurface(
                                     modifier = Modifier.width(160.dp),
                                     onClick = { onOpenItem(album) },
                                     onPin = { togglePin(album) },
+                                    onNotInterested = { dismiss(album) },
                                     isPinned = isPinned(album),
                                 )
                             }
-                            items(localContent.keepListeningArtists, key = { "artist:${it.id}" }) { artist ->
+                            items(keepListeningArtists, key = { "artist:${it.id}" }) { artist ->
                                 DesktopMediaGridCard(
                                     item = artist,
                                     isActive = false,
@@ -389,6 +408,7 @@ fun DesktopHomeSurface(
                                     modifier = Modifier.width(160.dp),
                                     onClick = { onOpenItem(artist) },
                                     onPin = { togglePin(artist) },
+                                    onNotInterested = { dismiss(artist) },
                                     isPinned = isPinned(artist),
                                 )
                             }
@@ -420,7 +440,7 @@ fun DesktopHomeSurface(
                     }
                 }
 
-                if (localContent.forgottenFavorites.isNotEmpty()) {
+                if (forgottenFavorites.isNotEmpty()) {
                     item(key = "home_forgotten_favorites_header") {
                         DesktopSectionHeader(title = "Forgotten favorites")
                     }
@@ -429,19 +449,23 @@ fun DesktopHomeSurface(
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(localContent.forgottenFavorites, key = { it.id }) { song ->
+                            items(forgottenFavorites, key = { it.id }) { song ->
                                 DesktopMediaGridCard(
                                     item = song,
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
                                     onClick = {
-                                        onPlayQueue(localContent.forgottenFavorites, localContent.forgottenFavorites.indexOf(song), "Forgotten favorites")
+                                        onPlayQueue(forgottenFavorites, forgottenFavorites.indexOf(song), "Forgotten favorites")
                                     },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
+                                    onSetLiked = { onSetLiked(song, it) },
+                                    isLiked = liked(song),
                                     onPin = { togglePin(song) },
+                                    onNotInterested = { dismiss(song) },
                                     isPinned = isPinned(song),
                                 )
                             }
@@ -450,6 +474,8 @@ fun DesktopHomeSurface(
                 }
 
                 similarRecommendations.forEach { recommendation ->
+                    val visibleItems = recommendation.items.filter(::visible)
+                    if (visibleItems.isEmpty()) return@forEach
                     item(key = "home_similar_header_${recommendation.title.id}") {
                         DesktopSectionHeader(
                             title = recommendation.title.title,
@@ -461,8 +487,8 @@ fun DesktopHomeSurface(
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(recommendation.items, key = { "${it::class.simpleName}:${it.id}" }) { item ->
-                                val songs = recommendation.items.filterIsInstance<SongItem>().distinctBy { it.id }
+                            items(visibleItems, key = { "${it::class.simpleName}:${it.id}" }) { item ->
+                                val songs = visibleItems.filterIsInstance<SongItem>().distinctBy { it.id }
                                 DesktopMediaGridCard(
                                     item = item,
                                     isActive = when (item) {
@@ -481,7 +507,11 @@ fun DesktopHomeSurface(
                                     onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                                     onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
                                     onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
+                                    onAddToPlaylist = (item as? SongItem)?.let { song -> { onAddToPlaylist(song) } },
+                                    onSetLiked = (item as? SongItem)?.let { song -> { value -> onSetLiked(song, value) } },
+                                    isLiked = (item as? SongItem)?.let(::liked) == true,
                                     onPin = { togglePin(item) },
+                                    onNotInterested = { dismiss(item) },
                                     isPinned = isPinned(item),
                                 )
                             }
@@ -500,7 +530,11 @@ fun DesktopHomeSurface(
                         onPlayNext = onPlayNext,
                         onAddToQueue = onAddToQueue,
                         onDownload = onDownload,
+                        onAddToPlaylist = onAddToPlaylist,
+                        onSetLiked = onSetLiked,
                         onPin = ::togglePin,
+                        onNotInterested = ::dismiss,
+                        isLiked = ::liked,
                         isPinned = ::isPinned,
                     )
                 }
@@ -710,7 +744,11 @@ private fun HomeSectionBlock(
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
     onDownload: (SongItem) -> Unit,
+    onAddToPlaylist: (SongItem) -> Unit,
+    onSetLiked: (SongItem, Boolean) -> Unit,
     onPin: (YTItem) -> Unit,
+    onNotInterested: (YTItem) -> Unit,
+    isLiked: (SongItem) -> Boolean,
     isPinned: (YTItem) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -742,7 +780,11 @@ private fun HomeSectionBlock(
                     onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                     onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
                     onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
+                    onAddToPlaylist = (item as? SongItem)?.let { song -> { onAddToPlaylist(song) } },
+                    onSetLiked = (item as? SongItem)?.let { song -> { value -> onSetLiked(song, value) } },
+                    isLiked = (item as? SongItem)?.let(isLiked) == true,
                     onPin = { onPin(item) },
+                    onNotInterested = { onNotInterested(item) },
                     isPinned = isPinned(item),
                 )
             }

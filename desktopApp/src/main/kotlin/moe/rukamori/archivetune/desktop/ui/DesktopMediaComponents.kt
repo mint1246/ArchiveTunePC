@@ -25,10 +25,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -141,12 +144,17 @@ fun DesktopMediaGridCard(
     onPlayNext: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onSetLiked: ((Boolean) -> Unit)? = null,
     onPin: (() -> Unit)? = null,
     onNotInterested: (() -> Unit)? = null,
+    isLiked: Boolean = false,
     isPinned: Boolean = false,
 ) {
     val thumbnailShape = if (item is ArtistItem) CircleShape else RoundedCornerShape(8.dp)
-    val hasMenu = onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null || onNotInterested != null
+    val hasMenu =
+        onPlayNext != null || onAddToQueue != null || onDownload != null || onAddToPlaylist != null ||
+            onSetLiked != null || onPin != null || onNotInterested != null
     Column(modifier = modifier.clickable(onClick = onClick)) {
         Box {
             DesktopMediaArtwork(
@@ -163,8 +171,11 @@ fun DesktopMediaGridCard(
                     onPlayNext = onPlayNext,
                     onAddToQueue = onAddToQueue,
                     onDownload = onDownload,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onSetLiked = onSetLiked,
                     onPin = onPin,
                     onNotInterested = onNotInterested,
+                    isLiked = isLiked,
                     isPinned = isPinned,
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                 )
@@ -210,8 +221,11 @@ fun DesktopMediaListRow(
     onPlayNext: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onSetLiked: ((Boolean) -> Unit)? = null,
     onPin: (() -> Unit)? = null,
     onNotInterested: (() -> Unit)? = null,
+    isLiked: Boolean = false,
     isPinned: Boolean = false,
 ) {
     Row(
@@ -257,13 +271,19 @@ fun DesktopMediaListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (onPlayNext != null || onAddToQueue != null || onDownload != null || onPin != null || onNotInterested != null) {
+        if (
+            onPlayNext != null || onAddToQueue != null || onDownload != null || onAddToPlaylist != null ||
+                onSetLiked != null || onPin != null || onNotInterested != null
+        ) {
             MediaOverflowMenu(
                 onPlayNext = onPlayNext,
                 onAddToQueue = onAddToQueue,
                 onDownload = onDownload,
+                onAddToPlaylist = onAddToPlaylist,
+                onSetLiked = onSetLiked,
                 onPin = onPin,
                 onNotInterested = onNotInterested,
+                isLiked = isLiked,
                 isPinned = isPinned,
             )
         }
@@ -275,8 +295,11 @@ private fun MediaOverflowMenu(
     onPlayNext: (() -> Unit)?,
     onAddToQueue: (() -> Unit)?,
     onDownload: (() -> Unit)?,
+    onAddToPlaylist: (() -> Unit)?,
+    onSetLiked: ((Boolean) -> Unit)?,
     onPin: (() -> Unit)?,
     onNotInterested: (() -> Unit)?,
+    isLiked: Boolean,
     isPinned: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -302,6 +325,22 @@ private fun MediaOverflowMenu(
                 DropdownMenuItem(
                     text = { Text("Download") },
                     leadingIcon = { Icon(Icons.Rounded.Download, contentDescription = null) },
+                    onClick = { open = false; action() },
+                )
+            }
+            onSetLiked?.let { action ->
+                DropdownMenuItem(
+                    text = { Text(if (isLiked) "Remove like" else "Like song") },
+                    leadingIcon = {
+                        Icon(if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, contentDescription = null)
+                    },
+                    onClick = { open = false; action(!isLiked) },
+                )
+            }
+            onAddToPlaylist?.let { action ->
+                DropdownMenuItem(
+                    text = { Text("Add to playlist") },
+                    leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
                     onClick = { open = false; action() },
                 )
             }

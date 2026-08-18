@@ -50,6 +50,9 @@ fun DesktopExploreSurface(
     onDownload: (SongItem) -> Unit,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
+    onAddToPlaylist: (SongItem) -> Unit,
+    onSetLiked: (SongItem, Boolean) -> Unit,
+    isLiked: (SongItem) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     val snapshot by services.playback.state.collectAsState()
@@ -127,6 +130,9 @@ fun DesktopExploreSurface(
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
+                                    onSetLiked = { onSetLiked(song, it) },
+                                    isLiked = isLiked(song),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }
@@ -176,6 +182,9 @@ fun DesktopExploreSurface(
                                             onPlayNext = { onPlayNext(song) },
                                             onAddToQueue = { onAddToQueue(song) },
                                             onDownload = { onDownload(song) },
+                                            onAddToPlaylist = { onAddToPlaylist(song) },
+                                            onSetLiked = { onSetLiked(song, it) },
+                                            isLiked = isLiked(song),
                                             modifier = Modifier.width(160.dp),
                                         )
                                     }

@@ -12,6 +12,7 @@ dependencies {
     implementation(project(":stream-resolver"))
     implementation(project(":morideobfuscator"))
     implementation(libs.okhttp)
+    implementation(libs.ktor.client.core)
     api(project(":lyrics:betterlyrics"))
     api(project(":lyrics:kugou"))
     api(project(":lyrics:lrclib"))
