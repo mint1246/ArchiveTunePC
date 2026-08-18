@@ -73,10 +73,10 @@ class ManagedChromiumLoginSource(
 
         try {
             browserProcess = ProcessBuilder(managedBrowserCommand(browser, profile))
-                .redirectInput(ProcessBuilder.Redirect.DISCARD)
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
                 .start()
+                .also { process -> process.outputStream.close() }
 
             val endpoint = waitForDevTools(profile)
             browserClient = CdpClient.connect(endpoint.browserWebSocketUrl)
