@@ -19,16 +19,25 @@ import uk.co.caprica.vlcj.media.callback.seekable.SeekableCallbackMedia
  * Googlevideo streams. OkHttp owns the request headers/range semantics while libVLC only receives
  * the resulting bytes through its callback-media API.
  */
-class VlcjRangeCallbackMedia(
+internal class VlcjRangeCallbackMedia(
     private val url: String,
     private val headers: Map<String, String> = emptyMap(),
     private val windowSize: Int = DEFAULT_WINDOW_SIZE,
     private val onHttpFailure: (Int) -> Unit = {},
+    httpClient: OkHttpClient,
 ) : SeekableCallbackMedia(), AutoCloseable {
-    private val source = RangeMediaSource(url, headers, windowSize)
+    private val source = RangeMediaSource(url, headers, windowSize, httpClient)
     private val closed = AtomicBoolean(false)
 
-    override fun onGetSize(): Long = source.open() ?: 0L
+    internal fun openSize(): Long =
+        try {
+            source.open() ?: 0L
+        } catch (failure: RangeHttpException) {
+            onHttpFailure(failure.httpStatus)
+            0L
+        }
+
+    override fun onGetSize(): Long = openSize()
 
     override fun onOpen(): Boolean = source.isOpen
 
@@ -52,15 +61,9 @@ class VlcjRangeCallbackMedia(
         private val url: String,
         private val headers: Map<String, String>,
         private val windowSize: Int,
+        private val client: OkHttpClient,
     ) : AutoCloseable {
         private val lock = Any()
-        private val client = OkHttpClient.Builder()
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(90, TimeUnit.SECONDS)
-            .build()
         private var contentLength: Long? = null
         private var cursor = 0L
         private var windowStart = -1L
@@ -75,6 +78,8 @@ class VlcjRangeCallbackMedia(
                 try {
                     fetchWindow(0L)
                     opened = true
+                } catch (failure: RangeHttpException) {
+                    throw failure
                 } catch (_: IOException) {
                     return null
                 }
@@ -216,10 +221,8 @@ class VlcjRangeCallbackMedia(
             }
         }
 
-        override fun close() {
-            client.connectionPool.evictAll()
-            client.dispatcher.executorService.shutdown()
-        }
+        // The controller-scoped transport owns the shared OkHttpClient lifecycle.
+        override fun close() = Unit
     }
 
     private companion object {
@@ -230,6 +233,44 @@ class VlcjRangeCallbackMedia(
         val FULL_OBJECT_FALLBACK_STATUS_CODES = setOf(403, 416)
     }
 }
+
+/** One reusable HTTP transport per playback controller; individual media never own its pool. */
+internal class VlcjRangeHttpTransport(
+    internal val client: OkHttpClient = newRangeHttpClient(),
+) : AutoCloseable {
+    private val closed = AtomicBoolean(false)
+
+    fun media(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        onHttpFailure: (Int) -> Unit = {},
+    ): VlcjRangeCallbackMedia {
+        check(!closed.get()) { "HTTP transport is closed" }
+        return VlcjRangeCallbackMedia(
+            url = url,
+            headers = headers,
+            onHttpFailure = onHttpFailure,
+            httpClient = client,
+        )
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        client.dispatcher.cancelAll()
+        client.connectionPool.evictAll()
+        client.dispatcher.executorService.shutdown()
+        runCatching { client.cache?.close() }
+    }
+}
+
+private fun newRangeHttpClient(): OkHttpClient =
+    OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
+        .build()
 
 private class RangeHttpException(
     val httpStatus: Int,

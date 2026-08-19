@@ -77,6 +77,7 @@ class VlcjPlaybackController(
     private val nativeLifecycleLock = Any()
     private val queue = PlaybackQueue()
     private val logger = Logger.getLogger("moe.rukamori.archivetune.desktop.playback")
+    private val rangeHttpTransport = VlcjRangeHttpTransport()
     private val _state = MutableStateFlow(PlaybackSnapshot())
     private val _events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 32)
     private val latestPositionMs = AtomicLong(0L)
@@ -584,7 +585,7 @@ class VlcjPlaybackController(
                 latestPositionMs.set(request.startPositionMs)
                 val callbackMedia =
                     if (resolved.shouldUseApplicationHttpTransport()) {
-                        VlcjRangeCallbackMedia(
+                        rangeHttpTransport.media(
                             url = resolved.uri,
                             headers = resolved.headers,
                             onHttpFailure = { httpStatus ->
@@ -1149,6 +1150,7 @@ class VlcjPlaybackController(
             runCatching { player?.controls()?.stop() }
             runCatching { player?.media()?.reset() }
             runCatching { activeCallbackMedia?.close() }
+            runCatching { rangeHttpTransport.close() }
             runCatching { player?.release() }
             runCatching { nativeLog?.release() }
             runCatching { factory?.release() }
