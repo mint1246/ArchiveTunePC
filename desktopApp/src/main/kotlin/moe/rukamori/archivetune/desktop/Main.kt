@@ -36,6 +36,7 @@ import coil3.SingletonImageLoader
 import coil3.memory.MemoryCache
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import moe.rukamori.archivetune.desktop.platform.DesktopPartyPlaybackPolicy
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
@@ -59,6 +60,14 @@ fun main() {
     val musicServices = runtime.own(DesktopMusicServices(runtime))
     val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
     val playTogether = runtime.own(PlayTogetherManager(musicServices.playback, runtime.paths.cache, runtime.logger))
+    musicServices.attachPartyPlaybackPolicyProvider {
+        val party = playTogether.state.value
+        DesktopPartyPlaybackPolicy(
+            localTransportAllowed = party.localTransportCommandsAllowed,
+            persistSpeedAndRepeat = party.persistSpeedAndRepeat,
+            persistShuffle = party.persistShuffle,
+        )
+    }
     musicServices.attachCompletedDownloadLookup(downloadServices::completedFileFor)
     val restored = runtime.settings.snapshot()
     var latestDestination = restored.lastDestination.asDesktopDestination()
@@ -116,6 +125,7 @@ fun main() {
                     { modifier, useShellDynamicBackdrop ->
                         moe.rukamori.archivetune.desktop.ui.DesktopLyricsView(
                             services = musicServices,
+                            playTogether = playTogether,
                             browse = browse,
                             modifier = modifier,
                             useShellDynamicBackdrop = useShellDynamicBackdrop,
@@ -158,7 +168,7 @@ fun main() {
                             }
                         },
                         content = { contentState, modifier ->
-                            moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(contentState, musicServices, downloadServices, runtime.paths, runtime.logger, browse, modifier)
+                            moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(contentState, musicServices, downloadServices, runtime.paths, runtime.logger, browse, playTogether, modifier)
                         },
                         playerContent = { modifier ->
                             moe.rukamori.archivetune.desktop.ui.DesktopMiniPlayer(
@@ -181,6 +191,7 @@ fun main() {
                             ) {
                                 moe.rukamori.archivetune.desktop.ui.DesktopQueuePanel(
                                     services = musicServices,
+                                    playTogether = playTogether,
                                     onClose = { showQueue = false },
                                     modifier = Modifier.fillMaxHeight().width(360.dp),
                                 )

@@ -118,4 +118,6 @@ core.*
 /SOUL.md
 /string_cleaner.py
 /.codexignore
+/.mcp-state/
+/.mcp-checkpoints/
 /android_resource_cleaner.py

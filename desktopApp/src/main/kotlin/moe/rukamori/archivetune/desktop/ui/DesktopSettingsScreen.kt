@@ -75,6 +75,8 @@ fun DesktopSettingsPanel(
     logger: Logger,
     settingsStore: DesktopSettingsStore,
     playback: PlaybackController?,
+    playbackModesEnabled: Boolean = true,
+    shuffleModeEnabled: Boolean = true,
     downloads: DesktopDownloadServices?,
     libraryFolders: List<Path>,
     onLibraryFoldersChanged: (List<Path>) -> Unit,
@@ -143,19 +145,32 @@ fun DesktopSettingsPanel(
                     val safe = (value * 4f).toInt() / 4f
                     settings = settingsStore.update { it.copy(speed = safe) }
                     scope.launch { playback?.setSpeed(safe) }
-                }, Modifier.fillMaxWidth(), valueRange = .25f..2f)
+                }, Modifier.fillMaxWidth(), enabled = playbackModesEnabled, valueRange = .25f..2f)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Repeat", modifier = Modifier.weight(1f))
                     DesktopRepeatMode.entries.forEach { mode ->
-                        TextButton(onClick = {
+                        TextButton(enabled = playbackModesEnabled, onClick = {
                             update { it.copy(repeatMode = mode) }
                             scope.launch { playback?.setRepeatMode(mode.toPlaybackMode()) }
                         }) { Text(if (settings.repeatMode == mode) "✓ ${mode.label}" else mode.label) }
                     }
                 }
-                ToggleRow("Shuffle queue by default", settings.shuffleEnabled, Icons.Rounded.Shuffle) { value ->
+                ToggleRow("Shuffle queue by default", settings.shuffleEnabled, Icons.Rounded.Shuffle, enabled = shuffleModeEnabled) { value ->
                     update { it.copy(shuffleEnabled = value) }
                     scope.launch { playback?.setShuffleEnabled(value) }
+                }
+                if (!playbackModesEnabled) {
+                    Text(
+                        "Speed and repeat are controlled by the party host while you are connected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (!shuffleModeEnabled) {
+                    Text(
+                        "Shuffle stays off while Play Together is active so every participant follows the same queue order.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -280,17 +295,23 @@ private fun SettingSlider(title: String, summary: String, icon: androidx.compose
 }
 
 @Composable
-private fun ToggleRow(title: String, checked: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector, onCheckedChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    title: String,
+    checked: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     // Expose one toggle semantics node instead of nesting a clickable row and Checkbox. The
     // latter produced two keyboard/accessibility targets that both changed the same setting.
     Row(
-        Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange),
+        Modifier.fillMaxWidth().toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onCheckedChange),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(10.dp))
         Text(title, Modifier.weight(1f))
-        Checkbox(checked, onCheckedChange = null)
+        Checkbox(checked, onCheckedChange = null, enabled = enabled)
     }
 }
 

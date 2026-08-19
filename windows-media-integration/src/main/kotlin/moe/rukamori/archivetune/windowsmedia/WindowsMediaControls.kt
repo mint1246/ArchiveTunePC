@@ -134,10 +134,12 @@ class WindowsMediaControls(
 class PlaybackMediaCommandRouter(
     private val controller: PlaybackController,
     private val seekStepMs: Long = 10_000L,
+    private val commandAllowed: () -> Boolean = { true },
 ) {
     init { require(seekStepMs > 0) }
 
     suspend fun handle(command: MediaCommand) {
+        if (!commandAllowed()) return
         when (command) {
             MediaCommand.PLAY_PAUSE -> if (controller.state.value.isPlaying) controller.pause() else controller.play()
             MediaCommand.NEXT -> controller.skipNext()

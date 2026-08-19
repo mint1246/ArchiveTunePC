@@ -62,6 +62,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -290,8 +291,10 @@ internal class DesktopBrowseController(
 }
 
 @Composable
-internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
+internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, playTogether: PlayTogetherManager, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val partyState by playTogether.state.collectAsState()
+    val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
     val accountState by services.account.state.collectAsState()
     val browseAccountScope = services.currentBrowseAccountScope()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
@@ -327,9 +330,11 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     }
     fun open(item: YTItem) {
         when (item) {
-            is SongItem -> scope.launch {
-                browse.failure = null
-                services.upNext(item.id)
+            is SongItem -> {
+                if (guestInParty) return
+                scope.launch {
+                    browse.failure = null
+                    services.upNext(item.id)
                     .onSuccess { next ->
                         val songs = next.items
                         if (songs.isEmpty()) {
@@ -357,6 +362,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                             title = "Up next",
                         )
                     }
+                }
             }
             is AlbumItem -> browse.openAlbum(item.browseId, scope)
             is ArtistItem -> browse.openArtist(item.id, scope)
@@ -372,7 +378,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
     }
     fun playQueue(songs: List<SongItem>, startIndex: Int, title: String) {
-        if (songs.isEmpty()) return
+        if (songs.isEmpty() || guestInParty) return
         scope.launch {
             services.playback.replaceQueue(
                 songs.map { toPlaybackItem(it, services.albumIndex) },
@@ -398,10 +404,25 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             }
         }
     }
-    fun playNextSong(song: SongItem) { scope.launch { services.playback.playNext(listOf(toPlaybackItem(song, services.albumIndex))) } }
-    fun enqueueSong(song: SongItem) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(song, services.albumIndex))) } }
-    fun playNextLocal(track: LocalTrack) { scope.launch { services.playback.playNext(listOf(toPlaybackItem(track))) } }
-    fun enqueueLocal(track: LocalTrack) { scope.launch { services.playback.enqueue(listOf(toPlaybackItem(track))) } }
+    fun playNextSong(song: SongItem) {
+        if (guestInParty) return
+        scope.launch { services.playback.playNext(listOf(toPlaybackItem(song, services.albumIndex))) }
+    }
+    fun enqueueSong(song: SongItem) {
+        scope.launch {
+            if (!playTogether.addToQueue(listOf(toPlaybackItem(song, services.albumIndex))) && guestInParty) {
+                browse.failure = if (partyState.canEditQueue) "Could not add this song to the shared queue." else "The party owner disabled queue editing for you."
+            }
+        }
+    }
+    fun playNextLocal(track: LocalTrack) {
+        if (partyState.mode != PartyMode.NONE) return
+        scope.launch { services.playback.playNext(listOf(toPlaybackItem(track))) }
+    }
+    fun enqueueLocal(track: LocalTrack) {
+        if (partyState.mode != PartyMode.NONE) return
+        scope.launch { services.playback.enqueue(listOf(toPlaybackItem(track))) }
+    }
     fun isLiked(song: SongItem) = homeSnapshot.likedSongs.any { it.id == song.id }
     fun setLiked(song: SongItem, liked: Boolean) {
         scope.launch {
@@ -456,7 +477,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 isLiked = ::isLiked,
                 modifier = modifier,
             )
-            moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
                 localTracks, onlinePlaylists, services.library.folders,
                 libraryLoading || remoteLibraryState.isInitialLoading || browse.loading,
@@ -467,7 +488,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onImportSpotify = { showSpotifyImport = true },
                 onCreatePlaylist = { createPlaylist() },
                 onOpenPlaylist = ::open,
-                onPlay = { selected -> scope.launch { val items = localTracks.map(::toPlaybackItem); services.playback.replaceQueue(items, localTracks.indexOf(selected).coerceAtLeast(0), title = "Local library") } },
+                onPlay = { selected -> if (partyState.mode == PartyMode.NONE) scope.launch { val items = localTracks.map(::toPlaybackItem); services.playback.replaceQueue(items, localTracks.indexOf(selected).coerceAtLeast(0), title = "Local library") } },
                 onPlayNext = ::playNextLocal,
                 onAddToQueue = ::enqueueLocal,
                 modifier,
@@ -502,6 +523,8 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 services.account,
                 settingsStore = services.settingsStore,
                 playback = services.playback,
+                playbackModesEnabled = partyState.mode != PartyMode.GUEST,
+                shuffleModeEnabled = partyState.mode == PartyMode.NONE,
                 downloads = downloadServices,
                 libraryFolders = services.library.folders,
                 onLibraryFoldersChanged = { folders ->
@@ -515,7 +538,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             page.page,
             onBack = { browse.goBack() },
             onPlay = { songs, index, title ->
-                scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
+                if (!guestInParty) scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
             },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
@@ -581,7 +604,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onOpenArtistItems = { endpoint ->
                 if (page is Detail.Artist) browse.openArtistItems(endpoint, page.page, scope)
             },
-            onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } },
+            onPlay = { songs, title, index -> if (!guestInParty) scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
             onPlayNext = ::playNextSong,
@@ -1469,6 +1492,17 @@ private fun NowPlayingSubtitle(
                                 label = { Text("Invite") },
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            partyState.participants.forEach { participant ->
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(participant.name, modifier = Modifier.weight(1f))
+                                    Text("Queue", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(8.dp))
+                                    Switch(
+                                        checked = participant.canEditQueue,
+                                        onCheckedChange = { playTogether.setGuestQueueEditing(participant.id, it) },
+                                    )
+                                }
+                            }
                         }
                         partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
                             Text(
@@ -1521,7 +1555,11 @@ private fun NowPlayingSubtitle(
                     partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> Unit
                     else -> {
                         TextButton(
-                            onClick = { scope.launch { playTogether.join(inviteInput) } },
+                            onClick = {
+                                scope.launch {
+                                    if (playTogether.join(inviteInput).isSuccess) showPartyDialog = false
+                                }
+                            },
                             enabled = inviteInput.isNotBlank(),
                         ) { Text("Join") }
                     }
@@ -1536,8 +1574,9 @@ private fun NowPlayingSubtitle(
         shape = MaterialTheme.shapes.large,
         border = dynamicGlassBorder(alpha = 0.14f),
     ) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
-        if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth())
+        val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
+        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = !guestInParty && item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
+        if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth(), enabled = !guestInParty)
     } }
 }
 
@@ -1545,11 +1584,14 @@ private fun NowPlayingSubtitle(
 @Composable
 internal fun DesktopLyricsView(
     services: DesktopMusicServices,
+    playTogether: PlayTogetherManager,
     browse: DesktopBrowseController,
     modifier: Modifier = Modifier,
     useShellDynamicBackdrop: Boolean = false,
 ) {
     val snapshot by services.playback.state.collectAsState()
+    val partyState by playTogether.state.collectAsState()
+    val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val item = snapshot.currentItem
     Surface(
@@ -1567,23 +1609,25 @@ internal fun DesktopLyricsView(
                         NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }, Modifier.fillMaxWidth())
                         NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }, modifier = Modifier.fillMaxWidth())
                     }
-                    IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
-                    FilledIconButton(onClick = { scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) {
+                    IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
+                    FilledIconButton(onClick = { scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) {
 AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) }, label = "mini-player-play-state") { playing -> Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play") }
                     }
-                    IconButton(onClick = { scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }
+                    IconButton(onClick = { scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }
                 }
                 if (item != null) {
                     Slider(
                         value = if (snapshot.durationMs > 0) (snapshot.positionMs.toFloat() / snapshot.durationMs).coerceIn(0f, 1f) else 0f,
                         onValueChange = { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                        enabled = !guestInParty,
                     )
                 }
                 DesktopLyricsPane(
                     presenter = services.lyrics,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     drawBackground = !useShellDynamicBackdrop,
+                    seekEnabled = !guestInParty,
                 )
             }
     }

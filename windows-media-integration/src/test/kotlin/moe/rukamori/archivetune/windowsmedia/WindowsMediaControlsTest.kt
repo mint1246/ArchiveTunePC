@@ -79,6 +79,16 @@ class WindowsMediaControlsTest {
         assertEquals(listOf("seek:0", "seek:14000", "next", "previous"), controller.calls)
     }
 
+    @Test
+    fun `router ignores local media commands while command gate is closed`() = runTest {
+        val controller = RecordingController(positionMs = 4_000)
+        val router = PlaybackMediaCommandRouter(controller, commandAllowed = { false })
+
+        MediaCommand.entries.forEach { router.handle(it) }
+
+        assertEquals(emptyList(), controller.calls)
+    }
+
     private class FakeHotKeys : WindowsHotKeySource {
         var starts = 0
         var closes = 0

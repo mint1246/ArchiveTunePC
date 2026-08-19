@@ -74,6 +74,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.desktop.party.PartyMode
+import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.playback.api.PlaybackQueueEntry
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
@@ -89,13 +91,16 @@ private val QueueRowHeight = 56.dp
 @Composable
 fun DesktopQueuePanel(
     services: DesktopMusicServices,
+    playTogether: PlayTogetherManager,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val snapshot by services.playback.state.collectAsState()
+    val partyState by playTogether.state.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val playback = services.playback
     val entries = snapshot.queueEntries
+    val guestInParty = partyState.isConnectedGuest
 
     Surface(
         modifier = modifier,
@@ -103,12 +108,27 @@ fun DesktopQueuePanel(
         shadowElevation = 8.dp,
     ) {
         Column(Modifier.fillMaxSize()) {
-            QueueHeader(snapshot, entries, onClose, playback)
+            QueueHeader(
+                snapshot,
+                entries,
+                onClose,
+                playback,
+                controlsEnabled = !guestInParty,
+                shuffleEnabled = partyState.mode == PartyMode.NONE,
+            )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
             if (entries.isEmpty()) {
                 EmptyQueue()
             } else {
-                QueueList(entries, snapshot, playback, scope)
+                QueueList(
+                    entries = entries,
+                    snapshot = snapshot,
+                    playback = playback,
+                    playTogether = playTogether,
+                    guestInParty = guestInParty,
+                    guestCanEditQueue = partyState.canEditQueue,
+                    scope = scope,
+                )
             }
         }
     }
@@ -120,6 +140,8 @@ private fun QueueHeader(
     entries: List<PlaybackQueueEntry>,
     onClose: () -> Unit,
     playback: moe.rukamori.archivetune.playback.api.PlaybackController,
+    controlsEnabled: Boolean,
+    shuffleEnabled: Boolean,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val totalDuration = remember(entries) { entries.sumOf { it.item.metadata.durationHintMs ?: 0L } }
@@ -138,8 +160,8 @@ private fun QueueHeader(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            ShuffleButton(enabled = snapshot.shuffleEnabled, onClick = { scope.launch { playback.setShuffleEnabled(!snapshot.shuffleEnabled) } })
-            RepeatButton(mode = snapshot.repeatMode, onClick = {
+            ShuffleButton(active = snapshot.shuffleEnabled, enabled = controlsEnabled && shuffleEnabled, onClick = { scope.launch { playback.setShuffleEnabled(!snapshot.shuffleEnabled) } })
+            RepeatButton(mode = snapshot.repeatMode, enabled = controlsEnabled, onClick = {
                 scope.launch {
                     playback.setRepeatMode(
                         when (snapshot.repeatMode) {
@@ -150,7 +172,7 @@ private fun QueueHeader(
                     )
                 }
             })
-            IconButton(onClick = { scope.launch { playback.clearQueue() } }, enabled = entries.isNotEmpty()) {
+            IconButton(onClick = { scope.launch { playback.clearQueue() } }, enabled = controlsEnabled && entries.isNotEmpty()) {
                 Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear queue")
             }
             IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Close queue") }
@@ -159,20 +181,20 @@ private fun QueueHeader(
 }
 
 @Composable
-private fun ShuffleButton(enabled: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
+private fun ShuffleButton(active: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled) {
         Icon(
             Icons.Rounded.Shuffle,
-            contentDescription = if (enabled) "Shuffle on" else "Shuffle off",
-            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            contentDescription = if (active) "Shuffle on" else "Shuffle off",
+            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
-private fun RepeatButton(mode: RepeatMode, onClick: () -> Unit) {
+private fun RepeatButton(mode: RepeatMode, enabled: Boolean, onClick: () -> Unit) {
     val active = mode != RepeatMode.OFF
-    IconButton(onClick = onClick) {
+    IconButton(onClick = onClick, enabled = enabled) {
         Icon(
             if (mode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
             contentDescription = "Repeat mode ${mode.name.lowercase()}",
@@ -197,6 +219,9 @@ private fun QueueList(
     entries: List<PlaybackQueueEntry>,
     snapshot: PlaybackSnapshot,
     playback: moe.rukamori.archivetune.playback.api.PlaybackController,
+    playTogether: PlayTogetherManager,
+    guestInParty: Boolean,
+    guestCanEditQueue: Boolean,
     scope: CoroutineScope,
 ) {
     val order = remember { mutableStateListOf<PlaybackQueueEntry>() }
@@ -225,10 +250,17 @@ private fun QueueList(
                 entry = entry,
                 snapshot = snapshot,
                 isDragging = draggedId == entry.id,
-                dragHandleEnabled = !entry.isCurrent,
+                playbackActionsEnabled = !guestInParty,
+                removeEnabled = !guestInParty || (guestCanEditQueue && !entry.isCurrent),
+                dragHandleEnabled = !guestInParty && !entry.isCurrent,
                 onRowClick = { scope.launch { playback.seekToItem(entry.logicalIndex) } },
                 onPlayNext = { scope.launch { playback.moveQueueItemToNext(entry.logicalIndex) } },
-                onRemove = { scope.launch { playback.removeQueueItem(entry.logicalIndex) } },
+                onRemove = {
+                    scope.launch {
+                        if (guestInParty) playTogether.removeFromQueue(entry.logicalIndex)
+                        else playback.removeQueueItem(entry.logicalIndex)
+                    }
+                },
                 onDragStart = {
                     draggedId = entry.id
                     dragStartIndex = index
@@ -300,6 +332,8 @@ private fun QueueRow(
     entry: PlaybackQueueEntry,
     snapshot: PlaybackSnapshot,
     isDragging: Boolean,
+    playbackActionsEnabled: Boolean,
+    removeEnabled: Boolean,
     dragHandleEnabled: Boolean,
     onRowClick: () -> Unit,
     onPlayNext: () -> Unit,
@@ -325,7 +359,10 @@ private fun QueueRow(
             .height(QueueRowHeight)
             .background(if (isDragging) MaterialTheme.colorScheme.primaryContainer else rowBackground)
             .hoverable(interactionSource)
-            .combinedClickable(onClick = onRowClick, onLongClick = { menuOpen = true }),
+            .combinedClickable(
+                onClick = { if (playbackActionsEnabled) onRowClick() },
+                onLongClick = { if (playbackActionsEnabled || removeEnabled) menuOpen = true },
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -362,26 +399,34 @@ private fun QueueRow(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "Queue item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play now") },
-                    onClick = { menuOpen = false; onRowClick() },
-                )
-                if (!isCurrent) {
-                    DropdownMenuItem(
-                        text = { Text("Play next") },
-                        onClick = { menuOpen = false; onPlayNext() },
-                    )
+        if (playbackActionsEnabled || removeEnabled) {
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "Queue item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenuItem(
-                    text = { Text("Remove from queue") },
-                    onClick = { menuOpen = false; onRemove() },
-                )
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (playbackActionsEnabled) {
+                        DropdownMenuItem(
+                            text = { Text("Play now") },
+                            onClick = { menuOpen = false; onRowClick() },
+                        )
+                    }
+                    if (playbackActionsEnabled && !isCurrent) {
+                        DropdownMenuItem(
+                            text = { Text("Play next") },
+                            onClick = { menuOpen = false; onPlayNext() },
+                        )
+                    }
+                    if (removeEnabled) {
+                        DropdownMenuItem(
+                            text = { Text("Remove from queue") },
+                            onClick = { menuOpen = false; onRemove() },
+                        )
+                    }
+                }
             }
+        } else {
+            Spacer(Modifier.width(36.dp))
         }
         if (dragHandleEnabled) {
             Icon(

@@ -166,7 +166,17 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     } else {
         null
     }
-    private val mediaCommandRouter = windowsMediaControls?.let { PlaybackMediaCommandRouter(playback) }
+    @Volatile private var partyPlaybackPolicyProvider: () -> DesktopPartyPlaybackPolicy = { DesktopPartyPlaybackPolicy() }
+    private val mediaCommandRouter = windowsMediaControls?.let {
+        PlaybackMediaCommandRouter(playback, commandAllowed = { partyPlaybackPolicy().localTransportAllowed })
+    }
+
+    internal fun attachPartyPlaybackPolicyProvider(provider: () -> DesktopPartyPlaybackPolicy) {
+        partyPlaybackPolicyProvider = provider
+    }
+
+    private fun partyPlaybackPolicy(): DesktopPartyPlaybackPolicy =
+        runCatching(partyPlaybackPolicyProvider).getOrDefault(DesktopPartyPlaybackPolicy())
 
     init {
         backend.bindSessionProvider(account)
@@ -206,12 +216,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 .drop(1)
                 .debounce(500)
                 .collect { state ->
+                    val policy = partyPlaybackPolicy()
                     settings.update {
                         it.copy(
                             volume = state.volume,
-                            speed = state.speed,
-                            repeatMode = state.repeatMode.toDesktopMode(),
-                            shuffleEnabled = state.shuffleEnabled,
+                            speed = if (policy.persistSpeedAndRepeat) state.speed else it.speed,
+                            repeatMode = if (policy.persistSpeedAndRepeat) state.repeatMode.toDesktopMode() else it.repeatMode,
+                            shuffleEnabled = if (policy.persistShuffle) state.shuffleEnabled else it.shuffleEnabled,
                         )
                     }
                 }
@@ -598,12 +609,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         val state = playback.state.value
         flushPlayHistoryCurrent(System.currentTimeMillis())
         queueStore.save(state)
+        val policy = partyPlaybackPolicy()
         settings.update {
             it.copy(
                 volume = state.volume,
-                speed = state.speed,
-                repeatMode = state.repeatMode.toDesktopMode(),
-                shuffleEnabled = state.shuffleEnabled,
+                speed = if (policy.persistSpeedAndRepeat) state.speed else it.speed,
+                repeatMode = if (policy.persistSpeedAndRepeat) state.repeatMode.toDesktopMode() else it.repeatMode,
+                shuffleEnabled = if (policy.persistShuffle) state.shuffleEnabled else it.shuffleEnabled,
             )
         }
         if (lyricsPresenter.isInitialized()) {
@@ -648,6 +660,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
 }
+
+internal data class DesktopPartyPlaybackPolicy(
+    val localTransportAllowed: Boolean = true,
+    val persistSpeedAndRepeat: Boolean = true,
+    val persistShuffle: Boolean = true,
+)
 
 private fun moe.rukamori.archivetune.desktopauth.DesktopAccount.cacheScope(): String =
     "account-${sha1(listOf(email.orEmpty(), channelHandle.orEmpty(), name).joinToString(separator = "\u0000"))}"
