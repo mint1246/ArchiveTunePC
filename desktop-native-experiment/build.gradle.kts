@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import dev.nucleusframework.desktop.application.dsl.NativeImageOptimization
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -35,6 +36,7 @@ nucleus.application {
         isEnabled.set(true)
         imageName.set("ArchiveTuneNative")
         maxHeapSize.set("768m")
+        optimization.set(NativeImageOptimization.SIZE)
         // Nucleus' static resource scanner sees native payloads for every supported platform in
         // a few dependencies. They can never be loaded by this Windows-x64 image, but Graal would
         // otherwise embed them verbatim in the executable's image heap.
