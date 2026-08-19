@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -117,6 +118,7 @@ import moe.rukamori.archivetune.innertube.pages.AlbumPage
 import moe.rukamori.archivetune.innertube.pages.ArtistItemsContinuationPage
 import moe.rukamori.archivetune.innertube.pages.ArtistItemsPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
+import moe.rukamori.archivetune.innertube.pages.ArtistSectionLayout
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.playback.api.PlaybackAlbum
 import moe.rukamori.archivetune.playback.api.PlaybackArtist
@@ -985,6 +987,7 @@ private fun SearchResults(
         error?.let { message -> item { Error(message) } }
         if (page is Detail.Artist) {
             page.page.sections.forEach { section ->
+                val sectionItems = section.items.distinctBy { it.id }
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
@@ -993,18 +996,43 @@ private fun SearchResults(
                         }
                     }
                 }
-                itemsIndexed(section.items, key = { index, item -> "${section.title}:${item::class}:${item.id}:$index" }) { _, item ->
-                    val song = item as? SongItem
-                    ResultCard(
-                        item,
-                        { onOpen(item) },
-                        song?.let { { onDownload(it) } },
-                        song?.let { { onPlayNext(it) } },
-                        song?.let { { onAddToQueue(it) } },
-                        song?.let { { onAddToPlaylist(it) } },
-                        song?.let { { liked -> onSetLiked(it, liked) } },
-                        song?.let(isLiked) == true,
-                    )
+                if (section.layout == ArtistSectionLayout.LIST && sectionItems.all { it is SongItem }) {
+                    itemsIndexed(sectionItems, key = { index, item -> "${section.title}:${item::class}:${item.id}:$index" }) { _, item ->
+                        val song = item as SongItem
+                        ResultCard(
+                            item,
+                            { onOpen(item) },
+                            { onDownload(song) },
+                            { onPlayNext(song) },
+                            { onAddToQueue(song) },
+                            { onAddToPlaylist(song) },
+                            { liked -> onSetLiked(song, liked) },
+                            isLiked(song),
+                        )
+                    }
+                } else {
+                    item {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(sectionItems, key = { item -> "${section.title}:${item::class}:${item.id}" }) { item ->
+                                val song = item as? SongItem
+                                Box(Modifier.width(280.dp)) {
+                                    ResultCard(
+                                        item,
+                                        { onOpen(item) },
+                                        song?.let { { onDownload(it) } },
+                                        song?.let { { onPlayNext(it) } },
+                                        song?.let { { onAddToQueue(it) } },
+                                        song?.let { { onAddToPlaylist(it) } },
+                                        song?.let { { liked -> onSetLiked(it, liked) } },
+                                        song?.let(isLiked) == true,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         } else {
