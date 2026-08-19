@@ -40,6 +40,63 @@ internal sealed interface DesktopBrowseRoute {
     }
 }
 
+internal class DesktopBrowsePageCache(
+    private val accountScopeProvider: () -> String,
+    private val maxPages: Int,
+) {
+    internal data class LoadToken(
+        val scopedKey: String,
+        val revision: Long,
+    ) {
+        val singleFlightKey: String = "browse:$scopedKey:r$revision"
+    }
+
+    private data class CacheEntry(val value: Any)
+
+    private val lock = Any()
+    private var nextRevision = 0L
+    private var globalRevision = 0L
+    private val routeRevisions = mutableMapOf<String, Long>()
+    private val pages = object : LinkedHashMap<String, CacheEntry>(maxPages + 1, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean = size > maxPages
+    }
+
+    init {
+        require(maxPages > 0) { "Browse cache must keep at least one page" }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun <T : Any> get(route: DesktopBrowseRoute): T? = synchronized(lock) {
+        pages[scopedKey(route)]?.value as? T
+    }
+
+    fun beginLoad(route: DesktopBrowseRoute): LoadToken = synchronized(lock) {
+        val key = scopedKey(route)
+        LoadToken(key, routeRevisions[key] ?: globalRevision)
+    }
+
+    fun putIfCurrent(token: LoadToken, value: Any) = synchronized(lock) {
+        val currentRevision = routeRevisions[token.scopedKey] ?: globalRevision
+        if (currentRevision == token.revision) pages[token.scopedKey] = CacheEntry(value)
+    }
+
+    fun invalidate(route: DesktopBrowseRoute) = synchronized(lock) {
+        val key = scopedKey(route)
+        pages.remove(key)
+        routeRevisions[key] = ++nextRevision
+    }
+
+    fun clear() = synchronized(lock) {
+        pages.clear()
+        globalRevision = ++nextRevision
+        routeRevisions.clear()
+    }
+
+    fun size(): Int = synchronized(lock) { pages.size }
+
+    private fun scopedKey(route: DesktopBrowseRoute): String = "${accountScopeProvider()}:${route.cacheId}"
+}
+
 /**
  * Bounded application-scoped cache for expensive browse/detail pages.
  *
@@ -53,17 +110,7 @@ internal class DesktopBrowseRepository(
     private val accountScopeProvider: () -> String,
     private val maxPages: Int = 24,
 ) {
-    private data class CacheEntry(val value: Any)
-
-    private val cacheLock = Any()
-    private val pages = object : LinkedHashMap<String, CacheEntry>(maxPages + 1, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean =
-            size > maxPages
-    }
-
-    init {
-        require(maxPages > 0) { "Browse cache must keep at least one page" }
-    }
+    private val cache = DesktopBrowsePageCache(accountScopeProvider, maxPages)
 
     suspend fun album(route: DesktopBrowseRoute.Album, forceRefresh: Boolean = false): Result<AlbumPage> =
         load(route, forceRefresh) { backend.album(route.browseId) }
@@ -83,24 +130,16 @@ internal class DesktopBrowseRepository(
             priority = DesktopRequestPriority.FOREGROUND,
         ) { backend.artistItemsContinuation(continuation) }
 
-    fun cachedAlbum(route: DesktopBrowseRoute.Album): AlbumPage? = cached(route)
-    fun cachedArtist(route: DesktopBrowseRoute.Artist): ArtistPage? = cached(route)
-    fun cachedPlaylist(route: DesktopBrowseRoute.Playlist): PlaylistPage? = cached(route)
-    fun cachedArtistItems(route: DesktopBrowseRoute.ArtistItems): ArtistItemsPage? = cached(route)
+    fun cachedAlbum(route: DesktopBrowseRoute.Album): AlbumPage? = cache.get(route)
+    fun cachedArtist(route: DesktopBrowseRoute.Artist): ArtistPage? = cache.get(route)
+    fun cachedPlaylist(route: DesktopBrowseRoute.Playlist): PlaylistPage? = cache.get(route)
+    fun cachedArtistItems(route: DesktopBrowseRoute.ArtistItems): ArtistItemsPage? = cache.get(route)
 
-    fun invalidate(route: DesktopBrowseRoute) {
-        synchronized(cacheLock) { pages.remove(scopedKey(route)) }
-    }
+    fun invalidate(route: DesktopBrowseRoute) = cache.invalidate(route)
 
-    fun clearAccountCache() {
-        synchronized(cacheLock) { pages.clear() }
-    }
+    fun clearAccountCache() = cache.clear()
 
-    internal fun cachedPageCount(): Int = synchronized(cacheLock) { pages.size }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun <T : Any> cached(route: DesktopBrowseRoute): T? =
-        synchronized(cacheLock) { pages[scopedKey(route)]?.value as? T }
+    internal fun cachedPageCount(): Int = cache.size()
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun <T : Any> load(
@@ -108,19 +147,16 @@ internal class DesktopBrowseRepository(
         forceRefresh: Boolean,
         request: suspend () -> Result<T>,
     ): Result<T> {
-        val key = scopedKey(route)
         if (!forceRefresh) {
-            synchronized(cacheLock) { pages[key]?.value as? T }?.let { return Result.success(it) }
+            cache.get<T>(route)?.let { return Result.success(it) }
         }
 
+        val token = cache.beginLoad(route)
         return coordinator.singleFlight(
-            key = "browse:$key",
+            key = token.singleFlightKey,
             priority = DesktopRequestPriority.FOREGROUND,
         ) { request() }.onSuccess { page ->
-            synchronized(cacheLock) { pages[key] = CacheEntry(page) }
+            cache.putIfCurrent(token, page)
         }
     }
-
-    private fun scopedKey(route: DesktopBrowseRoute): String =
-        "${accountScopeProvider()}:${route.cacheId}"
 }

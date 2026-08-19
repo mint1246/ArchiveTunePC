@@ -226,6 +226,15 @@ internal class DesktopBrowseController(
         }
     }
 
+    fun invalidatePlaylist(id: String) {
+        repository.invalidate(DesktopBrowseRoute.Playlist(id))
+    }
+
+    fun refreshPlaylist(id: String, scope: CoroutineScope) {
+        invalidatePlaylist(id)
+        openPlaylist(id, scope, forceRefresh = true)
+    }
+
     private fun <R : DesktopBrowseRoute, P : Any> open(
         route: R,
         scope: CoroutineScope,
@@ -552,6 +561,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
         is Detail.Playlist -> PlaylistDetailPage(
             page.page,
+            error = browse.failure,
             onBack = { browse.goBack() },
             onPlay = { songs, index, title ->
                 if (!guestInParty) scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
@@ -564,20 +574,20 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onSetLiked = ::setLiked,
             isLiked = ::isLiked,
             onRemoveFromPlaylist = { song ->
+                browse.failure = null
                 scope.launch {
                     services.backend.removeSongFromPlaylist(page.page.playlist.id, song)
-                        .onSuccess { browse.openPlaylist(page.page.playlist.id, scope, forceRefresh = true) }
+                        .onSuccess { browse.refreshPlaylist(page.page.playlist.id, scope) }
                         .onFailure { browse.failure = it.message ?: "Could not remove song from playlist" }
                 }
             },
             onRenamePlaylist = { name ->
                 val original = page.page.playlist
+                browse.failure = null
                 services.libraryRepository.renameCached(original.id, name)
                 scope.launch {
                     services.backend.renamePlaylist(original.id, name)
-                        .onSuccess {
-                            browse.openPlaylist(original.id, scope, forceRefresh = true)
-                        }
+                        .onSuccess { browse.refreshPlaylist(original.id, scope) }
                         .onFailure {
                             services.libraryRepository.upsertCached(original)
                             browse.failure = it.message ?: "Could not rename playlist"
@@ -586,14 +596,15 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             },
             onDeletePlaylist = {
                 val original = page.page.playlist
-                services.libraryRepository.removeCached(original.id)
-                browse.clearCurrentStack()
+                browse.failure = null
                 scope.launch {
                     services.backend.deletePlaylist(original.id)
-                        .onFailure {
-                            services.libraryRepository.upsertCached(original)
-                            browse.failure = it.message ?: "Could not delete playlist"
+                        .onSuccess {
+                            browse.invalidatePlaylist(original.id)
+                            services.libraryRepository.removeCached(original.id)
+                            browse.clearCurrentStack()
                         }
+                        .onFailure { browse.failure = it.message ?: "Could not delete playlist" }
                 }
             },
             modifier = modifier,
@@ -668,8 +679,15 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onCreate = { createPlaylist(song) },
             onAdd = { playlist ->
                 addToPlaylistSong = null
+                browse.failure = null
                 scope.launch {
                     services.backend.addSongToPlaylist(playlist.id, song.id)
+                        .onSuccess {
+                            browse.invalidatePlaylist(playlist.id)
+                            if ((browse.detail as? Detail.Playlist)?.page?.playlist?.id == playlist.id) {
+                                browse.openPlaylist(playlist.id, scope, forceRefresh = true)
+                            }
+                        }
                         .onFailure { browse.failure = it.message ?: "Could not add song to playlist" }
                 }
             },
@@ -1264,6 +1282,7 @@ internal fun playlistSongOccurrences(
 @Composable
 private fun PlaylistDetailPage(
     page: PlaylistPage,
+    error: String?,
     onBack: () -> Unit,
     onPlay: (List<SongItem>, Int, String) -> Unit,
     onDownload: (SongItem) -> Unit,
@@ -1323,6 +1342,7 @@ private fun PlaylistDetailPage(
                 }
             }
         }
+        error?.let { message -> item { Error(message) } }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Tracks", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
