@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -93,7 +92,7 @@ fun DesktopHomeSurface(
     onSetLiked: (SongItem, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val playbackState by services.playback.state.collectAsState()
+    val playbackIdentity = rememberPlaybackIdentity(services.playback)
     val accountState by services.account.state.collectAsState()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
     val remoteState by services.homeRepository.state.collectAsState()
@@ -109,7 +108,7 @@ fun DesktopHomeSurface(
     val error = remoteState.error
     val isLoadingMore = remoteState.isLoadingMore
     val feedbackHiddenItems = remoteState.feedbackHiddenItems
-    val listState = rememberLazyListState()
+    val listState = rememberPersistedLazyListState("home")
 
     LaunchedEffect(Unit) { services.homeRepository.activate() }
 
@@ -141,20 +140,33 @@ fun DesktopHomeSurface(
     }
     fun dismissLocal(item: YTItem) = services.homeStore.dismissLocalRecommendation(item)
     fun liked(song: SongItem) = homeSnapshot.likedSongs.any { it.id == song.id }
-    val sections =
+    val sections = remember(homePage?.sections, feedbackHiddenItems) {
         homePage?.sections.orEmpty()
             .map { section -> section.copy(items = section.items.filter(::visible)) }
             .filter { it.items.isNotEmpty() }
-    val heroSongs = remember(remoteQuickPicks) {
-        remoteQuickPicks?.items.orEmpty().filterIsInstance<SongItem>().distinctBy { it.id }
     }
-    val visibleHeroSongs = heroSongs.filter(::visible)
+    val visibleHeroSongs = remember(remoteQuickPicks, feedbackHiddenItems) {
+        remoteQuickPicks?.items.orEmpty()
+            .filterIsInstance<SongItem>()
+            .distinctBy { it.id }
+            .filter(::visible)
+    }
     val speedDial = homeSnapshot.speedDial
-    val localQuickPicks = localContent.quickPicks.filter(::localVisible)
-    val keepListeningSongs = localContent.keepListeningSongs.filter(::localVisible)
-    val keepListeningAlbums = localContent.keepListeningAlbums.filter(::localVisible)
-    val keepListeningArtists = localContent.keepListeningArtists.filter(::localVisible)
-    val forgottenFavorites = localContent.forgottenFavorites.filter(::localVisible)
+    val speedDialSongs = remember(speedDial) { speedDial.filterIsInstance<SongItem>().distinctBy { it.id } }
+    val localQuickPicks = remember(localContent) { localContent.quickPicks.filter(::localVisible) }
+    val keepListeningSongs = remember(localContent) { localContent.keepListeningSongs.filter(::localVisible) }
+    val keepListeningAlbums = remember(localContent) { localContent.keepListeningAlbums.filter(::localVisible) }
+    val keepListeningArtists = remember(localContent) { localContent.keepListeningArtists.filter(::localVisible) }
+    val forgottenFavorites = remember(localContent) { localContent.forgottenFavorites.filter(::localVisible) }
+    val visiblePlaylists = remember(playlists) { playlists.distinctBy { it.id } }
+    val similarContent = remember(similarRecommendations, homeSnapshot) {
+        similarRecommendations.mapNotNull { recommendation ->
+            val items = recommendation.items.filter(::localVisible)
+            items.takeIf(List<YTItem>::isNotEmpty)?.let {
+                Triple(recommendation, it, it.filterIsInstance<SongItem>().distinctBy(SongItem::id))
+            }
+        }
+    }
     fun isPinned(item: YTItem) = services.homeStore.isSpeedDialPinned(item)
     fun togglePin(item: YTItem) = services.homeStore.toggleSpeedDial(item)
     val hasContent =
@@ -168,9 +180,9 @@ fun DesktopHomeSurface(
             forgottenFavorites.isNotEmpty() ||
             similarRecommendations.isNotEmpty() ||
             speedDial.isNotEmpty()
-    val isPlaying = playbackState.isPlaying
-    val currentItemId = playbackState.currentItem?.metadata?.id
-    val currentAlbumId = playbackState.currentItem?.metadata?.album?.id
+    val isPlaying = playbackIdentity.isPlaying
+    val currentItemId = playbackIdentity.currentItemId
+    val currentAlbumId = playbackIdentity.currentAlbumId
     val accountName =
         (accountState as? DesktopAccountState.SignedIn)?.account?.name?.takeIf { it.isNotBlank() } ?: "Account"
     val accountAvatarUrl = (accountState as? DesktopAccountState.SignedIn)?.account?.avatarUrl
@@ -213,7 +225,9 @@ fun DesktopHomeSurface(
         }
 
         else -> {
-            val chips = homePage?.chips.orEmpty().filterNot { it.title.contains("podcasts", ignoreCase = true) }
+            val chips = remember(homePage?.chips) {
+                homePage?.chips.orEmpty().filterNot { it.title.contains("podcasts", ignoreCase = true) }
+            }
             val quickPicksSection = remoteQuickPicks
             LazyColumn(
                 state = listState,
@@ -295,7 +309,6 @@ fun DesktopHomeSurface(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             items(speedDial, key = { "${it::class.simpleName}:${it.id}" }) { item ->
-                                val songs = speedDial.filterIsInstance<SongItem>().distinctBy { it.id }
                                 DesktopMediaGridCard(
                                     item = item,
                                     isActive = when (item) {
@@ -307,7 +320,7 @@ fun DesktopHomeSurface(
                                     modifier = Modifier.width(160.dp),
                                     onClick = {
                                         when (item) {
-                                            is SongItem -> onPlayQueue(songs, songs.indexOf(item).coerceAtLeast(0), "Speed dial")
+                                            is SongItem -> onPlayQueue(speedDialSongs, speedDialSongs.indexOf(item).coerceAtLeast(0), "Speed dial")
                                             else -> onOpenItem(item)
                                         }
                                     },
@@ -315,7 +328,6 @@ fun DesktopHomeSurface(
                                     isPinned = isPinned(item),
                                 )
                             }
-                            val speedDialSongs = speedDial.filterIsInstance<SongItem>().distinctBy { it.id }
                             if (speedDialSongs.isNotEmpty()) {
                                 item(key = "speed_dial_random") {
                                     SpeedDialRandomTile(
@@ -400,7 +412,7 @@ fun DesktopHomeSurface(
                                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                items(playlists.distinctBy { it.id }, key = { it.id }) { playlist ->
+                                items(visiblePlaylists, key = { it.id }) { playlist ->
                                     DesktopMediaGridCard(
                                         item = playlist,
                                         isActive = false,
@@ -449,9 +461,7 @@ fun DesktopHomeSurface(
                     }
                 }
 
-                similarRecommendations.forEach { recommendation ->
-                    val visibleItems = recommendation.items.filter(::localVisible)
-                    if (visibleItems.isEmpty()) return@forEach
+                similarContent.forEach { (recommendation, visibleItems, songs) ->
                     item(key = "home_similar_header_${recommendation.title.id}") {
                         DesktopSectionHeader(
                             title = recommendation.title.title,
@@ -464,7 +474,6 @@ fun DesktopHomeSurface(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             items(visibleItems, key = { "${it::class.simpleName}:${it.id}" }) { item ->
-                                val songs = visibleItems.filterIsInstance<SongItem>().distinctBy { it.id }
                                 DesktopMediaGridCard(
                                     item = item,
                                     isActive = when (item) {

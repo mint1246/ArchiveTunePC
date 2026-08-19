@@ -646,6 +646,20 @@ Do not risk corrupting persistent state merely to save a few milliseconds.
 
 # Phase 8 - Compose/rendering smoothness audit
 
+**Status: completed 2026-08-19.**
+
+Implementation checkpoint:
+
+- Added a bounded 64-entry compact view-state LRU that stores only lazy-list `(index, offset)` coordinates, never retained Compose screens or `LazyListState` objects.
+- Restored vertical scroll position across Home, Explore, Search, Library, Downloads, albums, artists, playlists and artist "See all" pages.
+- Added a small `rememberPersistedLazyListState` adapter that snapshots position when a route/list leaves composition.
+- Home and Explore no longer collect the full playback snapshot. They subscribe to a distinct `(isPlaying, currentItemId, currentAlbumId)` identity projection, so 250 ms playback-position ticks do not recompose the large feed screens.
+- Memoized Home section visibility filtering, Quick Pick extraction, Speed Dial song extraction, playlist deduplication and similar-recommendation filtering/song queues.
+- Memoized Explore chart filtering/deduplication, Top Music Videos extraction and artist-preference new-release sorting.
+- Kept palette quantization/sorting unchanged because it already runs only on artwork cache misses rather than normal recomposition.
+- Added a focused bounded-view-state restoration test.
+- Verified with `:desktopApp:test :desktopApp:compileKotlin`.
+
 Do this after the architecture stops constantly destroying/reloading state.
 
 ## Inspect
@@ -920,7 +934,7 @@ No phase commit was made at this checkpoint because `DesktopMusicSurface.kt` alr
 - [x] phase 5 - real route/back-stack navigation (route/cache architecture + automated verification complete)
 - [x] phase 6 - request priority/concurrency cleanup (ownership/priority/auth-refresh audit complete)
 - [x] phase 7 - async/coalesced persistence (filesystem audit + hot-path fixes complete)
-- [ ] phase 8 - Compose/rendering smoothness audit
+- [x] phase 8 - Compose/rendering smoothness audit (view-state restoration + hot recomposition/allocation audit complete)
 - [ ] phase 9 - diagnostics, RAM validation, final tuning
 
 ---

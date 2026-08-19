@@ -62,7 +62,8 @@ fun DesktopDownloadsSurface(
     val downloads by services.downloads.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var message by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
-    LazyColumn(modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val listState = rememberPersistedLazyListState("downloads")
+    LazyColumn(state = listState, modifier = modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text("Downloads", style = MaterialTheme.typography.headlineMedium); Text(services.downloadDirectory.toString(), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant) }

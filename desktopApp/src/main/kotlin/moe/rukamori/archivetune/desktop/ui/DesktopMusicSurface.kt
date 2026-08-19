@@ -654,7 +654,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
 }
 
 @Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
+    val listState = rememberPersistedLazyListState("library")
     LazyColumn(
+        state = listState,
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -866,7 +868,9 @@ private fun SearchResults(
     isLiked: (SongItem) -> Boolean,
     modifier: Modifier,
 ) {
+    val listState = rememberPersistedLazyListState("search:${query.trim().lowercase(java.util.Locale.ROOT)}")
     LazyColumn(
+        state = listState,
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -932,7 +936,16 @@ private fun SearchResults(
     val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail }
     val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist" }
     val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist, is Detail.ArtistItems -> emptyList() }
+    val listState = rememberPersistedLazyListState(
+        when (page) {
+            is Detail.Album -> "detail:album:${page.page.album.browseId}"
+            is Detail.Playlist -> "detail:playlist:${page.page.playlist.id}"
+            is Detail.Artist -> "detail:artist:${page.page.artist.id}"
+            is Detail.ArtistItems -> "detail:artist-items:${page.parent.artist.id}:${page.page.title}"
+        },
+    )
     LazyColumn(
+        state = listState,
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1022,8 +1035,10 @@ private fun ArtistItemsDetailPage(
     var continuation by remember(page) { mutableStateOf(page.continuation) }
     var loadingMore by remember(page) { mutableStateOf(false) }
     var loadMoreError by remember(page) { mutableStateOf<String?>(null) }
+    val listState = rememberPersistedLazyListState("detail:artist-items:${detail.parent.artist.id}:${page.title}")
 
     LazyColumn(
+        state = listState,
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1112,8 +1127,10 @@ private fun PlaylistDetailPage(
         page.playlist.author?.name,
         page.playlist.songCountText ?: "${page.songs.size} songs",
     ).joinToString(" • ")
+    val listState = rememberPersistedLazyListState("detail:playlist:${page.playlist.id}")
 
     LazyColumn(
+        state = listState,
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
