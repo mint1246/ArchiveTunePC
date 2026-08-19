@@ -483,38 +483,42 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     }
 
     private suspend fun resolve(item: PlaybackItem): Result<ResolvedPlaybackSource> = when (val source = item.source) {
-        is PlaybackSource.Deferred -> completedDownloadLookup?.invoke(source.key)?.let { path ->
-            Result.success(ResolvedPlaybackSource(path.toUri().toASCIIString()))
-        } ?: cachedSourceFor(source.key)?.let { Result.success(it) }
-            ?: backend.resolveAudioStreamWithMetadataFallback(
-                videoId = source.key,
-                title = item.metadata.title,
-                artistNames = item.metadata.artists.map { it.name },
-                albumTitle = item.metadata.album?.title,
-                durationHintMs = item.metadata.durationHintMs,
-            ).fold(
-                onSuccess = {
-                    runtime.logger.info(
-                        "stream_resolution event=resolved videoId=${source.key} resolvedVideoId=${it.videoId} client=${it.clientKey} " +
-                            "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
-                            "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
+        is PlaybackSource.Deferred -> resolveDeferredPreferCompletedDownload(
+            item = item,
+            completedDownloadLookup = completedDownloadLookup,
+        ) {
+            cachedSourceFor(source.key)?.let { Result.success(it) }
+                ?: backend.resolveAudioStreamWithMetadataFallback(
+                    videoId = source.key,
+                    title = item.metadata.title,
+                    artistNames = item.metadata.artists.map { it.name },
+                    albumTitle = item.metadata.album?.title,
+                    durationHintMs = item.metadata.durationHintMs,
+                )
+                    .fold(
+                        onSuccess = {
+                            runtime.logger.info(
+                                "stream_resolution event=resolved videoId=${source.key} resolvedVideoId=${it.videoId} client=${it.clientKey} " +
+                                    "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
+                                    "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
+                            )
+                            val resolved = ResolvedPlaybackSource(it.url, it.mimeType, it.requestHeaders, it.expiresAtEpochMillis)
+                            cacheSource(
+                                key = source.key,
+                                source = resolved,
+                                resolvedVideoId = it.videoId,
+                                streamClientKey = it.clientKey,
+                                streamAuthFingerprint = it.authFingerprint,
+                            )
+                            Result.success(resolved)
+                        },
+                        onFailure = { failure ->
+                            val classification = classifyStreamResolutionFailure(failure)
+                            runtime.logger.warning("stream_resolution event=player_handoff result=${classification.name}")
+                            Result.failure(DesktopStreamResolutionException(classification, failure))
+                        },
                     )
-                    val resolved = ResolvedPlaybackSource(it.url, it.mimeType, it.requestHeaders, it.expiresAtEpochMillis)
-                    cacheSource(
-                        key = source.key,
-                        source = resolved,
-                        resolvedVideoId = it.videoId,
-                        streamClientKey = it.clientKey,
-                        streamAuthFingerprint = it.authFingerprint,
-                    )
-                    Result.success(resolved)
-                },
-                onFailure = { failure ->
-                    val classification = classifyStreamResolutionFailure(failure)
-                    runtime.logger.warning("stream_resolution event=player_handoff result=${classification.name}")
-                    Result.failure(DesktopStreamResolutionException(classification, failure))
-                },
-            )
+        }
         is PlaybackSource.Remote, is PlaybackSource.LocalFile -> DesktopConcretePlaybackSourceResolver.resolve(item)
     }
 
@@ -668,6 +672,28 @@ internal data class DesktopPartyPlaybackPolicy(
     val persistSpeedAndRepeat: Boolean = true,
     val persistShuffle: Boolean = true,
 )
+
+/**
+ * Resolves a completed download through the normal LocalFile path before touching any signed-stream
+ * fallback. The lookup already filters stale journal entries, but validation here also covers a file
+ * disappearing between journal lookup and playback without turning a recoverable cache miss into a
+ * player error.
+ */
+internal suspend fun resolveDeferredPreferCompletedDownload(
+    item: PlaybackItem,
+    completedDownloadLookup: ((String) -> Path?)?,
+    fallback: suspend () -> Result<ResolvedPlaybackSource>,
+): Result<ResolvedPlaybackSource> {
+    val deferred = item.source as? PlaybackSource.Deferred ?: return fallback()
+    val completedPath = runCatching { completedDownloadLookup?.invoke(deferred.key) }.getOrNull()
+    if (completedPath != null) {
+        val localResult = DesktopConcretePlaybackSourceResolver.resolve(
+            item.copy(source = PlaybackSource.LocalFile(completedPath.toString())),
+        )
+        if (localResult.isSuccess) return localResult
+    }
+    return fallback()
+}
 
 private fun moe.rukamori.archivetune.desktopauth.DesktopAccount.cacheScope(): String =
     "account-${sha1(listOf(email.orEmpty(), channelHandle.orEmpty(), name).joinToString(separator = "\u0000"))}"
