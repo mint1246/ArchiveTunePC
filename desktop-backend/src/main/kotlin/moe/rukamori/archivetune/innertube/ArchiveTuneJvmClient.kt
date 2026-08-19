@@ -217,9 +217,10 @@ class ArchiveTuneJvmClient(
         }
 
     /**
-     * Some YouTube Music artist responses expose only a fixed Albums carousel and no "more"
-     * endpoint, even while songs still point at additional valid album browse IDs. Recover those
-     * full albums from the artist's song search so desktop does not silently hide them.
+     * Some YouTube Music artist responses expose an incomplete Albums carousel even when the
+     * carousel has a valid "more" endpoint. Songs can still point at additional valid album browse
+     * IDs, so recover those full albums from the artist's song search instead of trusting the
+     * carousel to be exhaustive.
      */
     private suspend fun recoverUnlistedArtistAlbums(page: ArtistPage): ArtistPage {
         val albumSectionIndex = page.sections.indexOfFirst { section ->
@@ -228,7 +229,6 @@ class ArchiveTuneJvmClient(
         if (albumSectionIndex < 0) return page
 
         val albumSection = page.sections[albumSectionIndex]
-        if (albumSection.moreEndpoint != null) return page
 
         val knownAlbumIds =
             page.sections
