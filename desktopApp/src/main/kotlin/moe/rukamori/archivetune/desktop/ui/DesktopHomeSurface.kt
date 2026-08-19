@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -44,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -98,6 +100,15 @@ fun DesktopHomeSurface(
     val remoteState by services.homeRepository.state.collectAsState()
     val similarRecommendations by services.similarRecommendations.collectAsState()
     val scope = rememberCoroutineScope()
+    val feedback = remember(services) {
+        HomeNotInterestedFeedback(
+            sendRemoteFeedback = services.backend::sendNotInterestedFeedback,
+            hideRemoteItem = services.homeRepository::hideRemoteItem,
+            dismissLocalItem = services.homeStore::dismissLocalRecommendation,
+            restoreLocalItem = services.homeStore::restoreLocalRecommendation,
+        )
+    }
+    val feedbackNotice by feedback.notice.collectAsState()
     val localContent = remember(homeSnapshot) { computeLocalHomeContent(homeSnapshot) }
 
     val homePage = remoteState.homePage
@@ -133,12 +144,10 @@ fun DesktopHomeSurface(
     fun dismiss(item: YTItem) {
         if (item.feedbackToken.isNullOrBlank()) return
         scope.launch {
-            services.backend.sendNotInterestedFeedback(item).onSuccess {
-                services.homeRepository.hideRemoteItem(item)
-            }
+            feedback.dismissRemote(item)
         }
     }
-    fun dismissLocal(item: YTItem) = services.homeStore.dismissLocalRecommendation(item)
+    fun dismissLocal(item: YTItem) = feedback.dismissLocal(item)
     fun liked(song: SongItem) = homeSnapshot.likedSongs.any { it.id == song.id }
     val sections = remember(homePage?.sections, feedbackHiddenItems) {
         homePage?.sections.orEmpty()
@@ -187,9 +196,10 @@ fun DesktopHomeSurface(
         (accountState as? DesktopAccountState.SignedIn)?.account?.name?.takeIf { it.isNotBlank() } ?: "Account"
     val accountAvatarUrl = (accountState as? DesktopAccountState.SignedIn)?.account?.avatarUrl
 
-    when {
+    Box(modifier.fillMaxSize()) {
+        when {
         isLoading && !hasContent -> {
-            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                     CircularProgressIndicator()
                 }
@@ -197,7 +207,7 @@ fun DesktopHomeSurface(
         }
 
         error != null && !hasContent -> {
-            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                     Text(
                         text = error.orEmpty(),
@@ -212,7 +222,7 @@ fun DesktopHomeSurface(
         }
 
         !hasContent -> {
-            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                     Text(
                         text = "No results found.",
@@ -231,7 +241,7 @@ fun DesktopHomeSurface(
             val quickPicksSection = remoteQuickPicks
             LazyColumn(
                 state = listState,
-                modifier = modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -533,8 +543,51 @@ fun DesktopHomeSurface(
                 }
             }
         }
+        }
+
+        feedbackNotice?.let { notice ->
+            HomeFeedbackNoticeBar(
+                notice = notice,
+                onAction = {
+                    when (notice) {
+                        is HomeFeedbackNotice.RemoteFailure -> scope.launch { feedback.retryRemoteFailure() }
+                        is HomeFeedbackNotice.LocalDismissed -> feedback.undoLocalDismissal()
+                    }
+                },
+                onDismiss = feedback::clearNotice,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
     }
 }
+
+@Composable
+private fun HomeFeedbackNoticeBar(
+    notice: HomeFeedbackNotice,
+    onAction: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.widthIn(max = 680.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shadowElevation = 6.dp,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(notice.message, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onAction) {
+                Text(if (notice is HomeFeedbackNotice.RemoteFailure) "Retry" else "Undo")
+            }
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
+        }
+    }
+}
+
 @Composable
 private fun HomeCategoryChips(
     chips: List<HomePage.Chip>,

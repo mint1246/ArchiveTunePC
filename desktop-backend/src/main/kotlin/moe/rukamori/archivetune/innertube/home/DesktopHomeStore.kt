@@ -139,6 +139,12 @@ class DesktopHomeStore(
         )
     }
 
+    fun restoreLocalRecommendation(item: YTItem) = update { current ->
+        current.copy(
+            dismissedLocalRecommendations = current.dismissedLocalRecommendations - homeItemKey(item),
+        )
+    }
+
     fun isLocalRecommendationDismissed(item: YTItem): Boolean =
         homeItemKey(item) in _snapshot.value.dismissedLocalRecommendations
 

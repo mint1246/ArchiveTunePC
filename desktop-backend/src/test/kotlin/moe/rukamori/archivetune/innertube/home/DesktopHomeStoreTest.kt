@@ -14,6 +14,7 @@ import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -182,6 +183,24 @@ class DesktopHomeStoreTest {
         store.setArtistSubscribed(artist, false)
         assertTrue(store.snapshot.value.likedSongs.isEmpty())
         assertTrue(store.snapshot.value.subscribedArtists.isEmpty())
+    }
+
+    @Test
+    fun `local recommendation dismissal and undo both persist`() {
+        val dir = Files.createTempDirectory("archivetune-home-store")
+        val file = dir.resolve("home-store.json")
+        val song = SongItem(id = "dismiss-me", title = "Dismiss me", artists = emptyList(), thumbnail = "t")
+        val store = DesktopHomeStore(file)
+
+        store.dismissLocalRecommendation(song)
+
+        assertTrue(store.isLocalRecommendationDismissed(song))
+        assertTrue(DesktopHomeStore(file).isLocalRecommendationDismissed(song))
+
+        store.restoreLocalRecommendation(song)
+
+        assertFalse(store.isLocalRecommendationDismissed(song))
+        assertFalse(DesktopHomeStore(file).isLocalRecommendationDismissed(song))
     }
 
     @Test
