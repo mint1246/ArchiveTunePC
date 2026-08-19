@@ -167,7 +167,7 @@ $product = @"
              Compressed="yes"
              InstallScope="perUser"
              Platform="x64" />
-    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
 
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="ARPCONTACT" Value="ArchiveTune" />
