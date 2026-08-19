@@ -46,6 +46,7 @@ import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import moe.rukamori.archivetune.playback.desktop.PlaybackQueueStore
 import moe.rukamori.archivetune.windowsmedia.PlaybackMediaCommandRouter
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
+import moe.rukamori.archivetune.windowsmedia.windowsMediaUpdateKey
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -54,6 +55,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -249,7 +251,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         windowsMediaControls?.let { controls ->
             controls.start()
             runtime.applicationScope.launch {
-                playback.state.collect(controls::update)
+                playback.state
+                    .distinctUntilChangedBy { it.windowsMediaUpdateKey() }
+                    .collect(controls::update)
             }
             runtime.applicationScope.launch {
                 controls.commands.collect { command -> mediaCommandRouter?.handle(command) }

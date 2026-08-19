@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import moe.rukamori.archivetune.playback.api.PlaybackController
+import moe.rukamori.archivetune.playback.api.PlaybackMetadata
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -36,6 +37,27 @@ data class WindowsMediaPresentation(
     val positionMs: Long,
     val durationMs: Long,
 )
+
+/** Fields that can actually change the retained/native media-control presentation. */
+data class WindowsMediaUpdateKey(
+    val metadata: PlaybackMetadata?,
+    val isPlaying: Boolean,
+    val durationMs: Long,
+    val hasPreviousItem: Boolean,
+    val hasNextItem: Boolean,
+    val volume: Float,
+)
+
+/** Deliberately excludes position so the 20 Hz playback clock does not fan out into OS updates. */
+fun PlaybackSnapshot.windowsMediaUpdateKey(): WindowsMediaUpdateKey =
+    WindowsMediaUpdateKey(
+        metadata = currentItem?.metadata,
+        isPlaying = isPlaying,
+        durationMs = durationMs.coerceAtLeast(0L),
+        hasPreviousItem = hasPreviousItem,
+        hasNextItem = hasNextItem,
+        volume = volume,
+    )
 
 enum class WindowsMediaAvailability {
     NOT_STARTED,

@@ -17,11 +17,41 @@ import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.RepeatMode
+import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class WindowsMediaControlsTest {
+    @Test
+    fun `position ticks share one windows media update key`() {
+        val base = presentationSnapshot()
+        val tenSecondsOfTicks = List(200) { tick -> base.copy(positionMs = tick * 50L) }
+
+        assertEquals(1, tenSecondsOfTicks.map(PlaybackSnapshot::windowsMediaUpdateKey).distinct().size)
+    }
+
+    @Test
+    fun `presentation relevant playback changes produce new update keys`() {
+        val base = presentationSnapshot()
+        val baseKey = base.windowsMediaUpdateKey()
+
+        assertNotEquals(baseKey, base.copy(playWhenReady = false).windowsMediaUpdateKey())
+        assertNotEquals(
+            baseKey,
+            base.copy(
+                queue = listOf(
+                    base.currentItem!!.copy(metadata = base.currentItem!!.metadata.copy(title = "Changed title")),
+                ),
+            ).windowsMediaUpdateKey(),
+        )
+        assertNotEquals(baseKey, base.copy(hasNextItem = true).windowsMediaUpdateKey())
+        assertNotEquals(baseKey, base.copy(hasPreviousItem = true).windowsMediaUpdateKey())
+        assertNotEquals(baseKey, base.copy(volume = 0.5f).windowsMediaUpdateKey())
+        assertNotEquals(baseKey, base.copy(durationMs = base.durationMs + 1_000L).windowsMediaUpdateKey())
+    }
+
     @Test
     fun `metadata is sanitized and no item falls back cleanly`() {
         val controls = WindowsMediaControls(FakeHotKeys())
@@ -100,6 +130,27 @@ class WindowsMediaControlsTest {
         }
         fun emit(command: MediaCommand) = callback?.invoke(command)
     }
+
+    private fun presentationSnapshot(): PlaybackSnapshot =
+        PlaybackSnapshot(
+            queue = listOf(
+                PlaybackItem(
+                    PlaybackMetadata(
+                        id = "id",
+                        title = "Title",
+                        artists = listOf(PlaybackArtist(name = "Artist")),
+                        album = PlaybackAlbum(title = "Album"),
+                        durationHintMs = 180_000L,
+                    ),
+                ),
+            ),
+            currentIndex = 0,
+            status = PlaybackStatus.READY,
+            playWhenReady = true,
+            positionMs = 5_000L,
+            durationMs = 180_000L,
+            volume = 1f,
+        )
 
     private class RecordingController(positionMs: Long) : PlaybackController {
         override val state: StateFlow<PlaybackSnapshot> = MutableStateFlow(PlaybackSnapshot(positionMs = positionMs))
