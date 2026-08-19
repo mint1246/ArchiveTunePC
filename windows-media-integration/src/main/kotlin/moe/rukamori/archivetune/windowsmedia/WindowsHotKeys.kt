@@ -18,6 +18,65 @@ fun interface WindowsHotKeySource {
     fun start(onCommand: (MediaCommand) -> Unit): AutoCloseable
 }
 
+internal data class WindowsHotKeyBinding(
+    val id: Int,
+    val virtualKey: Int,
+    val command: MediaCommand,
+)
+
+internal interface WindowsHotKeyRegistrationApi {
+    fun register(id: Int, virtualKey: Int): Boolean
+    fun unregister(id: Int)
+}
+
+/** Owns only registrations which Windows actually granted to this process. */
+internal class WindowsHotKeyRegistrations(
+    private val api: WindowsHotKeyRegistrationApi,
+) : AutoCloseable {
+    private val owned = linkedMapOf<Int, MediaCommand>()
+
+    fun register(bindings: List<WindowsHotKeyBinding>): Map<Int, MediaCommand> {
+        check(owned.isEmpty()) { "Windows hot keys are already registered" }
+        try {
+            bindings.forEach { binding ->
+                if (api.register(binding.id, binding.virtualKey)) {
+                    owned[binding.id] = binding.command
+                }
+            }
+            if (owned.isEmpty()) {
+                throw UnsupportedOperationException("No Windows media keys could be registered")
+            }
+            return owned.toMap()
+        } catch (failure: Throwable) {
+            runCatching { close() }.onFailure(failure::addSuppressed)
+            throw failure
+        }
+    }
+
+    override fun close() {
+        val registrations = owned.keys.toList()
+        owned.clear()
+        var firstFailure: Throwable? = null
+        registrations.forEach { id ->
+            try {
+                api.unregister(id)
+            } catch (failure: Throwable) {
+                if (firstFailure == null) firstFailure = failure else firstFailure.addSuppressed(failure)
+            }
+        }
+        firstFailure?.let { throw it }
+    }
+}
+
+private object JnaWindowsHotKeyRegistrationApi : WindowsHotKeyRegistrationApi {
+    override fun register(id: Int, virtualKey: Int): Boolean =
+        User32.INSTANCE.RegisterHotKey(null, id, 0, virtualKey)
+
+    override fun unregister(id: Int) {
+        User32.INSTANCE.UnregisterHotKey(null, id)
+    }
+}
+
 /**
  * Captures the Windows virtual media keys using RegisterHotKey and a dedicated message queue.
  * Windows may reserve a key for another app; unavailable keys are simply not registered.
@@ -33,10 +92,11 @@ class JnaWindowsHotKeySource : WindowsHotKeySource {
         private val stopped = CountDownLatch(1)
         @Volatile private var threadId = 0
         @Volatile private var closed = false
-        private val bindings = linkedMapOf(
-            1 to MediaCommand.PLAY_PAUSE,
-            2 to MediaCommand.NEXT,
-            3 to MediaCommand.PREVIOUS,
+        @Volatile private var startupFailure: Throwable? = null
+        private val bindings = listOf(
+            WindowsHotKeyBinding(1, 0xB3, MediaCommand.PLAY_PAUSE), // VK_MEDIA_PLAY_PAUSE
+            WindowsHotKeyBinding(2, 0xB0, MediaCommand.NEXT), // VK_MEDIA_NEXT_TRACK
+            WindowsHotKeyBinding(3, 0xB1, MediaCommand.PREVIOUS), // VK_MEDIA_PREV_TRACK
         )
         private val thread = Thread(::runLoop, "archive-tune-win-media-keys").apply {
             isDaemon = true
@@ -48,30 +108,34 @@ class JnaWindowsHotKeySource : WindowsHotKeySource {
                 close()
                 throw UnsupportedOperationException("Windows media-key loop did not start")
             }
+            startupFailure?.let { failure ->
+                close()
+                if (failure is UnsupportedOperationException) throw failure
+                throw UnsupportedOperationException("Windows media-key registration failed", failure)
+            }
         }
 
         private fun runLoop() {
             threadId = Kernel32.INSTANCE.GetCurrentThreadId()
-            bindings.forEach { (id, command) ->
-                val virtualKey = when (command) {
-                    MediaCommand.PLAY_PAUSE -> 0xB3 // VK_MEDIA_PLAY_PAUSE
-                    MediaCommand.NEXT -> 0xB0 // VK_MEDIA_NEXT_TRACK
-                    MediaCommand.PREVIOUS -> 0xB1 // VK_MEDIA_PREV_TRACK
-                    else -> error("No Windows virtual key")
-                }
-                User32.INSTANCE.RegisterHotKey(null, id, 0, virtualKey)
-            }
-            started.countDown()
+            val registrations = WindowsHotKeyRegistrations(JnaWindowsHotKeyRegistrationApi)
             try {
+                val activeBindings = registrations.register(bindings)
+                started.countDown()
                 val message = WinUser.MSG()
                 while (User32.INSTANCE.GetMessage(message, null, 0, 0) > 0) {
                     if (message.message == WinUser.WM_HOTKEY) {
-                        bindings[message.wParam.toInt()]?.let(onCommand)
+                        activeBindings[message.wParam.toInt()]?.let(onCommand)
                     }
                 }
+            } catch (failure: Throwable) {
+                startupFailure = failure
+                started.countDown()
             } finally {
-                bindings.keys.forEach { User32.INSTANCE.UnregisterHotKey(null, it) }
-                stopped.countDown()
+                try {
+                    registrations.close()
+                } finally {
+                    stopped.countDown()
+                }
             }
         }
 
