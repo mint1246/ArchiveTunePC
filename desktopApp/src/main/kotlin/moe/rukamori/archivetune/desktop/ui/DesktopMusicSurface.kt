@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -680,8 +681,38 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     }
 }
 
+internal data class LocalLibraryFilterResult(
+    val playlists: List<PlaylistItem>,
+    val tracks: List<LocalTrack>,
+)
+
+internal fun filterLocalLibrary(
+    playlists: List<PlaylistItem>,
+    tracks: List<LocalTrack>,
+    query: String,
+): LocalLibraryFilterResult {
+    val trimmedQuery = query.trim()
+    if (trimmedQuery.isEmpty()) return LocalLibraryFilterResult(playlists, tracks)
+    return LocalLibraryFilterResult(
+        playlists = playlists.filter { playlist ->
+            playlist.title.contains(trimmedQuery, ignoreCase = true) ||
+                playlist.author?.name?.contains(trimmedQuery, ignoreCase = true) == true
+        },
+        tracks = tracks.filter { track ->
+            track.title.contains(trimmedQuery, ignoreCase = true) ||
+                track.artist.contains(trimmedQuery, ignoreCase = true) ||
+                track.album?.contains(trimmedQuery, ignoreCase = true) == true
+        },
+    )
+}
+
 @Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
     val listState = rememberPersistedLazyListState("library")
+    var filterQuery by remember { mutableStateOf("") }
+    val filtered = remember(onlinePlaylists, tracks, filterQuery) {
+        filterLocalLibrary(onlinePlaylists, tracks, filterQuery)
+    }
+    val filtering = filterQuery.isNotBlank()
     LazyColumn(
         state = listState,
         modifier = modifier,
@@ -689,8 +720,31 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
+            OutlinedTextField(
+                value = filterQuery,
+                onValueChange = { filterQuery = it },
+                modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(),
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                label = { Text("Filter library") },
+                placeholder = { Text("Playlists, artists, albums, tracks") },
+            )
+        }
+        if (filtering && filtered.playlists.isEmpty() && filtered.tracks.isEmpty()) {
+            item {
+                Text(
+                    "No playlists or local tracks match “${filterQuery.trim()}”.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("YouTube Music playlists", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                Text(
+                    if (filtering) "YouTube Music playlists • ${filtered.playlists.size} of ${onlinePlaylists.size}" else "YouTube Music playlists",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.weight(1f),
+                )
                 OutlinedButton(onClick = onCreatePlaylist, enabled = spotifyImportEnabled) { Text("Create playlist") }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = onImportSpotify, enabled = spotifyImportEnabled) { Text("Import Spotify") }
@@ -698,15 +752,24 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
         if (onlinePlaylists.isEmpty()) {
             item { Text("No signed-in playlists found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        } else if (filtered.playlists.isEmpty()) {
+            item { Text("No playlists match this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else {
-            items(onlinePlaylists, key = { it.id }) { playlist -> ResultCard(playlist, { onOpenPlaylist(playlist) }) }
+            items(filtered.playlists, key = { it.id }) { playlist -> ResultCard(playlist, { onOpenPlaylist(playlist) }) }
         }
         item {
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Local library", style = MaterialTheme.typography.headlineMedium)
-                    Text(if (folders.isEmpty()) "Choose a music folder to begin." else "${tracks.size} tracks from ${folders.size} folder${if (folders.size == 1) "" else "s"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        when {
+                            folders.isEmpty() -> "Choose a music folder to begin."
+                            filtering -> "${filtered.tracks.size} of ${tracks.size} tracks from ${folders.size} folder${if (folders.size == 1) "" else "s"}"
+                            else -> "${tracks.size} tracks from ${folders.size} folder${if (folders.size == 1) "" else "s"}"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 androidx.compose.material3.Button(onClick = onAddFolder) { Text("Add folder") }
                 Spacer(Modifier.width(8.dp))
@@ -722,7 +785,10 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             ) { Loading() }
         }
         error?.let { message -> item { Error(message) } }
-        items(tracks, key = { it.id }) { track ->
+        if (tracks.isNotEmpty() && filtered.tracks.isEmpty() && filtering) {
+            item { Text("No local tracks match this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        items(filtered.tracks, key = { it.id }) { track ->
             Card(Modifier.fillMaxWidth().clickable { onPlay(track) }) {
                 Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(54.dp).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.MusicNote, "Track artwork unavailable") }
