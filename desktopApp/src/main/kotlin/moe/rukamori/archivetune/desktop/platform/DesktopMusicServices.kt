@@ -22,7 +22,11 @@ import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
 import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
+import moe.rukamori.archivetune.innertube.cache.DesktopRequestPriority
+import moe.rukamori.archivetune.innertube.cache.DesktopResourceCoordinator
+import moe.rukamori.archivetune.innertube.home.DesktopHomeRepository
 import moe.rukamori.archivetune.innertube.home.DesktopHomeStore
+import moe.rukamori.archivetune.innertube.home.DesktopLibraryRepository
 import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
 import moe.rukamori.archivetune.innertube.home.DesktopSimilarRecommendation
 import moe.rukamori.archivetune.innertube.home.quickPickSeedIds
@@ -57,6 +61,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 
 /** The small desktop-only seam between ArchiveTune's backend and the native playback engine. */
 class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable {
@@ -70,6 +75,25 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         verifier = ArchiveTuneSessionVerifier(backend),
         interactiveLoginSource = managedYouTubeBrowser,
         cookieRefresher = managedYouTubeBrowser,
+    )
+    val contentCoordinator = DesktopResourceCoordinator(
+        cacheDirectory = runtime.paths.cache.resolve("content"),
+        maxMemoryEntries = 32,
+        maxBackgroundRequests = 2,
+        diagnostic = runtime.logger::info,
+    )
+    val libraryRepository = DesktopLibraryRepository(
+        backend = backend,
+        coordinator = contentCoordinator,
+        scope = runtime.applicationScope,
+        accountScopeProvider = ::accountCacheScope,
+    )
+    val homeRepository = DesktopHomeRepository(
+        backend = backend,
+        coordinator = contentCoordinator,
+        libraryRepository = libraryRepository,
+        scope = runtime.applicationScope,
+        accountScopeProvider = ::accountCacheScope,
     )
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
     /** Signed sources live only in memory and are discarded before their server expiry. */
@@ -89,14 +113,18 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     val lyrics: DesktopLyricsPresenter
         get() = lyricsPresenter.value
     private val legacyLibraryFile = runtime.paths.data.resolve("local-library.properties")
-    val library = DesktopLibrary(legacyLibraryFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
+    private val localLibraryIndexFile = runtime.paths.data.resolve("local-library-index.properties")
+    val library = DesktopLibrary(localLibraryIndexFile, folderStore = SettingsFolderStore(settings, legacyLibraryFile))
     private val spotifyPlaylistImporter =
         DesktopSpotifyPlaylistImporter(
             backend = backend,
             diagnostic = runtime.logger::info,
         )
     /** Account-scoped personalization data for the Home surface (synced + recorded locally). */
-    val homeStore = DesktopHomeStore(runtime.paths.data.resolve("home-store.json"))
+    val homeStore = DesktopHomeStore(
+        runtime.paths.data.resolve("home-store.json"),
+        asyncPersistence = true,
+    )
     /** Song→album knowledge for backfilling album links on tracks served without album metadata. */
     val albumIndex = DesktopAlbumIndex(runtime.paths.data.resolve("album-index.json"))
     private val _similarRecommendations = MutableStateFlow<List<DesktopSimilarRecommendation>>(emptyList())
@@ -130,6 +158,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         }
         startPlayHistoryRecorder()
         startHomeSyncObserver()
+        if (library.folders.isNotEmpty()) {
+            runtime.applicationScope.launch(Dispatchers.IO) {
+                contentCoordinator.singleFlight("local-library-scan", DesktopRequestPriority.MAINTENANCE) {
+                    runCatching { library.rescan() }
+                }
+            }
+        }
         val restored = settings.snapshot()
         runtime.applicationScope.launch {
             playback.setVolume(restored.volume)
@@ -283,17 +318,53 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 .map { state -> (state as? DesktopAccountState.SignedIn)?.account }
                 .distinctUntilChanged()
                 .collectLatest { signedInAccount ->
-                if (signedInAccount != null) {
-                    syncHomeLibrary()
-                    runtime.applicationScope.launch { warmQuickPickRelatedCache() }
-                    loadSimilarRecommendations()
-                } else {
-                    homeStore.clearAccountData()
-                    _similarRecommendations.value = emptyList()
-                }
+                    libraryRepository.onAccountScopeChanged()
+                    homeRepository.onAccountScopeChanged()
+                    if (signedInAccount != null) {
+                        // Restore persistent Home/Library state immediately. Network refreshes can
+                        // then happen behind already-renderable cached content.
+                        runtime.applicationScope.launch(Dispatchers.IO) { homeRepository.activate() }
+                        runtime.applicationScope.launch(Dispatchers.IO) { libraryRepository.activate() }
+
+                        // Keep Android-style personalization sync out of the visible startup path.
+                        delay(BACKGROUND_MAINTENANCE_START_DELAY_MS)
+                        runtime.applicationScope.launch(Dispatchers.IO) {
+                            contentCoordinator.singleFlight(
+                                "home-library-sync:${accountCacheScope()}",
+                                DesktopRequestPriority.MAINTENANCE,
+                            ) {
+                                runCatching {
+                                    syncHomeLibrary()
+                                    Unit
+                                }
+                            }
+                        }
+                        runtime.applicationScope.launch(Dispatchers.IO) {
+                            contentCoordinator.singleFlight(
+                                "home-recommendation-maintenance:${accountCacheScope()}",
+                                DesktopRequestPriority.MAINTENANCE,
+                            ) {
+                                runCatching {
+                                    warmQuickPickRelatedCache()
+                                    loadSimilarRecommendations()
+                                    Unit
+                                }
+                            }
+                        }
+                    } else {
+                        homeStore.clearAccountData()
+                        _similarRecommendations.value = emptyList()
+                    }
             }
         }
     }
+
+    private fun accountCacheScope(): String =
+        when (val state = account.state.value) {
+            is DesktopAccountState.SignedIn -> state.account.cacheScope()
+            is DesktopAccountState.Expired -> state.account?.cacheScope() ?: "signed-out"
+            else -> "signed-out"
+        }
 
     private fun startPlayHistoryRecorder() {
         runtime.applicationScope.launch {
@@ -485,6 +556,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             lyricsScope.value.cancel()
         }
         windowsMediaControls?.close()
+        homeStore.close()
         albumIndex.close()
         playback.close()
         resolvedSourceCache.clear()
@@ -517,9 +589,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         const val POSITION_BUCKET_MS = 5_000L
         const val MIN_PLAY_HISTORY_EVENT_MS = 5_000L
         const val MAX_PLAY_HISTORY_EVENT_MS = 1_800_000L
+        const val BACKGROUND_MAINTENANCE_START_DELAY_MS = 1_500L
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
 }
+
+private fun moe.rukamori.archivetune.desktopauth.DesktopAccount.cacheScope(): String =
+    "account-${sha1(listOf(email.orEmpty(), channelHandle.orEmpty(), name).joinToString(separator = "\u0000"))}"
 
 private data class PlaybackPreferences(
     val volume: Float,

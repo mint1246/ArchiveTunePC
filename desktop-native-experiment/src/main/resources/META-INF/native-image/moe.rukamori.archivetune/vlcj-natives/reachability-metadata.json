@@ -1,0 +1,445 @@
+{
+    "reflection":  [
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_cleanup_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_drain_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_flush_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_device_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_pause_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_play_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_resume_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_set_volume_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_setup_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_track_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_callback_t",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_chapter_description_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_cancel_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_cbs",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_display_error_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_display_login_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_display_progress_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_display_question_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_id",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_dialog_update_progress_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_display_callback_t",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_equalizer_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_event_manager_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_event_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_event_u",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_instance_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_lock_callback_t",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_log_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_log_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_close_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_discoverer_description_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_discoverer_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_list_player_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_list_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_open_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_player_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_read_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_seek_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_slave_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_stats_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_thumbnail_request_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_track_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_media_track_u",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_module_description_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_picture_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_rd_description_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_rectangle_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_renderer_discoverer_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_renderer_item_t",
+                           "allDeclaredConstructors":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_subtitle_track_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_title_description_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_track_description_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_unlock_callback_t",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_cleanup_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_format_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_getProcAddress_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_makeCurrent_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_setup_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_swap_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_track_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_update_output_cb",
+                           "allPublicMethods":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_video_viewpoint_t",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_duration_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_freed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_list_item_added",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_list_item_deleted",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_list_player_next_item_set",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_list_will_add_item",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_list_will_delete_item",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_meta_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_parsed_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_parsed_status",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_audio_device",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_audio_volume",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_buffering",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_chapter_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_es_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_length_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_media_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_pausable_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_position_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_scrambled_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_seekable_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_snapshot_taken",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_time_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_title_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_player_vout",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_preparsed_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_state_changed",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_subitem_added",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_subitemtree_added",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.media_thumbnail_generated",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.renderer_discoverer_item_added",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.renderer_discoverer_item_deleted",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.vlm_media_event",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       }
+                   ]
+}

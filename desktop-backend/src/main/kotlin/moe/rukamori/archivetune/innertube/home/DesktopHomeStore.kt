@@ -23,6 +23,9 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.io.path.absolute
@@ -47,10 +50,22 @@ data class DesktopHomeSnapshot(
 )
 
 /** Atomic, JSON-backed persistence for desktop Home personalization data. */
-class DesktopHomeStore(private val file: Path) {
+class DesktopHomeStore(
+    private val file: Path,
+    private val asyncPersistence: Boolean = false,
+) : AutoCloseable {
     private val normalized = file.absolute().normalize()
     private val lock = ReentrantLock()
     private val _snapshot = MutableStateFlow(load())
+    private val persistenceExecutor =
+        if (asyncPersistence) {
+            Executors.newSingleThreadScheduledExecutor { runnable ->
+                Thread(runnable, "ArchiveTuneHomeStore").apply { isDaemon = true }
+            }
+        } else {
+            null
+        }
+    private var pendingWrite: ScheduledFuture<*>? = null
 
     val snapshot: StateFlow<DesktopHomeSnapshot> = _snapshot.asStateFlow()
 
@@ -59,11 +74,25 @@ class DesktopHomeStore(private val file: Path) {
     fun replaceLikedAlbums(albums: List<AlbumItem>) = update { it.copy(likedAlbums = albums) }
     fun replaceSubscribedArtists(artists: List<ArtistItem>) = update { it.copy(subscribedArtists = artists) }
 
+    fun setSongLiked(song: SongItem, liked: Boolean) = update { current ->
+        val withoutSong = current.likedSongs.filterNot { it.id == song.id }
+        current.copy(likedSongs = if (liked) listOf(song) + withoutSong else withoutSong)
+    }
+
+    fun setArtistSubscribed(artist: ArtistItem, subscribed: Boolean) = update { current ->
+        val withoutArtist = current.subscribedArtists.filterNot {
+            it.id == artist.id ||
+                (artist.channelId != null && it.channelId == artist.channelId)
+        }
+        current.copy(subscribedArtists = if (subscribed) listOf(artist) + withoutArtist else withoutArtist)
+    }
+
     fun recordPlay(event: DesktopPlayEvent) = update { current ->
         val merged =
             (current.playHistory.filterNot { it.song.id == event.song.id && it.playedAtEpochMillis == event.playedAtEpochMillis } + event)
                 .sortedByDescending { it.playedAtEpochMillis }
                 .take(MAX_PLAY_EVENTS)
+                .canonicalizeSongReferences()
         current.copy(playHistory = merged)
     }
 
@@ -72,10 +101,16 @@ class DesktopHomeStore(private val file: Path) {
 
     fun replaceRelatedSongs(seedId: String, songs: List<SongItem>) = update { current ->
         if (songs.isEmpty()) return@update current
+        val boundedSongs = songs.distinctBy(SongItem::id).take(MAX_RELATED_SONGS_PER_SEED)
+        val withoutSeed = current.relatedSongsBySeed - seedId
+        val boundedSeeds =
+            (withoutSeed + (seedId to boundedSongs))
+                .entries
+                .toList()
+                .takeLast(MAX_RELATED_SEEDS)
+                .associate { it.key to it.value }
         current.copy(
-            relatedSongsBySeed =
-                current.relatedSongsBySeed +
-                    (seedId to songs.distinctBy(SongItem::id)),
+            relatedSongsBySeed = boundedSeeds,
         )
     }
 
@@ -119,7 +154,21 @@ class DesktopHomeStore(private val file: Path) {
     private fun update(transform: (DesktopHomeSnapshot) -> DesktopHomeSnapshot) = lock.withLock {
         val next = transform(_snapshot.value)
         _snapshot.value = next
-        write(next)
+        if (asyncPersistence) scheduleWrite() else write(next)
+    }
+
+    private fun scheduleWrite() {
+        val executor = persistenceExecutor ?: return
+        pendingWrite?.cancel(false)
+        pendingWrite =
+            executor.schedule(
+                {
+                    val snapshot = lock.withLock { _snapshot.value }
+                    write(snapshot)
+                },
+                WRITE_DEBOUNCE_MS,
+                TimeUnit.MILLISECONDS,
+            )
     }
 
     private fun load(): DesktopHomeSnapshot = lock.withLock {
@@ -201,7 +250,9 @@ class DesktopHomeStore(private val file: Path) {
                         playedAtEpochMillis = event.optLong("playedAt", 0L),
                         playTimeMs = event.optLong("playTimeMs", 0L),
                     )
-                },
+                }.sortedByDescending { it.playedAtEpochMillis }
+                    .take(MAX_PLAY_EVENTS)
+                    .canonicalizeSongReferences(),
         )
     }
 
@@ -209,6 +260,27 @@ class DesktopHomeStore(private val file: Path) {
         const val MAX_PLAY_EVENTS = 2_000
         const val MAX_SPEED_DIAL = 24
         const val MAX_DISMISSED_LOCAL_RECOMMENDATIONS = 500
+        const val MAX_RELATED_SEEDS = 64
+        const val MAX_RELATED_SONGS_PER_SEED = 100
+        const val WRITE_DEBOUNCE_MS = 250L
+    }
+
+    override fun close() {
+        val executor = persistenceExecutor ?: return
+        lock.withLock {
+            pendingWrite?.cancel(false)
+            write(_snapshot.value)
+            pendingWrite = null
+        }
+        executor.shutdown()
+    }
+}
+
+private fun List<DesktopPlayEvent>.canonicalizeSongReferences(): List<DesktopPlayEvent> {
+    val songs = HashMap<String, SongItem>()
+    return map { event ->
+        val canonical = songs.getOrPut(event.song.id) { event.song }
+        if (canonical === event.song) event else event.copy(song = canonical)
     }
 }
 

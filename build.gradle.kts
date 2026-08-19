@@ -14,14 +14,26 @@ tasks.register<Delete>("clean") {
 
 tasks.register("releaseJ9") {
     group = "distribution"
-    description = "Builds the canonical OpenJ9 desktop release."
-    dependsOn(":desktopApp:createOpenJ9ReleaseDistributable")
+    description = "Builds the fast OpenJ9 desktop distributable with JIT enabled (no ProGuard)."
+    dependsOn(":desktopApp:createOpenJ9Distributable")
 }
 
 tasks.register("msiJ9") {
     group = "distribution"
-    description = "Builds the upgradable OpenJ9 desktop MSI."
+    description = "Builds the fast upgradable OpenJ9 JIT desktop MSI (no ProGuard)."
     dependsOn(":desktopApp:packageOpenJ9MsiUpgradable")
+}
+
+tasks.register("releaseJ9Shrunk") {
+    group = "distribution"
+    description = "Builds the smaller OpenJ9 JIT desktop distributable through ProGuard."
+    dependsOn(":desktopApp:createOpenJ9ReleaseDistributable")
+}
+
+tasks.register("msiJ9Shrunk") {
+    group = "distribution"
+    description = "Builds the smaller upgradable OpenJ9 JIT MSI through ProGuard."
+    dependsOn(":desktopApp:packageOpenJ9ReleaseMsiUpgradable")
 }
 
 if (tasks.findByName("prepareKotlinBuildScriptModel") == null) {

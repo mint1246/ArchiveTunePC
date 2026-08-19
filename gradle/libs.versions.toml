@@ -46,6 +46,8 @@ accompanist = "1.0.19"
 accompanist-core = "0.4.7"
 androidsvg = "1.4"
 aboutLibraries = "15.0.3"
+libdatachannelJava = "0.24.1.1"
+jdtAnnotations = "2.4.100"
 
 
 [libraries]
@@ -123,6 +125,8 @@ json = { module = "org.json:json", version.ref = "json" }
 okhttp_dnsoverhttps = { module = "com.squareup.okhttp3:okhttp-dnsoverhttps", version.ref = "okhttp" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 jna-platform = { module = "net.java.dev.jna:jna-platform-jpms", version.ref = "jna" }
+libdatachannel-java-arch-detect = { module = "tel.schich:libdatachannel-java-arch-detect", version.ref = "libdatachannelJava" }
+jdt-annotations = { module = "org.eclipse.jdt:org.eclipse.jdt.annotation", version.ref = "jdtAnnotations" }
 
 brotli = { module = "org.brotli:dec", version.ref = "brotli" }
 rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }

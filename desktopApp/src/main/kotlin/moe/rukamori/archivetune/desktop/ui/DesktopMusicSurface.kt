@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
@@ -94,7 +95,13 @@ import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopAlbumIndex
+import moe.rukamori.archivetune.desktop.party.PartyMode
+import moe.rukamori.archivetune.desktop.party.PartyPhase
+import moe.rukamori.archivetune.desktop.party.PartyTransport
+import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPane
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.util.logging.Logger
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.models.AlbumItem
@@ -167,9 +174,10 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val accountState by services.account.state.collectAsState()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
+    val remoteLibraryState by services.libraryRepository.state.collectAsState()
+    val localTracks by services.library.tracksFlow.collectAsState()
+    val onlinePlaylists = remoteLibraryState.playlists
     var resultItems by remember { mutableStateOf<List<YTItem>>(emptyList()) }
-    var localTracks by remember { mutableStateOf(services.library.tracks) }
-    var onlinePlaylists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     var showSpotifyImport by remember { mutableStateOf(false) }
@@ -179,19 +187,13 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     var playlistPickerLoading by remember { mutableStateOf(false) }
     suspend fun rescanLibrary() {
         libraryLoading = true; libraryError = null
-        runCatching { services.library.rescan() }.onSuccess { localTracks = it }.onFailure { libraryError = it.message ?: "Library scan failed" }
+        runCatching { services.library.rescan() }.onFailure { libraryError = it.message ?: "Library scan failed" }
         libraryLoading = false
     }
-    suspend fun refreshOnlinePlaylists() {
-        services.backend.libraryPlaylists()
-            .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
-            .onFailure { libraryError = "Could not load your YouTube Music playlists." }
-    }
-    LaunchedEffect(Unit) { if (services.library.folders.isNotEmpty()) rescanLibrary() }
     LaunchedEffect(state.destination) {
         browse.clear()
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
-        refreshOnlinePlaylists()
+        services.libraryRepository.activate()
     }
     LaunchedEffect(state.searchQuery, state.destination) {
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH || state.searchQuery.isBlank()) return@LaunchedEffect
@@ -281,7 +283,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     fun setLiked(song: SongItem, liked: Boolean) {
         scope.launch {
             services.backend.setSongLiked(song.id, liked)
-                .onSuccess { services.syncHomeLibrary() }
+                .onSuccess { services.homeStore.setSongLiked(song, liked) }
                 .onFailure { browse.failure = it.message ?: "Could not update like" }
         }
     }
@@ -289,7 +291,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         addToPlaylistSong = song
         scope.launch {
             playlistPickerLoading = true
-            refreshOnlinePlaylists()
+            services.libraryRepository.activate()
             playlistPickerLoading = false
         }
     }
@@ -315,7 +317,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, browse.loading, browse.failure, ::open, ::downloadSong, ::playNextSong, ::enqueueSong, ::choosePlaylist, ::setLiked, ::isLiked, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
-                localTracks, onlinePlaylists, services.library.folders, libraryLoading || browse.loading, browse.failure ?: libraryError,
+                localTracks, onlinePlaylists, services.library.folders,
+                libraryLoading || remoteLibraryState.isInitialLoading || browse.loading,
+                browse.failure ?: libraryError ?: remoteLibraryState.error,
                 onAddFolder = { scope.launch { chooseLibraryFolder()?.let { services.library.setFolders(services.library.folders + it); rescanLibrary() } } },
                 onRescan = { scope.launch { rescanLibrary() } },
                 spotifyImportEnabled = accountState is DesktopAccountState.SignedIn,
@@ -359,7 +363,10 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 playback = services.playback,
                 downloads = downloadServices,
                 libraryFolders = services.library.folders,
-                onLibraryFoldersChanged = { folders -> services.library.setFolders(folders) },
+                onLibraryFoldersChanged = { folders ->
+                    services.library.setFolders(folders)
+                    scope.launch { rescanLibrary() }
+                },
                 modifier = modifier,
             )
         }
@@ -384,23 +391,29 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 }
             },
             onRenamePlaylist = { name ->
+                val original = page.page.playlist
+                services.libraryRepository.renameCached(original.id, name)
                 scope.launch {
-                    services.backend.renamePlaylist(page.page.playlist.id, name)
+                    services.backend.renamePlaylist(original.id, name)
                         .onSuccess {
-                            refreshOnlinePlaylists()
-                            browse.openPlaylist(page.page.playlist.id, services.backend, scope)
+                            browse.openPlaylist(original.id, services.backend, scope)
                         }
-                        .onFailure { browse.failure = it.message ?: "Could not rename playlist" }
+                        .onFailure {
+                            services.libraryRepository.upsertCached(original)
+                            browse.failure = it.message ?: "Could not rename playlist"
+                        }
                 }
             },
             onDeletePlaylist = {
+                val original = page.page.playlist
+                services.libraryRepository.removeCached(original.id)
+                browse.clear()
                 scope.launch {
-                    services.backend.deletePlaylist(page.page.playlist.id)
-                        .onSuccess {
-                            refreshOnlinePlaylists()
-                            browse.clear()
+                    services.backend.deletePlaylist(original.id)
+                        .onFailure {
+                            services.libraryRepository.upsertCached(original)
+                            browse.failure = it.message ?: "Could not delete playlist"
                         }
-                        .onFailure { browse.failure = it.message ?: "Could not delete playlist" }
                 }
             },
             modifier = modifier,
@@ -440,7 +453,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 scope.launch {
                     val channelId = artist.channelId ?: artist.id
                     services.backend.setArtistSubscribed(channelId, subscribed)
-                        .onSuccess { services.syncHomeLibrary() }
+                        .onSuccess { services.homeStore.setArtistSubscribed(artist, subscribed) }
                         .onFailure { browse.failure = it.message ?: "Could not update artist subscription" }
                 }
             },
@@ -457,9 +470,10 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 showSpotifyImport = false
                 libraryError = result.warning
                 scope.launch {
-                    services.backend.libraryPlaylists()
-                        .onSuccess { onlinePlaylists = it.items.filterIsInstance<PlaylistItem>() }
-                        .onFailure { libraryError = "Playlist imported, but the library could not be refreshed." }
+                    services.libraryRepository.activate(forceRefresh = true)
+                    if (services.libraryRepository.state.value.error != null) {
+                        libraryError = "Playlist imported, but the library could not be refreshed."
+                    }
                 }
             },
         )
@@ -492,7 +506,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 createPlaylistSong = null
                 scope.launch {
                     services.backend.createPlaylist(name, song?.let { listOf(it.id) }.orEmpty())
-                        .onSuccess { refreshOnlinePlaylists() }
+                        .onSuccess { playlistId -> services.libraryRepository.addCached(playlistId, name) }
                         .onFailure { browse.failure = it.message ?: "Could not create playlist" }
                 }
             },
@@ -1179,19 +1193,119 @@ private fun NowPlayingSubtitle(
 
 @Composable internal fun DesktopMiniPlayer(
     services: DesktopMusicServices,
+    playTogether: PlayTogetherManager,
     browse: DesktopBrowseController,
     onShowLyrics: () -> Unit,
     onShowQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val snapshot by services.playback.state.collectAsState(); val scope = androidx.compose.runtime.rememberCoroutineScope(); val item = snapshot.currentItem
+    val snapshot by services.playback.state.collectAsState()
+    val partyState by playTogether.state.collectAsState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val item = snapshot.currentItem
+    var showPartyDialog by remember { mutableStateOf(false) }
+    var inviteInput by remember { mutableStateOf("") }
+
+    if (showPartyDialog) {
+        AlertDialog(
+            onDismissRequest = { if (partyState.phase != PartyPhase.STARTING) showPartyDialog = false },
+            title = { Text("Play together") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    when {
+                        partyState.phase == PartyPhase.STARTING -> {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                                Text(partyState.message ?: "Connecting…")
+                            }
+                        }
+                        partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
+                            Text("${partyState.participantCount} connected. share this invite with anyone you want in the party.")
+                            if (partyState.participantCount > 1) {
+                                val fallbackPeers = (partyState.participantCount - 1 - partyState.directPeerCount).coerceAtLeast(0)
+                                Text(
+                                    buildString {
+                                        append("${partyState.directPeerCount} direct P2P")
+                                        if (fallbackPeers > 0) append(" · $fallbackPeers tunnel fallback")
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            OutlinedTextField(
+                                value = partyState.invite.orEmpty(),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Invite") },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
+                            Text(
+                                when (partyState.transport) {
+                                    PartyTransport.DIRECT -> "Connected directly P2P. the host controls playback."
+                                    PartyTransport.RELAY -> "Connected through the Quick Tunnel fallback. the host controls playback."
+                                    else -> partyState.message ?: "Connected. the host controls playback."
+                                },
+                            )
+                            partyState.roundTripMs?.let { Text("${it} ms round trip", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                        else -> {
+                            partyState.message?.takeIf { partyState.phase == PartyPhase.ERROR }?.let {
+                                Text(it, color = MaterialTheme.colorScheme.error)
+                            }
+                            Text("Create a temporary party, or paste an invite from someone else.")
+                            OutlinedTextField(
+                                value = inviteInput,
+                                onValueChange = { inviteInput = it },
+                                singleLine = true,
+                                label = { Text("Party invite") },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                when {
+                    partyState.phase == PartyPhase.STARTING -> Unit
+                    partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
+                        TextButton(onClick = {
+                            partyState.invite?.let { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(it), null) }
+                        }) { Text("Copy invite") }
+                    }
+                    partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
+                        TextButton(onClick = { playTogether.leave(); showPartyDialog = false }) { Text("Leave") }
+                    }
+                    else -> {
+                        TextButton(onClick = { scope.launch { playTogether.startHosting() } }) { Text("Create party") }
+                    }
+                }
+            },
+            dismissButton = {
+                when {
+                    partyState.phase == PartyPhase.STARTING -> Unit
+                    partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
+                        TextButton(onClick = { playTogether.leave(); showPartyDialog = false }) { Text("End party") }
+                    }
+                    partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> Unit
+                    else -> {
+                        TextButton(
+                            onClick = { scope.launch { playTogether.join(inviteInput) } },
+                            enabled = inviteInput.isNotBlank(),
+                        ) { Text("Join") }
+                    }
+                }
+            },
+        )
+    }
+
     Surface(
         modifier.padding(horizontal = 12.dp, vertical = 8.dp).animateContentSize(tween(220, easing = FastOutSlowInEasing)),
         color = dynamicGlassColor(MaterialTheme.colorScheme.surfaceContainerHigh, alpha = 0.62f),
         shape = MaterialTheme.shapes.large,
         border = dynamicGlassBorder(alpha = 0.14f),
     ) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, services.backend, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, services.backend, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, services.backend, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, services.backend, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, services.backend, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, services.backend, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
         if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth())
     } }
 }

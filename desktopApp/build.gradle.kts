@@ -11,12 +11,9 @@ group = "moe.rukamori.archivetune"
 version = "14.1.0"
 val windowsInstallationPath = "ArchiveTune App"
 
-// Set only by the OpenJ9 release wrapper task below. Normal HotSpot/dev builds keep their existing
-// JVM behaviour, while the canonical OpenJ9 release disables runtime JIT but keeps AOT/shared-class
-// support. This preserves the low-memory behaviour without paying the full -Xint startup penalty
-// on every launch.
-val openJ9NoJitRelease =
-    providers.gradleProperty("archivetune.openj9NoJit").map(String::toBoolean).orElse(false)
+val buildingWithOpenJ9 =
+    System.getProperty("java.vm.name").contains("OpenJ9", ignoreCase = true) ||
+        System.getProperty("java.vm.info").contains("OpenJ9", ignoreCase = true)
 
 kotlin {
     jvmToolchain(21)
@@ -31,6 +28,7 @@ dependencies {
     implementation(project(":desktop-backend"))
     implementation(project(":desktop-auth"))
     implementation(project(":desktop-playback"))
+    implementation(project(":desktop-play-together"))
     implementation(project(":desktop-library"))
     implementation(project(":desktop-settings"))
     implementation(project(":desktop-lyrics-ui"))
@@ -72,13 +70,19 @@ compose.desktop {
             "-Dsun.java2d.dpiaware=true",
             "-Xms32m",
             "-Xmx768m",
-            "-XX:ReservedCodeCacheSize=128m",
-            "-XX:ParallelGCThreads=4",
-            "-XX:ConcGCThreads=2",
-            "-XX:G1ConcRefinementThreads=4",
         )
-        if (openJ9NoJitRelease.get()) {
-            jvmArgs += "-Xnojit"
+        if (buildingWithOpenJ9) {
+            // OpenJ9 enables JIT by default; keep it explicit in packaged builds so the runtime
+            // choice is visible in ArchiveTune.cfg and cannot accidentally regress to -Xnojit.
+            jvmArgs += "-Xjit"
+        } else {
+            // These are HotSpot/G1 knobs and should not be carried into the OpenJ9 launcher.
+            jvmArgs += listOf(
+                "-XX:ReservedCodeCacheSize=128m",
+                "-XX:ParallelGCThreads=4",
+                "-XX:ConcGCThreads=2",
+                "-XX:G1ConcRefinementThreads=4",
+            )
         }
 
         buildTypes.release.proguard {
@@ -142,11 +146,12 @@ val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/wi
 val jpackageExecutable = "${System.getProperty("java.home")}/bin/jpackage.exe"
 
 /**
- * Canonical low-memory Windows release build.
+ * OpenJ9 Windows builds intentionally use a nested Gradle invocation because the JVM running
+ * Gradle is also the JDK Compose uses for jlink/jpackage.
  *
- * This intentionally starts a nested Gradle invocation under IBM Semeru/OpenJ9 because the JVM
- * running Gradle is also the JDK Compose uses for jlink/jpackage. The produced app remains in the
- * standard Compose release location (`compose/binaries/main-release`) rather than a custom folder.
+ * The normal OpenJ9 path uses Compose's non-ProGuard distributable: runtime behaviour is the same
+ * JVM bytecode, but iterative builds avoid the several-minute shrink/obfuscation pass. A separate
+ * shrunk release task is retained for occasions where distribution size matters.
  *
  * Override JDK discovery with either:
  *   -Parchivetune.openj9Home=C:\path\to\jdk
@@ -171,9 +176,9 @@ val openJ9HomeForRelease =
     }
 val gradlewBatPath = rootProject.file("gradlew.bat").absolutePath
 
-val createOpenJ9ReleaseDistributable = tasks.register<Exec>("createOpenJ9ReleaseDistributable") {
+val createOpenJ9Distributable = tasks.register<Exec>("createOpenJ9Distributable") {
     group = "distribution"
-    description = "Builds the canonical main-release app image with Semeru/OpenJ9 and runtime JIT disabled."
+    description = "Builds the fast OpenJ9 app image with JIT enabled and without ProGuard."
     workingDir(rootProject.projectDir)
 
     if (openJ9HomeForRelease != null) {
@@ -187,8 +192,34 @@ val createOpenJ9ReleaseDistributable = tasks.register<Exec>("createOpenJ9Release
             "/d",
             "/c",
             gradlewBatPath,
-            "--no-daemon",
-            "-Parchivetune.openj9NoJit=true",
+            ":desktopApp:createDistributable",
+        )
+    } else {
+        commandLine(
+            "cmd.exe",
+            "/d",
+            "/c",
+            "echo OpenJ9 JDK not found. Install IBM Semeru OpenJ9 or set ARCHIVETUNE_OPENJ9_HOME / -Parchivetune.openj9Home=^<jdk^>. 1>&2 & exit /b 1",
+        )
+    }
+}
+
+val createOpenJ9ReleaseDistributable = tasks.register<Exec>("createOpenJ9ReleaseDistributable") {
+    group = "distribution"
+    description = "Builds the shrunk OpenJ9 main-release app image with JIT enabled and ProGuard."
+    workingDir(rootProject.projectDir)
+
+    if (openJ9HomeForRelease != null) {
+        environment("JAVA_HOME", openJ9HomeForRelease.absolutePath)
+        environment(
+            "PATH",
+            File(openJ9HomeForRelease, "bin").absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""),
+        )
+        commandLine(
+            "cmd.exe",
+            "/d",
+            "/c",
+            gradlewBatPath,
             ":desktopApp:createReleaseDistributable",
         )
     } else {
@@ -251,7 +282,33 @@ val openJ9JpackageExecutable =
 
 val packageOpenJ9MsiUpgradable = tasks.register<Exec>("packageOpenJ9MsiUpgradable") {
     group = "package"
-    description = "Builds an upgradable MSI from the canonical OpenJ9 no-JIT main-release app image."
+    description = "Builds an upgradable MSI from the fast OpenJ9 JIT app image without ProGuard."
+    dependsOn(createOpenJ9Distributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    environment(
+        "PATH",
+        buildString {
+            openJ9HomeForRelease?.let {
+                append(File(it, "bin").absolutePath)
+                append(File.pathSeparator)
+            }
+            append(wixToolsetDir.get().asFile.absolutePath)
+            append(File.pathSeparator)
+            append(System.getenv("PATH") ?: "")
+        },
+    )
+    commandLine(
+        listOf(openJ9JpackageExecutable) +
+            installerJpackageArgs(
+                "msi",
+                appImageDir,
+                layout.buildDirectory.dir("compose/binaries/main/msi"),
+            ),
+    )
+}
+
+val packageOpenJ9ReleaseMsiUpgradable = tasks.register<Exec>("packageOpenJ9ReleaseMsiUpgradable") {
+    group = "package"
+    description = "Builds an upgradable MSI from the shrunk OpenJ9 JIT/ProGuard app image."
     dependsOn(createOpenJ9ReleaseDistributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment(
         "PATH",

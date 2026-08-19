@@ -65,7 +65,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
@@ -97,45 +96,22 @@ fun DesktopHomeSurface(
     val playbackState by services.playback.state.collectAsState()
     val accountState by services.account.state.collectAsState()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
+    val remoteState by services.homeRepository.state.collectAsState()
     val similarRecommendations by services.similarRecommendations.collectAsState()
     val scope = rememberCoroutineScope()
     val localContent = remember(homeSnapshot) { computeLocalHomeContent(homeSnapshot) }
 
-    var homePage by remember { mutableStateOf<HomePage?>(null) }
-    var remoteQuickPicks by remember { mutableStateOf<HomePage.Section?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var playlists by remember { mutableStateOf<List<PlaylistItem>>(emptyList()) }
-    var selectedChip by remember { mutableStateOf<HomePage.Chip?>(null) }
-    var previousHomePage by remember { mutableStateOf<HomePage?>(null) }
-    var previousQuickPicks by remember { mutableStateOf<HomePage.Section?>(null) }
-    var isLoadingMore by remember { mutableStateOf(false) }
-    var feedbackHiddenItems by remember { mutableStateOf(emptySet<String>()) }
+    val homePage = remoteState.homePage
+    val remoteQuickPicks = remoteState.remoteQuickPicks
+    val playlists = remoteState.playlists
+    val selectedChip = remoteState.selectedChip
+    val isLoading = remoteState.isInitialLoading
+    val error = remoteState.error
+    val isLoadingMore = remoteState.isLoadingMore
+    val feedbackHiddenItems = remoteState.feedbackHiddenItems
     val listState = rememberLazyListState()
 
-    suspend fun loadInitial() {
-        isLoading = true
-        error = null
-        coroutineScope {
-            launch {
-                services.backend.home().onSuccess { page ->
-                    val (pageWithoutQuickPicks, quickPicksSection) = page.extractQuickPicks()
-                    homePage = pageWithoutQuickPicks
-                    remoteQuickPicks = quickPicksSection
-                }.onFailure { failure ->
-                    error = failure.message ?: "Could not load the home feed."
-                }
-            }
-            launch {
-                services.backend.libraryPlaylists().onSuccess { page ->
-                    playlists = page.items.filterIsInstance<PlaylistItem>().filterNot { it.id == "SE" }
-                }
-            }
-        }
-        isLoading = false
-    }
-
-    LaunchedEffect(Unit) { loadInitial() }
+    LaunchedEffect(Unit) { services.homeRepository.activate() }
 
     LaunchedEffect(homePage?.continuation) {
         val continuation = homePage?.continuation ?: return@LaunchedEffect
@@ -144,41 +120,12 @@ fun DesktopHomeSurface(
             val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             lastVisibleIndex >= layoutInfo.totalItemsCount - 3
         }.collect { nearEnd ->
-            if (nearEnd && !isLoadingMore) {
-                isLoadingMore = true
-                services.backend.home(continuation = continuation).onSuccess { page ->
-                    val current = homePage ?: return@onSuccess
-                    val merged = current.copy(sections = current.sections + page.sections, continuation = page.continuation)
-                    val (pageWithoutQuickPicks, quickPicksSection) = merged.extractQuickPicks()
-                    quickPicksSection?.let { remoteQuickPicks = it }
-                    homePage = pageWithoutQuickPicks
-                }
-                isLoadingMore = false
-            }
+            if (nearEnd && !isLoadingMore) services.homeRepository.loadMore()
         }
     }
 
     fun selectChip(chip: HomePage.Chip) {
-        if (chip == selectedChip && previousHomePage != null) {
-            homePage = previousHomePage
-            remoteQuickPicks = previousQuickPicks
-            previousHomePage = null
-            previousQuickPicks = null
-            selectedChip = null
-            return
-        }
-        if (selectedChip == null) {
-            previousHomePage = homePage
-            previousQuickPicks = remoteQuickPicks
-        }
-        scope.launch {
-            services.backend.home(params = chip.endpoint?.params).onSuccess { page ->
-                val (pageWithoutQuickPicks, quickPicksSection) = page.copy(chips = homePage?.chips).extractQuickPicks()
-                remoteQuickPicks = quickPicksSection
-                homePage = pageWithoutQuickPicks
-                selectedChip = chip
-            }
-        }
+        services.homeRepository.selectChip(chip)
     }
 
     fun itemKey(item: YTItem) = "${item::class.simpleName}:${item.id}"
@@ -188,7 +135,7 @@ fun DesktopHomeSurface(
         if (item.feedbackToken.isNullOrBlank()) return
         scope.launch {
             services.backend.sendNotInterestedFeedback(item).onSuccess {
-                feedbackHiddenItems = feedbackHiddenItems + itemKey(item)
+                services.homeRepository.hideRemoteItem(item)
             }
         }
     }
@@ -229,7 +176,7 @@ fun DesktopHomeSurface(
     val accountAvatarUrl = (accountState as? DesktopAccountState.SignedIn)?.account?.avatarUrl
 
     when {
-        isLoading -> {
+        isLoading && !hasContent -> {
             Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                     CircularProgressIndicator()
@@ -247,7 +194,7 @@ fun DesktopHomeSurface(
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(20.dp))
-                    Button(onClick = { scope.launch { loadInitial() } }) { Text("Retry") }
+                    Button(onClick = { scope.launch { services.homeRepository.activate(forceRefresh = true) } }) { Text("Retry") }
                 }
             }
         }
@@ -579,7 +526,6 @@ fun DesktopHomeSurface(
         }
     }
 }
-
 @Composable
 private fun HomeCategoryChips(
     chips: List<HomePage.Chip>,
@@ -840,11 +786,4 @@ private fun HomeSectionBlock(
             }
         }
     }
-}
-
-private fun HomePage.extractQuickPicks(): Pair<HomePage, HomePage.Section?> {
-    val quickPicksIndex = sections.indexOfFirst { it.title.contains("quick pick", ignoreCase = true) }
-    if (quickPicksIndex < 0) return this to null
-    val quickPicks = sections[quickPicksIndex]
-    return copy(sections = sections.toMutableList().also { it.removeAt(quickPicksIndex) }) to quickPicks
 }

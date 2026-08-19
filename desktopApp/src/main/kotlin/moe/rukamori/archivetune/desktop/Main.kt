@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
+import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneDesktopApp
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneWindowChrome
@@ -57,6 +58,7 @@ fun main() {
     val runtime = DesktopRuntime.start()
     val musicServices = runtime.own(DesktopMusicServices(runtime))
     val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
+    val playTogether = runtime.own(PlayTogetherManager(musicServices.playback, runtime.paths.cache, runtime.logger))
     musicServices.attachCompletedDownloadLookup(downloadServices::completedFileFor)
     val restored = runtime.settings.snapshot()
     var latestDestination = restored.lastDestination.asDesktopDestination()
@@ -154,6 +156,7 @@ fun main() {
                         playerContent = { modifier ->
                             moe.rukamori.archivetune.desktop.ui.DesktopMiniPlayer(
                                 services = musicServices,
+                                playTogether = playTogether,
                                 browse = browse,
                                 onShowLyrics = { showLyrics = true },
                                 onShowQueue = { showQueue = !showQueue },

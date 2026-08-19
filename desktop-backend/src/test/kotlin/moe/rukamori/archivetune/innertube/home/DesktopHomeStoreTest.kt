@@ -14,6 +14,7 @@ import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -156,5 +157,54 @@ class DesktopHomeStoreTest {
             )
 
         assertEquals(listOf("fav", "played", "unknown"), sorted.map { it.browseId })
+    }
+
+    @Test
+    fun `precise account mutations update local snapshot without a full resync`() {
+        val dir = Files.createTempDirectory("archivetune-home-store")
+        val store = DesktopHomeStore(dir.resolve("home-store.json"))
+        val song = SongItem(id = "song", title = "Song", artists = emptyList(), thumbnail = "t")
+        val artist = ArtistItem(
+            id = "artist",
+            title = "Artist",
+            thumbnail = null,
+            channelId = "channel",
+            shuffleEndpoint = null,
+            radioEndpoint = null,
+        )
+
+        store.setSongLiked(song, true)
+        store.setArtistSubscribed(artist, true)
+        assertEquals(listOf("song"), store.snapshot.value.likedSongs.map { it.id })
+        assertEquals(listOf("artist"), store.snapshot.value.subscribedArtists.map { it.id })
+
+        store.setSongLiked(song, false)
+        store.setArtistSubscribed(artist, false)
+        assertTrue(store.snapshot.value.likedSongs.isEmpty())
+        assertTrue(store.snapshot.value.subscribedArtists.isEmpty())
+    }
+
+    @Test
+    fun `history and related caches stay memory bounded`() {
+        val dir = Files.createTempDirectory("archivetune-home-store")
+        val store = DesktopHomeStore(dir.resolve("home-store.json"), asyncPersistence = true)
+        val first = SongItem(id = "same", title = "Old", artists = emptyList(), thumbnail = "t")
+        val newest = first.copy(title = "Newest")
+
+        store.recordPlay(DesktopPlayEvent(first, playedAtEpochMillis = 1_000L, playTimeMs = 10_000L))
+        store.recordPlay(DesktopPlayEvent(newest, playedAtEpochMillis = 2_000L, playTimeMs = 10_000L))
+        val events = store.snapshot.value.playHistory
+        assertSame(events[0].song, events[1].song)
+        assertEquals("Newest", events[0].song.title)
+
+        repeat(70) { seed ->
+            store.replaceRelatedSongs(
+                "seed-$seed",
+                List(105) { song -> SongItem(id = "$seed-$song", title = "Song", artists = emptyList(), thumbnail = "t") },
+            )
+        }
+        assertEquals(64, store.snapshot.value.relatedSongsBySeed.size)
+        assertTrue(store.snapshot.value.relatedSongsBySeed.values.all { it.size <= 100 })
+        store.close()
     }
 }

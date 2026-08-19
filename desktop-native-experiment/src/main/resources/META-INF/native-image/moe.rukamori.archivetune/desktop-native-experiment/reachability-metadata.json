@@ -1,0 +1,96 @@
+{
+  "reflection": [
+    {
+      "type": {
+        "proxy": [
+          "uk.co.caprica.vlcj.binding.lib.LibC"
+        ]
+      }
+    },
+    {
+      "type": "uk.co.caprica.vlcj.binding.lib.LibVlc",
+      "jniAccessible": true,
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "uk.co.caprica.vlcj.binding.support.types.size_t",
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "uk.co.caprica.vlcj.binding.support.types.size_tByReference",
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": {
+        "proxy": [
+          "com.sun.jna.platform.win32.Crypt32"
+        ]
+      }
+    },
+    {
+      "type": "com.sun.jna.platform.win32.Crypt32",
+      "jniAccessible": true,
+      "allPublicMethods": true
+    },
+    {
+      "type": "com.sun.jna.platform.win32.WinCrypt$DATA_BLOB",
+      "allDeclaredConstructors": true,
+      "allPublicFields": true
+    },
+    {
+      "type": "com.sun.jna.platform.win32.WinCrypt$CRYPTPROTECT_PROMPTSTRUCT",
+      "allDeclaredConstructors": true,
+      "allPublicFields": true
+    },
+    {
+      "type": "com.sun.jna.CallbackReference$AttachOptions",
+      "allDeclaredConstructors": true,
+      "allPublicFields": true
+    },
+    {
+      "type": "sun.awt.windows.WComponentPeer",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "setBackground",
+          "parameterTypes": [
+            "java.awt.Color"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.awt.event.KeyEvent",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.awt.Component",
+            "int",
+            "long",
+            "int",
+            "int",
+            "char",
+            "int"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.awt.windows.TranslucentWindowPainter$VIOptWindowPainter$1",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "run",
+          "parameterTypes": []
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "glob": "icons/archivetune.png"
+    }
+  ]
+}

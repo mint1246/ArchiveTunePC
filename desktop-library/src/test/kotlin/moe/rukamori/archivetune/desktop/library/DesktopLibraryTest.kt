@@ -65,4 +65,28 @@ class DesktopLibraryTest {
         assertEquals(123_000, song.durationMs); assertEquals(1, song.artwork?.single())
         assertEquals("broken", tracks.single { it.path == broken.toRealPath() }.title)
     }
+
+    @Test fun `persisted index is immediately reusable and unchanged files skip tag parsing`() = runTest {
+        val root = Files.createTempDirectory("archivetune-library")
+        val state = root.resolve("state.properties")
+        val song = root.resolve("cached.flac")
+        Files.writeString(song, "audio")
+        var metadataReads = 0
+        val reader = AudioMetadataReader {
+            metadataReads++
+            LocalMetadata("Cached Song", "Cached Artist", "Cached Album", durationMs = 42_000, artwork = byteArrayOf(1, 2, 3))
+        }
+
+        val first = DesktopLibrary(state, metadataReader = reader)
+        first.setFolders(listOf(root))
+        assertEquals("Cached Song", first.rescan().single().title)
+        assertEquals(1, metadataReads)
+
+        val restored = DesktopLibrary(state, metadataReader = reader)
+        assertEquals("Cached Song", restored.tracks.single().title)
+        assertEquals(null, restored.tracks.single().artwork)
+
+        restored.rescan()
+        assertEquals(1, metadataReads)
+    }
 }
