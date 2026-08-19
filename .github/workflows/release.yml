@@ -70,6 +70,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: on-success
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            nucleus
 
       - name: Build GraalVM Native Image MSI
         shell: pwsh

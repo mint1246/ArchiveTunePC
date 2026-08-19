@@ -32,6 +32,10 @@ jobs:
         with:
           cache-read-only: true
           cache-cleanup: on-success
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            nucleus
 
       - name: Verify Java runtime
         shell: pwsh
