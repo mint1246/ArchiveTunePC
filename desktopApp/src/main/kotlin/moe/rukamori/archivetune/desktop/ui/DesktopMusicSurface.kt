@@ -412,7 +412,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         addToPlaylistSong = song
         scope.launch {
             playlistPickerLoading = true
-            services.libraryRepository.activate()
+            services.libraryRepository.refresh()
             playlistPickerLoading = false
         }
     }
