@@ -1156,6 +1156,32 @@ private fun ArtistItemsDetailPage(
         }
     }
 }
+
+internal data class PlaylistSongOccurrence(
+    val song: SongItem,
+    val originalIndex: Int,
+) {
+    val stableKey: String
+        get() = "${song.id}:$originalIndex"
+}
+
+internal fun playlistSongOccurrences(
+    songs: List<SongItem>,
+    query: String,
+): List<PlaylistSongOccurrence> =
+    songs.mapIndexedNotNull { index, song ->
+        if (
+            query.isBlank() ||
+            song.title.contains(query, ignoreCase = true) ||
+            song.artists.any { it.name.contains(query, ignoreCase = true) } ||
+            song.album?.name?.contains(query, ignoreCase = true) == true
+        ) {
+            PlaylistSongOccurrence(song, index)
+        } else {
+            null
+        }
+    }
+
 @Composable
 private fun PlaylistDetailPage(
     page: PlaylistPage,
@@ -1177,13 +1203,8 @@ private fun PlaylistDetailPage(
     var showRename by remember(page.playlist.id) { mutableStateOf(false) }
     var showDeleteConfirm by remember(page.playlist.id) { mutableStateOf(false) }
     val filtered = remember(page.songs, query) {
-        if (query.isBlank()) page.songs else page.songs.filter { song ->
-            song.title.contains(query, ignoreCase = true) ||
-                song.artists.any { it.name.contains(query, ignoreCase = true) } ||
-                song.album?.name?.contains(query, ignoreCase = true) == true
-        }
+        playlistSongOccurrences(page.songs, query)
     }
-    val queueIndices = remember(page.songs) { page.songs.withIndex().associate { it.value.id to it.index } }
     val subtitle = listOfNotNull(
         page.playlist.author?.name,
         page.playlist.songCountText ?: "${page.songs.size} songs",
@@ -1241,11 +1262,11 @@ private fun PlaylistDetailPage(
         } else if (filtered.isEmpty()) {
             item { Text("No matching tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        itemsIndexed(filtered, key = { index, song -> "${song.id}:$index" }) { _, song ->
-            val queueIndex = queueIndices[song.id] ?: 0
+        itemsIndexed(filtered, key = { _, occurrence -> occurrence.stableKey }) { _, occurrence ->
+            val song = occurrence.song
             ResultCard(
                 song,
-                { onPlay(page.songs, queueIndex, page.playlist.title) },
+                { onPlay(page.songs, occurrence.originalIndex, page.playlist.title) },
                 { onDownload(song) },
                 { onPlayNext(song) },
                 { onAddToQueue(song) },
