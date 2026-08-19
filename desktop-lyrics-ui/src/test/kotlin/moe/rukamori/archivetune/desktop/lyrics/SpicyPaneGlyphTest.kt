@@ -388,6 +388,16 @@ class SpicyPaneGlyphTest {
     }
 
     @Test
+    fun finishedLineKeepsAnimatedRendererDuringExitSettle() {
+        val line = sceneLine("smooth handoff", 10_000L, 12_000L)
+
+        assertTrue(shouldKeepAnimatedLineAt(11_999L, line))
+        assertTrue(shouldKeepAnimatedLineAt(12_000L, line))
+        assertTrue(shouldKeepAnimatedLineAt(12_000L + LINE_EXIT_SETTLE_MS - 1L, line))
+        assertTrue(!shouldKeepAnimatedLineAt(12_000L + LINE_EXIT_SETTLE_MS, line))
+    }
+
+    @Test
     fun overlappingVocalsDoNotCreateFakeInterludeDots() {
         val lyrics = CharLyrics(
             lines = listOf(

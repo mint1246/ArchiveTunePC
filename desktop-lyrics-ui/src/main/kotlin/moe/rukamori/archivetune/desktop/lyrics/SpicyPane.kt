@@ -21,6 +21,9 @@
  */
 package moe.rukamori.archivetune.desktop.lyrics
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring as composeSpring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -135,6 +138,12 @@ private const val INTERLUDE_PREHIDE_MS = 500L
 private const val INTERLUDE_TAIL_PADDING_MS = 550L
 /** Keep one newly-current lyric below the pinned scroll anchor before moving the page. */
 internal const val SCROLL_PIN_LOOKAHEAD = 2
+/**
+ * Keep the expensive animated renderer mounted briefly after the provider line ends.
+ * This gives the line-level focus transition time to settle before falling back to the
+ * cheap static Text renderer, avoiding a one-frame bright/dim renderer swap at handoff.
+ */
+internal const val LINE_EXIT_SETTLE_MS = 700L
 
 /** SpicyLyrics `--gradient-alpha`: bright portion of a glyph. */
 private val BrightColor = Color(0xD9FFFFFF)
@@ -379,6 +388,10 @@ internal fun buildLyricsSceneItems(lyrics: CharLyrics): List<LyricsSceneItem> = 
 /** A vocal line stays live for its full provider interval, even if another line overlaps it. */
 internal fun isVocalLineActiveAt(positionMs: Long, line: CharLine): Boolean =
     positionMs >= line.startMs && positionMs < line.endMs
+
+/** Keep the animated canvas alive during the short visual release after a line ends. */
+internal fun shouldKeepAnimatedLineAt(positionMs: Long, line: CharLine): Boolean =
+    positionMs >= line.startMs && positionMs < line.endMs + LINE_EXIT_SETTLE_MS
 
 /** Binary search because this runs every frame. Scene items are ordered by start time. */
 internal fun activeSceneIndexAt(positionMs: Long, items: List<LyricsSceneItem>): Int {
@@ -880,6 +893,7 @@ private fun LyricScene(
     val anchorState = remember(lyrics) { mutableFloatStateOf(0f) }
     val activeSceneIndexState = remember(lyrics) { mutableIntStateOf(0) }
     val activeVocalLineIndicesState = remember(lyrics) { mutableStateOf<Set<Int>>(emptySet()) }
+    val animatedVocalLineIndicesState = remember(lyrics) { mutableStateOf<Set<Int>>(emptySet()) }
     val activeVocalLineIndexState = remember(lyrics) { mutableIntStateOf(0) }
     val scrollAnchorLineState = remember(lyrics) { mutableIntStateOf(-1) }
     val positionState = remember(lyrics) { mutableLongStateOf(0L) }
@@ -891,6 +905,7 @@ private fun LyricScene(
         var anchorWasInterlude = false
         // Reused every frame so overlap tracking does not allocate a collection at 60/120 Hz.
         val activeVocalMembership = BooleanArray(lyrics.lines.size)
+        val animatedVocalMembership = BooleanArray(lyrics.lines.size)
         // Latest position sample from the player; the backend provides controlled timing samples.
         // times per second). Between samples we dead-reckon at wall-clock rate so the
         // sweep/bounce animate smoothly instead of freezing and jumping per sample.
@@ -945,17 +960,31 @@ private fun LyricScene(
                     val interpolatedPos = smoothPosMs.toLong().coerceAtLeast(0L)
 
                     var activeMembershipChanged = false
+                    var animatedMembershipChanged = false
                     lyrics.lines.forEachIndexed { index, line ->
                         val active = isVocalLineActiveAt(interpolatedPos, line)
                         if (activeVocalMembership[index] != active) {
                             activeVocalMembership[index] = active
                             activeMembershipChanged = true
                         }
+
+                        val animated = shouldKeepAnimatedLineAt(interpolatedPos, line)
+                        if (animatedVocalMembership[index] != animated) {
+                            animatedVocalMembership[index] = animated
+                            animatedMembershipChanged = true
+                        }
                     }
                     if (activeMembershipChanged) {
                         activeVocalLineIndicesState.value = buildSet {
                             activeVocalMembership.forEachIndexed { index, active ->
                                 if (active) add(index)
+                            }
+                        }
+                    }
+                    if (animatedMembershipChanged) {
+                        animatedVocalLineIndicesState.value = buildSet {
+                            animatedVocalMembership.forEachIndexed { index, animated ->
+                                if (animated) add(index)
                             }
                         }
                     }
@@ -1074,6 +1103,7 @@ private fun LyricScene(
                             val activeSceneIndex = activeSceneIndexState.value
                             val activeItem = sceneItems.getOrNull(activeSceneIndex)
                             val activeVocalLines = activeVocalLineIndicesState.value
+                            val animatedVocalLines = animatedVocalLineIndicesState.value
                             val focusDistance = when {
                                 activeVocalLines.isNotEmpty() ->
                                     activeVocalLines.minOf { activeLine -> abs(item.lineIndex - activeLine) }
@@ -1085,7 +1115,7 @@ private fun LyricScene(
                                 lineIndex = item.lineIndex,
                                 lines = lyrics.lines,
                                 line = line,
-                                isActive = item.lineIndex in activeVocalLines,
+                                useAnimatedRenderer = item.lineIndex in animatedVocalLines,
                                 focusDistance = focusDistance,
                                 positionState = positionState,
                                 textStyle = textStyle,
@@ -1290,7 +1320,7 @@ private fun LyricLineContent(
     lineIndex: Int,
     lines: List<CharLine>,
     line: CharLine,
-    isActive: Boolean,
+    useAnimatedRenderer: Boolean,
     focusDistance: Int,
     positionState: State<Long>,
     textStyle: TextStyle,
@@ -1300,7 +1330,24 @@ private fun LyricLineContent(
     onSeek: (Long) -> Unit,
     isPlaying: Boolean,
 ) {
-    val blurRadius = blurPxFor(focusDistance).dp
+    // Focus changes only at lyric boundaries, so these animations run for the handful
+    // of affected lines rather than recomposing the whole lyric scene every playback frame.
+    val targetDistance = focusDistance.toFloat()
+    val animatedAlpha by animateFloatAsState(
+        targetValue = alphaFor(targetDistance),
+        animationSpec = composeSpring(dampingRatio = 0.92f, stiffness = 180f),
+        label = "lyricLineAlpha",
+    )
+    val animatedScale by animateFloatAsState(
+        targetValue = scaleFor(targetDistance),
+        animationSpec = composeSpring(dampingRatio = 0.88f, stiffness = 180f),
+        label = "lyricLineScale",
+    )
+    val animatedBlur by animateDpAsState(
+        targetValue = blurPxFor(focusDistance).dp,
+        animationSpec = composeSpring(dampingRatio = 1f, stiffness = 220f),
+        label = "lyricLineBlur",
+    )
 
     Column(
         modifier = Modifier
@@ -1308,18 +1355,16 @@ private fun LyricLineContent(
             .graphicsLayer {
                 // Visual focus follows the actually sung scene item. Scroll position is
                 // intentionally independent, so a current lyric can stay lower on screen.
-                val d = focusDistance.toFloat()
-                alpha = alphaFor(d)
-                val s = scaleFor(d)
-                scaleX = s
-                scaleY = s
+                alpha = animatedAlpha.coerceIn(0f, 1f)
+                scaleX = animatedScale
+                scaleY = animatedScale
             }
-            .blur(radius = blurRadius, edgeTreatment = BlurredEdgeTreatment.Rectangle)
+            .blur(radius = animatedBlur, edgeTreatment = BlurredEdgeTreatment.Rectangle)
             .clickable(onClick = { onSeek(line.startMs) })
             .padding(vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (isActive) {
+        if (useAnimatedRenderer) {
             ActiveLineText(
                 index = lineIndex,
                 lines = lines,
