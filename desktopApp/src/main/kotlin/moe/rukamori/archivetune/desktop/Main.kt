@@ -156,6 +156,8 @@ fun main() {
                         windowControls = windowControls,
                         immersiveContent = lyricsContent.takeIf { showLyrics },
                         onDismissImmersive = { showLyrics = false },
+                        queueVisible = showQueue,
+                        onDismissQueue = { showQueue = false },
                         contentCanNavigateBack = browse.detail != null,
                         onContentNavigateBack = browse::goBack,
                         onShellStateChanged = { destination, theme, accentSeedArgb ->
@@ -186,7 +188,7 @@ fun main() {
                                 modifier = modifier,
                             )
                         },
-                        queueContent = { modifier ->
+                        queueContent = { modifier, queueWidth ->
                             AnimatedVisibility(
                                 visible = showQueue,
                                 enter = slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it } +
@@ -199,7 +201,7 @@ fun main() {
                                     services = musicServices,
                                     playTogether = playTogether,
                                     onClose = { showQueue = false },
-                                    modifier = Modifier.fillMaxHeight().width(360.dp),
+                                    modifier = Modifier.fillMaxHeight().width(queueWidth),
                                 )
                             }
                         },

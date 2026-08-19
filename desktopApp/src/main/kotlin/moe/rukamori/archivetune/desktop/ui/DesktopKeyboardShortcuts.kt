@@ -11,6 +11,12 @@ internal enum class DesktopShortcutAction {
     ESCAPE,
 }
 
+internal enum class DesktopEscapeAction {
+    DISMISS_IMMERSIVE,
+    DISMISS_QUEUE,
+    CLEAR_SEARCH,
+}
+
 /** Pure shortcut mapping so shell key handling stays consistent and unit-testable. */
 internal fun desktopShortcutAction(
     key: Key,
@@ -22,5 +28,17 @@ internal fun desktopShortcutAction(
     altPressed && !ctrlPressed && key == Key.DirectionLeft -> DesktopShortcutAction.BACK
     altPressed && !ctrlPressed && key == Key.DirectionRight -> DesktopShortcutAction.FORWARD
     !ctrlPressed && !altPressed && key == Key.Escape -> DesktopShortcutAction.ESCAPE
+    else -> null
+}
+
+/** Overlay dismissal wins over page-level Escape behavior; text fields still receive the key first. */
+internal fun desktopEscapeAction(
+    immersiveVisible: Boolean,
+    queueVisible: Boolean,
+    hasSearchQuery: Boolean,
+): DesktopEscapeAction? = when {
+    immersiveVisible -> DesktopEscapeAction.DISMISS_IMMERSIVE
+    queueVisible -> DesktopEscapeAction.DISMISS_QUEUE
+    hasSearchQuery -> DesktopEscapeAction.CLEAR_SEARCH
     else -> null
 }

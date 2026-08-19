@@ -103,6 +103,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopPlatform
@@ -161,11 +162,13 @@ fun ArchiveTuneDesktopApp(
     windowControls: (@Composable () -> Unit)? = null,
     immersiveContent: (@Composable (Modifier, Boolean) -> Unit)? = null,
     onDismissImmersive: () -> Unit = {},
+    queueVisible: Boolean = false,
+    onDismissQueue: () -> Unit = {},
     contentCanNavigateBack: Boolean = false,
     onContentNavigateBack: () -> Boolean = { false },
     content: (@Composable (DesktopContentState, Modifier) -> Unit)? = null,
     playerContent: (@Composable (Modifier) -> Unit)? = null,
-    queueContent: (@Composable (Modifier) -> Unit)? = null,
+    queueContent: (@Composable (Modifier, Dp) -> Unit)? = null,
 ) {
     val navigator = remember { DesktopNavigator(initialDestination) }
     val searchFocusRequester = remember { FocusRequester() }
@@ -219,16 +222,26 @@ fun ArchiveTuneDesktopApp(
                             DesktopShortcutAction.FORWARD -> {
                                 if (immersiveContent != null || contentCanNavigateBack) false else navigator.navigateForward()
                             }
-                            DesktopShortcutAction.ESCAPE -> when {
-                                immersiveContent != null -> {
+                            DesktopShortcutAction.ESCAPE -> when (
+                                desktopEscapeAction(
+                                    immersiveVisible = immersiveContent != null,
+                                    queueVisible = queueVisible,
+                                    hasSearchQuery = searchQuery.isNotEmpty(),
+                                )
+                            ) {
+                                DesktopEscapeAction.DISMISS_IMMERSIVE -> {
                                     onDismissImmersive()
                                     true
                                 }
-                                searchQuery.isNotEmpty() -> {
+                                DesktopEscapeAction.DISMISS_QUEUE -> {
+                                    onDismissQueue()
+                                    true
+                                }
+                                DesktopEscapeAction.CLEAR_SEARCH -> {
                                     searchQuery = ""
                                     true
                                 }
-                                else -> false
+                                null -> false
                             }
                             null -> false
                         }
@@ -306,7 +319,7 @@ fun ArchiveTuneDesktopApp(
                             onNavigateBackOverride = if (contentCanNavigateBack) ({ onContentNavigateBack() }) else null,
                         )
 
-                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                             AnimatedContent(
                                 targetState = state.destination,
                                 transitionSpec = {
@@ -333,7 +346,10 @@ fun ArchiveTuneDesktopApp(
                             }
 
                             if (queueContent != null) {
-                                queueContent(Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+                                queueContent(
+                                    Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                    desktopQueueOverlayWidth(maxWidth),
+                                )
                             }
                         }
 

@@ -29,4 +29,29 @@ class DesktopKeyboardShortcutsTest {
         assertNull(desktopShortcutAction(Key.Comma, ctrlPressed = false, altPressed = false))
         assertNull(desktopShortcutAction(Key.K, ctrlPressed = true, altPressed = true))
     }
+
+    @Test
+    fun `escape dismisses immersive content before queue and search`() {
+        assertEquals(
+            DesktopEscapeAction.DISMISS_IMMERSIVE,
+            desktopEscapeAction(immersiveVisible = true, queueVisible = true, hasSearchQuery = true),
+        )
+    }
+
+    @Test
+    fun `escape dismisses queue before clearing search`() {
+        assertEquals(
+            DesktopEscapeAction.DISMISS_QUEUE,
+            desktopEscapeAction(immersiveVisible = false, queueVisible = true, hasSearchQuery = true),
+        )
+    }
+
+    @Test
+    fun `escape falls back to existing search clear and otherwise does nothing`() {
+        assertEquals(
+            DesktopEscapeAction.CLEAR_SEARCH,
+            desktopEscapeAction(immersiveVisible = false, queueVisible = false, hasSearchQuery = true),
+        )
+        assertNull(desktopEscapeAction(immersiveVisible = false, queueVisible = false, hasSearchQuery = false))
+    }
 }
