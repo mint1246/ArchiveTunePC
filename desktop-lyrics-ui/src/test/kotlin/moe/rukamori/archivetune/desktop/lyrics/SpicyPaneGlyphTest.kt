@@ -374,6 +374,44 @@ class SpicyPaneGlyphTest {
     }
 
     @Test
+    fun overlappingLinesRemainActiveIndependentlyForTheirFullIntervals() {
+        val main = sceneLine("main vocal", 10_000L, 15_000L)
+        val backing = sceneLine("(backing vocal)", 12_000L, 14_000L)
+
+        assertTrue(isVocalLineActiveAt(12_500L, main))
+        assertTrue(isVocalLineActiveAt(12_500L, backing))
+
+        // The shorter overlapping line finishing must not make the longer line finish too.
+        assertTrue(isVocalLineActiveAt(14_500L, main))
+        assertTrue(!isVocalLineActiveAt(14_500L, backing))
+        assertTrue(!isVocalLineActiveAt(15_000L, main))
+    }
+
+    @Test
+    fun overlappingVocalsDoNotCreateFakeInterludeDots() {
+        val lyrics = CharLyrics(
+            lines = listOf(
+                sceneLine("long main", 0L, 10_000L),
+                sceneLine("short backing", 1_000L, 2_000L),
+                // There appears to be a 3 s gap after the backing line, but the main
+                // vocal still covers it all the way through 10 s.
+                sceneLine("another backing", 5_000L, 6_000L),
+                sceneLine("next real line", 13_000L, 14_000L),
+            ),
+            preludeMs = 0L,
+        )
+
+        val items = buildLyricsSceneItems(lyrics)
+        val interludes = items.filterIsInstance<LyricsSceneItem.Interlude>()
+
+        assertEquals(1, interludes.size)
+        assertEquals(10_000L, interludes.single().startMs)
+        assertEquals(13_000L, interludes.single().endMs)
+        assertEquals(0, interludes.single().previousLineIndex)
+        assertEquals(3, interludes.single().nextLineIndex)
+    }
+
+    @Test
     fun longPreludeGetsMusicalDotsBeforeFirstVocal() {
         val lyrics = CharLyrics(
             lines = listOf(sceneLine("finally", 3_000L, 4_000L)),

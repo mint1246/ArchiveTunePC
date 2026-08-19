@@ -331,7 +331,11 @@ internal sealed interface LyricsSceneItem {
     ) : LyricsSceneItem
 }
 
-/** Build the same kind of explicit timed musical-line items used by SpicyLyrics. */
+/**
+ * Build explicit timed musical-line items from the UNION of all vocal intervals.
+ * Overlapping lines must never create a fake interlude just because one shorter line
+ * ends before the next line starts while another vocal is still running underneath it.
+ */
 internal fun buildLyricsSceneItems(lyrics: CharLyrics): List<LyricsSceneItem> = buildList {
     val lines = lyrics.lines
     if (lines.isEmpty()) return@buildList
@@ -348,21 +352,33 @@ internal fun buildLyricsSceneItems(lyrics: CharLyrics): List<LyricsSceneItem> = 
         )
     }
 
-    lines.forEachIndexed { index, line ->
-        add(LyricsSceneItem.Vocal(lineIndex = index, startMs = line.startMs))
-        val next = lines.getOrNull(index + 1) ?: return@forEachIndexed
-        if (next.startMs - line.endMs >= INTERLUDE_MIN_MS) {
+    add(LyricsSceneItem.Vocal(lineIndex = 0, startMs = first.startMs))
+    var coveredUntilMs = first.endMs
+    var coverageEndLineIndex = 0
+
+    for (index in 1..lines.lastIndex) {
+        val line = lines[index]
+        if (line.startMs - coveredUntilMs >= INTERLUDE_MIN_MS) {
             add(
                 LyricsSceneItem.Interlude(
-                    previousLineIndex = index,
-                    nextLineIndex = index + 1,
-                    startMs = line.endMs,
-                    endMs = next.startMs,
+                    previousLineIndex = coverageEndLineIndex,
+                    nextLineIndex = index,
+                    startMs = coveredUntilMs,
+                    endMs = line.startMs,
                 ),
             )
         }
+        add(LyricsSceneItem.Vocal(lineIndex = index, startMs = line.startMs))
+        if (line.endMs > coveredUntilMs) {
+            coveredUntilMs = line.endMs
+            coverageEndLineIndex = index
+        }
     }
 }
+
+/** A vocal line stays live for its full provider interval, even if another line overlaps it. */
+internal fun isVocalLineActiveAt(positionMs: Long, line: CharLine): Boolean =
+    positionMs >= line.startMs && positionMs < line.endMs
 
 /** Binary search because this runs every frame. Scene items are ordered by start time. */
 internal fun activeSceneIndexAt(positionMs: Long, items: List<LyricsSceneItem>): Int {
@@ -863,6 +879,7 @@ private fun LyricScene(
 
     val anchorState = remember(lyrics) { mutableFloatStateOf(0f) }
     val activeSceneIndexState = remember(lyrics) { mutableIntStateOf(0) }
+    val activeVocalLineIndicesState = remember(lyrics) { mutableStateOf<Set<Int>>(emptySet()) }
     val activeVocalLineIndexState = remember(lyrics) { mutableIntStateOf(0) }
     val scrollAnchorLineState = remember(lyrics) { mutableIntStateOf(-1) }
     val positionState = remember(lyrics) { mutableLongStateOf(0L) }
@@ -872,6 +889,8 @@ private fun LyricScene(
     LaunchedEffect(lyrics, sceneItems, isPlaying) {
         var lastFrame = 0L
         var anchorWasInterlude = false
+        // Reused every frame so overlap tracking does not allocate a collection at 60/120 Hz.
+        val activeVocalMembership = BooleanArray(lyrics.lines.size)
         // Latest position sample from the player; the backend provides controlled timing samples.
         // times per second). Between samples we dead-reckon at wall-clock rate so the
         // sweep/bounce animate smoothly instead of freezing and jumping per sample.
@@ -924,6 +943,22 @@ private fun LyricScene(
                         smoothPosMs = predictedPos
                     }
                     val interpolatedPos = smoothPosMs.toLong().coerceAtLeast(0L)
+
+                    var activeMembershipChanged = false
+                    lyrics.lines.forEachIndexed { index, line ->
+                        val active = isVocalLineActiveAt(interpolatedPos, line)
+                        if (activeVocalMembership[index] != active) {
+                            activeVocalMembership[index] = active
+                            activeMembershipChanged = true
+                        }
+                    }
+                    if (activeMembershipChanged) {
+                        activeVocalLineIndicesState.value = buildSet {
+                            activeVocalMembership.forEachIndexed { index, active ->
+                                if (active) add(index)
+                            }
+                        }
+                    }
 
                     val newActiveScene = activeSceneIndexAt(interpolatedPos, sceneItems)
                     if (newActiveScene >= 0 && newActiveScene != activeSceneIndexState.intValue) {
@@ -1038,15 +1073,19 @@ private fun LyricScene(
                             val line = lyrics.lines[item.lineIndex]
                             val activeSceneIndex = activeSceneIndexState.value
                             val activeItem = sceneItems.getOrNull(activeSceneIndex)
-                            val focusDistance = when (activeItem) {
-                                is LyricsSceneItem.Vocal -> abs(item.lineIndex - activeItem.lineIndex)
+                            val activeVocalLines = activeVocalLineIndicesState.value
+                            val focusDistance = when {
+                                activeVocalLines.isNotEmpty() ->
+                                    activeVocalLines.minOf { activeLine -> abs(item.lineIndex - activeLine) }
+                                activeItem is LyricsSceneItem.Vocal ->
+                                    abs(item.lineIndex - activeItem.lineIndex)
                                 else -> abs(sceneIndex - activeSceneIndex)
                             }
                             LyricLineContent(
                                 lineIndex = item.lineIndex,
                                 lines = lyrics.lines,
                                 line = line,
-                                isActive = sceneIndex == activeSceneIndex,
+                                isActive = item.lineIndex in activeVocalLines,
                                 focusDistance = focusDistance,
                                 positionState = positionState,
                                 textStyle = textStyle,
