@@ -122,13 +122,7 @@ class ManagedChromiumLoginSource(
                 .start()
                 .also { process -> process.outputStream.close() }
 
-            val loginDeadlineNanos = System.nanoTime() + loginTimeout.toNanos()
-            while (!completion.isCompleted) {
-                if (System.nanoTime() >= loginDeadlineNanos) {
-                    throw IllegalStateException("Timed out waiting for YouTube Music sign-in")
-                }
-                delay(pollDelayMillis)
-            }
+            awaitManagedLoginCompletion(completion, loginProcess, loginTimeout, pollDelayMillis)
 
             stopManagedBrowser(loginProcess)
             loginProcess = null
@@ -314,6 +308,28 @@ class ManagedChromiumLoginSource(
         private const val PROCESS_EXIT_POLL_MILLIS = 50L
         private val PROCESS_EXIT_GRACE = Duration.ofSeconds(2)
         private val PAGE_LOAD_TIMEOUT = Duration.ofSeconds(10)
+    }
+}
+
+internal suspend fun awaitManagedLoginCompletion(
+    completion: CompletableDeferred<Unit>,
+    managedProcess: Process,
+    loginTimeout: Duration,
+    pollDelayMillis: Long,
+) {
+    val deadlineNanos = System.nanoTime() + loginTimeout.toNanos()
+    while (true) {
+        if (completion.isCompleted) return
+        if (!managedProcess.isAlive) {
+            // completeLogin() may race with the browser's final process exit. Give an already-won
+            // completion signal precedence rather than reporting that successful confirmation as a close.
+            if (completion.isCompleted) return
+            throw IllegalStateException("The ArchiveTune sign-in browser was closed before sign-in was completed")
+        }
+        if (System.nanoTime() >= deadlineNanos) {
+            throw IllegalStateException("Timed out waiting for YouTube Music sign-in")
+        }
+        delay(pollDelayMillis.coerceAtLeast(1L))
     }
 }
 
