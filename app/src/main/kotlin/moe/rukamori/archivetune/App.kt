@@ -35,6 +35,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.canvas.ArchiveTuneCanvas
 import moe.rukamori.archivetune.constants.*
+import moe.rukamori.archivetune.downloads.DownloadedArtworkRepository
 import moe.rukamori.archivetune.extensions.*
 import moe.rukamori.archivetune.gatekeeper.GatekeeperResult
 import moe.rukamori.archivetune.gatekeeper.RunGatekeeperCheckUseCase
@@ -84,6 +85,7 @@ class App :
 
     @Inject
     lateinit var playlistCoverInterceptor: PlaylistCoverInterceptor
+    lateinit var downloadedArtworkRepository: DownloadedArtworkRepository
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     @Volatile private var isInitialized = false
@@ -369,6 +371,7 @@ class App :
             .diskCachePolicy(imageCacheConfig.policy)
             .components {
                 add(playlistCoverInterceptor)
+                add(downloadedArtworkRepository.coilMapper())
             }
             .build()
     }
