@@ -218,10 +218,9 @@ class ArchiveTuneJvmClient(
         }
 
     /**
-     * Some YouTube Music artist responses expose an incomplete Albums carousel even when the
-     * carousel has a valid "more" endpoint. Songs can still point at additional valid album browse
-     * IDs, so recover those full albums from the artist's song search instead of trusting the
-     * carousel to be exhaustive.
+     * YouTube Music can return a region-dependent subset of an artist's Albums carousel. An
+     * anonymous US artist page gives us YouTube's canonical English artist title, and searching that
+     * title can expose releases omitted from both the current-locale and US artist carousels.
      */
     private suspend fun recoverUnlistedArtistAlbums(page: ArtistPage): ArtistPage {
         val albumSectionIndex = page.sections.indexOfFirst { section ->
@@ -231,46 +230,49 @@ class ArchiveTuneJvmClient(
 
         val albumSection = page.sections[albumSectionIndex]
 
+        val fallbackPage =
+            YouTube.artist(
+                browseId = page.artist.id,
+                useAccountContext = false,
+                localeOverride = ARTIST_ALBUM_RECOVERY_LOCALE,
+            ).getOrNull() ?: return page
         val knownAlbumIds =
             page.sections
                 .asSequence()
                 .flatMap { it.items.asSequence() }
                 .filterIsInstance<AlbumItem>()
                 .mapTo(mutableSetOf()) { it.browseId }
+        val fallbackAlbums =
+            fallbackPage.sections
+                .firstOrNull { section -> section.items.any { it is AlbumItem } }
+                ?.items
+                ?.filterIsInstance<AlbumItem>()
+                .orEmpty()
+        knownAlbumIds += fallbackAlbums.map { it.browseId }
 
-        val searchItems = buildList {
-            addAll(
-                YouTube.search(page.artist.title, YouTube.SearchFilter.FILTER_SONG)
-                    .getOrNull()
-                    ?.items
-                    .orEmpty(),
-            )
-            if (YouTube.locale.gl != ARTIST_ALBUM_RECOVERY_LOCALE.gl) {
-                addAll(
+        val candidateAlbumIds =
+            listOf(fallbackPage.artist.title, page.artist.title)
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .distinct()
+                .flatMap { query ->
                     YouTube.search(
-                        page.artist.title,
-                        YouTube.SearchFilter.FILTER_SONG,
+                        query = query,
+                        filter = YouTube.SearchFilter.FILTER_SONG,
+                        useAccountContext = false,
                         localeOverride = ARTIST_ALBUM_RECOVERY_LOCALE,
                     ).getOrNull()
                         ?.items
-                        .orEmpty(),
-                )
-            }
-        }
-
-        val candidateAlbumIds =
-            searchItems
-                .asSequence()
+                        .orEmpty()
+                }.asSequence()
                 .filterIsInstance<SongItem>()
                 .filter { song -> song.artists.any { it.id == page.artist.id } }
                 .mapNotNull { it.album?.id }
                 .filterNot(knownAlbumIds::contains)
                 .distinct()
-                .take(MAX_RECOVERED_ARTIST_ALBUMS)
                 .toList()
-        if (candidateAlbumIds.isEmpty()) return page
 
-        val recovered =
+        val searchedAlbums =
             candidateAlbumIds.mapNotNull { albumId ->
                 val albumPage = YouTube.album(albumId).getOrNull() ?: return@mapNotNull null
                 val belongsToArtist =
@@ -279,6 +281,7 @@ class ArchiveTuneJvmClient(
                 if (!belongsToArtist || albumPage.songs.size < MIN_FULL_ALBUM_TRACKS) return@mapNotNull null
                 albumPage.album
             }
+        val recovered = (fallbackAlbums + searchedAlbums).distinctBy { it.browseId }
         if (recovered.isEmpty()) return page
 
         val mergedItems =
@@ -1267,7 +1270,6 @@ private fun normalizeStreamIdentity(value: String): String =
         .trim()
         .replace(Regex("\\s+"), " ")
 
-private const val MAX_RECOVERED_ARTIST_ALBUMS = 4
 private const val MIN_FULL_ALBUM_TRACKS = 7
 private val ARTIST_ALBUM_RECOVERY_LOCALE = YouTubeLocale(gl = "US", hl = "en")
 private const val MAX_STREAM_REPLACEMENT_CANDIDATES = 3
