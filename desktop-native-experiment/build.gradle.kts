@@ -46,6 +46,9 @@ nucleus.application {
         )
         buildArgs.add("""-H:ExcludeResources=^com/sun/jna/win32-(aarch64|x86)/.*$""")
         buildArgs.add("""-H:ExcludeResources=^nucleus/native/(darwin|linux)-.*/.*$""")
+        // Nucleus already stages this DLL beside the executable in bin/, so keeping a second
+        // byte-for-byte copy in the image heap only inflates the EXE.
+        buildArgs.add("""-H:ExcludeResources=^skiko-windows-x64[.]dll$""")
     }
 }
 
