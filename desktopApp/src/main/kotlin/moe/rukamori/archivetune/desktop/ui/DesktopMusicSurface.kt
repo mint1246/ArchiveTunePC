@@ -175,9 +175,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     val accountState by services.account.state.collectAsState()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
     val remoteLibraryState by services.libraryRepository.state.collectAsState()
+    val searchState by services.searchRepository.state.collectAsState()
     val localTracks by services.library.tracksFlow.collectAsState()
     val onlinePlaylists = remoteLibraryState.playlists
-    var resultItems by remember { mutableStateOf<List<YTItem>>(emptyList()) }
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     var showSpotifyImport by remember { mutableStateOf(false) }
@@ -196,11 +196,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         services.libraryRepository.activate()
     }
     LaunchedEffect(state.searchQuery, state.destination) {
-        if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH || state.searchQuery.isBlank()) return@LaunchedEffect
-        delay(300); browse.loading = true; browse.failure = null
-        services.backend.searchSummary(state.searchQuery).onSuccess { page -> resultItems = page.summaries.flatMap { it.items }.distinctBy { it::class to it.id } }
-            .onFailure { browse.failure = it.message ?: "Search failed. Check your connection and try again."; resultItems = emptyList() }
-        browse.loading = false
+        if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH) return@LaunchedEffect
+        if (state.searchQuery.isNotBlank()) delay(250)
+        services.searchRepository.activate(state.searchQuery)
     }
     fun open(item: YTItem) {
         when (item) {
@@ -314,7 +312,25 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     ) { page ->
         when (page) {
         null -> when (state.destination) {
-            moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(state.searchQuery, resultItems, browse.loading, browse.failure, ::open, ::downloadSong, ::playNextSong, ::enqueueSong, ::choosePlaylist, ::setLiked, ::isLiked, modifier)
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(
+                query = state.searchQuery,
+                items = searchState.items,
+                history = searchState.history,
+                loading = searchState.isInitialLoading,
+                refreshing = searchState.isRefreshing,
+                error = searchState.error,
+                onHistorySelected = state.setSearchQuery,
+                onHistoryRemoved = services.searchRepository::removeHistory,
+                onHistoryCleared = services.searchRepository::clearHistory,
+                open = ::open,
+                download = ::downloadSong,
+                onPlayNext = ::playNextSong,
+                onAddToQueue = ::enqueueSong,
+                onAddToPlaylist = ::choosePlaylist,
+                onSetLiked = ::setLiked,
+                isLiked = ::isLiked,
+                modifier = modifier,
+            )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
                 localTracks, onlinePlaylists, services.library.folders,
@@ -707,13 +723,60 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     selected?.toPath()
 }
 
-@Composable private fun SearchResults(query: String, items: List<YTItem>, loading: Boolean, error: String?, open: (YTItem) -> Unit, download: (SongItem) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, modifier: Modifier) {
+@Composable
+private fun SearchResults(
+    query: String,
+    items: List<YTItem>,
+    history: List<String>,
+    loading: Boolean,
+    refreshing: Boolean,
+    error: String?,
+    onHistorySelected: (String) -> Unit,
+    onHistoryRemoved: (String) -> Unit,
+    onHistoryCleared: () -> Unit,
+    open: (YTItem) -> Unit,
+    download: (SongItem) -> Unit,
+    onPlayNext: (SongItem) -> Unit,
+    onAddToQueue: (SongItem) -> Unit,
+    onAddToPlaylist: (SongItem) -> Unit,
+    onSetLiked: (SongItem, Boolean) -> Unit,
+    isLiked: (SongItem) -> Boolean,
+    modifier: Modifier,
+) {
     LazyColumn(
         modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { Text(if (query.isBlank()) "Search YouTube Music" else "Results for “$query”", style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Text(
+                if (query.isBlank()) "Search YouTube Music" else "Results for “$query”",
+                style = MaterialTheme.typography.headlineMedium,
+            )
+        }
+        if (query.isBlank()) {
+            if (history.isEmpty()) {
+                item { Text("Your recent searches will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            } else {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Recent searches", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = onHistoryCleared) { Text("Clear") }
+                    }
+                }
+                items(history, key = { "search-history:$it" }) { recent ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { onHistorySelected(recent) }, modifier = Modifier.weight(1f)) {
+                            Text(recent, modifier = Modifier.fillMaxWidth())
+                        }
+                        TextButton(onClick = { onHistoryRemoved(recent) }) { Text("Remove") }
+                    }
+                }
+            }
+        }
+        if (refreshing && items.isNotEmpty()) {
+            item { Text("Refreshing results…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         item {
             AnimatedVisibility(
                 visible = loading,

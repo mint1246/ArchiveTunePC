@@ -129,6 +129,7 @@ import coil3.compose.SubcomposeAsyncImage
 data class DesktopContentState(
     val destination: DesktopDestination,
     val searchQuery: String,
+    val setSearchQuery: (String) -> Unit,
     val navigate: (DesktopDestination) -> Unit,
     val themePreference: DesktopThemePreference,
     val setThemePreference: (DesktopThemePreference) -> Unit,
@@ -215,6 +216,10 @@ fun ArchiveTuneDesktopApp(
             val state = DesktopContentState(
                 destination = navigator.current,
                 searchQuery = searchQuery,
+                setSearchQuery = { query ->
+                    searchQuery = query
+                    if (query.isNotEmpty()) navigator.navigate(DesktopDestination.SEARCH)
+                },
                 navigate = navigator::navigate,
                 themePreference = themePreference,
                 setThemePreference = { themePreference = it },
@@ -262,10 +267,7 @@ fun ArchiveTuneDesktopApp(
                             navigator = navigator,
                             destination = state.destination,
                             query = searchQuery,
-                            onQueryChanged = { query ->
-                                searchQuery = query
-                                if (query.isNotEmpty()) navigator.navigate(DesktopDestination.SEARCH)
-                            },
+                            onQueryChanged = state.setSearchQuery,
                             searchFocusRequester = searchFocusRequester,
                             compact = layout == DesktopNavigationLayout.COMPACT,
                             windowDragModifier = windowDragModifier,

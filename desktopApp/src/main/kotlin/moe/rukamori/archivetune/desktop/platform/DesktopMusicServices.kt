@@ -30,6 +30,7 @@ import moe.rukamori.archivetune.innertube.home.DesktopLibraryRepository
 import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
 import moe.rukamori.archivetune.innertube.home.DesktopSimilarRecommendation
 import moe.rukamori.archivetune.innertube.home.quickPickSeedIds
+import moe.rukamori.archivetune.innertube.search.DesktopSearchRepository
 import moe.rukamori.archivetune.spotify.DesktopSpotifyPlaylistImporter
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportProgress
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportResult
@@ -92,6 +93,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         backend = backend,
         coordinator = contentCoordinator,
         libraryRepository = libraryRepository,
+        scope = runtime.applicationScope,
+        accountScopeProvider = ::accountCacheScope,
+    )
+    val searchRepository = DesktopSearchRepository(
+        searchSummary = backend::searchSummary,
+        coordinator = contentCoordinator,
         scope = runtime.applicationScope,
         accountScopeProvider = ::accountCacheScope,
     )
@@ -320,6 +327,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 .collectLatest { signedInAccount ->
                     libraryRepository.onAccountScopeChanged()
                     homeRepository.onAccountScopeChanged()
+                    searchRepository.onAccountScopeChanged()
                     if (signedInAccount != null) {
                         // Restore persistent Home/Library state immediately. Network refreshes can
                         // then happen behind already-renderable cached content.

@@ -422,6 +422,24 @@ Desired behavior:
 
 # Phase 4 - Search subsystem
 
+**Status: completed 2026-08-19.**
+
+Implementation checkpoint:
+
+- Added application-scoped `DesktopSearchRepository`.
+- Normalizes queries and keeps an access-ordered in-memory cache capped at 12 queries.
+- Persists recent query results and up to 30 search-history entries per account scope.
+- Uses a 10-minute freshness window with stale-while-revalidate behavior.
+- Cached results remain visible during refresh; only an uncached query needs an initial loader.
+- Obsolete searches are cancelled, and a generation/current-query guard prevents late responses from replacing newer results.
+- Search UI now renders repository state instead of owning a disposable `resultItems` list.
+- Added recent-search select/remove/clear UI.
+- Added a compact `YTItem` persistence codec that stores render/navigation metadata only, never signed playback URLs or headers.
+- Added focused repository tests for normalized cache hits, stale-response races, bounded memory, and persisted history.
+- Verified with `:desktop-backend:test :desktopApp:compileKotlin`.
+
+Scroll-position restoration is intentionally completed together with route/view-state work in Phase 5/8 rather than retaining Compose screens.
+
 ## Goal
 
 Search should behave like a persistent user session rather than a disposable request.
@@ -849,7 +867,7 @@ No phase commit was made at this checkpoint because `DesktopMusicSurface.kt` alr
 - [x] phase 1 - app-scoped cache/request infrastructure (implementation + automated verification complete)
 - [x] phase 2 - Home repository + stale-while-revalidate (implementation + automated verification complete)
 - [x] phase 3 - Library cached-first behavior (implementation + automated verification complete)
-- [ ] phase 4 - Search sessions/history/cache
+- [x] phase 4 - Search sessions/history/cache (implementation + automated verification complete)
 - [ ] phase 5 - real route/back-stack navigation
 - [ ] phase 6 - request priority/concurrency cleanup
 - [ ] phase 7 - async/coalesced persistence
