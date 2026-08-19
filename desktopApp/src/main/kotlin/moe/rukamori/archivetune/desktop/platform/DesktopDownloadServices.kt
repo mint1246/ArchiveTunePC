@@ -31,6 +31,48 @@ import moe.rukamori.archivetune.innertube.ResolvedAudioStream
 import moe.rukamori.archivetune.innertube.probeResolvedAudioStream
 import moe.rukamori.archivetune.innertube.models.SongItem
 
+internal data class RetryableDownloadSpec(
+    val videoId: String,
+    val title: String,
+    val artistNames: List<String>,
+    val albumTitle: String?,
+    val albumId: String?,
+    val artworkUrl: String?,
+    val durationMs: Long?,
+    val explicit: Boolean,
+)
+
+/** Keeps only stable song metadata in memory; signed URLs and headers never enter this store. */
+internal class InProcessDownloadAttempts {
+    private val retryable = ConcurrentHashMap<String, RetryableDownloadSpec>()
+
+    suspend fun enqueueFresh(
+        spec: RetryableDownloadSpec,
+        resolve: suspend (RetryableDownloadSpec) -> DownloadRequest,
+        enqueue: (DownloadRequest) -> String,
+    ): Result<String> = runCatching {
+        val request = resolve(spec)
+        enqueue(request).also { retryable[it] = spec }
+    }
+
+    suspend fun retry(
+        id: String,
+        resolve: suspend (RetryableDownloadSpec) -> DownloadRequest,
+        enqueue: (DownloadRequest) -> String,
+    ): Result<String>? = retryable[id]?.let { enqueueFresh(it, resolve, enqueue) }
+}
+
+private fun SongItem.toRetryableDownloadSpec() = RetryableDownloadSpec(
+    videoId = id,
+    title = title,
+    artistNames = artists.map { it.name },
+    albumTitle = album?.name,
+    albumId = album?.id,
+    artworkUrl = thumbnail,
+    durationMs = duration?.times(1_000L),
+    explicit = explicit,
+)
+
 /** Desktop-only coordinator: resolves fresh URLs just-in-time, never persists them. */
 class DesktopDownloadServices(
     private val runtime: DesktopRuntime,
@@ -38,7 +80,7 @@ class DesktopDownloadServices(
 ) : AutoCloseable {
     @Volatile private var directory: Path = configuredDirectory()
     @Volatile private var manager = newManager(directory, runtime.settings.snapshot())
-    private val retryRequests = ConcurrentHashMap<String, DownloadRequest>()
+    private val retryAttempts = InProcessDownloadAttempts()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutableDownloads = MutableStateFlow(manager.downloads.value)
     private var downloadsJob: Job = observe(manager)
@@ -69,25 +111,31 @@ class DesktopDownloadServices(
                         directory.resolve(it.fileName) == completedFile
                 }?.let { return@withLock Result.success(it.id) }
             }
-            runCatching { resolveValidatedStream(song) }.map { stream ->
-                val request = DownloadRequest(
-                    url = stream.url,
-                    headers = stream.requestHeaders,
-                    title = song.title,
-                    artist = song.artists.joinToString { it.name }.ifBlank { null },
-                    extension = stream.mimeType.substringAfter('/').substringBefore(';').ifBlank { "m4a" },
-                    mediaId = song.id,
-                    albumTitle = song.album?.name,
-                    albumId = song.album?.id,
-                    artworkUrl = song.thumbnail,
-                    durationMs = song.duration?.times(1000L),
-                    explicit = song.explicit,
-                )
-                manager.enqueue(request).also { retryRequests[it] = request }
-            }
+            retryAttempts.enqueueFresh(
+                spec = song.toRetryableDownloadSpec(),
+                resolve = ::resolveRequest,
+                enqueue = { manager.enqueue(it) },
+            )
         } finally {
             synchronized(operationLock) { inFlightEnqueues-- }
         }
+    }
+
+    private suspend fun resolveRequest(spec: RetryableDownloadSpec): DownloadRequest {
+        val stream = resolveValidatedStream(spec)
+        return DownloadRequest(
+            url = stream.url,
+            headers = stream.requestHeaders,
+            title = spec.title,
+            artist = spec.artistNames.joinToString().ifBlank { null },
+            extension = stream.mimeType.substringAfter('/').substringBefore(';').ifBlank { "m4a" },
+            mediaId = spec.videoId,
+            albumTitle = spec.albumTitle,
+            albumId = spec.albumId,
+            artworkUrl = spec.artworkUrl,
+            durationMs = spec.durationMs,
+            explicit = spec.explicit,
+        )
     }
 
     /**
@@ -95,14 +143,14 @@ class DesktopDownloadServices(
      * rejected by the media CDN even though the player response itself succeeded; on those concrete
      * 403/404/410/416 responses, back off that client/proof generation and resolve once more.
      */
-    private suspend fun resolveValidatedStream(song: SongItem): ResolvedAudioStream {
+    private suspend fun resolveValidatedStream(spec: RetryableDownloadSpec): ResolvedAudioStream {
         var stream =
             backend.resolveAudioStreamWithMetadataFallback(
-                videoId = song.id,
-                title = song.title,
-                artistNames = song.artists.map { it.name },
-                albumTitle = song.album?.name,
-                durationHintMs = song.duration?.times(1_000L),
+                videoId = spec.videoId,
+                title = spec.title,
+                artistNames = spec.artistNames,
+                albumTitle = spec.albumTitle,
+                durationHintMs = spec.durationMs,
             ).getOrThrow()
 
         val initialProbeFailure = probeResolvedAudioStream(stream).exceptionOrNull()
@@ -141,9 +189,18 @@ class DesktopDownloadServices(
         return DownloadBatchResult(songs.distinctBy(SongItem::id).size, queued, failures)
     }
 
-    /** Retry only within this process; after restart the user must resolve a new signed stream. */
-    fun retry(id: String): String? = synchronized(operationLock) {
-        retryRequests[id]?.let { manager.enqueue(it).also { next -> retryRequests[next] = it } }
+    /** Retry only within this process; every retry resolves a new signed stream first. */
+    suspend fun retry(id: String): Result<String>? = enqueueMutex.withLock {
+        synchronized(operationLock) { inFlightEnqueues++ }
+        try {
+            retryAttempts.retry(
+                id = id,
+                resolve = ::resolveRequest,
+                enqueue = { manager.enqueue(it) },
+            )
+        } finally {
+            synchronized(operationLock) { inFlightEnqueues-- }
+        }
     }
     fun cancel(id: String): Boolean = synchronized(operationLock) { manager.cancel(id) }
 

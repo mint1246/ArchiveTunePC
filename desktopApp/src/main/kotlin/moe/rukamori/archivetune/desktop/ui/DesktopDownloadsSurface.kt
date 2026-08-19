@@ -78,7 +78,18 @@ fun DesktopDownloadsSurface(
                 DownloadRow(
                     download,
                     onCancel = { services.cancel(download.id) },
-                    onRetry = { if (services.retry(download.id) == null) message = "This download was restored after restart. Search and download it again to obtain a fresh stream." },
+                    onRetry = {
+                        scope.launch {
+                            val retry = services.retry(download.id)
+                            if (retry == null) {
+                                message = "This download was restored after restart. Search and download it again to obtain a fresh stream."
+                            } else {
+                                retry
+                                    .onSuccess { message = null }
+                                    .onFailure { message = it.message ?: "Could not resolve a fresh stream for this download." }
+                            }
+                        }
+                    },
                     onPlay = {
                         services.completedFileForDownload(download.id)?.let { onPlayFile(it, download) }
                             ?: run { message = "The downloaded file is missing or unreadable. Download the song again." }
