@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import java.nio.file.Files
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 
 class ArchiveTuneJvmClientTest {
@@ -158,6 +159,36 @@ class ArchiveTuneJvmClientTest {
     }
 
     @Test
+    fun retryableMediaHttpFailureAfterAuthRefreshAlsoBlocksCurrentGeneration() = runBlocking {
+        val failedAuth = PlaybackAuthState(visitorData = "before").normalized()
+        val currentAuth = failedAuth.copy(visitorData = "after").normalized()
+        val client =
+            ArchiveTuneJvmClient(
+                cacheDirectory = Files.createTempDirectory("archivetune-test-").toFile(),
+                sessionProvider = DesktopSessionProvider { currentAuth },
+            )
+        val videoId = "video-after-auth-refresh"
+        val failedClient = client.orderedStreamClientsForTest(currentAuth, videoId).first()
+        val failedClientKey = "${failedClient.clientName}@${failedClient.clientVersion}"
+
+        val action =
+            client.prepareStreamHttpRecovery(
+                videoId = videoId,
+                clientKey = failedClientKey,
+                httpStatusCode = 403,
+                authFingerprint = failedAuth.fingerprint,
+                failedUrlHadPoToken = false,
+            )
+
+        assertEquals(StreamHttpRecoveryAction.CLIENT_BACKOFF, action)
+        assertFalse(
+            client.orderedStreamClientsForTest(currentAuth, videoId).any {
+                it.clientName == failedClient.clientName && it.clientVersion == failedClient.clientVersion
+            },
+        )
+    }
+
+    @Test
     fun nonRetryableMediaHttpFailureDoesNotRemoveTheClient() {
         val client = ArchiveTuneJvmClient(Files.createTempDirectory("archivetune-test-").toFile())
         val auth = PlaybackAuthState().normalized()
@@ -248,6 +279,49 @@ class ArchiveTuneJvmClientTest {
             assertEquals(206, result.httpStatus)
             assertEquals(4, result.bytesRead)
             assertTrue(result.rangedResponse)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun streamProbeRejectsUrlThatFailsLibVlcStyleLaterSeek() {
+        val rangeHeaders = CopyOnWriteArrayList<String>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/seek-sensitive") { exchange ->
+            val range = exchange.requestHeaders.getFirst("Range").orEmpty()
+            rangeHeaders += range
+            if (range == "bytes=0-1023") {
+                exchange.responseHeaders.add("Content-Range", "bytes 0-1023/8192")
+                exchange.sendResponseHeaders(206, 1024)
+                exchange.responseBody.use { it.write(ByteArray(1024) { 1 }) }
+            } else {
+                exchange.sendResponseHeaders(403, -1)
+                exchange.close()
+            }
+        }
+        server.start()
+        try {
+            val stream =
+                ResolvedAudioStream(
+                    videoId = "test",
+                    url = "http://127.0.0.1:${server.address.port}/seek-sensitive",
+                    format = format(251, 155_000, "audio/webm", direct = true),
+                    videoDetails = null,
+                    playbackTracking = null,
+                    audioConfig = null,
+                    clientName = "test",
+                    clientVersion = "test",
+                    requestHeaders = emptyMap(),
+                    expiresAtEpochMillis = System.currentTimeMillis() + 60_000,
+                    authFingerprint = "test",
+                )
+
+            val failure = probeResolvedAudioStream(stream).exceptionOrNull()
+
+            assertTrue(failure is AudioStreamProbeHttpException)
+            assertEquals(403, (failure as AudioStreamProbeHttpException).httpStatus)
+            assertEquals(listOf("bytes=0-1023", "bytes=7168-8191"), rangeHeaders.toList())
         } finally {
             server.stop(0)
         }

@@ -924,10 +924,22 @@ class ArchiveTuneJvmClient(
             }
         }
 
-        // Only back off a client when the failed URL still belongs to this exact auth generation.
-        // A visitor-data/session repair can legitimately evolve the current fingerprint between URL
-        // resolution and recovery; in that case a fresh retry is safer than poisoning either state.
-        if (!sameAuthGeneration) return StreamHttpRecoveryAction.RETRY_ONLY
+        // The URL already proved that this concrete client is unusable for this video. If session
+        // repair changed the fingerprint after resolution, block the client in both generations so
+        // the transparent retry cannot immediately choose the same rejected client again. A
+        // successful proof refresh above is the one exception: in that case retrying the same Web
+        // client is intentional because its URL will now be minted with different proof.
+        if (!sameAuthGeneration) {
+            val blockedFailedGeneration =
+                markStreamClientFailed(videoId, normalizedClientKey, httpStatusCode, authFingerprint)
+            val blockedCurrentGeneration =
+                markStreamClientFailed(videoId, normalizedClientKey, httpStatusCode, currentAuth.fingerprint)
+            return if (blockedFailedGeneration || blockedCurrentGeneration) {
+                StreamHttpRecoveryAction.CLIENT_BACKOFF
+            } else {
+                StreamHttpRecoveryAction.RETRY_ONLY
+            }
+        }
 
         return if (markStreamClientFailed(videoId, normalizedClientKey, httpStatusCode, authFingerprint)) {
             StreamHttpRecoveryAction.CLIENT_BACKOFF
