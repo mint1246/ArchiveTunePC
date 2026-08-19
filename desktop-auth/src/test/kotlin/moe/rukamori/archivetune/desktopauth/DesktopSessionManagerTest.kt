@@ -2,8 +2,10 @@ package moe.rukamori.archivetune.desktopauth
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,6 +17,9 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class DesktopSessionManagerTest {
     @Test
@@ -131,6 +136,56 @@ class DesktopSessionManagerTest {
         manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
 
         assertTrue(manager.logout().isSuccess)
+        assertNull(store.value)
+        assertEquals(DesktopAccountState.SignedOut, manager.state.value)
+        assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+    }
+
+    @Test
+    fun `slow logout cleanup does not block caller dispatcher`() = runBlocking {
+        val cleanupStarted = CountDownLatch(1)
+        val releaseCleanup = CountDownLatch(1)
+        val loginSource = object : DesktopInteractiveLoginSource {
+            override suspend fun acquireSession(): Result<YouTubeSessionImport> =
+                Result.failure(UnsupportedOperationException("not used"))
+
+            override fun clearSession(): Result<Unit> {
+                cleanupStarted.countDown()
+                check(releaseCleanup.await(5, TimeUnit.SECONDS)) { "test did not release cleanup" }
+                return Result.success(Unit)
+            }
+        }
+        val manager = manager(interactiveLoginSource = loginSource)
+        val executor = Executors.newSingleThreadExecutor()
+        executor.asCoroutineDispatcher().use { uiDispatcher ->
+            val logout = async(uiDispatcher) { manager.logout() }
+            assertTrue(cleanupStarted.await(2, TimeUnit.SECONDS))
+            try {
+                val uiPulse = async(uiDispatcher) { true }
+                assertTrue(withTimeout(1_000) { uiPulse.await() })
+            } finally {
+                releaseCleanup.countDown()
+            }
+            assertTrue(logout.await().isSuccess)
+        }
+    }
+
+    @Test
+    fun `logout cleanup failure propagates after account is signed out`() = runBlocking {
+        val store = MemoryStore()
+        val expected = IllegalStateException("profile cleanup failed")
+        val loginSource = object : DesktopInteractiveLoginSource {
+            override suspend fun acquireSession(): Result<YouTubeSessionImport> =
+                Result.failure(UnsupportedOperationException("not used"))
+
+            override fun clearSession(): Result<Unit> = Result.failure(expected)
+        }
+        val manager = manager(store = store, interactiveLoginSource = loginSource)
+        manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
+
+        val result = manager.logout()
+
+        assertEquals(expected, result.exceptionOrNull())
         assertNull(store.value)
         assertEquals(DesktopAccountState.SignedOut, manager.state.value)
         assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
@@ -491,6 +546,9 @@ class DesktopSessionManagerTest {
         store: SecureSessionStore = MemoryStore(),
         clock: Clock = Clock.systemUTC(),
         browser: SystemBrowserLauncher = SystemBrowserLauncher { Result.success(Unit) },
+        interactiveLoginSource: DesktopInteractiveLoginSource = DesktopInteractiveLoginSource {
+            Result.failure(UnsupportedOperationException("interactive login not configured in test"))
+        },
     ) =
         DesktopSessionManager(
             secureStore = store,
@@ -504,6 +562,7 @@ class DesktopSessionManagerTest {
                     )
                 },
             browserLauncher = browser,
+            interactiveLoginSource = interactiveLoginSource,
             clock = clock,
         )
 

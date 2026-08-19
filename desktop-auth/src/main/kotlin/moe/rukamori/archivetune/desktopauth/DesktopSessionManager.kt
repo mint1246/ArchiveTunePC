@@ -7,11 +7,13 @@
 package moe.rukamori.archivetune.desktopauth
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.DesktopSessionProvider
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
@@ -349,20 +351,24 @@ class DesktopSessionManager(
         return SessionImportResult.Success(stored.account)
     }
 
-    fun logout(): Result<Unit> =
-        try {
-            synchronized(stateLock) {
-                secureStore.delete()
-                active = null
-                lastCookieRefreshAtEpochMillis = null
-                _state.value = DesktopAccountState.SignedOut
+    suspend fun logout(): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                synchronized(stateLock) {
+                    secureStore.delete()
+                    active = null
+                    lastCookieRefreshAtEpochMillis = null
+                    _state.value = DesktopAccountState.SignedOut
+                }
+                interactiveLoginSource.clearSession().getOrThrow()
+                Result.success(Unit)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: SecureStoreUnavailableException) {
+                Result.failure(failure)
+            } catch (failure: Exception) {
+                Result.failure(failure)
             }
-            interactiveLoginSource.clearSession().getOrThrow()
-            Result.success(Unit)
-        } catch (failure: SecureStoreUnavailableException) {
-            Result.failure(failure)
-        } catch (failure: Exception) {
-            Result.failure(failure)
         }
 
     override fun currentAuthState(): PlaybackAuthState =
