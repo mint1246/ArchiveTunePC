@@ -543,7 +543,9 @@ private fun DesktopTopBar(
                 )
             }
         } else {
-            Spacer(Modifier.weight(1f).then(windowDragModifier))
+            // A weighted Spacer has zero cross-axis size by default, so compact chrome otherwise
+            // has no draggable pixels at all.
+            Spacer(Modifier.weight(1f).height(64.dp).then(windowDragModifier))
         }
         if (showSearch) {
             OutlinedTextField(
