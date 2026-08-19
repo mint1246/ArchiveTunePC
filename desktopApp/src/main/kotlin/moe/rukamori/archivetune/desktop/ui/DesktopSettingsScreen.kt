@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -90,7 +91,11 @@ fun DesktopSettingsPanel(
     audioEffects: DesktopAudioEffects?,
     downloads: DesktopDownloadServices?,
     libraryFolders: List<Path>,
+    libraryTrackCount: Int,
+    libraryScanning: Boolean,
+    libraryScanError: String?,
     onLibraryFoldersChanged: (List<Path>) -> Unit,
+    onLibraryRescan: () -> Unit,
     account: DesktopSessionManager?,
     accountContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -105,6 +110,12 @@ fun DesktopSettingsPanel(
     var error by remember { mutableStateOf<String?>(null) }
     var equalizerCapabilities by remember(audioEffects) { mutableStateOf<DesktopEqualizerCapabilities?>(null) }
     var equalizerUnavailable by remember(audioEffects) { mutableStateOf(audioEffects == null) }
+    val libraryFeedback = localLibraryScanFeedback(
+        folderCount = localFolders.size,
+        trackCount = libraryTrackCount,
+        scanning = libraryScanning,
+        error = libraryScanError,
+    )
 
     fun update(transform: (DesktopSettings) -> DesktopSettings) {
         settings = settingsStore.update(transform)
@@ -326,11 +337,12 @@ fun DesktopSettingsPanel(
                     Button(onClick = {
                         scope.launch { chooseDirectory("Add local music folder")?.let { folder ->
                             val next = (localFolders + folder).distinct()
+                            if (next == localFolders) return@let
                             localFolders = next
                             onLibraryFoldersChanged(next)
                             update { it.copy(libraryFolders = next) }
                         } }
-                    }) { Text("Add") }
+                    }, enabled = libraryFeedback.folderActionsEnabled) { Text("Add") }
                 }
                 localFolders.forEach { folder ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -340,8 +352,23 @@ fun DesktopSettingsPanel(
                             localFolders = next
                             onLibraryFoldersChanged(next)
                             update { it.copy(libraryFolders = next) }
-                        }) { Text("Remove") }
+                        }, enabled = libraryFeedback.folderActionsEnabled) { Text("Remove") }
                     }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (libraryFeedback.showProgress) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                    Text(
+                        libraryFeedback.status,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (libraryFeedback.showRetry) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = onLibraryRescan,
+                        enabled = libraryFeedback.rescanEnabled,
+                    ) { Text(if (libraryFeedback.showRetry) "Retry" else "Rescan") }
                 }
             }
         }
@@ -392,6 +419,50 @@ fun DesktopSettingsPanel(
         notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
+}
+
+internal data class LocalLibraryScanFeedback(
+    val status: String,
+    val showProgress: Boolean,
+    val showRetry: Boolean,
+    val rescanEnabled: Boolean,
+    val folderActionsEnabled: Boolean,
+)
+
+internal fun localLibraryScanFeedback(
+    folderCount: Int,
+    trackCount: Int,
+    scanning: Boolean,
+    error: String?,
+): LocalLibraryScanFeedback = when {
+    scanning -> LocalLibraryScanFeedback(
+        status = "Scanning local library…",
+        showProgress = true,
+        showRetry = false,
+        rescanEnabled = false,
+        folderActionsEnabled = false,
+    )
+    !error.isNullOrBlank() -> LocalLibraryScanFeedback(
+        status = error,
+        showProgress = false,
+        showRetry = true,
+        rescanEnabled = folderCount > 0,
+        folderActionsEnabled = true,
+    )
+    folderCount == 0 -> LocalLibraryScanFeedback(
+        status = "Add a folder to index local music.",
+        showProgress = false,
+        showRetry = false,
+        rescanEnabled = false,
+        folderActionsEnabled = true,
+    )
+    else -> LocalLibraryScanFeedback(
+        status = "$trackCount track${if (trackCount == 1) "" else "s"} indexed from $folderCount folder${if (folderCount == 1) "" else "s"}.",
+        showProgress = false,
+        showRetry = false,
+        rescanEnabled = true,
+        folderActionsEnabled = true,
+    )
 }
 
 @Composable

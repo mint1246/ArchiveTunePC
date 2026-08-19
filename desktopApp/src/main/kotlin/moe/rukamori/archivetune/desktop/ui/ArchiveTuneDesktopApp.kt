@@ -628,7 +628,11 @@ fun FoundationDestinationContent(
     audioEffects: moe.rukamori.archivetune.playback.desktop.DesktopAudioEffects? = null,
     downloads: moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices? = null,
     libraryFolders: List<java.nio.file.Path> = emptyList(),
+    libraryTrackCount: Int = 0,
+    libraryScanning: Boolean = false,
+    libraryScanError: String? = null,
     onLibraryFoldersChanged: (List<java.nio.file.Path>) -> Unit = {},
+    onLibraryRescan: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (state.destination) {
@@ -645,7 +649,11 @@ fun FoundationDestinationContent(
             audioEffects,
             downloads,
             libraryFolders,
+            libraryTrackCount,
+            libraryScanning,
+            libraryScanError,
             onLibraryFoldersChanged,
+            onLibraryRescan,
             modifier,
         )
         else -> FoundationEmptyState(state.destination, state.searchQuery, modifier)
@@ -791,7 +799,11 @@ private fun FoundationSettings(
     audioEffects: moe.rukamori.archivetune.playback.desktop.DesktopAudioEffects?,
     downloads: moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices?,
     libraryFolders: List<java.nio.file.Path>,
+    libraryTrackCount: Int,
+    libraryScanning: Boolean,
+    libraryScanError: String?,
     onLibraryFoldersChanged: (List<java.nio.file.Path>) -> Unit,
+    onLibraryRescan: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (settingsStore == null) {
@@ -809,7 +821,11 @@ private fun FoundationSettings(
         audioEffects = audioEffects,
         downloads = downloads,
         libraryFolders = libraryFolders,
+        libraryTrackCount = libraryTrackCount,
+        libraryScanning = libraryScanning,
+        libraryScanError = libraryScanError,
         onLibraryFoldersChanged = onLibraryFoldersChanged,
+        onLibraryRescan = onLibraryRescan,
         account = account,
         accountContent = { if (account != null) DesktopAccountCard(account) else AnonymousAccountCard() },
         modifier = modifier,

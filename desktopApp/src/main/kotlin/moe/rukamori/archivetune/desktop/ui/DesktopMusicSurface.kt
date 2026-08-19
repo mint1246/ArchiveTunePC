@@ -87,6 +87,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -333,9 +334,18 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     var addToPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
     var playlistPickerLoading by remember { mutableStateOf(false) }
     suspend fun rescanLibrary() {
-        libraryLoading = true; libraryError = null
-        runCatching { services.library.rescan() }.onFailure { libraryError = it.message ?: "Library scan failed" }
-        libraryLoading = false
+        if (libraryLoading) return
+        libraryLoading = true
+        libraryError = null
+        try {
+            services.library.rescan()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            libraryError = failure.message ?: "Library scan failed"
+        } finally {
+            libraryLoading = false
+        }
     }
     LaunchedEffect(state.destination) {
         browse.activate(state.destination)
@@ -567,10 +577,14 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 audioEffects = services.playback.audioEffects,
                 downloads = downloadServices,
                 libraryFolders = services.library.folders,
+                libraryTrackCount = localTracks.size,
+                libraryScanning = libraryLoading,
+                libraryScanError = libraryError,
                 onLibraryFoldersChanged = { folders ->
                     services.library.setFolders(folders)
                     scope.launch { rescanLibrary() }
                 },
+                onLibraryRescan = { scope.launch { rescanLibrary() } },
                 modifier = modifier,
             )
         }
@@ -817,7 +831,7 @@ internal fun filterLocalLibrary(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                androidx.compose.material3.Button(onClick = onAddFolder) { Text("Add folder") }
+                androidx.compose.material3.Button(onClick = onAddFolder, enabled = !loading) { Text("Add folder") }
                 Spacer(Modifier.width(8.dp))
                 androidx.compose.material3.OutlinedButton(onClick = onRescan, enabled = folders.isNotEmpty() && !loading) { Text("Rescan") }
             }
