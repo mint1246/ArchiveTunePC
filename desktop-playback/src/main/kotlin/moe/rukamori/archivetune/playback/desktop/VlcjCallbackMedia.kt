@@ -84,6 +84,18 @@ class VlcjRangeCallbackMedia(
 
         fun seek(offset: Long): Boolean = synchronized(lock) {
             if (offset < 0L) return false
+            val activeWindow = window
+            if (
+                activeWindow != null &&
+                offset >= windowStart &&
+                offset <= windowStart + activeWindow.size
+            ) {
+                // libVLC probes/rewinds container headers during startup. Do not discard bytes we
+                // already own just because it moved the cursor inside the current HTTP range; doing
+                // so creates a second Googlevideo request immediately after playback starts.
+                cursor = offset
+                return true
+            }
             if (contentLength != null && offset >= contentLength!!) {
                 cursor = contentLength!!
                 window = null
@@ -129,6 +141,12 @@ class VlcjRangeCallbackMedia(
                 try {
                     client.newCall(requestBuilder.build()).execute().use { response ->
                         if (!response.isSuccessful) {
+                            if (
+                                response.code in FULL_OBJECT_FALLBACK_STATUS_CODES &&
+                                fetchWholeObjectFallback(offset)
+                            ) {
+                                return
+                            }
                             throw RangeHttpException(response.code)
                         }
                         val bytes = response.body.bytes()
@@ -166,6 +184,38 @@ class VlcjRangeCallbackMedia(
             throw lastFailure ?: IOException("Unable to fetch YouTube media range")
         }
 
+        /**
+         * Some signed Googlevideo URLs reject a follow-up Range request while the same URL still
+         * works as a normal GET. For ordinary song-sized audio files, keep that already-resolved URL
+         * alive instead of forcing a full YouTube player re-resolution and client backoff.
+         */
+        private fun fetchWholeObjectFallback(requiredOffset: Long): Boolean {
+            val requestBuilder = Request.Builder().url(url)
+            headers.forEach { (name, value) ->
+                if (name.isNotBlank() && value.isNotBlank() &&
+                    !name.equals("Range", ignoreCase = true)
+                ) {
+                    requestBuilder.header(name, value)
+                }
+            }
+            return try {
+                client.newCall(requestBuilder.build()).execute().use { response ->
+                    if (!response.isSuccessful) return false
+                    val declaredLength = response.body.contentLength()
+                    if (declaredLength < 0L || declaredLength > MAX_FULL_OBJECT_FALLBACK_BYTES) return false
+                    val bytes = response.body.bytes()
+                    if (bytes.size.toLong() > MAX_FULL_OBJECT_FALLBACK_BYTES) return false
+                    if (requiredOffset > bytes.size.toLong()) return false
+                    contentLength = bytes.size.toLong()
+                    windowStart = 0L
+                    window = bytes
+                    true
+                }
+            } catch (_: IOException) {
+                false
+            }
+        }
+
         override fun close() {
             client.connectionPool.evictAll()
             client.dispatcher.executorService.shutdown()
@@ -176,6 +226,8 @@ class VlcjRangeCallbackMedia(
         const val DEFAULT_WINDOW_SIZE = 512 * 1024
         const val MAX_FETCH_ATTEMPTS = 3
         const val FETCH_RETRY_DELAY_MS = 100L
+        const val MAX_FULL_OBJECT_FALLBACK_BYTES = 32L * 1024L * 1024L
+        val FULL_OBJECT_FALLBACK_STATUS_CODES = setOf(403, 416)
     }
 }
 

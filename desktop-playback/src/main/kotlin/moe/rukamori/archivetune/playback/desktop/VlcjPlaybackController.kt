@@ -698,7 +698,32 @@ class VlcjPlaybackController(
 
     private fun createNativeLogListener(): LogEventListener =
         LogEventListener { level, module, file, line, name, header, id, message ->
-            message.orEmpty().httpErrorStatusCode()?.takeIf { it in RETRYABLE_STREAM_RESPONSE_CODES }?.let { httpStatus ->
+            val nativeMessage = message.orEmpty()
+            if (
+                activeCallbackMedia != null &&
+                module == "imem" &&
+                nativeMessage.contains("Invalid get/release function pointers", ignoreCase = true)
+            ) {
+                // libvlc_media_new_callbacks uses the imem access module. VLC also probes the
+                // separate imem demux module, which rejects the access callbacks and emits this
+                // scary-looking message before the explicitly selected MP4/Matroska demuxer opens.
+                // It is module-probe noise, not a playback failure.
+                logger.fine("Ignoring expected libVLC imem demux probe while using callback media")
+                return@LogEventListener
+            }
+            if (
+                activeCallbackMedia != null &&
+                module == "imem_access" &&
+                nativeMessage.contains("read error", ignoreCase = true) &&
+                httpRecoveryGeneration.get() != NO_RECOVERY_GENERATION
+            ) {
+                // The application transport already logged the concrete HTTP status and scheduled
+                // recovery. The following imem_access read error is only libVLC observing the same
+                // IOException through its callback API.
+                logger.fine("Ignoring duplicate libVLC callback read error during HTTP recovery")
+                return@LogEventListener
+            }
+            nativeMessage.httpErrorStatusCode()?.takeIf { it in RETRYABLE_STREAM_RESPONSE_CODES }?.let { httpStatus ->
                 activeGeneration?.let { failedGeneration ->
                     scheduleStreamHttpRecovery(failedGeneration, httpStatus, "libVLC media request")
                 }
@@ -709,7 +734,7 @@ class VlcjPlaybackController(
                 append(": ")
                 if (!module.isNullOrBlank()) append('[').append(module).append("] ")
                 if (!header.isNullOrBlank()) append(header).append(": ")
-                append(message.orEmpty().redactSignedUrls())
+                append(nativeMessage.redactSignedUrls())
                 if (!file.isNullOrBlank()) {
                     append(" (").append(file.substringAfterLast('/').substringAfterLast('\\'))
                     if (line != null) append(':').append(line)
