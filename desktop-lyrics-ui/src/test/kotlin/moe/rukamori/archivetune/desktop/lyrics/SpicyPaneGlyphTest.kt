@@ -63,6 +63,30 @@ class SpicyPaneGlyphTest {
         endMs = 3000L,
     )
 
+    private fun sceneLine(text: String, startMs: Long, endMs: Long) = CharLine(
+        chars = emptyList(),
+        text = text,
+        words = emptyList(),
+        startMs = startMs,
+        endMs = endMs,
+    )
+
+    private fun singleWordLine(durationMs: Long) = CharLine(
+        chars = emptyList(),
+        text = "hello",
+        words = listOf(
+            WordSpan(
+                text = "hello",
+                startChar = 0,
+                endChar = 5,
+                startMs = 0L,
+                endMs = durationMs,
+            ),
+        ),
+        startMs = 0L,
+        endMs = durationMs,
+    )
+
     @Test
     fun buildsClusterBandsForEveryLetter() {
         val geometry = geometryOf(
@@ -291,5 +315,86 @@ class SpicyPaneGlyphTest {
         assertEquals(-1, activeWordIndexAt(-1L, line.words))
         assertEquals(0, activeWordIndexAt(500L, line.words))
         assertEquals(1, activeWordIndexAt(2_500L, line.words))
+    }
+
+    @Test
+    fun letterAnimationStartsAtFiveHundredMilliseconds() {
+        val tooShort = singleWordLine(LETTER_ANIMATION_MIN_MS - 1L)
+        val capable = singleWordLine(LETTER_ANIMATION_MIN_MS)
+
+        assertTrue(!geometryOf(tooShort.text, tooShort).wordLetterCapable.single())
+        assertTrue(geometryOf(capable.text, capable).wordLetterCapable.single())
+    }
+
+    @Test
+    fun heldWordsGetProgressivelyStrongerLetterMotionWithACap() {
+        val short = letterEmphasisProfile(500L)
+        val medium = letterEmphasisProfile(1_500L)
+        val long = letterEmphasisProfile(3_000L)
+        val absurdlyLong = letterEmphasisProfile(10_000L)
+
+        assertTrue(medium.scaleExcursionMultiplier > short.scaleExcursionMultiplier)
+        assertTrue(long.scaleExcursionMultiplier > medium.scaleExcursionMultiplier)
+        assertEquals(long, absurdlyLong, "duration strength should stop growing after the cap")
+        assertTrue(long.falloffExponent < short.falloffExponent, "long holds should involve nearby letters more")
+
+        val normalPeak = emphasizedLetterScale(1.175f, short)
+        val heldPeak = emphasizedLetterScale(1.175f, long)
+        assertTrue(heldPeak > normalPeak)
+        assertTrue(heldPeak <= 1.30f)
+        assertEquals(0.95f, emphasizedLetterScale(0.95f, long))
+    }
+
+    @Test
+    fun interludeDotsRequireAtLeastThreeSecondsOfSilence() {
+        val justShort = CharLyrics(
+            lines = listOf(
+                sceneLine("one", 0L, 1_000L),
+                sceneLine("two", 3_999L, 5_000L),
+            ),
+            preludeMs = 0L,
+        )
+        val exactThreshold = CharLyrics(
+            lines = listOf(
+                sceneLine("one", 0L, 1_000L),
+                sceneLine("two", 4_000L, 5_000L),
+            ),
+            preludeMs = 0L,
+        )
+
+        assertTrue(buildLyricsSceneItems(justShort).none { it is LyricsSceneItem.Interlude })
+
+        val items = buildLyricsSceneItems(exactThreshold)
+        assertEquals(3, items.size)
+        val interlude = items[1] as LyricsSceneItem.Interlude
+        assertEquals(1_000L, interlude.startMs)
+        assertEquals(4_000L, interlude.endMs)
+        assertEquals(1, activeSceneIndexAt(2_500L, items))
+        assertEquals(2, activeSceneIndexAt(4_000L, items))
+    }
+
+    @Test
+    fun longPreludeGetsMusicalDotsBeforeFirstVocal() {
+        val lyrics = CharLyrics(
+            lines = listOf(sceneLine("finally", 3_000L, 4_000L)),
+            preludeMs = 3_000L,
+        )
+        val items = buildLyricsSceneItems(lyrics)
+
+        assertEquals(2, items.size)
+        val interlude = items.first() as LyricsSceneItem.Interlude
+        assertEquals(null, interlude.previousLineIndex)
+        assertEquals(0, interlude.nextLineIndex)
+        assertEquals(0L, interlude.startMs)
+        assertEquals(3_000L, interlude.endMs)
+    }
+
+    @Test
+    fun scrollAnchorLetsNextCurrentLineStayLowerBeforeAdvancing() {
+        assertEquals(0, pinnedScrollAnchorLine(previousAnchorLine = -1, activeLine = 0))
+        assertEquals(0, pinnedScrollAnchorLine(previousAnchorLine = 0, activeLine = 1))
+        assertEquals(2, pinnedScrollAnchorLine(previousAnchorLine = 0, activeLine = 2))
+        assertEquals(1, pinnedScrollAnchorLine(previousAnchorLine = 3, activeLine = 1))
+        assertEquals(4, pinnedScrollAnchorLine(previousAnchorLine = 2, activeLine = 4, forceReset = true))
     }
 }

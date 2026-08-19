@@ -21,12 +21,14 @@
  */
 package moe.rukamori.archivetune.desktop.lyrics
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -125,6 +127,14 @@ private const val FOCAL_RATIO = 0.45f
 /** Scene anchor spring: near-critical damping for a smooth, coherent slide. */
 private const val ANCHOR_FREQ = 1.0
 private const val ANCHOR_DAMPING = 0.9
+/** Match SpicyLyrics: only vocal gaps of at least three seconds become musical dot lines. */
+internal const val INTERLUDE_MIN_MS = 3_000L
+/** SpicyLyrics starts collapsing the dot group shortly before vocals resume. */
+private const val INTERLUDE_PREHIDE_MS = 500L
+/** Its three timed dots finish just before that collapse starts. */
+private const val INTERLUDE_TAIL_PADDING_MS = 550L
+/** Keep one newly-current lyric below the pinned scroll anchor before moving the page. */
+internal const val SCROLL_PIN_LOOKAHEAD = 2
 
 /** SpicyLyrics `--gradient-alpha`: bright portion of a glyph. */
 private val BrightColor = Color(0xD9FFFFFF)
@@ -190,6 +200,18 @@ private const val Y_OFFSET_DAMPING = 0.40
 private const val GLOW_FREQ = 1.18
 private const val GLOW_DAMPING = 0.56
 
+/** SpicyLyrics dot animation tuning. Only three dots exist, so this is intentionally literal. */
+private const val DOT_SCALE_FREQ = 0.7
+private const val DOT_SCALE_DAMPING = 0.6
+private const val DOT_Y_FREQ = 1.25
+private const val DOT_Y_DAMPING = 0.4
+private const val DOT_GLOW_FREQ = 1.0
+private const val DOT_GLOW_DAMPING = 0.5
+private const val DOT_OPACITY_FREQ = 1.0
+private const val DOT_OPACITY_DAMPING = 0.5
+private const val DOT_GROUP_SCALE_FREQ = 5.0
+private const val DOT_GROUP_SCALE_DAMPING = 0.7
+
 /** One glyph of a timed word, addressed by its char offset into `CharLine.text`. */
 internal data class Letter(
     val ch: String,
@@ -226,23 +248,156 @@ private val GlowSpline = CubicSpline(
     doubleArrayOf(0.0, 0.15, 0.6, 1.0),
     doubleArrayOf(0.0, 1.0, 1.0, 0.0),
 )
+private val DotScaleSpline = CubicSpline(
+    doubleArrayOf(0.0, 0.7, 1.0),
+    doubleArrayOf(0.75, 1.05, 1.0),
+)
+private val DotYOffsetSpline = CubicSpline(
+    doubleArrayOf(0.0, 0.9, 1.0),
+    doubleArrayOf(0.0, -0.12, 0.0),
+)
+private val DotGlowSpline = CubicSpline(
+    doubleArrayOf(0.0, 0.6, 1.0),
+    doubleArrayOf(0.0, 1.0, 1.0),
+)
+private val DotOpacitySpline = CubicSpline(
+    doubleArrayOf(0.0, 0.6, 1.0),
+    doubleArrayOf(0.35, 1.0, 1.0),
+)
 
 private fun wordScaleCurve(p: Float): Float = WordScaleSpline.at(p.toDouble()).toFloat()
 private fun letterScaleCurve(p: Float): Float = LetterScaleSpline.at(p.toDouble()).toFloat()
 private fun wordYOffsetCurve(p: Float): Float = WordYOffsetSpline.at(p.toDouble()).toFloat()
 private fun letterYOffsetCurve(p: Float): Float = LetterYOffsetSpline.at(p.toDouble()).toFloat()
 private fun glowCurve(p: Float): Float = GlowSpline.at(p.toDouble()).toFloat()
+private fun dotScaleCurve(p: Float): Float = DotScaleSpline.at(p.toDouble()).toFloat()
+private fun dotYOffsetCurve(p: Float): Float = DotYOffsetSpline.at(p.toDouble()).toFloat()
+private fun dotGlowCurve(p: Float): Float = DotGlowSpline.at(p.toDouble()).toFloat()
+private fun dotOpacityCurve(p: Float): Float = DotOpacitySpline.at(p.toDouble()).toFloat()
 
 /**
- * Desktop tuning: use the SpicyLyrics letter animation on essentially every word long
- * enough for the eye to perceive it. The web renderer keeps a ~1 s promotion gate to
- * control DOM/layer cost; this renderer is one Canvas, so that tradeoff does not apply.
+ * Keep letter-by-letter motion common, but skip words too short for a human eye to read
+ * as sequential glyph motion. 500 ms is intentionally much more permissive than the
+ * web renderer's ~1 s emphasis gate.
  */
-private const val LETTER_ANIMATION_MIN_MS = 180L
+internal const val LETTER_ANIMATION_MIN_MS = 500L
 private const val FAR_WORD_SNAP_MS = 500L
 private const val SUNG_LETTER_GLOW_PROGRESS = 0.2f
 private const val GEOMETRY_PREWARM_BEHIND = 2
 private const val GEOMETRY_PREWARM_AHEAD = 6
+
+/**
+ * Long held words should not merely run the same animation more slowly. Their active
+ * glyph gets physically stronger, the neighbouring glyphs participate a little more,
+ * and the lift/glow rise modestly. Values are precomputed per word and capped so a
+ * multi-second vocal hold stays expressive rather than exploding the layout.
+ */
+internal data class LetterEmphasisProfile(
+    val scaleExcursionMultiplier: Float,
+    val falloffExponent: Double,
+    val yMultiplier: Float,
+    val glowMultiplier: Float,
+)
+
+internal fun letterEmphasisProfile(durationMs: Long): LetterEmphasisProfile {
+    val raw = ((durationMs - LETTER_ANIMATION_MIN_MS).toFloat() / 2_500f).coerceIn(0f, 1f)
+    val intensity = raw * raw * (3f - 2f * raw)
+    return LetterEmphasisProfile(
+        scaleExcursionMultiplier = 1f + 0.70f * intensity,
+        falloffExponent = 2.8 - 0.5 * intensity,
+        yMultiplier = 1f + 0.35f * intensity,
+        glowMultiplier = 1f + 0.25f * intensity,
+    )
+}
+
+/** Amplify only the portion above 1x so the 0.95 resting scale stays unchanged. */
+internal fun emphasizedLetterScale(baseScale: Float, profile: LetterEmphasisProfile): Float =
+    if (baseScale <= 1f) baseScale
+    else (1f + (baseScale - 1f) * profile.scaleExcursionMultiplier).coerceAtMost(1.30f)
+
+internal sealed interface LyricsSceneItem {
+    val startMs: Long
+
+    data class Vocal(
+        val lineIndex: Int,
+        override val startMs: Long,
+    ) : LyricsSceneItem
+
+    data class Interlude(
+        val previousLineIndex: Int?,
+        val nextLineIndex: Int,
+        override val startMs: Long,
+        val endMs: Long,
+    ) : LyricsSceneItem
+}
+
+/** Build the same kind of explicit timed musical-line items used by SpicyLyrics. */
+internal fun buildLyricsSceneItems(lyrics: CharLyrics): List<LyricsSceneItem> = buildList {
+    val lines = lyrics.lines
+    if (lines.isEmpty()) return@buildList
+
+    val first = lines.first()
+    if (first.startMs >= INTERLUDE_MIN_MS) {
+        add(
+            LyricsSceneItem.Interlude(
+                previousLineIndex = null,
+                nextLineIndex = 0,
+                startMs = 0L,
+                endMs = first.startMs,
+            ),
+        )
+    }
+
+    lines.forEachIndexed { index, line ->
+        add(LyricsSceneItem.Vocal(lineIndex = index, startMs = line.startMs))
+        val next = lines.getOrNull(index + 1) ?: return@forEachIndexed
+        if (next.startMs - line.endMs >= INTERLUDE_MIN_MS) {
+            add(
+                LyricsSceneItem.Interlude(
+                    previousLineIndex = index,
+                    nextLineIndex = index + 1,
+                    startMs = line.endMs,
+                    endMs = next.startMs,
+                ),
+            )
+        }
+    }
+}
+
+/** Binary search because this runs every frame. Scene items are ordered by start time. */
+internal fun activeSceneIndexAt(positionMs: Long, items: List<LyricsSceneItem>): Int {
+    if (items.isEmpty()) return -1
+    var low = 0
+    var high = items.lastIndex
+    var answer = -1
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        if (items[mid].startMs <= positionMs) {
+            answer = mid
+            low = mid + 1
+        } else {
+            high = mid - 1
+        }
+    }
+    return answer.coerceAtLeast(0)
+}
+
+/**
+ * Separate vocal focus from page movement: line N+1 can become active without hauling
+ * it to the focal point. The page advances when playback reaches N+2, or immediately
+ * after an interlude/backward seek/large discontinuity.
+ */
+internal fun pinnedScrollAnchorLine(
+    previousAnchorLine: Int,
+    activeLine: Int,
+    forceReset: Boolean = false,
+): Int = when {
+    previousAnchorLine < 0 -> activeLine
+    forceReset -> activeLine
+    activeLine < previousAnchorLine -> activeLine
+    activeLine - previousAnchorLine >= SCROLL_PIN_LOOKAHEAD -> activeLine
+    else -> previousAnchorLine
+}
 
 
 private fun containsStrongRtl(text: String): Boolean {
@@ -390,7 +545,7 @@ internal class LineTextGeometry(
     val wordBottom: List<Float>,
     /** word index -> true when the word's run reads right-to-left (Hebrew, Arabic, …). */
     val wordRtl: List<Boolean>,
-    /** Canvas renderer split: timed non-RTL words >= 180 ms become letter groups. */
+    /** Canvas renderer split: timed non-RTL words >= 500 ms become letter groups. */
     val wordLetterCapable: List<Boolean>,
     /** Provider-accurate animation end for each word. */
     val wordAnimationEndMs: List<Long>,
@@ -695,15 +850,28 @@ private fun LyricScene(
     isPlaying: Boolean,
 ) {
     val density = LocalDensity.current
+    val sceneItems = remember(lyrics) { buildLyricsSceneItems(lyrics) }
+    val vocalSceneIndices = remember(sceneItems, lyrics.lines.size) {
+        IntArray(lyrics.lines.size) { -1 }.also { indices ->
+            sceneItems.forEachIndexed { sceneIndex, item ->
+                if (item is LyricsSceneItem.Vocal && item.lineIndex in indices.indices) {
+                    indices[item.lineIndex] = sceneIndex
+                }
+            }
+        }
+    }
 
     val anchorState = remember(lyrics) { mutableFloatStateOf(0f) }
-    val activeIndexState = remember(lyrics) { mutableIntStateOf(0) }
+    val activeSceneIndexState = remember(lyrics) { mutableIntStateOf(0) }
+    val activeVocalLineIndexState = remember(lyrics) { mutableIntStateOf(0) }
+    val scrollAnchorLineState = remember(lyrics) { mutableIntStateOf(-1) }
     val positionState = remember(lyrics) { mutableLongStateOf(0L) }
 
-    val anchorSpring = remember { Spring(0.0, ANCHOR_FREQ, ANCHOR_DAMPING) }
+    val anchorSpring = remember(lyrics) { Spring(0.0, ANCHOR_FREQ, ANCHOR_DAMPING) }
 
-    LaunchedEffect(lyrics, isPlaying) {
+    LaunchedEffect(lyrics, sceneItems, isPlaying) {
         var lastFrame = 0L
+        var anchorWasInterlude = false
         // Latest position sample from the player; the backend provides controlled timing samples.
         // times per second). Between samples we dead-reckon at wall-clock rate so the
         // sweep/bounce animate smoothly instead of freezing and jumping per sample.
@@ -757,13 +925,36 @@ private fun LyricScene(
                     }
                     val interpolatedPos = smoothPosMs.toLong().coerceAtLeast(0L)
 
-                    val newActive = lyrics.lines.indexOfLast { interpolatedPos >= it.startMs }
-                        .coerceAtLeast(0)
-                    if (newActive != activeIndexState.intValue) {
-                        activeIndexState.intValue = newActive
+                    val newActiveScene = activeSceneIndexAt(interpolatedPos, sceneItems)
+                    if (newActiveScene >= 0 && newActiveScene != activeSceneIndexState.intValue) {
+                        activeSceneIndexState.intValue = newActiveScene
                     }
 
-                    anchorSpring.setGoal(activeIndexState.intValue.toDouble())
+                    val anchorTargetScene = when (val activeItem = sceneItems.getOrNull(newActiveScene)) {
+                        is LyricsSceneItem.Interlude -> {
+                            // During a real instrumental gap the dots become the focal scene item.
+                            // Prewarm the lyric that will arrive after them while they animate.
+                            activeVocalLineIndexState.intValue = activeItem.nextLineIndex
+                            anchorWasInterlude = true
+                            newActiveScene
+                        }
+                        is LyricsSceneItem.Vocal -> {
+                            val activeLine = activeItem.lineIndex
+                            activeVocalLineIndexState.intValue = activeLine
+                            val anchorLine = pinnedScrollAnchorLine(
+                                previousAnchorLine = scrollAnchorLineState.intValue,
+                                activeLine = activeLine,
+                                forceReset = anchorWasInterlude,
+                            )
+                            scrollAnchorLineState.intValue = anchorLine
+                            anchorWasInterlude = false
+                            vocalSceneIndices.getOrNull(anchorLine)?.takeIf { it >= 0 }
+                                ?: newActiveScene
+                        }
+                        null -> 0
+                    }
+
+                    anchorSpring.setGoal(anchorTargetScene.toDouble())
                     anchorState.floatValue = anchorSpring.step(dt).toFloat()
 
                     positionState.longValue = interpolatedPos
@@ -817,7 +1008,7 @@ private fun LyricScene(
         }
         LaunchedEffect(lyrics, textStyle, contentWidthPx, geometryCache) {
             val all = lyrics.lines
-            snapshotFlow { activeIndexState.intValue }
+            snapshotFlow { activeVocalLineIndexState.intValue }
                 .collectLatest { active ->
                     if (all.isEmpty()) return@collectLatest
                     val clamped = active.coerceIn(0, all.lastIndex)
@@ -841,21 +1032,38 @@ private fun LyricScene(
 
         Layout(
             content = {
-                lyrics.lines.forEachIndexed { i, line ->
-                    LyricLineContent(
-                        index = i,
-                        lines = lyrics.lines,
-                        line = line,
-                        anchorState = anchorState,
-                        activeIndexState = activeIndexState,
-                        positionState = positionState,
-                        textStyle = textStyle,
-                        translationStyle = translationStyle,
-                        contentWidthPx = contentWidthPx,
-                        geometryCache = geometryCache,
-                        onSeek = onSeek,
-                        isPlaying = isPlaying,
-                    )
+                sceneItems.forEachIndexed { sceneIndex, item ->
+                    when (item) {
+                        is LyricsSceneItem.Vocal -> {
+                            val line = lyrics.lines[item.lineIndex]
+                            val activeSceneIndex = activeSceneIndexState.value
+                            val activeItem = sceneItems.getOrNull(activeSceneIndex)
+                            val focusDistance = when (activeItem) {
+                                is LyricsSceneItem.Vocal -> abs(item.lineIndex - activeItem.lineIndex)
+                                else -> abs(sceneIndex - activeSceneIndex)
+                            }
+                            LyricLineContent(
+                                lineIndex = item.lineIndex,
+                                lines = lyrics.lines,
+                                line = line,
+                                isActive = sceneIndex == activeSceneIndex,
+                                focusDistance = focusDistance,
+                                positionState = positionState,
+                                textStyle = textStyle,
+                                translationStyle = translationStyle,
+                                contentWidthPx = contentWidthPx,
+                                geometryCache = geometryCache,
+                                onSeek = onSeek,
+                                isPlaying = isPlaying,
+                            )
+                        }
+                        is LyricsSceneItem.Interlude -> InterludeDots(
+                            interlude = item,
+                            positionState = positionState,
+                            isPlaying = isPlaying,
+                            isActive = sceneIndex == activeSceneIndexState.value,
+                        )
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -867,10 +1075,17 @@ private fun LyricScene(
 
             val centers = FloatArray(placeables.size)
             var cursor = 0f
+            var hasVisibleItem = false
             for (i in placeables.indices) {
                 val h = placeables[i].height.toFloat()
+                if (h <= 0f) {
+                    centers[i] = cursor
+                    continue
+                }
+                if (hasVisibleItem) cursor += gapPx
                 centers[i] = cursor + h / 2f
-                cursor += h + gapPx
+                cursor += h
+                hasVisibleItem = true
             }
 
             val lastIndex = centers.size - 1
@@ -901,13 +1116,143 @@ private fun LyricScene(
 /*  One lyric line                                                                     */
 /* ---------------------------------------------------------------------------------- */
 
+private class DotAnimationState {
+    val scale = Spring(dotScaleCurve(0f).toDouble(), DOT_SCALE_FREQ, DOT_SCALE_DAMPING)
+    val yOffset = Spring(dotYOffsetCurve(0f).toDouble(), DOT_Y_FREQ, DOT_Y_DAMPING)
+    val glow = Spring(dotGlowCurve(0f).toDouble(), DOT_GLOW_FREQ, DOT_GLOW_DAMPING)
+    val opacity = Spring(dotOpacityCurve(0f).toDouble(), DOT_OPACITY_FREQ, DOT_OPACITY_DAMPING)
+}
+
+private class InterludeFrameRuntime(var positionMs: Long)
+
+/**
+ * Three-dot musical break copied from SpicyLyrics' timing model: the gap is split into
+ * thirds, the dots spring in one after another, then the whole group collapses during
+ * the final 500 ms before vocals return. Inactive interludes measure at zero height.
+ */
+@Composable
+private fun InterludeDots(
+    interlude: LyricsSceneItem.Interlude,
+    positionState: State<Long>,
+    isPlaying: Boolean,
+    isActive: Boolean,
+) {
+    if (!isActive) {
+        Box(Modifier.fillMaxWidth().height(0.dp))
+        return
+    }
+
+    val density = LocalDensity.current
+    val fontPx = with(density) { LYRIC_FONT_SIZE.toPx() }
+    val effectiveEndMs = remember(interlude) {
+        (interlude.endMs - INTERLUDE_TAIL_PADDING_MS).coerceAtLeast(interlude.startMs + 3L)
+    }
+    val dotTimes = remember(interlude, effectiveEndMs) {
+        val duration = (effectiveEndMs - interlude.startMs).coerceAtLeast(3L)
+        List(3) { i ->
+            val start = interlude.startMs + duration * i / 3
+            val end = interlude.startMs + duration * (i + 1) / 3
+            start to end.coerceAtLeast(start + 1L)
+        }
+    }
+    val dots = remember(interlude) { List(3) { DotAnimationState() } }
+    val groupScale = remember(interlude) {
+        Spring(1.0, DOT_GROUP_SCALE_FREQ, DOT_GROUP_SCALE_DAMPING)
+    }
+    val runtime = remember(interlude) { InterludeFrameRuntime(positionState.value) }
+    val drawTick = remember(interlude) { mutableIntStateOf(0) }
+
+    LaunchedEffect(interlude, isPlaying) {
+        var lastFrame = 0L
+        while (true) {
+            withFrameNanos { now ->
+                val elapsedNanos = if (lastFrame == 0L) 16_666_667L else now - lastFrame
+                val dt = (elapsedNanos / 1e9).coerceIn(0.001, 0.10)
+                lastFrame = now
+
+                val pos = positionState.value
+                val positionChanged = pos != runtime.positionMs
+                runtime.positionMs = pos
+                val snap = !isPlaying
+
+                val hiding = pos >= interlude.endMs - INTERLUDE_PREHIDE_MS
+                groupScale.setGoal(if (hiding) 0.0 else 1.0, snap = snap)
+                advanceSpring(groupScale, dt, isPlaying)
+
+                dots.forEachIndexed { index, animation ->
+                    val (startMs, endMs) = dotTimes[index]
+                    val state = wordStateAt(pos, startMs, endMs)
+                    val progress = progressOf(pos, startMs, endMs)
+                    val curveProgress = when (state) {
+                        WordState.NOT_SUNG -> 0f
+                        WordState.ACTIVE -> progress
+                        WordState.SUNG -> 1f
+                    }
+
+                    animation.scale.setGoal(dotScaleCurve(curveProgress).toDouble(), snap = snap)
+                    animation.yOffset.setGoal(dotYOffsetCurve(curveProgress).toDouble(), snap = snap)
+                    animation.glow.setGoal(dotGlowCurve(curveProgress).toDouble(), snap = snap)
+                    animation.opacity.setGoal(dotOpacityCurve(curveProgress).toDouble(), snap = snap)
+                    advanceSpring(animation.scale, dt, isPlaying)
+                    advanceSpring(animation.yOffset, dt, isPlaying)
+                    advanceSpring(animation.glow, dt, isPlaying)
+                    advanceSpring(animation.opacity, dt, isPlaying)
+                }
+
+                if (isPlaying || positionChanged) drawTick.intValue++
+            }
+        }
+    }
+
+    Canvas(Modifier.fillMaxWidth().height(64.dp)) {
+        drawTick.intValue
+        val baseRadius = 7.5.dp.toPx()
+        val gap = 9.dp.toPx()
+        val step = baseRadius * 2f + gap
+        val group = groupScale.snapshotPosition().toFloat().coerceIn(0f, 1.15f)
+
+        dots.forEachIndexed { index, animation ->
+            val scale = animation.scale.snapshotPosition().toFloat().coerceAtLeast(0f) * group
+            val opacity = animation.opacity.snapshotPosition().toFloat().coerceIn(0f, 1f) * group
+            val glow = animation.glow.snapshotPosition().toFloat().coerceIn(0f, 1.15f) * group
+            val radius = baseRadius * scale
+            if (radius <= 0.1f || opacity <= 0.001f) return@forEachIndexed
+
+            val center = Offset(
+                x = size.width / 2f + (index - 1) * step,
+                y = size.height / 2f + animation.yOffset.snapshotPosition().toFloat() * fontPx,
+            )
+
+            // A couple of translucent bloom discs approximate SpicyLyrics' shadow glow
+            // without allocating a native blur filter every frame.
+            if (glow > 0.01f) {
+                drawCircle(
+                    color = Color.White.copy(alpha = (0.08f * glow * opacity).coerceIn(0f, 0.16f)),
+                    radius = radius * 2.6f,
+                    center = center,
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = (0.16f * glow * opacity).coerceIn(0f, 0.28f)),
+                    radius = radius * 1.75f,
+                    center = center,
+                )
+            }
+            drawCircle(
+                color = Color.White.copy(alpha = (0.90f * opacity).coerceIn(0f, 1f)),
+                radius = radius,
+                center = center,
+            )
+        }
+    }
+}
+
 @Composable
 private fun LyricLineContent(
-    index: Int,
+    lineIndex: Int,
     lines: List<CharLine>,
     line: CharLine,
-    anchorState: State<Float>,
-    activeIndexState: State<Int>,
+    isActive: Boolean,
+    focusDistance: Int,
     positionState: State<Long>,
     textStyle: TextStyle,
     translationStyle: TextStyle,
@@ -916,14 +1261,15 @@ private fun LyricLineContent(
     onSeek: (Long) -> Unit,
     isPlaying: Boolean,
 ) {
-    val isActive = index == activeIndexState.value
-    val blurRadius = blurPxFor(abs(index - activeIndexState.value)).dp
+    val blurRadius = blurPxFor(focusDistance).dp
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                val d = abs(index - anchorState.value)
+                // Visual focus follows the actually sung scene item. Scroll position is
+                // intentionally independent, so a current lyric can stay lower on screen.
+                val d = focusDistance.toFloat()
                 alpha = alphaFor(d)
                 val s = scaleFor(d)
                 scaleX = s
@@ -936,7 +1282,7 @@ private fun LyricLineContent(
     ) {
         if (isActive) {
             ActiveLineText(
-                index = index,
+                index = lineIndex,
                 lines = lines,
                 line = line,
                 positionState = positionState,
@@ -1031,6 +1377,9 @@ private fun ActiveLineText(
             WordAnimationState(letters, geometry.wordLetterCapable[wordIndex])
         }
     }
+    val emphasisProfiles = remember(line.words) {
+        line.words.map { word -> letterEmphasisProfile(word.endMs - word.startMs) }
+    }
     val runtime = remember(line) { InlineFrameRuntime(positionState.value) }
     val drawTick = remember(line) { mutableIntStateOf(0) }
 
@@ -1082,6 +1431,7 @@ private fun ActiveLineText(
 
                     val letterSprings = animation.letters
                     val wordLetters = timedLetters[wordIndex]
+                    val emphasis = emphasisProfiles[wordIndex]
                     val activeLetterIndex = if (state == WordState.ACTIVE) {
                         wordLetters.indexOfFirst { pos >= it.startMs && pos < it.endMs }
                     } else -1
@@ -1090,9 +1440,13 @@ private fun ActiveLineText(
                         progressOf(pos, letter.startMs, letter.endMs)
                     } else 0f
 
-                    val activeScale = letterScaleCurve(activeLetterProgress)
-                    val activeY = letterYOffsetCurve(activeLetterProgress)
-                    val activeGlow = glowCurve(activeLetterProgress)
+                    val activeScale = emphasizedLetterScale(
+                        letterScaleCurve(activeLetterProgress),
+                        emphasis,
+                    )
+                    val activeY = letterYOffsetCurve(activeLetterProgress) * emphasis.yMultiplier
+                    val activeGlow = (glowCurve(activeLetterProgress) * emphasis.glowMultiplier)
+                        .coerceAtMost(1.25f)
                     val restScale = letterScaleCurve(0f)
                     val restY = letterYOffsetCurve(0f)
                     val restGlow = glowCurve(0f)
@@ -1119,7 +1473,9 @@ private fun ActiveLineText(
                             WordState.ACTIVE -> {
                                 if (activeLetterIndex >= 0) {
                                     val distance = abs(letterIndex - activeLetterIndex)
-                                    val falloff = (1f / (1f + distance.toDouble().pow(2.8))).toFloat()
+                                    val falloff = (
+                                        1f / (1f + distance.toDouble().pow(emphasis.falloffExponent))
+                                    ).toFloat()
                                     val glowFalloff = 1f / (1f + distance * 0.9f)
                                     targetScale = restScale + (activeScale - restScale) * falloff
                                     targetY = restY + (activeY - restY) * falloff
@@ -1332,9 +1688,9 @@ private fun DrawScope.drawAnimatedLine(
                         glow = animation.glow.snapshotPosition().toFloat(),
                     )
                 } else {
-                        // Only true SpicyLyrics emphasis words reach this path. The word
-                        // wrapper has its own spring above; each letter then adds its own
-                        // scale/Y/glow and only the actually sung letter moves the sweep.
+                        // Letter-capable words reach this path. The word wrapper keeps its
+                        // own spring while each glyph adds duration-scaled scale/Y/glow,
+                        // and only the actually sung letter moves the highlight sweep.
                         val letters = geometry.wordLetters[index]
                         val activeLetterIndex = letters.indexOfFirst { lt ->
                             positionMs >= lt.letter.startMs && positionMs < lt.letter.endMs
