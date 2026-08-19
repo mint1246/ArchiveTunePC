@@ -1002,24 +1002,29 @@ class PlayTogetherManager(
         if (isCurrentSession(generation)) {
             _state.update { current -> current.copy(message = "Downloading Cloudflare tunnel helper…") }
         }
-        val temporary = executable.resolveSibling("${executable.fileName}.part")
-        val request = java.net.http.HttpRequest.newBuilder(CLOUDFLARED_WINDOWS_AMD64_URI)
-            .timeout(Duration.ofMinutes(2))
-            .GET()
-            .build()
-        val response = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(20))
-            .build()
-            .send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(temporary))
-        require(response.statusCode() in 200..299) { "Cloudflare helper download failed (${response.statusCode()})" }
+        val temporary = cloudflaredTemporaryPath(executable, generation)
         try {
-            Files.move(temporary, executable, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-        } catch (_: Exception) {
-            Files.move(temporary, executable, StandardCopyOption.REPLACE_EXISTING)
+            val request = java.net.http.HttpRequest.newBuilder(CLOUDFLARED_WINDOWS_AMD64_URI)
+                .timeout(Duration.ofMinutes(2))
+                .GET()
+                .build()
+            val response = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(20))
+                .build()
+                .send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(temporary))
+            require(response.statusCode() in 200..299) { "Cloudflare helper download failed (${response.statusCode()})" }
+            ensureCurrentSession(generation)
+            try {
+                Files.move(temporary, executable, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: Exception) {
+                Files.move(temporary, executable, StandardCopyOption.REPLACE_EXISTING)
+            }
+            ensureCurrentSession(generation)
+            executable
+        } finally {
+            cleanupCloudflaredTemporaryFile(temporary)
         }
-        ensureCurrentSession(generation)
-        executable
     }
 
     private suspend fun startQuickTunnel(cloudflared: Path, port: Int, generation: Long): String {
@@ -1308,20 +1313,41 @@ class PlayTogetherManager(
             )
         }
 
-        internal fun queueSignature(snapshot: PlaybackSnapshot): String = buildString {
-            append(snapshot.queueTitle)
+        internal fun queueSignature(snapshot: PlaybackSnapshot): String {
             val entries = snapshot.queueEntries
             if (entries.size == snapshot.queue.size && entries.isNotEmpty()) {
-                entries.forEach { entry ->
-                    append('|')
-                        .append(entry.id)
-                        .append('@')
-                        .append(entry.logicalIndex)
-                        .append(':')
-                        .append(entry.item.metadata.id)
+                return buildString {
+                    append(snapshot.queueTitle)
+                    entries.forEach { entry ->
+                        append('|')
+                            .append(entry.id)
+                            .append('@')
+                            .append(entry.logicalIndex)
+                            .append(':')
+                            .append(entry.item.metadata.id)
+                    }
                 }
+            }
+            return fallbackQueueSignature(snapshot.queueTitle, snapshot.queue.map { it.metadata.id })
+        }
+
+        internal fun cloudflaredTemporaryPath(executable: Path, generation: Long): Path =
+            executable.resolveSibling("${executable.fileName}.part.$generation")
+
+        internal fun cleanupCloudflaredTemporaryFile(temporary: Path): Boolean =
+            runCatching { Files.deleteIfExists(temporary) }.getOrDefault(false)
+
+        internal fun fallbackQueueSignature(queueTitle: String?, mediaIds: List<String>): String = buildString {
+            append("fallback:")
+            appendLengthPrefixed(queueTitle)
+            mediaIds.forEach { appendLengthPrefixed(it) }
+        }
+
+        private fun StringBuilder.appendLengthPrefixed(value: String?) {
+            if (value == null) {
+                append("-1:")
             } else {
-                snapshot.queue.forEach { append('|').append(it.metadata.id) }
+                append(value.length).append(':').append(value)
             }
         }
 

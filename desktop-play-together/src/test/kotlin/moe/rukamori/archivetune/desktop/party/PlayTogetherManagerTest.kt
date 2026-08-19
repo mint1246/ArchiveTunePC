@@ -312,6 +312,67 @@ class PlayTogetherManagerTest {
     }
 
     @Test
+    fun `queue revision keeps stable-entry encoding unchanged`() {
+        val first = PlaybackItem(PlaybackMetadata(id = "alpha", title = "Alpha"))
+        val second = PlaybackItem(PlaybackMetadata(id = "beta", title = "Beta"))
+        val snapshot = PlaybackSnapshot(
+            queueTitle = "Queue",
+            queue = listOf(first, second),
+            queueEntries = listOf(
+                PlaybackQueueEntry(id = 11L, item = first, logicalIndex = 0, isCurrent = true),
+                PlaybackQueueEntry(id = 22L, item = second, logicalIndex = 1, isCurrent = false),
+            ),
+            currentIndex = 0,
+        )
+
+        assertEquals("Queue|11@0:alpha|22@1:beta", PlayTogetherManager.queueSignature(snapshot))
+    }
+
+    @Test
+    fun `fallback queue revision is collision safe for delimiter shaped ids`() {
+        val splitIds = PlayTogetherManager.fallbackQueueSignature("Queue", listOf("alpha", "beta"))
+        val embeddedDelimiter = PlayTogetherManager.fallbackQueueSignature("Queue", listOf("alpha|beta"))
+        val nullTitle = PlayTogetherManager.fallbackQueueSignature(null, listOf("alpha"))
+        val literalNullTitle = PlayTogetherManager.fallbackQueueSignature("null", listOf("alpha"))
+
+        assertNotEquals(splitIds, embeddedDelimiter)
+        assertNotEquals(nullTitle, literalNullTitle)
+    }
+
+    @Test
+    fun `fallback queue revision changes on reorder add and remove`() {
+        val original = PlayTogetherManager.fallbackQueueSignature("Queue", listOf("alpha", "beta"))
+        val reordered = PlayTogetherManager.fallbackQueueSignature("Queue", listOf("beta", "alpha"))
+        val added = PlayTogetherManager.fallbackQueueSignature("Queue", listOf("alpha", "beta", "gamma"))
+        val removed = PlayTogetherManager.fallbackQueueSignature("Queue", listOf("alpha"))
+
+        assertNotEquals(original, reordered)
+        assertNotEquals(original, added)
+        assertNotEquals(original, removed)
+        assertEquals(original, PlayTogetherManager.fallbackQueueSignature("Queue", listOf("alpha", "beta")))
+    }
+
+    @Test
+    fun `cloudflared temporary files are generation owned and cleanup is scoped`() {
+        val tools = Files.createTempDirectory("party-cloudflared-temp-test")
+        val executable = tools.resolve("cloudflared.exe")
+        val first = PlayTogetherManager.cloudflaredTemporaryPath(executable, 41L)
+        val second = PlayTogetherManager.cloudflaredTemporaryPath(executable, 42L)
+
+        assertNotEquals(first, second)
+        assertEquals("cloudflared.exe.part.41", first.fileName.toString())
+        assertEquals("cloudflared.exe.part.42", second.fileName.toString())
+
+        Files.writeString(first, "old attempt")
+        Files.writeString(second, "new attempt")
+        assertTrue(PlayTogetherManager.cleanupCloudflaredTemporaryFile(first))
+        assertFalse(Files.exists(first))
+        assertTrue(Files.exists(second), "Cleaning one generation must not remove another attempt's temporary file")
+        assertTrue(PlayTogetherManager.cleanupCloudflaredTemporaryFile(second))
+        assertFalse(Files.exists(second))
+    }
+
+    @Test
     fun `bundled WebRTC data channel negotiates locally`() {
         LibDataChannelArchDetect.initialize()
 
