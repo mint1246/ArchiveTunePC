@@ -31,6 +31,22 @@ class DesktopSettingsStoreTest {
     }
 
     @Test
+    fun accentDefaultsToBrandAndResetRemovesPersistedSeed() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+
+        assertEquals(null, store.snapshot().accentSeedArgb)
+        store.save(store.snapshot().copy(accentSeedArgb = 0xFF4D_7CFEL))
+        assertEquals(0xFF4D_7CFEL, DesktopSettingsStore(file).snapshot().accentSeedArgb)
+
+        store.save(store.snapshot().copy(accentSeedArgb = null))
+
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertFalse(persisted.containsKey("appearance.accentArgb"))
+        assertEquals(null, DesktopSettingsStore(file).snapshot().accentSeedArgb)
+    }
+
+    @Test
     fun corruptedFileFallsBackToDefaults() {
         val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
         Files.writeString(file, "not a properties file\\uZZZZ")

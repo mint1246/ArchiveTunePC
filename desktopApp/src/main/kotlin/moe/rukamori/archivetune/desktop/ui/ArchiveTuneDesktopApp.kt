@@ -134,6 +134,8 @@ data class DesktopContentState(
     val navigate: (DesktopDestination) -> Unit,
     val themePreference: DesktopThemePreference,
     val setThemePreference: (DesktopThemePreference) -> Unit,
+    val accentSeedArgb: Long?,
+    val setAccentSeedArgb: (Long?) -> Unit,
 )
 
 private val DesktopDestination.icon: ImageVector
@@ -152,8 +154,9 @@ fun ArchiveTuneDesktopApp(
     logger: Logger,
     initialDestination: DesktopDestination,
     initialThemePreference: DesktopThemePreference,
+    initialAccentSeedArgb: Long? = null,
     dynamicArtworkUri: String? = null,
-    onShellStateChanged: (DesktopDestination, DesktopThemePreference) -> Unit,
+    onShellStateChanged: (DesktopDestination, DesktopThemePreference, Long?) -> Unit,
     windowDragModifier: Modifier = Modifier,
     windowControls: (@Composable () -> Unit)? = null,
     immersiveContent: (@Composable (Modifier, Boolean) -> Unit)? = null,
@@ -168,14 +171,15 @@ fun ArchiveTuneDesktopApp(
     val searchFocusRequester = remember { FocusRequester() }
     var searchQuery by remember { mutableStateOf("") }
     var themePreference by remember { mutableStateOf(initialThemePreference) }
+    var accentSeedArgb by remember { mutableStateOf(initialAccentSeedArgb) }
     val dynamicActive = themePreference == DesktopThemePreference.DYNAMIC
     val dynamicPalette = rememberDynamicThemePalette(dynamicArtworkUri.takeIf { dynamicActive })
 
-    LaunchedEffect(navigator.current, themePreference) {
-        onShellStateChanged(navigator.current, themePreference)
+    LaunchedEffect(navigator.current, themePreference, accentSeedArgb) {
+        onShellStateChanged(navigator.current, themePreference, accentSeedArgb)
     }
 
-    ArchiveTuneDesktopTheme(themePreference, dynamicPalette) {
+    ArchiveTuneDesktopTheme(themePreference, dynamicPalette, accentSeedArgb) {
         Box(Modifier.fillMaxSize()) {
             if (dynamicActive) {
                 DynamicAppBackdrop(
@@ -248,6 +252,8 @@ fun ArchiveTuneDesktopApp(
                 navigate = navigator::navigate,
                 themePreference = themePreference,
                 setThemePreference = { themePreference = it },
+                accentSeedArgb = accentSeedArgb,
+                setAccentSeedArgb = { accentSeedArgb = it },
             )
 
             AnimatedContent(

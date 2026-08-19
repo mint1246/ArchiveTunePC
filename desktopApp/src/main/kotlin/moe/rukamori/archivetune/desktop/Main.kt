@@ -72,6 +72,7 @@ fun main() {
     val restored = runtime.settings.snapshot()
     var latestDestination = restored.lastDestination.asDesktopDestination()
     var latestTheme = restored.themeMode.asDesktopThemePreference()
+    var latestAccentSeedArgb = restored.accentSeedArgb
 
     try {
         application(exitProcessOnExit = true) {
@@ -86,6 +87,7 @@ fun main() {
                 runtime.settings.update {
                     it.copy(
                         themeMode = latestTheme.asSettingsThemeMode(),
+                        accentSeedArgb = latestAccentSeedArgb,
                         lastDestination = latestDestination.asSettingsDestination(),
                         windowPlacement = DesktopWindowPlacement(
                             widthDp = windowState.size.width.value,
@@ -147,6 +149,7 @@ fun main() {
                         logger = runtime.logger,
                         initialDestination = latestDestination,
                         initialThemePreference = latestTheme,
+                        initialAccentSeedArgb = latestAccentSeedArgb,
                         dynamicArtworkUri = dynamicArtworkUri,
                         windowDragModifier = windowDragModifier,
                         windowControls = windowControls,
@@ -154,15 +157,17 @@ fun main() {
                         onDismissImmersive = { showLyrics = false },
                         contentCanNavigateBack = browse.detail != null,
                         onContentNavigateBack = browse::goBack,
-                        onShellStateChanged = { destination, theme ->
+                        onShellStateChanged = { destination, theme, accentSeedArgb ->
                             latestDestination = destination
                             latestTheme = theme
+                            latestAccentSeedArgb = accentSeedArgb
                             // Theme/navigation are user preferences, not shutdown state. Persist them
                             // as soon as Compose reports a change so an abnormal process exit, update,
                             // or installer replacement cannot silently revert the visible selection.
                             runtime.settings.update { settings ->
                                 settings.copy(
                                     themeMode = theme.asSettingsThemeMode(),
+                                    accentSeedArgb = accentSeedArgb,
                                     lastDestination = destination.asSettingsDestination(),
                                 )
                             }

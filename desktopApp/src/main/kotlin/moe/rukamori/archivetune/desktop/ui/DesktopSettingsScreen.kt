@@ -1,8 +1,10 @@
 package moe.rukamori.archivetune.desktop.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,6 +50,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -155,11 +158,15 @@ fun DesktopSettingsPanel(
     ) {
         Text("Appearance", style = MaterialTheme.typography.headlineMedium)
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
-            Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThemeChoice("System", Icons.Rounded.BrightnessAuto, DesktopThemePreference.SYSTEM, state, Modifier.weight(1f))
-                ThemeChoice("Light", Icons.Rounded.LightMode, DesktopThemePreference.LIGHT, state, Modifier.weight(1f))
-                ThemeChoice("Dark", Icons.Rounded.DarkMode, DesktopThemePreference.DARK, state, Modifier.weight(1f))
-                ThemeChoice("Dynamic", Icons.Rounded.Palette, DesktopThemePreference.DYNAMIC, state, Modifier.weight(1f))
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ThemeChoice("System", Icons.Rounded.BrightnessAuto, DesktopThemePreference.SYSTEM, state, Modifier.weight(1f))
+                    ThemeChoice("Light", Icons.Rounded.LightMode, DesktopThemePreference.LIGHT, state, Modifier.weight(1f))
+                    ThemeChoice("Dark", Icons.Rounded.DarkMode, DesktopThemePreference.DARK, state, Modifier.weight(1f))
+                    ThemeChoice("Dynamic", Icons.Rounded.Palette, DesktopThemePreference.DYNAMIC, state, Modifier.weight(1f))
+                }
+                HorizontalDivider()
+                AccentChoices(state)
             }
         }
 
@@ -481,6 +488,60 @@ private fun DesktopEqualizerSettings.toPlaybackProfile(): DesktopEqualizerProfil
         preampDb = preampDb,
         bandGainsDb = bandGainsDb,
     )
+
+@Composable
+private fun AccentChoices(state: DesktopContentState) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text("Accent color", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (state.themePreference == DesktopThemePreference.DYNAMIC) {
+                    "Dynamic follows the current artwork. Your accent is kept for System, Light and Dark."
+                } else {
+                    "Tint buttons, selections and highlights without changing the light or dark surface palette."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = { state.setAccentSeedArgb(null) }) {
+            if (state.accentSeedArgb == null) {
+                Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+            }
+            Text("Default")
+        }
+        AccentPresets.forEach { preset ->
+            val selected = state.accentSeedArgb == preset.argb
+            Surface(
+                onClick = { state.setAccentSeedArgb(preset.argb) },
+                modifier = Modifier.size(38.dp),
+                shape = CircleShape,
+                color = preset.color,
+                border = BorderStroke(
+                    if (selected) 3.dp else 1.dp,
+                    if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
+                ),
+            ) {
+                if (selected) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Icon(Icons.Rounded.Check, contentDescription = "${preset.label} accent selected", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class AccentPreset(val label: String, val argb: Long, val color: Color)
+
+private val AccentPresets = listOf(
+    AccentPreset("Blue", 0xFF4D7CFEL, Color(0xFF4D7CFE)),
+    AccentPreset("Purple", 0xFF8C66FFL, Color(0xFF8C66FF)),
+    AccentPreset("Rose", 0xFFC75573L, Color(0xFFC75573)),
+    AccentPreset("Orange", 0xFFBA6B24L, Color(0xFFBA6B24)),
+    AccentPreset("Teal", 0xFF178C8CL, Color(0xFF178C8C)),
+)
 
 private suspend fun chooseDirectory(title: String): Path? = withContext(Dispatchers.IO) {
     var selected: Path? = null
