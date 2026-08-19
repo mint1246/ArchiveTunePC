@@ -525,6 +525,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 playback = services.playback,
                 playbackModesEnabled = partyState.mode != PartyMode.GUEST,
                 shuffleModeEnabled = partyState.mode == PartyMode.NONE,
+                audioEffects = services.playback.audioEffects,
                 downloads = downloadServices,
                 libraryFolders = services.library.folders,
                 onLibraryFoldersChanged = { folders ->

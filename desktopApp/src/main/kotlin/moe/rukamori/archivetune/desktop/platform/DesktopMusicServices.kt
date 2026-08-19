@@ -41,6 +41,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import moe.rukamori.archivetune.playback.desktop.DesktopConcretePlaybackSourceResolver
+import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import moe.rukamori.archivetune.playback.desktop.PlaybackQueueStore
 import moe.rukamori.archivetune.windowsmedia.PlaybackMediaCommandRouter
@@ -201,6 +202,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             playback.setSpeed(restored.speed)
             playback.setRepeatMode(restored.repeatMode.toPlaybackMode())
             playback.setShuffleEnabled(restored.shuffleEnabled)
+            playback.audioEffects.applyEqualizer(restored.equalizer.toPlaybackProfile())
         }
         runtime.applicationScope.launch {
             playback.state
@@ -706,6 +708,13 @@ private fun moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode.toPlayba
 
 private fun RepeatMode.toDesktopMode(): moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode =
     moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode.valueOf(name)
+
+private fun moe.rukamori.archivetune.desktop.settings.DesktopEqualizerSettings.toPlaybackProfile(): DesktopEqualizerProfile =
+    DesktopEqualizerProfile(
+        enabled = enabled,
+        preampDb = preampDb,
+        bandGainsDb = bandGainsDb,
+    )
 
 private class DesktopStreamResolutionException(
     classification: StreamResolutionFailureKind,

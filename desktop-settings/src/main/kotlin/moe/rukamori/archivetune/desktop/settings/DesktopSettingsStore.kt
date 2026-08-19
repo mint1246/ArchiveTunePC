@@ -57,6 +57,13 @@ data class DesktopWindowPlacement(
     val maximized: Boolean = false,
 )
 
+data class DesktopEqualizerSettings(
+    val enabled: Boolean = false,
+    val presetName: String? = null,
+    val preampDb: Float = 0f,
+    val bandGainsDb: List<Float> = emptyList(),
+)
+
 /** Non-secret desktop preferences. Paths are supplied by the host application. */
 data class DesktopSettings(
     val themeMode: DesktopThemeMode = DesktopThemeMode.SYSTEM,
@@ -66,6 +73,7 @@ data class DesktopSettings(
     val speed: Float = 1f,
     val repeatMode: DesktopRepeatMode = DesktopRepeatMode.OFF,
     val shuffleEnabled: Boolean = false,
+    val equalizer: DesktopEqualizerSettings = DesktopEqualizerSettings(),
     val lastDestination: DesktopLastDestination = DesktopLastDestination.HOME,
     val windowPlacement: DesktopWindowPlacement = DesktopWindowPlacement(),
     val libraryFolders: List<Path> = emptyList(),
@@ -138,6 +146,12 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 speed = values.getProperty("playback.speed")?.toFloatOrNull() ?: 1f,
                 repeatMode = values.enumValue("playback.repeatMode", DesktopRepeatMode.OFF),
                 shuffleEnabled = values.getProperty("playback.shuffle")?.toBooleanStrictOrNull() ?: false,
+                equalizer = DesktopEqualizerSettings(
+                    enabled = values.getProperty("playback.equalizer.enabled")?.toBooleanStrictOrNull() ?: false,
+                    presetName = values.getProperty("playback.equalizer.preset"),
+                    preampDb = values.getProperty("playback.equalizer.preampDb")?.toFloatOrNull() ?: 0f,
+                    bandGainsDb = readFloats(values, "playback.equalizer.band", MAX_EQUALIZER_BANDS),
+                ),
                 lastDestination = values.enumValue("navigation.lastDestination", DesktopLastDestination.HOME),
                 windowPlacement = DesktopWindowPlacement(
                     widthDp = values.getProperty("window.widthDp")?.toFloatOrNull() ?: 1_280f,
@@ -165,6 +179,12 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             setProperty("playback.speed", settings.speed.toString())
             setProperty("playback.repeatMode", settings.repeatMode.name)
             setProperty("playback.shuffle", settings.shuffleEnabled.toString())
+            setProperty("playback.equalizer.enabled", settings.equalizer.enabled.toString())
+            settings.equalizer.presetName?.let { setProperty("playback.equalizer.preset", it) }
+            setProperty("playback.equalizer.preampDb", settings.equalizer.preampDb.toString())
+            settings.equalizer.bandGainsDb.forEachIndexed { index, gain ->
+                setProperty("playback.equalizer.band.$index", gain.toString())
+            }
             setProperty("navigation.lastDestination", settings.lastDestination.name)
             setProperty("window.widthDp", settings.windowPlacement.widthDp.toString())
             setProperty("window.heightDp", settings.windowPlacement.heightDp.toString())
@@ -194,6 +214,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         accentSeedArgb = accentSeedArgb?.takeIf { it in 0..ARGB_MAX },
         volume = volume.finiteOr(1f).coerceIn(0f, 1f),
         speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
+        equalizer = equalizer.sanitized(),
         downloadConcurrency = downloadConcurrency.coerceIn(1, 8),
         windowPlacement = windowPlacement.sanitized(),
         libraryFolders = libraryFolders.map(Path::absolute).map(Path::normalize).distinct().take(MAX_LIBRARY_FOLDERS),
@@ -206,6 +227,14 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         heightDp = heightDp.finiteOr(800f).coerceIn(480f, 2_880f),
         xDp = xDp?.takeIf(Float::isFinite),
         yDp = yDp?.takeIf(Float::isFinite),
+    )
+
+    private fun DesktopEqualizerSettings.sanitized(): DesktopEqualizerSettings = copy(
+        presetName = presetName?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_EQUALIZER_PRESET_LENGTH),
+        preampDb = preampDb.finiteOr(0f).coerceIn(MIN_EQUALIZER_GAIN_DB, MAX_EQUALIZER_GAIN_DB),
+        bandGainsDb = bandGainsDb.take(MAX_EQUALIZER_BANDS).map {
+            it.finiteOr(0f).coerceIn(MIN_EQUALIZER_GAIN_DB, MAX_EQUALIZER_GAIN_DB)
+        },
     )
 
     private fun Float.finiteOr(default: Float): Float = takeIf(Float::isFinite) ?: default
@@ -229,12 +258,19 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         (0 until MAX_LYRICS_PROVIDERS)
             .mapNotNull { values.getProperty("$prefix.$it")?.trim()?.takeIf(String::isNotEmpty) }
 
+    private fun readFloats(values: Properties, prefix: String, limit: Int): List<Float> =
+        (0 until limit).mapNotNull { values.getProperty("$prefix.$it")?.toFloatOrNull() }
+
     private fun String.toPathOrNull(): Path? = runCatching { Path.of(this).absolute().normalize() }.getOrNull()
 
     private companion object {
         const val ARGB_MAX = 0xFFFF_FFFFL
         const val MAX_LIBRARY_FOLDERS = 64
         const val MAX_LYRICS_PROVIDERS = 32
+        const val MAX_EQUALIZER_BANDS = 32
+        const val MAX_EQUALIZER_PRESET_LENGTH = 80
+        const val MIN_EQUALIZER_GAIN_DB = -20f
+        const val MAX_EQUALIZER_GAIN_DB = 20f
         const val WRITE_DEBOUNCE_MILLIS = 250L
         val states = ConcurrentHashMap<Path, SharedState>()
         val flusher = Executors.newSingleThreadScheduledExecutor { runnable ->

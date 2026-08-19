@@ -108,4 +108,31 @@ class DesktopSettingsStoreTest {
         val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
         assertEquals("0.42", persisted.getProperty("playback.volume"))
     }
+
+    @Test
+    fun persistsAndSanitizesEqualizerSettings() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+        store.save(
+            DesktopSettings(
+                equalizer = DesktopEqualizerSettings(
+                    enabled = true,
+                    presetName = "  Rock  ",
+                    preampDb = Float.POSITIVE_INFINITY,
+                    bandGainsDb = listOf(-99f, -3.5f, Float.NaN, 7.25f, 99f),
+                ),
+            ),
+        )
+
+        val restored = store.snapshot().equalizer
+        assertEquals(true, restored.enabled)
+        assertEquals("Rock", restored.presetName)
+        assertEquals(0f, restored.preampDb, 0.0001f)
+        assertEquals(listOf(-20f, -3.5f, 0f, 7.25f, 20f), restored.bandGainsDb)
+
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertEquals("true", persisted.getProperty("playback.equalizer.enabled"))
+        assertEquals("Rock", persisted.getProperty("playback.equalizer.preset"))
+        assertEquals("7.25", persisted.getProperty("playback.equalizer.band.3"))
+    }
 }

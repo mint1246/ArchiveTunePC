@@ -1,6 +1,7 @@
 package moe.rukamori.archivetune.desktop.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lyrics
@@ -38,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +58,7 @@ import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.DesktopPlatform
 import moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy
+import moe.rukamori.archivetune.desktop.settings.DesktopEqualizerSettings
 import moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode
 import moe.rukamori.archivetune.desktop.settings.DesktopSettings
 import moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore
@@ -62,6 +66,9 @@ import moe.rukamori.archivetune.desktop.state.DesktopThemePreference
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
 import moe.rukamori.archivetune.playback.api.PlaybackController
+import moe.rukamori.archivetune.playback.desktop.DesktopAudioEffects
+import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerCapabilities
+import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import java.nio.file.Path
 import java.util.logging.Logger
 import javax.swing.JFileChooser
@@ -77,6 +84,7 @@ fun DesktopSettingsPanel(
     playback: PlaybackController?,
     playbackModesEnabled: Boolean = true,
     shuffleModeEnabled: Boolean = true,
+    audioEffects: DesktopAudioEffects?,
     downloads: DesktopDownloadServices?,
     libraryFolders: List<Path>,
     onLibraryFoldersChanged: (List<Path>) -> Unit,
@@ -92,9 +100,32 @@ fun DesktopSettingsPanel(
     var localFolders by remember(libraryFolders) { mutableStateOf(libraryFolders) }
     var notice by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var equalizerCapabilities by remember(audioEffects) { mutableStateOf<DesktopEqualizerCapabilities?>(null) }
+    var equalizerUnavailable by remember(audioEffects) { mutableStateOf(audioEffects == null) }
 
     fun update(transform: (DesktopSettings) -> DesktopSettings) {
         settings = settingsStore.update(transform)
+    }
+
+    fun applyEqualizer(next: DesktopEqualizerSettings) {
+        settings = settingsStore.update { it.copy(equalizer = next) }
+        val profile = settings.equalizer.toPlaybackProfile()
+        scope.launch {
+            runCatching { audioEffects?.applyEqualizer(profile) }
+                .onFailure { error = it.message ?: "Could not apply equalizer settings." }
+        }
+    }
+
+    LaunchedEffect(audioEffects) {
+        equalizerCapabilities = null
+        equalizerUnavailable = audioEffects == null
+        val effects = audioEffects ?: return@LaunchedEffect
+        runCatching { effects.equalizerCapabilities() }
+            .onSuccess {
+                equalizerCapabilities = it
+                equalizerUnavailable = false
+            }
+            .onFailure { equalizerUnavailable = true }
     }
 
     fun reconfigureDownloads(nextConcurrency: Int, nextPolicy: DesktopPartialCleanupPolicy) {
@@ -171,6 +202,78 @@ fun DesktopSettingsPanel(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+
+        Text("Equalizer", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ToggleRow("Enable equalizer", settings.equalizer.enabled, Icons.Rounded.GraphicEq) { enabled ->
+                    applyEqualizer(settings.equalizer.copy(enabled = enabled))
+                }
+                when {
+                    equalizerUnavailable -> Text(
+                        "Equalizer controls are unavailable because the VLC audio engine could not be initialized.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    equalizerCapabilities == null -> Text(
+                        "Loading VLC equalizer controls…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else -> {
+                        val capabilities = requireNotNull(equalizerCapabilities)
+                        if (capabilities.presets.isNotEmpty()) {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                capabilities.presets.forEach { preset ->
+                                    TextButton(onClick = {
+                                        scope.launch {
+                                            val effects = audioEffects ?: return@launch
+                                            val profile = runCatching { effects.presetEqualizer(preset) }.getOrNull() ?: return@launch
+                                            val next = DesktopEqualizerSettings(
+                                                enabled = true,
+                                                presetName = preset,
+                                                preampDb = profile.preampDb,
+                                                bandGainsDb = profile.bandGainsDb,
+                                            )
+                                            settings = settingsStore.update { it.copy(equalizer = next) }
+                                            runCatching { effects.applyEqualizer(settings.equalizer.toPlaybackProfile()) }
+                                                .onFailure { error = it.message ?: "Could not apply equalizer preset." }
+                                        }
+                                    }) {
+                                        Text(if (settings.equalizer.presetName == preset) "✓ $preset" else preset)
+                                    }
+                                }
+                            }
+                        }
+
+                        EqualizerGainRow(
+                            label = "Preamp",
+                            value = settings.equalizer.preampDb,
+                            enabled = settings.equalizer.enabled,
+                        ) { value ->
+                            applyEqualizer(settings.equalizer.copy(preampDb = value, presetName = null))
+                        }
+                        capabilities.bandFrequenciesHz.forEachIndexed { index, frequencyHz ->
+                            val gain = settings.equalizer.bandGainsDb.getOrElse(index) { 0f }
+                            EqualizerGainRow(
+                                label = formatEqualizerFrequency(frequencyHz),
+                                value = gain,
+                                enabled = settings.equalizer.enabled,
+                            ) { value ->
+                                val gains = List(capabilities.bandFrequenciesHz.size) { bandIndex ->
+                                    settings.equalizer.bandGainsDb.getOrElse(bandIndex) { 0f }
+                                }.toMutableList()
+                                gains[index] = value
+                                applyEqualizer(settings.equalizer.copy(bandGainsDb = gains, presetName = null))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -346,6 +449,38 @@ private fun ThemeChoice(label: String, icon: androidx.compose.ui.graphics.vector
         }
     }
 }
+
+@Composable
+private fun EqualizerGainRow(
+    label: String,
+    value: Float,
+    enabled: Boolean,
+    onValueChange: (Float) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.width(72.dp), style = MaterialTheme.typography.bodySmall)
+        Slider(
+            value = value.coerceIn(-20f, 20f),
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            enabled = enabled,
+            valueRange = -20f..20f,
+        )
+        Text(formatEqualizerDb(value), Modifier.width(64.dp), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private fun formatEqualizerDb(value: Float): String = "%+.1f dB".format(value.coerceIn(-20f, 20f))
+
+private fun formatEqualizerFrequency(hz: Float): String =
+    if (hz >= 1_000f) "%.1f kHz".format(hz / 1_000f) else "%.0f Hz".format(hz)
+
+private fun DesktopEqualizerSettings.toPlaybackProfile(): DesktopEqualizerProfile =
+    DesktopEqualizerProfile(
+        enabled = enabled,
+        preampDb = preampDb,
+        bandGainsDb = bandGainsDb,
+    )
 
 private suspend fun chooseDirectory(title: String): Path? = withContext(Dispatchers.IO) {
     var selected: Path? = null

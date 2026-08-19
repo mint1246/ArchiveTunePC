@@ -87,6 +87,7 @@ class VlcjPlaybackController(
     private var nativeLog: NativeLog? = null
     private var nativeLogListener: LogEventListener? = null
     private var player: MediaPlayer? = null
+    private var equalizerBackend: EqualizerBackend? = null
     private var listener: MediaPlayerEventAdapter? = null
     private var activeCallbackMedia: VlcjRangeCallbackMedia? = null
     private var generation = 0L
@@ -100,6 +101,11 @@ class VlcjPlaybackController(
 
     override val state = _state.asStateFlow()
     override val events = _events.asSharedFlow()
+    private val vlcjAudioEffects = VlcjAudioEffects {
+        ensurePlayer()
+        synchronized(nativeLifecycleLock) { checkNotNull(equalizerBackend) }
+    }
+    val audioEffects: DesktopAudioEffects = vlcjAudioEffects
 
     init {
         // libVLC startup is relatively expensive (especially on OpenJ9 -Xint), but its idle
@@ -678,13 +684,16 @@ class VlcjPlaybackController(
                         addLogListener(newNativeLogListener)
                     }
                     val newPlayer = newFactory.mediaPlayers().newMediaPlayer()
+                    val newEqualizerBackend = VlcjEqualizerBackend(newFactory, newPlayer)
                     val newListener = createEventListener()
                     newPlayer.events().addMediaPlayerEventListener(newListener)
                     factory = newFactory
                     nativeLog = newNativeLog
                     nativeLogListener = newNativeLogListener
                     player = newPlayer
+                    equalizerBackend = newEqualizerBackend
                     listener = newListener
+                    vlcjAudioEffects.attach(newEqualizerBackend)
                     newPlayer
                 } catch (error: Throwable) {
                     newNativeLogListener?.let { eventListener ->
@@ -1151,6 +1160,7 @@ class VlcjPlaybackController(
             runCatching { player?.media()?.reset() }
             runCatching { activeCallbackMedia?.close() }
             runCatching { rangeHttpTransport.close() }
+            equalizerBackend?.let(vlcjAudioEffects::detach)
             runCatching { player?.release() }
             runCatching { nativeLog?.release() }
             runCatching { factory?.release() }
@@ -1158,6 +1168,7 @@ class VlcjPlaybackController(
             nativeLogListener = null
             nativeLog = null
             player = null
+            equalizerBackend = null
             activeCallbackMedia = null
             factory = null
             _state.update { it.copy(status = PlaybackStatus.IDLE, playWhenReady = false) }
