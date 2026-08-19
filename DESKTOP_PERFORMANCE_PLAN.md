@@ -690,6 +690,25 @@ The app should remain smooth **during background loading**, not just after loadi
 
 # Phase 9 - Instrumentation and measurable targets
 
+**Status: completed 2026-08-19.**
+
+Implementation / validation checkpoint:
+
+- Kept diagnostics deliberately low-overhead: the shared resource coordinator already counted started/coalesced/memory-hit/disk-hit/miss requests and logged redacted request category/priority/result; existing completion events now also include `duration_ms` without adding another normal-success log event.
+- Cancellation and unexpected request failures now include the same redacted duration/category diagnostic.
+- Final cache/state bounds are explicit: shared resource memory cache 32 entries; Search query sessions 12; parsed browse pages 24; top-level navigation history 32; nested browse history 16 routes per destination; compact view-state positions 64.
+- Fresh GraalVM Native Image after the performance work is ~207.79 MiB on disk.
+- Signed-in 60-second Native Image Home soak, including real Home/Library refresh and recommendation maintenance, peaked around 203 MiB private working set and settled at ~173 MiB from 25-60 seconds. Total working set settled around ~290 MiB. The curve stabilized instead of growing continuously.
+- The same Native Image soak remained clean of Graal reachability failures, AWT `NoSuchMethodError`, and JNA callback errors.
+- User manual testing of downloaded-song playback with animated lyrics was smooth at roughly ~300 MiB in Task Manager, providing an additional real interactive workload check beyond the automated idle/Home measurements.
+- A synthetic many-query input run plateaued around ~198 MiB private working set rather than continuously growing. Backend completion for every synthetic query was not independently verified, so bounded Search behavior remains primarily protected by the dedicated Search repository tests rather than treating this run as a network benchmark.
+- Found the bundled VLC `plugins.dat` was stale, causing hundreds of cache warnings and unnecessary plugin rescans. Regenerated the cache with VideoLAN VLC 3.0.21's official `vlc-cache-gen.exe` against ArchiveTune's exact trimmed plugin tree, using the required absolute Windows plugin path.
+- Native and JVM VLC staging now both use the timestamp-preserving staging task, and package verification rejects a missing/trivially-empty plugin cache.
+- With a freshly staged valid plugin cache, isolated Native Image libVLC initialization dropped to ~0.424 s with zero stale-plugin-cache errors; removing the cache entirely had caused an isolated cold scan of ~16.8 s.
+- Final focused verification after diagnostics: `:desktop-backend:test :desktopApp:compileKotlin` passed.
+
+The plan's architectural performance work is complete. Remaining testing is feature-parity/manual product coverage rather than another cache/state-performance phase.
+
 Add lightweight debug metrics/logging, ideally disableable or low-overhead in release.
 
 ## Per request
@@ -935,7 +954,7 @@ No phase commit was made at this checkpoint because `DesktopMusicSurface.kt` alr
 - [x] phase 6 - request priority/concurrency cleanup (ownership/priority/auth-refresh audit complete)
 - [x] phase 7 - async/coalesced persistence (filesystem audit + hot-path fixes complete)
 - [x] phase 8 - Compose/rendering smoothness audit (view-state restoration + hot recomposition/allocation audit complete)
-- [ ] phase 9 - diagnostics, RAM validation, final tuning
+- [x] phase 9 - diagnostics, RAM validation, final tuning (Native Image + packaging validation complete)
 
 ---
 

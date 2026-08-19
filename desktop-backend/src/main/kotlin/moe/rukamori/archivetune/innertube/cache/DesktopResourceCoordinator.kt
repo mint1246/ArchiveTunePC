@@ -155,6 +155,7 @@ class DesktopResourceCoordinator(
         }
         if (!owner) return deferred.await() as Result<T>
 
+        val startedAtNanos = System.nanoTime()
         try {
             val result =
                 if (priority == DesktopRequestPriority.FOREGROUND) {
@@ -164,15 +165,21 @@ class DesktopResourceCoordinator(
                 }
             deferred.complete(result as Result<Any>)
             diagnostic(
-                "request event=completed priority=${priority.name.lowercase()} result=${if (result.isSuccess) "success" else "failure"} key=${safeDiagnosticKey(key)}",
+                "request event=completed priority=${priority.name.lowercase()} result=${if (result.isSuccess) "success" else "failure"} duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)}",
             )
             return result
         } catch (cancellation: CancellationException) {
             deferred.completeExceptionally(cancellation)
+            diagnostic(
+                "request event=cancelled priority=${priority.name.lowercase()} duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)}",
+            )
             throw cancellation
         } catch (failure: Throwable) {
             val result = Result.failure<T>(failure)
             deferred.complete(result as Result<Any>)
+            diagnostic(
+                "request event=completed priority=${priority.name.lowercase()} result=failure duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)}",
+            )
             return result
         } finally {
             synchronized(flightLock) { inFlight.remove(key, deferred) }
@@ -190,6 +197,9 @@ class DesktopResourceCoordinator(
     private fun cacheFile(key: String): Path = cacheDirectory.resolve("${sha256(key)}.json")
 
     private fun safeDiagnosticKey(key: String): String = key.substringBefore(':').take(48)
+
+    private fun elapsedMillis(startedAtNanos: Long): Long =
+        (System.nanoTime() - startedAtNanos).coerceAtLeast(0L) / 1_000_000L
 
     private fun sha256(value: String): String =
         MessageDigest.getInstance("SHA-256")

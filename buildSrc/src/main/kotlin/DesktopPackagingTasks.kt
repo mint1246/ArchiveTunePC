@@ -133,9 +133,13 @@ abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
         val plugins = root.resolve("plugins")
         val pluginCache = plugins.resolve("plugins.dat")
         val accidentalNestedPlugins = plugins.resolve("plugins")
-        if (!libVlc.isFile || !libVlcCore.isFile || !plugins.isDirectory || !pluginCache.isFile) {
+        val hasPluginDlls = plugins.isDirectory && plugins.walkTopDown().any {
+            it.isFile && it.extension.equals("dll", ignoreCase = true)
+        }
+        val hasUsablePluginCache = pluginCache.isFile && pluginCache.length() > MIN_PLUGIN_CACHE_BYTES
+        if (!libVlc.isFile || !libVlcCore.isFile || !hasPluginDlls || !hasUsablePluginCache) {
             throw GradleException(
-                "Incomplete libVLC runtime at ${root.absolutePath}; expected DLLs, plugins/, and plugins/plugins.dat",
+                "Incomplete libVLC runtime at ${root.absolutePath}; expected libVLC DLLs, plugin DLLs, and a generated plugins/plugins.dat cache",
             )
         }
         if (accidentalNestedPlugins.exists()) {
@@ -144,9 +148,13 @@ abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
             )
         }
     }
+
+    private companion object {
+        const val MIN_PLUGIN_CACHE_BYTES = 1_024L
+    }
 }
 
-@DisableCachingByDefault(because = "The VLC tree is already versioned locally; staging must preserve file timestamps for plugins.dat.")
+@DisableCachingByDefault(because = "The VLC tree is versioned locally; staging must preserve plugin timestamps used by plugins.dat.")
 abstract class StageBundledVlcRuntimeTask : DefaultTask() {
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)

@@ -41,11 +41,11 @@ nucleus.application {
 val nativeOutputDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/output/${project.name}")
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
 
-val stageNativeVlcRuntime = tasks.register<Sync>("stageNativeVlcRuntime") {
+val stageNativeVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNativeVlcRuntime") {
     group = "distribution"
     description = "Stages ArchiveTune's bundled libVLC runtime beside the GraalVM native executable."
-    from(bundledVlcSourceDir)
-    into(nativeOutputDir.map { it.dir("native/windows-x64/vlc") })
+    sourceDirectory.set(bundledVlcSourceDir)
+    destinationDirectory.set(nativeOutputDir.map { it.dir("native/windows-x64/vlc") })
 }
 
 tasks.matching { it.name == "packageGraalvmNative" }.configureEach {
