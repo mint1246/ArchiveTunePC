@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackFailure
@@ -61,7 +62,8 @@ class VlcjPlaybackController(
     private val sourceResolver: PlaybackSourceResolver,
     private val runtimeConfiguration: VlcRuntimeConfiguration = VlcRuntimeConfiguration(),
     private val onStreamHttpFailure: suspend (PlaybackItem, ResolvedPlaybackSource, Int) -> Boolean = { _, _, _ -> false },
-) : PlaybackController {
+    initialAudioOutputDeviceId: String? = null,
+) : PlaybackController, DesktopAudioOutputControl {
     private data class LoadRequest(
         val generation: Long,
         val item: PlaybackItem,
@@ -80,6 +82,7 @@ class VlcjPlaybackController(
     private val rangeHttpTransport = VlcjRangeHttpTransport()
     private val _state = MutableStateFlow(PlaybackSnapshot())
     private val _events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 32)
+    private val audioOutputSelection = DesktopAudioOutputSelection(initialAudioOutputDeviceId)
     private val latestPositionMs = AtomicLong(0L)
     private var positionTicker: Job? = null
     private var loadWatchdog: Job? = null
@@ -106,6 +109,17 @@ class VlcjPlaybackController(
         synchronized(nativeLifecycleLock) { checkNotNull(equalizerBackend) }
     }
     val audioEffects: DesktopAudioEffects = vlcjAudioEffects
+    override val audioOutputState = audioOutputSelection.state
+
+    override suspend fun refreshAudioOutputDevices(): DesktopAudioOutputState = withContext(Dispatchers.IO) {
+        ensurePlayer()
+        audioOutputSelection.refresh()
+    }
+
+    override suspend fun selectAudioOutputDevice(deviceId: String?): DesktopAudioOutputState = withContext(Dispatchers.IO) {
+        ensurePlayer()
+        audioOutputSelection.select(deviceId)
+    }
 
     init {
         // libVLC startup is relatively expensive (especially on OpenJ9 -Xint), but its idle
@@ -694,6 +708,7 @@ class VlcjPlaybackController(
                     equalizerBackend = newEqualizerBackend
                     listener = newListener
                     vlcjAudioEffects.attach(newEqualizerBackend)
+                    audioOutputSelection.replaceBackend(VlcjAudioOutputBackend(newPlayer))
                     newPlayer
                 } catch (error: Throwable) {
                     newNativeLogListener?.let { eventListener ->
@@ -1169,6 +1184,7 @@ class VlcjPlaybackController(
             nativeLog = null
             player = null
             equalizerBackend = null
+            audioOutputSelection.replaceBackend(null)
             activeCallbackMedia = null
             factory = null
             _state.update { it.copy(status = PlaybackStatus.IDLE, playWhenReady = false) }

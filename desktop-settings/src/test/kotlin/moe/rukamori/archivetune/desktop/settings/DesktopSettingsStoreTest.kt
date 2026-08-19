@@ -87,6 +87,7 @@ class DesktopSettingsStoreTest {
         val expected = DesktopSettings(
             repeatMode = DesktopRepeatMode.ALL,
             shuffleEnabled = true,
+            audioOutputDeviceId = "headphones-device-id",
             downloadConcurrency = 7,
             partialCleanupPolicy = DesktopPartialCleanupPolicy.KEEP_ON_CANCEL,
             lyricsProviderIds = listOf("lrclib", "betterlyrics"),
@@ -95,6 +96,8 @@ class DesktopSettingsStoreTest {
         DesktopSettingsStore(file).save(expected)
 
         assertEquals(expected, DesktopSettingsStore(file).snapshot())
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertEquals("headphones-device-id", persisted.getProperty("playback.audioOutputDevice"))
     }
 
     @Test
@@ -110,6 +113,22 @@ class DesktopSettingsStoreTest {
         val restored = DesktopSettingsStore(file).snapshot()
         assertEquals(8, restored.downloadConcurrency)
         assertEquals(listOf("lrclib"), restored.lyricsProviderIds)
+    }
+
+    @Test
+    fun sanitizesAudioOutputDeviceId() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+
+        store.save(DesktopSettings(audioOutputDeviceId = "  headphones-device-id  "))
+        assertEquals("headphones-device-id", store.snapshot().audioOutputDeviceId)
+        assertEquals("headphones-device-id", DesktopSettingsStore(file).snapshot().audioOutputDeviceId)
+
+        store.save(DesktopSettings(audioOutputDeviceId = "   "))
+        assertEquals(null, store.snapshot().audioOutputDeviceId)
+
+        store.save(DesktopSettings(audioOutputDeviceId = "x".repeat(2_000)))
+        assertEquals(1_024, store.snapshot().audioOutputDeviceId?.length)
     }
 
     @Test

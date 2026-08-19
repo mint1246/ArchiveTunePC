@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -130,6 +131,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         onStreamHttpFailure = { item, source, httpStatus ->
             recoverFromStreamHttpFailure(item, source, httpStatus)
         },
+        initialAudioOutputDeviceId = settings.snapshot().audioOutputDeviceId,
     )
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
@@ -208,6 +210,17 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             playback.setRepeatMode(restored.repeatMode.toPlaybackMode())
             playback.setShuffleEnabled(restored.shuffleEnabled)
             playback.audioEffects.applyEqualizer(restored.equalizer.toPlaybackProfile())
+        }
+        runtime.applicationScope.launch {
+            playback.audioOutputState
+                .filter { it.resolved }
+                .map { it.selectedDeviceId }
+                .distinctUntilChanged()
+                .collect { selectedDeviceId ->
+                    if (settings.snapshot().audioOutputDeviceId != selectedDeviceId) {
+                        settings.update { it.copy(audioOutputDeviceId = selectedDeviceId) }
+                    }
+                }
         }
         runtime.applicationScope.launch {
             playback.state

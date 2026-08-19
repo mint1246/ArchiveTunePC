@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +35,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +75,7 @@ import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.desktop.DesktopAudioEffects
+import moe.rukamori.archivetune.playback.desktop.DesktopAudioOutputControl
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerCapabilities
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import java.nio.file.Path
@@ -89,6 +94,7 @@ fun DesktopSettingsPanel(
     playbackModesEnabled: Boolean = true,
     shuffleModeEnabled: Boolean = true,
     audioEffects: DesktopAudioEffects?,
+    audioOutput: DesktopAudioOutputControl?,
     downloads: DesktopDownloadServices?,
     libraryFolders: List<Path>,
     libraryTrackCount: Int,
@@ -219,6 +225,12 @@ fun DesktopSettingsPanel(
                         "Shuffle stays off while Play Together is active so every participant follows the same queue order.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                audioOutput?.let { output ->
+                    AudioOutputSetting(
+                        audioOutput = output,
+                        onNotice = { notice = it },
                     )
                 }
             }
@@ -418,6 +430,81 @@ fun DesktopSettingsPanel(
         DirectorySetting("Logs", paths.logs, Icons.Rounded.FolderOpen, actionLabel = "Open") { DesktopPlatform.openDirectory(paths.logs, logger) }
         notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+private fun AudioOutputSetting(
+    audioOutput: DesktopAudioOutputControl,
+    onNotice: (String) -> Unit,
+) {
+    val outputState by audioOutput.audioOutputState.collectAsState()
+    val scope = rememberCoroutineScope()
+    var menuOpen by remember(audioOutput) { mutableStateOf(false) }
+
+    LaunchedEffect(audioOutput) {
+        audioOutput.refreshAudioOutputDevices()
+    }
+
+    val selectedName = outputState.devices
+        .firstOrNull { it.id == outputState.selectedDeviceId }
+        ?.name
+        ?: "System default"
+    val outputError = outputState.errorMessage
+    val statusText = outputError ?: if (outputState.resolved) selectedName else "Loading audio outputs…"
+
+    HorizontalDivider()
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.VolumeUp, null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Audio output", style = MaterialTheme.typography.titleMedium)
+            Text(
+                statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (outputError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box {
+            OutlinedButton(
+                onClick = { menuOpen = true },
+                enabled = outputState.resolved && outputState.devices.isNotEmpty(),
+            ) { Text("Choose") }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+            ) {
+                outputState.devices.forEach { device ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (device.id == outputState.selectedDeviceId) "✓ ${device.name}" else device.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            scope.launch {
+                                val result = audioOutput.selectAudioOutputDevice(device.id)
+                                if (result.errorMessage == null) onNotice("Audio output updated.")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(
+            onClick = {
+                scope.launch {
+                    val result = audioOutput.refreshAudioOutputDevices()
+                    if (result.errorMessage == null) onNotice("Audio outputs refreshed.")
+                }
+            },
+        ) { Text("Refresh") }
     }
 }
 

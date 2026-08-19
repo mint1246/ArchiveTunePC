@@ -587,6 +587,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 playbackModesEnabled = partyState.mode != PartyMode.GUEST,
                 shuffleModeEnabled = partyState.mode == PartyMode.NONE,
                 audioEffects = services.playback.audioEffects,
+                audioOutput = services.playback,
                 downloads = downloadServices,
                 libraryFolders = services.library.folders,
                 libraryTrackCount = localTracks.size,

@@ -74,6 +74,7 @@ data class DesktopSettings(
     val repeatMode: DesktopRepeatMode = DesktopRepeatMode.OFF,
     val shuffleEnabled: Boolean = false,
     val equalizer: DesktopEqualizerSettings = DesktopEqualizerSettings(),
+    val audioOutputDeviceId: String? = null,
     val lastDestination: DesktopLastDestination = DesktopLastDestination.HOME,
     val windowPlacement: DesktopWindowPlacement = DesktopWindowPlacement(),
     val libraryFolders: List<Path> = emptyList(),
@@ -152,6 +153,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                     preampDb = values.getProperty("playback.equalizer.preampDb")?.toFloatOrNull() ?: 0f,
                     bandGainsDb = readFloats(values, "playback.equalizer.band", MAX_EQUALIZER_BANDS),
                 ),
+                audioOutputDeviceId = values.getProperty("playback.audioOutputDevice"),
                 lastDestination = values.enumValue("navigation.lastDestination", DesktopLastDestination.HOME),
                 windowPlacement = DesktopWindowPlacement(
                     widthDp = values.getProperty("window.widthDp")?.toFloatOrNull() ?: 1_280f,
@@ -185,6 +187,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             settings.equalizer.bandGainsDb.forEachIndexed { index, gain ->
                 setProperty("playback.equalizer.band.$index", gain.toString())
             }
+            settings.audioOutputDeviceId?.let { setProperty("playback.audioOutputDevice", it) }
             setProperty("navigation.lastDestination", settings.lastDestination.name)
             setProperty("window.widthDp", settings.windowPlacement.widthDp.toString())
             setProperty("window.heightDp", settings.windowPlacement.heightDp.toString())
@@ -215,6 +218,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         volume = volume.finiteOr(1f).coerceIn(0f, 1f),
         speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
         equalizer = equalizer.sanitized(),
+        audioOutputDeviceId = audioOutputDeviceId?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH),
         downloadConcurrency = downloadConcurrency.coerceIn(1, 8),
         windowPlacement = windowPlacement.sanitized(),
         libraryFolders = libraryFolders.map(Path::absolute).map(Path::normalize).distinct().take(MAX_LIBRARY_FOLDERS),
@@ -271,6 +275,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         const val MAX_EQUALIZER_PRESET_LENGTH = 80
         const val MIN_EQUALIZER_GAIN_DB = -20f
         const val MAX_EQUALIZER_GAIN_DB = 20f
+        const val MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH = 1_024
         const val WRITE_DEBOUNCE_MILLIS = 250L
         val states = ConcurrentHashMap<Path, SharedState>()
         val flusher = Executors.newSingleThreadScheduledExecutor { runnable ->
