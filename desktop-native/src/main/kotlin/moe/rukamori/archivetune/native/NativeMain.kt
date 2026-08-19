@@ -1,15 +1,15 @@
-package moe.rukamori.archivetune.nativeexperiment
+package moe.rukamori.archivetune.native
 
 import dev.nucleusframework.graalvm.GraalVmInitializer
 import java.nio.file.Path
 import moe.rukamori.archivetune.desktop.main as archiveTuneMain
 
 /**
- * Experimental GraalVM Native Image entry point.
+ * GraalVM Native Image entry point for the Windows desktop distribution.
  *
  * Nucleus needs to initialize its native-image substitutions before ArchiveTune touches AWT,
  * Compose, or Skiko. The production desktop entry point remains unchanged and is called directly
- * afterwards so this experiment exercises the real application rather than a reduced test shell.
+ * afterwards so the native build exercises the same application code as the regular JVM build.
  */
 fun main() {
     GraalVmInitializer.initialize()

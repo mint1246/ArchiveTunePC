@@ -9,7 +9,8 @@ plugins {
 }
 
 group = "moe.rukamori.archivetune"
-version = "14.1.0-native-experiment"
+val desktopAppProject = evaluationDependsOn(":desktopApp")
+version = desktopAppProject.version
 
 kotlin {
     jvmToolchain(21)
@@ -30,11 +31,11 @@ configurations.runtimeClasspath {
 }
 
 nucleus.application {
-    mainClass = "moe.rukamori.archivetune.nativeexperiment.NativeMainKt"
+    mainClass = "moe.rukamori.archivetune.native.NativeMainKt"
 
     graalvm {
         isEnabled.set(true)
-        imageName.set("ArchiveTuneNative")
+        imageName.set("ArchiveTune")
         maxHeapSize.set("768m")
         optimization.set(NativeImageOptimization.SIZE)
         // Nucleus' static resource scanner sees native payloads for every supported platform in
@@ -57,6 +58,12 @@ nucleus.application {
 val nativeOutputDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/output/${project.name}")
 val nativeCompileDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/nativeCompile")
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
+val nativeMsiScript = rootProject.layout.projectDirectory.file("packaging/windows/build-native-msi.ps1")
+val nativeReleaseDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/app/ArchiveTune")
+val nativeMsiOutputDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/msi")
+val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
+val desktopVersion = version.toString()
+val generatedWindowsIcon = desktopAppProject.layout.buildDirectory.file("generated/desktop/icon/ArchiveTune.ico")
 
 val stageNativeRuntimeShims = tasks.register<Copy>("stageNativeRuntimeShims") {
     group = "distribution"
@@ -66,6 +73,7 @@ val stageNativeRuntimeShims = tasks.register<Copy>("stageNativeRuntimeShims") {
         include("java.dll", "jvm.dll")
     }
     into(nativeOutputDir)
+    mustRunAfter("packageGraalvmNative")
 }
 
 val stageNativeVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNativeVlcRuntime") {
@@ -73,8 +81,55 @@ val stageNativeVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNat
     description = "Stages ArchiveTune's bundled libVLC runtime beside the GraalVM native executable."
     sourceDirectory.set(bundledVlcSourceDir)
     destinationDirectory.set(nativeOutputDir.map { it.dir("native/windows-x64/vlc") })
+    mustRunAfter("packageGraalvmNative")
 }
 
 tasks.matching { it.name == "packageGraalvmNative" }.configureEach {
     finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime)
+}
+
+val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
+    group = "distribution"
+    description = "Stages the production GraalVM distribution under desktopApp/build/compose/binaries/main-native."
+    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime)
+    from(nativeOutputDir)
+    into(nativeReleaseDir)
+}
+
+tasks.register<Exec>("packageNativeMsi") {
+    group = "distribution"
+    description = "Builds the production per-user/upgradable MSI from the size-optimized GraalVM native distribution."
+
+    dependsOn(
+        stageNativeDistribution,
+        desktopAppProject.tasks.named("generateWindowsIcon"),
+        rootProject.tasks.named("unzipWix"),
+    )
+
+    inputs.dir(nativeReleaseDir)
+    inputs.file(nativeMsiScript)
+    inputs.file(rootProject.layout.projectDirectory.file("LICENSE"))
+    inputs.file(generatedWindowsIcon)
+    outputs.file(nativeMsiOutputDir.map { it.file("ArchiveTune-$desktopVersion.msi") })
+
+    commandLine(
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        nativeMsiScript.asFile.absolutePath,
+        "-SourceDir",
+        nativeReleaseDir.get().asFile.absolutePath,
+        "-OutputDir",
+        nativeMsiOutputDir.get().asFile.absolutePath,
+        "-WixDir",
+        wixToolsetDir.get().asFile.absolutePath,
+        "-IconPath",
+        generatedWindowsIcon.get().asFile.absolutePath,
+        "-LicensePath",
+        rootProject.layout.projectDirectory.file("LICENSE").asFile.absolutePath,
+        "-Version",
+        desktopVersion,
+    )
 }

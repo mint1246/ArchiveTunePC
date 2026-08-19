@@ -36,6 +36,30 @@ tasks.register("msiJ9Shrunk") {
     dependsOn(":desktopApp:packageOpenJ9ReleaseMsiUpgradable")
 }
 
+tasks.register("desktopDev") {
+    group = "distribution"
+    description = "Runs the regular JVM desktop app for the fastest development cycle."
+    dependsOn(":desktopApp:run")
+}
+
+tasks.register("nativeCheck") {
+    group = "distribution"
+    description = "Builds only the size-optimized GraalVM executable, skipping distribution staging."
+    dependsOn(":desktop-native:nativeImageCompile")
+}
+
+tasks.register("nativeRelease") {
+    group = "distribution"
+    description = "Builds the size-optimized GraalVM Native Image for release packaging."
+    dependsOn(":desktop-native:stageNativeDistribution")
+}
+
+tasks.register("msiNative") {
+    group = "distribution"
+    description = "Builds the production upgradable MSI from the size-optimized GraalVM Native Image."
+    dependsOn(":desktop-native:packageNativeMsi")
+}
+
 if (tasks.findByName("prepareKotlinBuildScriptModel") == null) {
     tasks.register("prepareKotlinBuildScriptModel") {}
 }
