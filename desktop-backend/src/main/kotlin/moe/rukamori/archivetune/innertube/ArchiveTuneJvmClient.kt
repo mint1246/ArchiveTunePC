@@ -218,9 +218,9 @@ class ArchiveTuneJvmClient(
         }
 
     /**
-     * YouTube Music can return a region-dependent subset of an artist's Albums carousel. An
-     * anonymous US artist page gives us YouTube's canonical English artist title, and searching that
-     * title can expose releases omitted from both the current-locale and US artist carousels.
+     * Artist pages can leak album browse IDs through songs even when those albums are omitted from
+     * the Albums carousel. Recover those profile-derived albums first. Some regional artist pages no
+     * longer leak enough context, so an anonymous US title search is only a last-resort fallback.
      */
     private suspend fun recoverUnlistedArtistAlbums(page: ArtistPage): ArtistPage {
         val albumSectionIndex = page.sections.indexOfFirst { section ->
@@ -230,28 +230,40 @@ class ArchiveTuneJvmClient(
 
         val albumSection = page.sections[albumSectionIndex]
 
-        val fallbackPage =
-            YouTube.artist(
-                browseId = page.artist.id,
-                useAccountContext = false,
-                localeOverride = ARTIST_ALBUM_RECOVERY_LOCALE,
-            ).getOrNull() ?: return page
         val knownAlbumIds =
             page.sections
                 .asSequence()
                 .flatMap { it.items.asSequence() }
                 .filterIsInstance<AlbumItem>()
                 .mapTo(mutableSetOf()) { it.browseId }
+
+        val profileLeakedAlbumIds =
+            page.sections
+                .asSequence()
+                .flatMap { it.items.asSequence() }
+                .filterIsInstance<SongItem>()
+                .mapNotNull { it.album?.id }
+                .filterNot(knownAlbumIds::contains)
+                .distinct()
+                .toList()
+
+        val fallbackPage =
+            YouTube.artist(
+                browseId = page.artist.id,
+                useAccountContext = false,
+                localeOverride = ARTIST_ALBUM_RECOVERY_LOCALE,
+            ).getOrNull()
         val fallbackAlbums =
-            fallbackPage.sections
-                .firstOrNull { section -> section.items.any { it is AlbumItem } }
+            fallbackPage
+                ?.sections
+                ?.firstOrNull { section -> section.items.any { it is AlbumItem } }
                 ?.items
                 ?.filterIsInstance<AlbumItem>()
                 .orEmpty()
         knownAlbumIds += fallbackAlbums.map { it.browseId }
 
-        val candidateAlbumIds =
-            listOf(fallbackPage.artist.title, page.artist.title)
+        val fallbackSearchAlbumIds =
+            listOfNotNull(fallbackPage?.artist?.title, page.artist.title)
                 .map(String::trim)
                 .filter(String::isNotEmpty)
                 .distinct()
@@ -271,6 +283,8 @@ class ArchiveTuneJvmClient(
                 .filterNot(knownAlbumIds::contains)
                 .distinct()
                 .toList()
+
+        val candidateAlbumIds = (profileLeakedAlbumIds + fallbackSearchAlbumIds).distinct()
 
         val searchedAlbums =
             candidateAlbumIds.mapNotNull { albumId ->
