@@ -1,9 +1,11 @@
 package moe.rukamori.archivetune.desktop.platform
 
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
+import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.StreamHttpRecoveryAction
 import moe.rukamori.archivetune.innertube.StreamResolutionFailureKind
 import moe.rukamori.archivetune.innertube.classifyStreamResolutionFailure
+import moe.rukamori.archivetune.innertube.utils.sha1
 import moe.rukamori.archivetune.desktopauth.ArchiveTuneSessionVerifier
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
@@ -382,7 +384,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     private fun cachedSourceFor(key: String): ResolvedPlaybackSource? {
         val cached = resolvedSourceCache[key] ?: return null
-        if (cached.sessionFingerprint != account.currentAuthState().fingerprint) {
+        if (cached.sessionFingerprint != account.currentAuthState().streamCacheSessionFingerprint()) {
             resolvedSourceCache.remove(key, cached)
             return null
         }
@@ -456,7 +458,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         if (resolvedSourceCache.size >= MAX_RESOLVED_SOURCE_CACHE_ENTRIES) resolvedSourceCache.clear()
         resolvedSourceCache[key] = CachedResolvedSource(
             source = source,
-            sessionFingerprint = account.currentAuthState().fingerprint,
+            // Per-video PoTokens rotate every time another song is prepared. They must not evict a
+            // still-valid signed source for the previous song; only stable account/session context
+            // determines whether a cached URL belongs to the current login.
+            sessionFingerprint = account.currentAuthState().streamCacheSessionFingerprint(),
             resolvedVideoId = resolvedVideoId,
             streamClientKey = streamClientKey,
             streamAuthFingerprint = streamAuthFingerprint,
@@ -537,6 +542,15 @@ private data class CachedResolvedSource(
     val streamClientKey: String,
     val streamAuthFingerprint: String?,
 )
+
+private fun PlaybackAuthState.streamCacheSessionFingerprint(): String =
+    sha1(
+        listOf(
+            cookie.orEmpty(),
+            visitorData.orEmpty(),
+            dataSyncId.orEmpty(),
+        ).joinToString(separator = "\u0000"),
+    )
 
 private fun moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode.toPlaybackMode(): RepeatMode =
     RepeatMode.valueOf(name)

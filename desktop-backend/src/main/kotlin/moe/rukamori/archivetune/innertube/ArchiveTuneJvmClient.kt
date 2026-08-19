@@ -1063,6 +1063,15 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
     if (all.any { it is StreamResolutionTimeoutException }) {
         return StreamResolutionFailureKind.NETWORK_TIMEOUT
     }
+    // A concrete player playability response is stronger evidence than one fallback client's
+    // extractor/parsing failure. Do not tell the user to update ArchiveTune merely because NewPipe
+    // failed after YouTube had already returned an explicit unavailable/login state.
+    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { !it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
+        return StreamResolutionFailureKind.UNAVAILABLE
+    }
+    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
+        return StreamResolutionFailureKind.AUTH_REQUIRED
+    }
     if (all.any { throwable ->
             throwable is StreamAudioFormatUnavailableException ||
                 throwable::class.simpleName.orEmpty().let { name ->
@@ -1072,14 +1081,6 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
                 }
         }
     ) return StreamResolutionFailureKind.EXTRACTOR_INCOMPATIBLE
-    // When an authenticated Web profile has a concrete non-login failure, preserve it over a
-    // later native fallback's expected AUTH_REQUIRED result.
-    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { !it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
-        return StreamResolutionFailureKind.UNAVAILABLE
-    }
-    if (all.filterIsInstance<StreamPlaybackUnavailableException>().any { it.status.equals("LOGIN_REQUIRED", ignoreCase = true) }) {
-        return StreamResolutionFailureKind.AUTH_REQUIRED
-    }
     if (all.any { it::class.simpleName.orEmpty().contains("Timeout", ignoreCase = true) }) {
         return StreamResolutionFailureKind.NETWORK_TIMEOUT
     }

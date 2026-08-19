@@ -93,6 +93,7 @@ class VlcjPlaybackController(
     @Volatile private var activeResolvedSource: ResolvedPlaybackSource? = null
     private val httpRecoveryGeneration = AtomicLong(NO_RECOVERY_GENERATION)
     private var recoveryAttemptedMediaId: String? = null
+    private var prematureFinishRetriedMediaId: String? = null
     private var pendingSeek: Pair<Long, Long>? = null
     private var suppressStoppedEvents = 0
 
@@ -456,6 +457,7 @@ class VlcjPlaybackController(
     override suspend fun retry() {
         checkOpen()
         val request = commandMutex.withLock {
+            prematureFinishRetriedMediaId = null
             prepareReloadLocked(TransitionReason.RETRY, _state.value.positionMs)
         }
         request?.let(::enqueueLoad)
@@ -582,7 +584,13 @@ class VlcjPlaybackController(
                 latestPositionMs.set(request.startPositionMs)
                 val callbackMedia =
                     if (resolved.shouldUseApplicationHttpTransport()) {
-                        VlcjRangeCallbackMedia(resolved.uri, resolved.headers).also {
+                        VlcjRangeCallbackMedia(
+                            url = resolved.uri,
+                            headers = resolved.headers,
+                            onHttpFailure = { httpStatus ->
+                                scheduleStreamHttpRecovery(request.generation, httpStatus, "application HTTP transport")
+                            },
+                        ).also {
                             activeCallbackMedia = it
                             logger.info("Using application HTTP transport for ${request.item.logLabel()}")
                         }
@@ -591,7 +599,10 @@ class VlcjPlaybackController(
                     }
                 val started =
                     if (callbackMedia != null) {
-                        activePlayer.media().play(callbackMedia)
+                        activePlayer.media().play(
+                            callbackMedia,
+                            *resolved.toCallbackMediaOptions().toTypedArray(),
+                        )
                     } else {
                         activePlayer.media().play(
                             resolved.uri,
@@ -688,16 +699,8 @@ class VlcjPlaybackController(
     private fun createNativeLogListener(): LogEventListener =
         LogEventListener { level, module, file, line, name, header, id, message ->
             message.orEmpty().httpErrorStatusCode()?.takeIf { it in RETRYABLE_STREAM_RESPONSE_CODES }?.let { httpStatus ->
-                val failedGeneration = activeGeneration
-                if (
-                    failedGeneration != null &&
-                    httpRecoveryGeneration.compareAndSet(NO_RECOVERY_GENERATION, failedGeneration)
-                ) {
-                    logger.warning(
-                        "libVLC media request returned HTTP $httpStatus; scheduling Android-style stream recovery " +
-                            "for generation=$failedGeneration",
-                    )
-                    dispatch { recoverAfterStreamHttpFailure(failedGeneration, httpStatus) }
+                activeGeneration?.let { failedGeneration ->
+                    scheduleStreamHttpRecovery(failedGeneration, httpStatus, "libVLC media request")
                 }
             }
             val details = buildString {
@@ -790,6 +793,32 @@ class VlcjPlaybackController(
                     if (!isActiveEventLocked()) return@withLock null
                     cancelLoadWatchdog()
                     val previous = queue.current
+                    val snapshot = _state.value
+                    val positionMs = maxOf(snapshot.positionMs, latestPositionMs.get())
+                    val expectedDurationMs =
+                        previous?.metadata?.durationHintMs?.takeIf { it > 0L }
+                            ?: snapshot.durationMs.takeIf { it > 0L }
+                    val endedPrematurely =
+                        expectedDurationMs != null &&
+                            positionMs + PREMATURE_FINISH_TOLERANCE_MS < expectedDurationMs
+                    if (endedPrematurely && previous != null) {
+                        logger.warning(
+                            "Ignoring premature libVLC finished event for ${previous.logLabel()}: " +
+                                "positionMs=$positionMs expectedDurationMs=$expectedDurationMs",
+                        )
+                        if (prematureFinishRetriedMediaId != previous.metadata.id) {
+                            prematureFinishRetriedMediaId = previous.metadata.id
+                            return@withLock prepareReloadLocked(TransitionReason.RETRY, positionMs)
+                        }
+                        stopActiveFileLocked()
+                        failLocked(
+                            PlaybackFailure(
+                                message = "The audio stream ended unexpectedly; retry the track",
+                                kind = PlaybackFailure.Kind.NETWORK,
+                            ),
+                        )
+                        return@withLock null
+                    }
                     val selected = queue.advance(automatic = true)
                     if (selected == null) {
                         _state.update {
@@ -959,6 +988,21 @@ class VlcjPlaybackController(
         retryRequest?.let(::enqueueLoad)
     }
 
+    private fun scheduleStreamHttpRecovery(
+        failedGeneration: Long,
+        httpStatus: Int,
+        source: String,
+    ) {
+        if (httpStatus !in RETRYABLE_STREAM_RESPONSE_CODES) return
+        if (activeGeneration != failedGeneration) return
+        if (!httpRecoveryGeneration.compareAndSet(NO_RECOVERY_GENERATION, failedGeneration)) return
+        logger.warning(
+            "$source returned HTTP $httpStatus; scheduling Android-style stream recovery " +
+                "for generation=$failedGeneration",
+        )
+        dispatch { recoverAfterStreamHttpFailure(failedGeneration, httpStatus) }
+    }
+
     private fun dispatch(block: suspend () -> Unit) {
         if (!closed.get()) scope.launch { runCatching { block() } }
     }
@@ -1042,7 +1086,10 @@ class VlcjPlaybackController(
     }
 
     private fun transition(previous: PlaybackItem?, current: PlaybackItem?, reason: TransitionReason) {
-        if (previous?.metadata?.id != current?.metadata?.id) recoveryAttemptedMediaId = null
+        if (previous?.metadata?.id != current?.metadata?.id) {
+            recoveryAttemptedMediaId = null
+            prematureFinishRetriedMediaId = null
+        }
         _events.tryEmit(PlaybackEvent.MediaTransition(previous, current, reason))
     }
 
@@ -1102,6 +1149,7 @@ class VlcjPlaybackController(
         const val MIN_URL_LIFETIME_MS = 5_000L
         const val POSITION_POLL_INTERVAL_MS = 50L
         const val LOAD_WATCHDOG_TIMEOUT_MS = 30_000L
+        const val PREMATURE_FINISH_TOLERANCE_MS = 5_000L
         const val NO_RECOVERY_GENERATION = -1L
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
@@ -1117,6 +1165,13 @@ private fun ResolvedPlaybackSource.shouldUseApplicationHttpTransport(): Boolean 
         parsed.scheme?.lowercase() in setOf("http", "https") &&
             (host == "googlevideo.com" || host.endsWith(".googlevideo.com"))
     }.getOrDefault(false)
+
+private fun ResolvedPlaybackSource.toCallbackMediaOptions(): List<String> =
+    when (mimeType?.substringBefore(';')?.trim()?.lowercase()) {
+        "audio/mp4" -> listOf(":demux=mp4")
+        "audio/webm" -> listOf(":demux=mkv")
+        else -> emptyList()
+    }
 
 private fun String.toLogMediaLocation(): String {
     if (isBlank()) return "<blank>"
