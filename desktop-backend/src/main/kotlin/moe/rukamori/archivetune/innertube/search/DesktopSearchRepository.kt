@@ -124,6 +124,13 @@ class DesktopSearchRepository(
         }
     }
 
+    /** Explicitly reissues the current query through the same cache/cancellation/generation path. */
+    suspend fun retry() {
+        val query = _state.value.query
+        if (query.isBlank()) return
+        activate(query, forceRefresh = true)
+    }
+
     suspend fun onAccountScopeChanged() {
         refreshJob?.cancel()
         requestGeneration.incrementAndGet()

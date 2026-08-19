@@ -68,6 +68,94 @@ class DesktopSearchRepositoryTest {
     }
 
     @Test
+    fun `failed search can retry same query and replace error with results`() = runBlocking {
+        val calls = AtomicInteger()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val repository = repository(scope) { query ->
+                if (calls.incrementAndGet() == 1) {
+                    Result.failure(IllegalStateException("offline"))
+                } else {
+                    Result.success(page(query))
+                }
+            }
+
+            repository.activate("Radiohead")
+            awaitError(repository, "offline")
+            assertEquals(1, calls.get())
+
+            repository.retry()
+            awaitQuery(repository, "radiohead")
+
+            assertEquals(2, calls.get())
+            assertEquals(null, repository.state.value.error)
+            assertEquals("Radiohead", repository.state.value.items.single().title)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `retry ignores blank current query`() = runBlocking {
+        val calls = AtomicInteger()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val repository = repository(scope) { query ->
+                calls.incrementAndGet()
+                Result.success(page(query))
+            }
+
+            repository.retry()
+            delay(50)
+
+            assertEquals(0, calls.get())
+            assertEquals("", repository.state.value.query)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `late retry cannot replace a newer query`() = runBlocking {
+        val retryStarted = CompletableDeferred<Unit>()
+        val releaseRetry = CompletableDeferred<Unit>()
+        val oldCalls = AtomicInteger()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val repository = repository(scope) { query ->
+                if (query == "old") {
+                    if (oldCalls.incrementAndGet() == 1) {
+                        Result.failure(IllegalStateException("offline"))
+                    } else {
+                        withContext(NonCancellable) {
+                            retryStarted.complete(Unit)
+                            releaseRetry.await()
+                        }
+                        Result.success(page(query))
+                    }
+                } else {
+                    Result.success(page(query))
+                }
+            }
+
+            repository.activate("old")
+            awaitError(repository, "offline")
+            repository.retry()
+            withTimeout(2_000) { retryStarted.await() }
+
+            repository.activate("new")
+            awaitQuery(repository, "new")
+            releaseRetry.complete(Unit)
+            delay(80)
+
+            assertEquals("new", repository.state.value.normalizedQuery)
+            assertEquals("new", repository.state.value.items.single().title)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun `query session memory is bounded`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
@@ -143,6 +231,19 @@ class DesktopSearchRepositoryTest {
                 delay(10)
             }
         }
+    }
+
+    private suspend fun awaitError(repository: DesktopSearchRepository, expected: String) {
+        withTimeout(2_000) {
+            while (
+                repository.state.value.isInitialLoading ||
+                repository.state.value.isRefreshing ||
+                repository.state.value.error == null
+            ) {
+                delay(10)
+            }
+        }
+        assertEquals(expected, repository.state.value.error)
     }
 
     private fun page(query: String) = SearchSummaryPage(

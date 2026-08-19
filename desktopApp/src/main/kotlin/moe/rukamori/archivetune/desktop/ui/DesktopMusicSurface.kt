@@ -465,6 +465,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 loading = searchState.isInitialLoading,
                 refreshing = searchState.isRefreshing,
                 error = searchState.error,
+                onRetry = { scope.launch { services.searchRepository.retry() } },
                 onHistorySelected = state.setSearchQuery,
                 onHistoryRemoved = services.searchRepository::removeHistory,
                 onHistoryCleared = services.searchRepository::clearHistory,
@@ -882,6 +883,7 @@ private fun SearchResults(
     loading: Boolean,
     refreshing: Boolean,
     error: String?,
+    onRetry: () -> Unit,
     onHistorySelected: (String) -> Unit,
     onHistoryRemoved: (String) -> Unit,
     onHistoryCleared: () -> Unit,
@@ -938,7 +940,14 @@ private fun SearchResults(
                 label = "search-loading",
             ) { Loading() }
         }
-        error?.let { message -> item { Error(message) } }
+        error?.let { message ->
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Error(message)
+                    OutlinedButton(onClick = onRetry, enabled = !loading && !refreshing) { Text("Retry") }
+                }
+            }
+        }
         if (!loading && error == null && query.isNotBlank() && items.isEmpty()) {
             item { Text("No music results found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
