@@ -18,6 +18,7 @@ import moe.rukamori.archivetune.innertube.models.AccountInfo
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
+import moe.rukamori.archivetune.innertube.models.YouTubeLocale
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
 import moe.rukamori.archivetune.innertube.pages.ArtistItemsContinuationPage
@@ -237,11 +238,25 @@ class ArchiveTuneJvmClient(
                 .filterIsInstance<AlbumItem>()
                 .mapTo(mutableSetOf()) { it.browseId }
 
-        val searchItems =
-            YouTube.search(page.artist.title, YouTube.SearchFilter.FILTER_SONG)
-                .getOrNull()
-                ?.items
-                .orEmpty()
+        val searchItems = buildList {
+            addAll(
+                YouTube.search(page.artist.title, YouTube.SearchFilter.FILTER_SONG)
+                    .getOrNull()
+                    ?.items
+                    .orEmpty(),
+            )
+            if (YouTube.locale.gl != ARTIST_ALBUM_RECOVERY_LOCALE.gl) {
+                addAll(
+                    YouTube.search(
+                        page.artist.title,
+                        YouTube.SearchFilter.FILTER_SONG,
+                        localeOverride = ARTIST_ALBUM_RECOVERY_LOCALE,
+                    ).getOrNull()
+                        ?.items
+                        .orEmpty(),
+                )
+            }
+        }
 
         val candidateAlbumIds =
             searchItems
@@ -1254,6 +1269,7 @@ private fun normalizeStreamIdentity(value: String): String =
 
 private const val MAX_RECOVERED_ARTIST_ALBUMS = 4
 private const val MIN_FULL_ALBUM_TRACKS = 7
+private val ARTIST_ALBUM_RECOVERY_LOCALE = YouTubeLocale(gl = "US", hl = "en")
 private const val MAX_STREAM_REPLACEMENT_CANDIDATES = 3
 private const val STREAM_REPLACEMENT_DURATION_TOLERANCE_MS = 12_000L
 private const val STREAM_RESOLUTION_TIMEOUT_MILLIS = 45_000L
