@@ -36,6 +36,8 @@ import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportProgress
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportResult
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
+import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
+import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.PlaybackSource
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.RepeatMode
@@ -72,6 +74,7 @@ import kotlinx.coroutines.delay
 /** The small desktop-only seam between ArchiveTune's backend and the native playback engine. */
 class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable {
     private val settings = runtime.settings
+    private val queuePersistencePolicy = QueuePersistencePolicy()
     val settingsStore get() = settings
     val backend = ArchiveTuneJvmClient(runtime.paths.cache.resolve("cipher").toFile().also(File::mkdirs))
     private val managedYouTubeBrowser = ManagedChromiumLoginSource(runtime.paths.data.resolve("youtube-browser-profile"))
@@ -232,21 +235,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 }
         }
         runtime.applicationScope.launch {
-            playback.state
-                .map { state ->
-                    PersistedQueueKey(
-                        title = state.queueTitle,
-                        queue = state.queue,
-                        currentIndex = state.currentIndex,
-                        positionBucket = state.positionMs / POSITION_BUCKET_MS,
-                    )
-                }
-                .distinctUntilChanged()
-                .drop(1)
-                .collect {
-                    val snapshot = playback.state.value
+            playback.state.collect { snapshot ->
+                if (queuePersistencePolicy.shouldPersist(snapshot)) {
                     withContext(Dispatchers.IO) { queueStore.save(snapshot) }
                 }
+            }
         }
         windowsMediaControls?.let { controls ->
             controls.start()
@@ -618,7 +611,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     override fun close() {
         val state = playback.state.value
         flushPlayHistoryCurrent(System.currentTimeMillis())
-        queueStore.save(state)
+        if (queuePersistencePolicy.shouldPersist(state, force = true)) queueStore.save(state)
         val policy = partyPlaybackPolicy()
         settings.update {
             it.copy(
@@ -663,7 +656,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private companion object {
         const val MAX_RESOLVED_SOURCE_CACHE_ENTRIES = 128
         const val STREAM_CACHE_EXPIRY_LEAD_MILLIS = 60_000L
-        const val POSITION_BUCKET_MS = 5_000L
         const val MIN_PLAY_HISTORY_EVENT_MS = 5_000L
         const val MAX_PLAY_HISTORY_EVENT_MS = 1_800_000L
         const val BACKGROUND_MAINTENANCE_START_DELAY_MS = 1_500L
@@ -709,12 +701,52 @@ private data class PlaybackPreferences(
     val shuffleEnabled: Boolean,
 )
 
-private data class PersistedQueueKey(
+internal data class QueuePersistenceKey(
     val title: String?,
     val queue: List<PlaybackItem>,
     val currentIndex: Int,
-    val positionBucket: Long,
 )
+
+internal class QueuePersistencePolicy(
+    private val checkpointMs: Long = 25_000L,
+    private val seekJumpMs: Long = 5_000L,
+) {
+    private data class Observation(
+        val key: QueuePersistenceKey,
+        val playWhenReady: Boolean,
+        val stopped: Boolean,
+        val positionMs: Long,
+        val positionBucket: Long,
+    )
+
+    private var previous: Observation? = null
+
+    init {
+        require(checkpointMs > 0L) { "Queue checkpoint interval must be positive" }
+        require(seekJumpMs > 0L) { "Queue seek threshold must be positive" }
+    }
+
+    fun shouldPersist(snapshot: PlaybackSnapshot, force: Boolean = false): Boolean {
+        val position = snapshot.positionMs.coerceAtLeast(0L)
+        val current = Observation(
+            key = QueuePersistenceKey(snapshot.queueTitle, snapshot.queue, snapshot.currentIndex),
+            playWhenReady = snapshot.playWhenReady,
+            stopped = snapshot.status == PlaybackStatus.IDLE || snapshot.status == PlaybackStatus.ENDED,
+            positionMs = position,
+            positionBucket = position / checkpointMs,
+        )
+        val last = previous
+        previous = current
+        if (force) return true
+        if (last == null) return false
+        if (current.key != last.key) return true
+        if (current.playWhenReady != last.playWhenReady) return true
+        if (!last.stopped && current.stopped) return true
+        if (current.key.queue.isEmpty() || current.key.currentIndex !in current.key.queue.indices) return false
+        if (kotlin.math.abs(current.positionMs - last.positionMs) >= seekJumpMs) return true
+        return current.positionBucket != last.positionBucket
+    }
+}
 
 private data class CachedResolvedSource(
     val source: ResolvedPlaybackSource,
