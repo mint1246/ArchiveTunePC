@@ -187,16 +187,26 @@ internal class DesktopBrowseController(
         detail = null
     }
 
-    fun openAlbum(browseId: String, scope: CoroutineScope, forceRefresh: Boolean = false) {
+    fun openAlbum(
+        browseId: String,
+        scope: CoroutineScope,
+        forceRefresh: Boolean = false,
+        onOpened: () -> Unit = {},
+    ) {
         val route = DesktopBrowseRoute.Album(browseId)
-        open(route, scope, forceRefresh, repository::cachedAlbum) {
+        open(route, scope, forceRefresh, repository::cachedAlbum, onOpened) {
             repository.album(route, forceRefresh).map { Detail.Album(it) }
         }
     }
 
-    fun openArtist(id: String, scope: CoroutineScope, forceRefresh: Boolean = false) {
+    fun openArtist(
+        id: String,
+        scope: CoroutineScope,
+        forceRefresh: Boolean = false,
+        onOpened: () -> Unit = {},
+    ) {
         val route = DesktopBrowseRoute.Artist(id)
-        open(route, scope, forceRefresh, repository::cachedArtist) {
+        open(route, scope, forceRefresh, repository::cachedArtist, onOpened) {
             repository.artist(route, forceRefresh).map { Detail.Artist(it) }
         }
     }
@@ -221,6 +231,7 @@ internal class DesktopBrowseController(
         scope: CoroutineScope,
         forceRefresh: Boolean,
         cached: (R) -> P?,
+        onOpened: () -> Unit = {},
         load: suspend () -> Result<Detail>,
     ) {
         if (!forceRefresh) {
@@ -238,6 +249,7 @@ internal class DesktopBrowseController(
                 if (detail != null) {
                     loading = false
                     failure = null
+                    onOpened()
                     return
                 }
             }
@@ -253,6 +265,7 @@ internal class DesktopBrowseController(
                     if (requestGeneration == generation && history.activeDestination == destination) {
                         history.push(route)
                         detail = loaded
+                        onOpened()
                     }
                 }
                 .onFailure {
@@ -1683,6 +1696,7 @@ internal fun DesktopLyricsView(
     services: DesktopMusicServices,
     playTogether: PlayTogetherManager,
     browse: DesktopBrowseController,
+    onBrowseOpened: () -> Unit = {},
     modifier: Modifier = Modifier,
     useShellDynamicBackdrop: Boolean = false,
 ) {
@@ -1703,8 +1717,14 @@ internal fun DesktopLyricsView(
                     Artwork(item?.metadata?.artworkUri, Modifier.size(42.dp))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }, Modifier.fillMaxWidth())
-                        NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }, modifier = Modifier.fillMaxWidth())
+                        NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope, onOpened = onBrowseOpened) }, Modifier.fillMaxWidth())
+                        NowPlayingSubtitle(
+                            snapshot,
+                            item,
+                            onAlbumClick = { albumId -> browse.openAlbum(albumId, scope, onOpened = onBrowseOpened) },
+                            onArtistClick = { artistId -> browse.openArtist(artistId, scope, onOpened = onBrowseOpened) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                     IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
                     FilledIconButton(onClick = { scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) {

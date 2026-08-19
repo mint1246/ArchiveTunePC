@@ -129,6 +129,7 @@ fun main() {
                             services = musicServices,
                             playTogether = playTogether,
                             browse = browse,
+                            onBrowseOpened = { showLyrics = false },
                             modifier = modifier,
                             useShellDynamicBackdrop = useShellDynamicBackdrop,
                         )
