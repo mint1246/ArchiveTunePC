@@ -333,6 +333,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     var createPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
     var addToPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
     var playlistPickerLoading by remember { mutableStateOf(false) }
+    var downloadBatchNotice by remember { mutableStateOf<String?>(null) }
     suspend fun rescanLibrary() {
         if (libraryLoading) return
         libraryLoading = true
@@ -349,6 +350,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     }
     LaunchedEffect(state.destination) {
         browse.activate(state.destination)
+        if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS) {
+            downloadBatchNotice = null
+        }
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
         services.libraryRepository.activate()
     }
@@ -423,17 +427,22 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     fun downloadSong(song: SongItem) {
         scope.launch {
             downloadServices.enqueue(song)
-                .onSuccess { state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS) }
+                .onSuccess {
+                    downloadBatchNotice = null
+                    state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS)
+                }
                 .onFailure { browse.failure = it.message ?: "Could not resolve a stream for download" }
         }
     }
     fun downloadSongs(songs: List<SongItem>) {
         scope.launch {
-            val result = downloadServices.enqueueAll(songs)
-            if (result.failures.isNotEmpty()) {
-                browse.failure = "Queued ${result.succeeded}/${result.requested} songs. ${result.failures.first()}"
-            } else if (result.succeeded > 0) {
+            val outcome = downloadServices.enqueueAll(songs).toUiOutcome()
+            if (outcome.navigateToDownloads) {
+                downloadBatchNotice = outcome.message
+                browse.failure = null
                 state.navigate(moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS)
+            } else if (outcome.message != null) {
+                browse.failure = outcome.message
             }
         }
     }
@@ -526,7 +535,14 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onAddToQueueLocal = ::enqueueLocal,
                 modifier = modifier,
             )
-            moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(
+                downloadServices,
+                { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } },
+                { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } },
+                { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } },
+                notice = downloadBatchNotice,
+                modifier = modifier,
+            )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
                 localTracks, onlinePlaylists, services.library.folders,
                 libraryLoading || remoteLibraryState.isInitialLoading || browse.loading,
@@ -1435,6 +1451,7 @@ private fun PlaylistDetailPage(
                 )
             }
         }
+        error?.let { message -> item { Error(message) } }
         if (page.songs.isEmpty()) {
             item { Text("This playlist has no available tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else if (filtered.isEmpty()) {

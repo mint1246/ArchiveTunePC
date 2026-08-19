@@ -59,7 +59,22 @@ internal class InProcessDownloadAttempts {
         id: String,
         resolve: suspend (RetryableDownloadSpec) -> DownloadRequest,
         enqueue: (DownloadRequest) -> String,
-    ): Result<String>? = retryable[id]?.let { enqueueFresh(it, resolve, enqueue) }
+    ): Result<String>? {
+        val spec = retryable[id] ?: return null
+        val result = runCatching {
+            val request = resolve(spec)
+            enqueue(request)
+        }
+        result.onSuccess { nextId ->
+            // Retarget retry ownership to the fresh row. The stale failed row must not remain a
+            // second entry point for spawning duplicate retries later in the same process.
+            if (nextId != id) {
+                retryable[nextId] = spec
+                retryable.remove(id, spec)
+            }
+        }
+        return result
+    }
 }
 
 private fun SongItem.toRetryableDownloadSpec() = RetryableDownloadSpec(

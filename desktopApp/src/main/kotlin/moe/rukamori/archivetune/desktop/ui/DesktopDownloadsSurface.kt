@@ -57,6 +57,7 @@ fun DesktopDownloadsSurface(
     onPlayFile: (Path, DownloadSnapshot) -> Unit,
     onPlayNextFile: (Path, DownloadSnapshot) -> Unit = { _, _ -> },
     onAddToQueueFile: (Path, DownloadSnapshot) -> Unit = { _, _ -> },
+    notice: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val downloads by services.downloads.collectAsState()
@@ -70,6 +71,7 @@ fun DesktopDownloadsSurface(
                 OutlinedButton(onClick = { scope.launch { chooseDownloadFolder()?.let { folder -> services.changeDirectory(folder).onFailure { message = it.message } } } }) { Icon(Icons.Rounded.FolderOpen, null); Spacer(Modifier.width(8.dp)); Text("Change folder") }
             }
         }
+        notice?.let { value -> item { Text(value, color = MaterialTheme.colorScheme.error) } }
         message?.let { value -> item { Text(value, color = MaterialTheme.colorScheme.error) } }
         if (downloads.isEmpty()) {
             item { EmptyDownloads() }

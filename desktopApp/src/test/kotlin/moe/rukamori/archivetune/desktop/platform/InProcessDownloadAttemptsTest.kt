@@ -56,6 +56,68 @@ class InProcessDownloadAttemptsTest {
     }
 
     @Test
+    fun `successful retry retargets state and stale failed id cannot retry again`() = runBlocking {
+        val attempts = InProcessDownloadAttempts()
+        val spec = retryableSpec()
+        var resolves = 0
+        var enqueues = 0
+
+        suspend fun resolve(value: RetryableDownloadSpec): DownloadRequest {
+            resolves++
+            return request(value, "https://media.invalid/$resolves", "token-$resolves")
+        }
+        fun enqueue(request: DownloadRequest): String {
+            require(request.mediaId == spec.videoId)
+            enqueues++
+            return "attempt-$enqueues"
+        }
+
+        val firstId = attempts.enqueueFresh(spec, ::resolve, ::enqueue).getOrThrow()
+        val secondId = attempts.retry(firstId, ::resolve, ::enqueue)?.getOrThrow() ?: error("retry state missing")
+
+        assertEquals("attempt-2", secondId)
+        assertNull(attempts.retry(firstId, ::resolve, ::enqueue))
+        assertEquals(2, resolves)
+        assertEquals(2, enqueues)
+
+        val thirdId = attempts.retry(secondId, ::resolve, ::enqueue)?.getOrThrow()
+        assertEquals("attempt-3", thirdId)
+        assertNull(attempts.retry(secondId, ::resolve, ::enqueue))
+        assertEquals(3, resolves)
+        assertEquals(3, enqueues)
+    }
+
+    @Test
+    fun `failed retry keeps original id retryable`() = runBlocking {
+        val attempts = InProcessDownloadAttempts()
+        val spec = retryableSpec()
+        var enqueues = 0
+
+        val firstId = attempts.enqueueFresh(
+            spec,
+            resolve = {
+                request(it, "https://media.invalid/fresh", "fresh-token")
+            },
+            enqueue = {
+                enqueues++
+                "attempt-$enqueues"
+            },
+        ).getOrThrow()
+
+        assertTrue(attempts.retry(firstId, { error("temporary resolver failure") }, { "unexpected" })?.isFailure == true)
+
+        val recovered = attempts.retry(
+            firstId,
+            { request(it, "https://media.invalid/recovered", "recovered-token") },
+            {
+                enqueues++
+                "attempt-$enqueues"
+            },
+        )?.getOrThrow()
+        assertEquals("attempt-2", recovered)
+    }
+
+    @Test
     fun `restored download has no in-memory retry spec`() = runBlocking {
         val attempts = InProcessDownloadAttempts()
         var resolves = 0
