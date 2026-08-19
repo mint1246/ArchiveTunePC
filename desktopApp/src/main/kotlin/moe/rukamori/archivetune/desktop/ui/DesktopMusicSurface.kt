@@ -438,6 +438,17 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             }
         }
     }
+    fun playLocal(track: LocalTrack) {
+        if (partyState.mode != PartyMode.NONE) return
+        scope.launch {
+            val queue = localTracks.map(::toPlaybackItem)
+            services.playback.replaceQueue(
+                queue,
+                localTracks.indexOf(track).coerceAtLeast(0),
+                title = "Local library",
+            )
+        }
+    }
     fun playNextLocal(track: LocalTrack) {
         if (partyState.mode != PartyMode.NONE) return
         scope.launch { services.playback.playNext(listOf(toPlaybackItem(track))) }
@@ -484,6 +495,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(
                 query = state.searchQuery,
                 items = searchState.items,
+                localItems = localSearchMatches(state.searchQuery, localTracks),
                 history = searchState.history,
                 loading = searchState.isInitialLoading,
                 refreshing = searchState.isRefreshing,
@@ -499,6 +511,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onAddToPlaylist = ::choosePlaylist,
                 onSetLiked = ::setLiked,
                 isLiked = ::isLiked,
+                openLocal = ::playLocal,
+                onPlayNextLocal = ::playNextLocal,
+                onAddToQueueLocal = ::enqueueLocal,
                 modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(downloadServices, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.replaceQueue(listOf(toPlaybackItem(item, path, services.albumIndex)), title = "Downloads") } }, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } }, modifier)
@@ -512,7 +527,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onImportSpotify = { showSpotifyImport = true },
                 onCreatePlaylist = { createPlaylist() },
                 onOpenPlaylist = ::open,
-                onPlay = { selected -> if (partyState.mode == PartyMode.NONE) scope.launch { val items = localTracks.map(::toPlaybackItem); services.playback.replaceQueue(items, localTracks.indexOf(selected).coerceAtLeast(0), title = "Local library") } },
+                onPlay = ::playLocal,
                 onPlayNext = ::playNextLocal,
                 onAddToQueue = ::enqueueLocal,
                 modifier,
@@ -820,21 +835,36 @@ internal fun filterLocalLibrary(
             item { Text("No local tracks match this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         items(filtered.tracks, key = { it.id }) { track ->
-            Card(Modifier.fillMaxWidth().clickable { onPlay(track) }) {
-                Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(54.dp).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.MusicNote, "Track artwork unavailable") }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                        Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    SongQueueMenu(
-                        onPlayNext = { onPlayNext(track) },
-                        onAddToQueue = { onAddToQueue(track) },
-                    )
-                    Icon(Icons.Rounded.PlayArrow, "Play ${track.title}")
-                }
+            LocalTrackCard(track, { onPlay(track) }, { onPlayNext(track) }, { onAddToQueue(track) })
+        }
+    }
+}
+
+@Composable
+private fun LocalTrackCard(
+    track: LocalTrack,
+    onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onPlay)) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(54.dp).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.MusicNote, "Track artwork unavailable") }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    listOfNotNull(track.artist, track.album?.takeIf(String::isNotBlank), track.durationMs?.let(::format)).joinToString(" • "),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+            SongQueueMenu(onPlayNext = onPlayNext, onAddToQueue = onAddToQueue)
+            Icon(Icons.Rounded.PlayArrow, "Play ${track.title}")
         }
     }
 }
@@ -972,10 +1002,28 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     selected?.toPath()
 }
 
+internal fun localSearchMatches(
+    query: String,
+    tracks: List<LocalTrack>,
+    maxResults: Int = 20,
+): List<LocalTrack> {
+    val needle = query.trim()
+    if (needle.isEmpty() || maxResults <= 0) return emptyList()
+    return tracks.asSequence()
+        .filter { track ->
+            track.title.contains(needle, ignoreCase = true) ||
+                track.artist.contains(needle, ignoreCase = true) ||
+                track.album?.contains(needle, ignoreCase = true) == true
+        }
+        .take(maxResults)
+        .toList()
+}
+
 @Composable
 private fun SearchResults(
     query: String,
     items: List<YTItem>,
+    localItems: List<LocalTrack>,
     history: List<String>,
     loading: Boolean,
     refreshing: Boolean,
@@ -991,6 +1039,9 @@ private fun SearchResults(
     onAddToPlaylist: (SongItem) -> Unit,
     onSetLiked: (SongItem, Boolean) -> Unit,
     isLiked: (SongItem) -> Boolean,
+    openLocal: (LocalTrack) -> Unit,
+    onPlayNextLocal: (LocalTrack) -> Unit,
+    onAddToQueueLocal: (LocalTrack) -> Unit,
     modifier: Modifier,
 ) {
     val listState = rememberPersistedLazyListState("search:${query.trim().lowercase(java.util.Locale.ROOT)}")
@@ -1002,7 +1053,7 @@ private fun SearchResults(
     ) {
         item {
             Text(
-                if (query.isBlank()) "Search YouTube Music" else "Results for “$query”",
+                if (query.isBlank()) "Search YouTube Music + local library" else "Results for “$query”",
                 style = MaterialTheme.typography.headlineMedium,
             )
         }
@@ -1026,6 +1077,20 @@ private fun SearchResults(
                 }
             }
         }
+        if (localItems.isNotEmpty()) {
+            item { Text("Local library", style = MaterialTheme.typography.titleLarge) }
+            items(localItems, key = { "local:${it.id}" }) { track ->
+                LocalTrackCard(
+                    track = track,
+                    onPlay = { openLocal(track) },
+                    onPlayNext = { onPlayNextLocal(track) },
+                    onAddToQueue = { onAddToQueueLocal(track) },
+                )
+            }
+            item { Text("YouTube Music", style = MaterialTheme.typography.titleLarge) }
+        } else if (query.isNotBlank()) {
+            item { Text("YouTube Music", style = MaterialTheme.typography.titleLarge) }
+        }
         if (refreshing && items.isNotEmpty()) {
             item { Text("Refreshing results…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
@@ -1045,7 +1110,7 @@ private fun SearchResults(
                 }
             }
         }
-        if (!loading && error == null && query.isNotBlank() && items.isEmpty()) {
+        if (!loading && error == null && query.isNotBlank() && items.isEmpty() && localItems.isEmpty()) {
             item { Text("No music results found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         items(items, key = { item -> item::class to item.id }) { item ->
@@ -1784,7 +1849,16 @@ private fun toPlaybackItem(song: SongItem, albumIndex: DesktopAlbumIndex) = Play
         explicit = song.explicit,
     ),
 )
-private fun toPlaybackItem(track: LocalTrack) = PlaybackItem(PlaybackMetadata(track.id, track.title, listOf(PlaybackArtist(name = track.artist)), track.album?.let { PlaybackAlbum(title = it) }), moe.rukamori.archivetune.playback.api.PlaybackSource.LocalFile(track.path.toString()))
+internal fun toPlaybackItem(track: LocalTrack) = PlaybackItem(
+    PlaybackMetadata(
+        id = track.id,
+        title = track.title,
+        artists = listOf(PlaybackArtist(name = track.artist)),
+        album = track.album?.let { PlaybackAlbum(title = it) },
+        durationHintMs = track.durationMs,
+    ),
+    moe.rukamori.archivetune.playback.api.PlaybackSource.LocalFile(track.path.toString()),
+)
 private fun toPlaybackItem(item: moe.rukamori.archivetune.downloads.DownloadSnapshot, path: java.nio.file.Path, albumIndex: DesktopAlbumIndex) = PlaybackItem(
     PlaybackMetadata(
         id = item.mediaId ?: item.id,
