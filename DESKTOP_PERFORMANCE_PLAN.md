@@ -596,6 +596,23 @@ Everything else should be background maintenance.
 
 # Phase 7 - Persistence and filesystem smoothness
 
+**Status: completed 2026-08-19.**
+
+Implementation checkpoint:
+
+- `DesktopSettingsStore` now reads disk once per process-local settings path; `snapshot()` is an in-memory read instead of reparsing the properties file.
+- Settings instances for the same path share one canonical locked state, preserving concurrent-update semantics.
+- Routine settings `update()` calls mutate memory immediately and debounce atomic persistence by 250 ms.
+- Explicit `save()` remains synchronous, and application shutdown synchronously flushes the latest settings snapshot.
+- Playback queue checkpoints are serialized/written on `Dispatchers.IO`; queue restore also reads from IO. The final shutdown queue save remains synchronous for durability.
+- Audited `DesktopHomeStore`: production writes were already debounced/asynchronous with atomic close flush.
+- Audited `DesktopAlbumIndex`: already has a daemon 2-second coalesced atomic flusher.
+- Audited local-library index persistence: scans/persistence already run on background/IO paths and use atomic replacement.
+- Audited download journal: high-frequency byte-progress updates explicitly use `persistState = false`; durable state transitions are small and occur primarily on the download IO dispatcher, so the working download engine was intentionally left unchanged.
+- Persistent page/search/Home cache writes already run from repository IO/background jobs.
+- Added a durability test proving a pending settings update is persisted by `close()`.
+- Verified with `:desktop-settings:test :desktop-backend:test :desktop-library:test :desktop-downloads:test :desktop-playback:test :desktopApp:test :desktopApp:compileKotlin`.
+
 ## Goal
 
 Remove synchronous whole-file work from UI-sensitive paths.
@@ -902,7 +919,7 @@ No phase commit was made at this checkpoint because `DesktopMusicSurface.kt` alr
 - [x] phase 4 - Search sessions/history/cache (implementation + automated verification complete)
 - [x] phase 5 - real route/back-stack navigation (route/cache architecture + automated verification complete)
 - [x] phase 6 - request priority/concurrency cleanup (ownership/priority/auth-refresh audit complete)
-- [ ] phase 7 - async/coalesced persistence
+- [x] phase 7 - async/coalesced persistence (filesystem audit + hot-path fixes complete)
 - [ ] phase 8 - Compose/rendering smoothness audit
 - [ ] phase 9 - diagnostics, RAM validation, final tuning
 

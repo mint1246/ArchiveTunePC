@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.nio.file.Files
+import java.util.Properties
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
@@ -93,5 +94,18 @@ class DesktopSettingsStoreTest {
         val restored = DesktopSettingsStore(file).snapshot()
         assertEquals(8, restored.downloadConcurrency)
         assertEquals(listOf("lrclib"), restored.lyricsProviderIds)
+    }
+
+    @Test
+    fun closeFlushesPendingUpdateToDisk() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+
+        store.update { it.copy(volume = 0.42f) }
+        assertEquals(0.42f, store.snapshot().volume, 0.0001f)
+        store.close()
+
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertEquals("0.42", persisted.getProperty("playback.volume"))
     }
 }

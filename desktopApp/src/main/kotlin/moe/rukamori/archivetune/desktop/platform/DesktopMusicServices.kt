@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -227,7 +228,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { queueStore.save(playback.state.value) }
+                .collect {
+                    val snapshot = playback.state.value
+                    withContext(Dispatchers.IO) { queueStore.save(snapshot) }
+                }
         }
         windowsMediaControls?.let { controls ->
             controls.start()
@@ -257,7 +261,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         completedDownloadLookup = lookup
         // Queue restoration must happen after the download service is attached, otherwise a
         // persisted deferred item can start remote resolution before local-first lookup exists.
-        runtime.applicationScope.launch { restoreQueueIfPresent() }
+        runtime.applicationScope.launch(Dispatchers.IO) { restoreQueueIfPresent() }
     }
 
     suspend fun upNext(videoId: String) =

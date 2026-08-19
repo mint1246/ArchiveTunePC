@@ -39,6 +39,9 @@ class DesktopRuntime private constructor(
                 logger.log(Level.WARNING, "A desktop service failed to close cleanly", error)
             }
         }
+        runCatching(settings::close).onFailure { error ->
+            logger.log(Level.WARNING, "Desktop settings failed to flush cleanly", error)
+        }
         logging.close()
     }
 

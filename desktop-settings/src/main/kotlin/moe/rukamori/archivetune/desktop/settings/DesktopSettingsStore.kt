@@ -12,6 +12,9 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.io.path.absolute
@@ -77,26 +80,51 @@ data class DesktopSettings(
  * Atomic, process-local concurrent-safe settings storage. Pass a file under the host's config
  * directory (for example, `AppPaths.config.resolve("desktop-settings.properties")`).
  */
-class DesktopSettingsStore(file: Path) {
+class DesktopSettingsStore(file: Path) : AutoCloseable {
     private val file = file.absolute().normalize()
-    private val lock = locks.computeIfAbsent(this.file) { ReentrantLock() }
-    private var current = load()
+    private val shared = states.computeIfAbsent(this.file) { SharedState(load()) }
 
-    fun snapshot(): DesktopSettings = lock.withLock {
-        current = load()
-        current
+    /** Cheap process-local snapshot; disk is read once when this settings path is first opened. */
+    fun snapshot(): DesktopSettings = shared.lock.withLock { shared.current }
+
+    /** Explicit save remains synchronous for callers that require a durability boundary. */
+    fun save(settings: DesktopSettings) = shared.lock.withLock {
+        shared.current = settings.sanitized()
+        shared.pendingWrite?.cancel(false)
+        shared.pendingWrite = null
+        write(shared.current)
     }
 
-    fun save(settings: DesktopSettings) = lock.withLock {
-        current = settings.sanitized()
-        write(current)
+    /**
+     * Applies the update in memory immediately and coalesces disk persistence. All store instances
+     * for the same path share [shared], so concurrent process-local updates cannot overwrite each
+     * other even though the filesystem write happens later on the daemon flusher.
+     */
+    fun update(transform: (DesktopSettings) -> DesktopSettings): DesktopSettings = shared.lock.withLock {
+        shared.current = transform(shared.current).sanitized()
+        scheduleWriteLocked()
+        shared.current
     }
 
-    /** Reads the latest saved state while locked, preventing lost updates between store instances. */
-    fun update(transform: (DesktopSettings) -> DesktopSettings): DesktopSettings = lock.withLock {
-        current = transform(load()).sanitized()
-        write(current)
-        current
+    /** Flushes the latest in-memory state synchronously during orderly application shutdown. */
+    override fun close() = shared.lock.withLock {
+        shared.pendingWrite?.cancel(false)
+        shared.pendingWrite = null
+        write(shared.current)
+    }
+
+    private fun scheduleWriteLocked() {
+        shared.pendingWrite?.cancel(false)
+        shared.pendingWrite = flusher.schedule(
+            {
+                shared.lock.withLock {
+                    shared.pendingWrite = null
+                    write(shared.current)
+                }
+            },
+            WRITE_DEBOUNCE_MILLIS,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     private fun load(): DesktopSettings {
@@ -207,6 +235,16 @@ class DesktopSettingsStore(file: Path) {
         const val ARGB_MAX = 0xFFFF_FFFFL
         const val MAX_LIBRARY_FOLDERS = 64
         const val MAX_LYRICS_PROVIDERS = 32
-        val locks = ConcurrentHashMap<Path, ReentrantLock>()
+        const val WRITE_DEBOUNCE_MILLIS = 250L
+        val states = ConcurrentHashMap<Path, SharedState>()
+        val flusher = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "desktop-settings-flusher").apply { isDaemon = true }
+        }
+    }
+
+    private class SharedState(initial: DesktopSettings) {
+        val lock = ReentrantLock()
+        var current: DesktopSettings = initial
+        var pendingWrite: ScheduledFuture<*>? = null
     }
 }
