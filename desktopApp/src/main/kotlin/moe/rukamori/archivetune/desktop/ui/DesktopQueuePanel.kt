@@ -182,24 +182,28 @@ private fun QueueHeader(
 
 @Composable
 private fun ShuffleButton(active: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick, enabled = enabled) {
-        Icon(
-            Icons.Rounded.Shuffle,
-            contentDescription = if (active) "Shuffle on" else "Shuffle off",
-            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    DesktopTooltip(if (active) "Shuffle on" else "Shuffle off") {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(
+                Icons.Rounded.Shuffle,
+                contentDescription = if (active) "Shuffle on" else "Shuffle off",
+                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 @Composable
 private fun RepeatButton(mode: RepeatMode, enabled: Boolean, onClick: () -> Unit) {
     val active = mode != RepeatMode.OFF
-    IconButton(onClick = onClick, enabled = enabled) {
-        Icon(
-            if (mode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-            contentDescription = "Repeat mode ${mode.name.lowercase()}",
-            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    DesktopTooltip("Repeat ${mode.name.lowercase()}") {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(
+                if (mode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                contentDescription = "Repeat mode ${mode.name.lowercase()}",
+                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

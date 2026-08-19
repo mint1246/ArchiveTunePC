@@ -397,26 +397,28 @@ private fun WindowChromeButton(
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     val hoverColor = if (close) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest
-    Box(
-        modifier = Modifier
-            .width(46.dp)
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(0.dp))
-            .hoverable(interactionSource)
-            .background(if (hovered) hoverColor else Color.Transparent)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onClick,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(16.dp),
-            tint = if (close && hovered) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    DesktopTooltip(contentDescription) {
+        Box(
+            modifier = Modifier
+                .width(46.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(0.dp))
+                .hoverable(interactionSource)
+                .background(if (hovered) hoverColor else Color.Transparent)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(16.dp),
+                tint = if (close && hovered) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

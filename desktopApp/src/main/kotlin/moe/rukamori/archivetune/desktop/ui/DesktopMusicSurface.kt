@@ -35,7 +35,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.MusicNote
@@ -607,7 +606,6 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         is Detail.Playlist -> PlaylistDetailPage(
             page.page,
             error = browse.failure,
-            onBack = { browse.goBack() },
             onPlay = { songs, index, title ->
                 if (!guestInParty) scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
             },
@@ -656,7 +654,6 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         )
         is Detail.ArtistItems -> ArtistItemsDetailPage(
             detail = page,
-            onBack = { browse.goBack() },
             onOpen = ::open,
             onDownload = ::downloadSong,
             onPlayNext = ::playNextSong,
@@ -671,7 +668,6 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             page,
             browse.loading,
             browse.failure,
-            onBack = { browse.goBack() },
             onOpen = ::open,
             onOpenArtistItems = { endpoint ->
                 if (page is Detail.Artist) browse.openArtistItems(endpoint, page.page, scope)
@@ -1158,7 +1154,7 @@ private fun SearchResults(
     }
 }
 
-@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onBack: () -> Unit, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, isArtistSubscribed: (ArtistItem) -> Boolean, onSetArtistSubscribed: (ArtistItem, Boolean) -> Unit, modifier: Modifier) {
+@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, isArtistSubscribed: (ArtistItem) -> Boolean, onSetArtistSubscribed: (ArtistItem, Boolean) -> Unit, modifier: Modifier) {
     val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title; is Detail.ArtistItems -> page.page.title }
     val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail }
     val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist" }
@@ -1177,7 +1173,6 @@ private fun SearchResults(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back to search") } }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Artwork(image, Modifier.size(112.dp))
@@ -1271,7 +1266,6 @@ private fun SearchResults(
 @Composable
 private fun ArtistItemsDetailPage(
     detail: Detail.ArtistItems,
-    onBack: () -> Unit,
     onOpen: (YTItem) -> Unit,
     onDownload: (SongItem) -> Unit,
     onPlayNext: (SongItem) -> Unit,
@@ -1298,8 +1292,6 @@ private fun ArtistItemsDetailPage(
     ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back to ${detail.parent.artist.title}") }
-                Spacer(Modifier.width(8.dp))
                 Text(
                     page.title.ifBlank { "More from ${detail.parent.artist.title}" },
                     style = MaterialTheme.typography.headlineMedium,
@@ -1378,7 +1370,6 @@ internal fun playlistSongOccurrences(
 private fun PlaylistDetailPage(
     page: PlaylistPage,
     error: String?,
-    onBack: () -> Unit,
     onPlay: (List<SongItem>, Int, String) -> Unit,
     onDownload: (SongItem) -> Unit,
     onDownloadAll: (List<SongItem>) -> Unit,
@@ -1410,7 +1401,6 @@ private fun PlaylistDetailPage(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item { IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back to library") } }
         item {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1801,7 +1791,32 @@ private fun NowPlayingSubtitle(
         border = dynamicGlassBorder(alpha = 0.14f),
     ) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
         val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = !guestInParty && item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) })
+                NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) })
+            }
+            TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }
+            IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
+            FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }
+            IconButton({ scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }
+            DesktopTooltip(if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off") {
+                IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) {
+                    Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            DesktopTooltip(when (snapshot.repeatMode) { RepeatMode.OFF -> "Repeat off"; RepeatMode.ALL -> "Repeat all"; RepeatMode.ONE -> "Repeat one" }) {
+                IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = !guestInParty && item != null) {
+                    Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            DesktopTooltip("Play together") { IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) } }
+            DesktopTooltip("Queue") { IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") } }
+            Icon(Icons.Rounded.VolumeUp, null)
+            Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp))
+        }
         if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth(), enabled = !guestInParty)
     } }
 }
