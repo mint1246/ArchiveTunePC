@@ -56,14 +56,19 @@ class DesktopLibraryTest {
         val root = Files.createTempDirectory("archivetune-library")
         val tagged = root.resolve("tagged.ogg"); val broken = root.resolve("broken.mp3")
         Files.writeString(tagged, "audio"); Files.writeString(broken, "bad")
-        val reader = AudioMetadataReader { file -> if (file == tagged.toRealPath()) LocalMetadata("Song", "Artist", "Album", "Album Artist", 2, 1, 123_000, byteArrayOf(1)) else error("bad tag") }
+        val reader = AudioMetadataReader { file -> if (file == tagged.toRealPath()) LocalMetadata("Song", "Artist", "Album", "Album Artist", 2, 1, 123_000) else error("bad tag") }
         val library = DesktopLibrary(root.resolve("state.properties"), metadataReader = reader)
         library.setFolders(listOf(root))
         val tracks = library.rescan()
         val song = tracks.single { it.title == "Song" }
         assertEquals("Artist", song.artist); assertEquals("Album", song.album); assertEquals(2, song.trackNumber)
-        assertEquals(123_000, song.durationMs); assertEquals(1, song.artwork?.single())
+        assertEquals(123_000, song.durationMs)
         assertEquals("broken", tracks.single { it.path == broken.toRealPath() }.title)
+    }
+
+    @Test fun `indexed tracks never retain embedded artwork bytes`() {
+        assertTrue(LocalTrack::class.java.declaredFields.none { field -> field.type == ByteArray::class.java })
+        assertTrue(LocalMetadata::class.java.declaredFields.none { field -> field.type == ByteArray::class.java })
     }
 
     @Test fun `persisted index is immediately reusable and unchanged files skip tag parsing`() = runTest {
@@ -74,7 +79,7 @@ class DesktopLibraryTest {
         var metadataReads = 0
         val reader = AudioMetadataReader {
             metadataReads++
-            LocalMetadata("Cached Song", "Cached Artist", "Cached Album", durationMs = 42_000, artwork = byteArrayOf(1, 2, 3))
+            LocalMetadata("Cached Song", "Cached Artist", "Cached Album", durationMs = 42_000)
         }
 
         val first = DesktopLibrary(state, metadataReader = reader)
@@ -84,7 +89,6 @@ class DesktopLibraryTest {
 
         val restored = DesktopLibrary(state, metadataReader = reader)
         assertEquals("Cached Song", restored.tracks.single().title)
-        assertEquals(null, restored.tracks.single().artwork)
 
         restored.rescan()
         assertEquals(1, metadataReads)

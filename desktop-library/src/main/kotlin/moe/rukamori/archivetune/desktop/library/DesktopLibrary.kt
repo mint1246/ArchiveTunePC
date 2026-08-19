@@ -29,7 +29,6 @@ data class LocalTrack(
     val trackNumber: Int? = null,
     val discNumber: Int? = null,
     val durationMs: Long? = null,
-    val artwork: ByteArray? = null,
 )
 
 data class LocalMetadata(
@@ -40,7 +39,6 @@ data class LocalMetadata(
     val trackNumber: Int? = null,
     val discNumber: Int? = null,
     val durationMs: Long? = null,
-    val artwork: ByteArray? = null,
 )
 
 fun interface AudioMetadataReader { fun read(file: Path): LocalMetadata? }
@@ -80,7 +78,6 @@ object JaudiotaggerMetadataReader : AudioMetadataReader {
     override fun read(file: Path): LocalMetadata? {
         val audio = AudioFileIO.read(file.toFile())
         val tag = audio.tagOrCreateAndSetDefault
-        val artwork = tag.firstArtwork?.binaryData?.takeIf { it.size <= MAX_ARTWORK_BYTES }
         return LocalMetadata(
             title = tag.getFirst(FieldKey.TITLE).trim().ifBlank { null },
             artist = tag.getFirst(FieldKey.ARTIST).trim().ifBlank { null },
@@ -89,12 +86,10 @@ object JaudiotaggerMetadataReader : AudioMetadataReader {
             trackNumber = tag.getFirst(FieldKey.TRACK).toPositiveIntOrNull(),
             discNumber = tag.getFirst(FieldKey.DISC_NO).toPositiveIntOrNull(),
             durationMs = audio.audioHeader.trackLength.toLong().takeIf { it > 0 }?.times(1_000),
-            artwork = artwork,
         )
     }
 
     private fun String.toPositiveIntOrNull() = substringBefore('/').trim().toIntOrNull()?.takeIf { it > 0 }
-    private const val MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 }
 
 /** Filesystem-backed local library. The index is rebuilt transactionally on each explicit scan. */
@@ -149,7 +144,6 @@ class DesktopLibrary(
             trackNumber = metadata?.trackNumber,
             discNumber = metadata?.discNumber,
             durationMs = metadata?.durationMs,
-            artwork = metadata?.artwork,
         )
     }
 
@@ -177,7 +171,6 @@ class DesktopLibrary(
                         trackNumber = properties.getProperty("$prefix.trackNumber")?.toIntOrNull(),
                         discNumber = properties.getProperty("$prefix.discNumber")?.toIntOrNull(),
                         durationMs = properties.getProperty("$prefix.durationMs")?.toLongOrNull(),
-                        artwork = null,
                     ),
                 )
             }
@@ -210,7 +203,7 @@ class DesktopLibrary(
         }
         val temporary = Files.createTempFile(storageFile.parent, ".library-index.", ".tmp")
         try {
-            Files.newOutputStream(temporary).use { properties.store(it, "ArchiveTune desktop local library index (artwork excluded)") }
+            Files.newOutputStream(temporary).use { properties.store(it, "ArchiveTune desktop local library index") }
             try {
                 Files.move(temporary, storageFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
