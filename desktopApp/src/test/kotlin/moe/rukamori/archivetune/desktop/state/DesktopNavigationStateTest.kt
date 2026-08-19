@@ -49,4 +49,38 @@ class DesktopNavigationStateTest {
         assertEquals(DesktopDestination.SEARCH, navigator.current)
         assertFalse(navigator.navigateBack())
     }
+
+    @Test
+    fun `top level navigator can move backward and forward`() {
+        val navigator = DesktopNavigator(DesktopDestination.HOME)
+        navigator.navigate(DesktopDestination.SEARCH)
+        navigator.navigate(DesktopDestination.LIBRARY)
+
+        assertTrue(navigator.navigateBack())
+        assertEquals(DesktopDestination.SEARCH, navigator.current)
+        assertTrue(navigator.canNavigateForward)
+        assertTrue(navigator.navigateForward())
+        assertEquals(DesktopDestination.LIBRARY, navigator.current)
+        assertFalse(navigator.canNavigateForward)
+    }
+
+    @Test
+    fun `new navigation after back discards forward branch`() {
+        val navigator = DesktopNavigator(DesktopDestination.HOME)
+        navigator.navigate(DesktopDestination.SEARCH)
+        navigator.navigate(DesktopDestination.LIBRARY)
+        navigator.navigate(DesktopDestination.DOWNLOADS)
+
+        assertTrue(navigator.navigateBack())
+        assertEquals(DesktopDestination.LIBRARY, navigator.current)
+        assertTrue(navigator.canNavigateForward)
+
+        navigator.navigate(DesktopDestination.SETTINGS)
+
+        assertEquals(DesktopDestination.SETTINGS, navigator.current)
+        assertFalse(navigator.canNavigateForward)
+        assertFalse(navigator.navigateForward())
+        assertTrue(navigator.navigateBack())
+        assertEquals(DesktopDestination.LIBRARY, navigator.current)
+    }
 }

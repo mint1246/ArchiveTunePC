@@ -40,7 +40,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.Check
@@ -97,7 +98,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -185,27 +186,47 @@ fun ArchiveTuneDesktopApp(
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
-                    .onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when {
-                            immersiveContent != null &&
-                                (event.key == Key.Escape || event.isAltPressed && event.key == Key.DirectionLeft) -> {
-                                onDismissImmersive()
-                                true
-                            }
-                            immersiveContent == null && event.isCtrlPressed && event.key == Key.F -> {
+                    // Bubble shortcuts after the focused control gets first chance to consume them;
+                    // this keeps text editing behavior ahead of shell navigation.
+                    .onKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                        when (desktopShortcutAction(event.key, event.isCtrlPressed, event.isAltPressed)) {
+                            DesktopShortcutAction.SEARCH -> {
+                                if (immersiveContent != null) return@onKeyEvent false
                                 navigator.navigate(DesktopDestination.SEARCH)
                                 searchFocusRequester.requestFocus()
                                 true
                             }
-                            event.isAltPressed && event.key == Key.DirectionLeft -> {
-                                if (contentCanNavigateBack) onContentNavigateBack() else navigator.navigateBack()
-                            }
-                            event.key == Key.Escape && searchQuery.isNotEmpty() -> {
-                                searchQuery = ""
+                            DesktopShortcutAction.SETTINGS -> {
+                                if (immersiveContent != null) return@onKeyEvent false
+                                navigator.navigate(DesktopDestination.SETTINGS)
                                 true
                             }
-                            else -> false
+                            DesktopShortcutAction.BACK -> {
+                                if (immersiveContent != null) {
+                                    onDismissImmersive()
+                                    true
+                                } else if (contentCanNavigateBack) {
+                                    onContentNavigateBack()
+                                } else {
+                                    navigator.navigateBack()
+                                }
+                            }
+                            DesktopShortcutAction.FORWARD -> {
+                                if (immersiveContent != null || contentCanNavigateBack) false else navigator.navigateForward()
+                            }
+                            DesktopShortcutAction.ESCAPE -> when {
+                                immersiveContent != null -> {
+                                    onDismissImmersive()
+                                    true
+                                }
+                                searchQuery.isNotEmpty() -> {
+                                    searchQuery = ""
+                                    true
+                                }
+                                else -> false
+                            }
+                            null -> false
                         }
                     },
                 color = if (dynamicActive) Color.Transparent else MaterialTheme.colorScheme.background,
@@ -414,15 +435,8 @@ private fun DesktopRail(
 
 @Composable
 private fun CompactNavigation(state: DesktopContentState) {
-    val destinations = listOf(
-        DesktopDestination.HOME,
-        DesktopDestination.EXPLORE,
-        DesktopDestination.SEARCH,
-        DesktopDestination.LIBRARY,
-        DesktopDestination.SETTINGS,
-    )
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        destinations.forEach { destination ->
+        DesktopDestination.entries.forEach { destination ->
             NavigationBarItem(
                 selected = destination == state.destination,
                 onClick = { state.navigate(destination) },
@@ -509,7 +523,12 @@ private fun DesktopTopBar(
     ) {
         if (onNavigateBackOverride != null || navigator.canNavigateBack) {
             IconButton(onClick = { if (onNavigateBackOverride != null) onNavigateBackOverride() else navigator.navigateBack() }) {
-                Icon(Icons.Rounded.ArrowBack, contentDescription = if (titleOverride != null) "Close lyrics" else "Back")
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = if (titleOverride != null) "Close lyrics" else "Back")
+            }
+        }
+        if (onNavigateBackOverride == null && navigator.canNavigateForward) {
+            IconButton(onClick = navigator::navigateForward) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = "Forward")
             }
         }
         if (!compact) {

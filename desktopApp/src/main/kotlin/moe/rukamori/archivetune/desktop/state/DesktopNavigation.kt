@@ -36,6 +36,8 @@ class DesktopNavigator(
     private val maxHistoryEntries: Int = 32,
 ) {
     private val history = mutableStateListOf(initialDestination)
+    private var historyIndex = 0
+
     init {
         require(maxHistoryEntries > 0) { "Navigation history must keep at least one destination" }
     }
@@ -43,19 +45,34 @@ class DesktopNavigator(
     var current by mutableStateOf(initialDestination)
         private set
 
-    val canNavigateBack: Boolean get() = history.size > 1
+    val canNavigateBack: Boolean get() = historyIndex > 0
+    val canNavigateForward: Boolean get() = historyIndex < history.lastIndex
 
     fun navigate(destination: DesktopDestination) {
         if (destination == current) return
+
+        // Match browser history: once the user goes back, a new destination starts a new branch.
+        while (history.lastIndex > historyIndex) history.removeAt(history.lastIndex)
         history += destination
-        while (history.size > maxHistoryEntries) history.removeAt(0)
+        historyIndex = history.lastIndex
+        while (history.size > maxHistoryEntries) {
+            history.removeAt(0)
+            historyIndex--
+        }
         current = destination
     }
 
     fun navigateBack(): Boolean {
         if (!canNavigateBack) return false
-        history.removeAt(history.lastIndex)
-        current = history.last()
+        historyIndex--
+        current = history[historyIndex]
+        return true
+    }
+
+    fun navigateForward(): Boolean {
+        if (!canNavigateForward) return false
+        historyIndex++
+        current = history[historyIndex]
         return true
     }
 }
