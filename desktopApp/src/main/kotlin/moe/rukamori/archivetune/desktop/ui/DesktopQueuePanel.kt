@@ -54,7 +54,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,9 +79,10 @@ import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.playback.api.PlaybackQueueEntry
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.api.RepeatMode
-import kotlin.math.floor
+import kotlin.math.abs
 
 private val QueueRowHeight = 56.dp
+private val QueueDragHandleSize = 28.dp
 
 /**
  * The "up next" queue panel. Renders the queue the same way the Android queue sheet does: previous
@@ -226,10 +226,9 @@ private fun QueueList(
 ) {
     val order = remember { mutableStateListOf<PlaybackQueueEntry>() }
     var draggedId by remember { mutableStateOf<Long?>(null) }
-    var dragStartIndex by remember { mutableIntStateOf(-1) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var dragPointerY by remember { mutableFloatStateOf(Float.NaN) }
     val listState = rememberLazyListState()
-    val rowHeightPx = with(LocalDensity.current) { QueueRowHeight.toPx() }
+    val dragHandleSizePx = with(LocalDensity.current) { QueueDragHandleSize.toPx() }
     val latestEntries by rememberUpdatedState(entries)
 
     LaunchedEffect(entries) {
@@ -245,7 +244,7 @@ private fun QueueList(
     }
 
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 6.dp)) {
-        itemsIndexed(order, key = { _, entry -> entry.id }) { index, entry ->
+        itemsIndexed(order, key = { _, entry -> entry.id }) { _, entry ->
             QueueRow(
                 entry = entry,
                 snapshot = snapshot,
@@ -261,43 +260,61 @@ private fun QueueList(
                         else playback.removeQueueItem(entry.logicalIndex)
                     }
                 },
-                onDragStart = {
+                onDragStart = { pointerInHandle ->
                     draggedId = entry.id
-                    dragStartIndex = index
-                    dragOffset = 0f
+                    dragPointerY = listState.layoutInfo.visibleItemsInfo
+                        .firstOrNull { it.key == entry.id }
+                        ?.let { item ->
+                            item.offset + (item.size - dragHandleSizePx) / 2f + pointerInHandle.y
+                        }
+                        ?: Float.NaN
                 },
                 onDrag = { change, amount ->
                     change.consume()
-                    dragOffset += amount.y
-                    val from = order.indexOfFirst { it.id == draggedId }
-                    if (from != -1) {
-                        autoScroll(listState, scope, change.position.y, from)
-                        val target = floor((dragStartIndex * rowHeightPx + dragOffset) / rowHeightPx)
-                            .toInt()
-                            .coerceIn(0, order.lastIndex)
-                        if (target != from) {
-                            val moved = order.removeAt(from)
-                            order.add(target, moved)
+                    val dragged = draggedId
+                    val from = dragged?.let { queueEntryIndex(order, it) } ?: -1
+                    if (from != -1 && dragged != null) {
+                        if (!dragPointerY.isFinite()) {
+                            listState.layoutInfo.visibleItemsInfo
+                                .firstOrNull { it.key == dragged }
+                                ?.let { it.offset + it.size / 2f }
+                                ?.let { dragPointerY = it }
+                        }
+                        if (dragPointerY.isFinite()) {
+                            dragPointerY += amount.y
+                            autoScroll(listState, scope, dragPointerY)
+                            val target = queueReorderTarget(
+                                draggedEntryId = dragged,
+                                currentIndex = from,
+                                pointerY = dragPointerY,
+                                visibleItems = listState.layoutInfo.visibleItemsInfo.mapNotNull { item ->
+                                    val entryId = item.key as? Long ?: return@mapNotNull null
+                                    QueueVisibleItemLayout(entryId, item.index, item.offset, item.size)
+                                },
+                                itemCount = order.size,
+                            )
+                            if (target != from) {
+                                val moved = order.removeAt(from)
+                                order.add(target, moved)
+                            }
                         }
                     }
                 },
                 onDragEnd = {
                     val dragged = draggedId
                     if (dragged != null) {
-                        val source = latestEntries.indexOfFirst { it.id == dragged }
-                        val destination = order.indexOfFirst { it.id == dragged }
+                        val source = queueEntryIndex(latestEntries, dragged)
+                        val destination = queueEntryIndex(order, dragged)
                         if (source != -1 && destination != -1 && source != destination) {
                             scope.launch { playback.moveQueueItem(source, destination) }
                         }
                     }
                     draggedId = null
-                    dragStartIndex = -1
-                    dragOffset = 0f
+                    dragPointerY = Float.NaN
                 },
                 onDragCancel = {
                     draggedId = null
-                    dragStartIndex = -1
-                    dragOffset = 0f
+                    dragPointerY = Float.NaN
                 },
             )
         }
@@ -307,23 +324,60 @@ private fun QueueList(
 private fun autoScroll(
     listState: androidx.compose.foundation.lazy.LazyListState,
     scope: CoroutineScope,
-    pointerYInRow: Float,
-    fromIndex: Int,
+    pointerY: Float,
 ) {
     val layoutInfo = listState.layoutInfo
-    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == fromIndex } ?: return
-    val pointerY = item.offset + pointerYInRow
-    val viewportHeight = layoutInfo.viewportSize.height.toFloat()
-    val topEdge = viewportHeight * 0.12f
-    val bottomEdge = viewportHeight * 0.88f
-    val delta =
-        when {
-            pointerY < topEdge -> (pointerY - topEdge) * 0.15f
-            pointerY > bottomEdge -> (pointerY - bottomEdge) * 0.15f
-            else -> return
-        }
+    val delta = queueAutoScrollDelta(pointerY, layoutInfo.viewportStartOffset, layoutInfo.viewportEndOffset)
+    if (delta == 0f) return
     scope.launch {
         listState.scroll(MutatePriority.Default) { scrollBy(delta) }
+    }
+}
+
+internal data class QueueVisibleItemLayout(
+    val entryId: Long,
+    val index: Int,
+    val offset: Int,
+    val size: Int,
+) {
+    val centerY: Float
+        get() = offset + size / 2f
+}
+
+internal fun queueEntryIndex(entries: List<PlaybackQueueEntry>, entryId: Long): Int =
+    entries.indexOfFirst { it.id == entryId }
+
+internal fun queueReorderTarget(
+    draggedEntryId: Long,
+    currentIndex: Int,
+    pointerY: Float,
+    visibleItems: List<QueueVisibleItemLayout>,
+    itemCount: Int,
+): Int {
+    if (itemCount <= 0) return -1
+    val clampedCurrent = currentIndex.coerceIn(0, itemCount - 1)
+    if (!pointerY.isFinite()) return clampedCurrent
+    val target = visibleItems
+        .asSequence()
+        .filter { it.index in 0 until itemCount }
+        .minByOrNull { abs(pointerY - it.centerY) }
+        ?: return clampedCurrent
+    return if (target.entryId == draggedEntryId) clampedCurrent else target.index.coerceIn(0, itemCount - 1)
+}
+
+internal fun queueAutoScrollDelta(
+    pointerY: Float,
+    viewportStartOffset: Int,
+    viewportEndOffset: Int,
+): Float {
+    if (!pointerY.isFinite() || viewportEndOffset <= viewportStartOffset) return 0f
+    val viewportHeight = (viewportEndOffset - viewportStartOffset).toFloat()
+    val topEdge = viewportStartOffset + viewportHeight * 0.12f
+    val bottomEdge = viewportStartOffset + viewportHeight * 0.88f
+    return when {
+        pointerY < topEdge -> (pointerY - topEdge) * 0.15f
+        pointerY > bottomEdge -> (pointerY - bottomEdge) * 0.15f
+        else -> 0f
     }
 }
 
@@ -338,7 +392,7 @@ private fun QueueRow(
     onRowClick: () -> Unit,
     onPlayNext: () -> Unit,
     onRemove: () -> Unit,
-    onDragStart: () -> Unit,
+    onDragStart: (Offset) -> Unit,
     onDrag: (PointerInputChange, Offset) -> Unit,
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit,
@@ -434,10 +488,10 @@ private fun QueueRow(
                 contentDescription = "Reorder",
                 tint = MaterialTheme.colorScheme.outline,
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(QueueDragHandleSize)
                     .pointerInput(entry.id) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { onDragStart() },
+                            onDragStart = { offset -> onDragStart(offset) },
                             onDragEnd = { onDragEnd() },
                             onDragCancel = { onDragCancel() },
                             onDrag = { change, amount -> onDrag(change, amount) },
@@ -445,7 +499,7 @@ private fun QueueRow(
                     },
             )
         } else {
-            Spacer(Modifier.width(28.dp))
+            Spacer(Modifier.width(QueueDragHandleSize))
         }
     }
 }
