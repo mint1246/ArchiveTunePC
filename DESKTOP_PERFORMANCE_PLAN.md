@@ -548,6 +548,21 @@ Do not keep whole screen composables alive.
 
 # Phase 6 - Request ownership, deduplication, priority, and concurrency
 
+**Status: completed 2026-08-19.**
+
+Implementation checkpoint:
+
+- Audited direct desktop backend calls and moved remaining page/resource reads behind application-scoped owners; explicit user mutations remain direct foreground actions.
+- Added application-scoped Explore state with a 10-minute freshness window. Explore + Charts load concurrently, stale content remains visible during refresh, and refresh traffic uses bounded background permits.
+- Routed Search Up Next and artist-items continuation requests through single-flight resource keys.
+- Recommendation/related-song warmup now limits the actual network requests with `MAINTENANCE` priority rather than holding one permit around a large opaque batch.
+- Reused identical related-page keys so startup warming and playback-triggered warming coalesce.
+- Account maintenance observer now keys on the stable account identity scope, so cookie/PoToken/session refreshes do not replay Home/Library synchronization.
+- Account-scoped startup children are tied to `collectLatest`; switching accounts cancels stale Home/Library/maintenance work.
+- Existing coordinator keeps background concurrency at two while foreground requests bypass that queue.
+- Final UI audit leaves direct backend calls only for explicit mutations/feedback actions.
+- Verified with `:desktop-backend:test :desktopApp:test :desktopApp:compileKotlin`.
+
 ## Goal
 
 Stop request storms and protect foreground responsiveness.
@@ -886,7 +901,7 @@ No phase commit was made at this checkpoint because `DesktopMusicSurface.kt` alr
 - [x] phase 3 - Library cached-first behavior (implementation + automated verification complete)
 - [x] phase 4 - Search sessions/history/cache (implementation + automated verification complete)
 - [x] phase 5 - real route/back-stack navigation (route/cache architecture + automated verification complete)
-- [ ] phase 6 - request priority/concurrency cleanup
+- [x] phase 6 - request priority/concurrency cleanup (ownership/priority/auth-refresh audit complete)
 - [ ] phase 7 - async/coalesced persistence
 - [ ] phase 8 - Compose/rendering smoothness audit
 - [ ] phase 9 - diagnostics, RAM validation, final tuning

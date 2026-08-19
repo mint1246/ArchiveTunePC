@@ -327,7 +327,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         when (item) {
             is SongItem -> scope.launch {
                 browse.failure = null
-                services.backend.upNext(item.id)
+                services.upNext(item.id)
                     .onSuccess { next ->
                         val songs = next.items
                         if (songs.isEmpty()) {
@@ -567,7 +567,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onAddToPlaylist = ::choosePlaylist,
             onSetLiked = ::setLiked,
             isLiked = ::isLiked,
-            loadMore = services.backend::artistItemsContinuation,
+            loadMore = services.browseRepository::artistItemsContinuation,
             modifier = modifier,
         )
         else -> DetailPage(

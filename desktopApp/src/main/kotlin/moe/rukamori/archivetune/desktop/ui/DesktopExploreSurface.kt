@@ -28,9 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -38,8 +35,6 @@ import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.innertube.home.sortNewReleasesByArtistPreference
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
-import moe.rukamori.archivetune.innertube.pages.ChartsPage
-import moe.rukamori.archivetune.innertube.pages.ExplorePage
 
 /** Desktop port of the Android Explore screen: charts, new releases and top music videos. */
 @Composable
@@ -59,30 +54,12 @@ fun DesktopExploreSurface(
     val isPlaying = snapshot.isPlaying
     val currentItemId = snapshot.currentItem?.metadata?.id
     val currentAlbumId = snapshot.currentItem?.metadata?.album?.id
+    val exploreState by services.exploreRepository.state.collectAsState()
 
-    var isLoading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var explorePage by remember { mutableStateOf<ExplorePage?>(null) }
-    var chartsPage by remember { mutableStateOf<ChartsPage?>(null) }
-    var loadAttempt by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { services.exploreRepository.activate() }
 
-    LaunchedEffect(loadAttempt) {
-        isLoading = true
-        error = null
-        explorePage = null
-        chartsPage = null
-        services.backend.explore().fold(
-            onSuccess = { explorePage = it },
-            onFailure = { error = it.message ?: "Could not load the explore page." },
-        )
-        if (error == null) {
-            services.backend.charts().fold(
-                onSuccess = { chartsPage = it },
-                onFailure = { error = it.message ?: "Could not load charts." },
-            )
-        }
-        isLoading = false
-    }
+    val explorePage = exploreState.explorePage
+    val chartsPage = exploreState.chartsPage
 
     val sections = chartsPage?.sections.orEmpty()
     val regularSections = sections.filterNot { section ->
@@ -103,14 +80,33 @@ fun DesktopExploreSurface(
 
     Box(modifier.fillMaxSize()) {
         when {
-            isLoading -> ExploreLoadingState()
-            error != null -> ExploreErrorState(message = error ?: "", onRetry = { loadAttempt += 1 })
+            exploreState.isInitialLoading -> ExploreLoadingState()
+            exploreState.error != null && !exploreState.hasContent ->
+                ExploreErrorState(message = exploreState.error ?: "", onRetry = services.exploreRepository::refresh)
             !hasContent -> ExploreEmptyState()
             else ->
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(top = 16.dp, bottom = 28.dp),
                 ) {
+                    if (exploreState.isRefreshing) {
+                        item(key = "explore-refreshing") {
+                            Text(
+                                "Refreshing…",
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    exploreState.error?.let { refreshError ->
+                        item(key = "explore-refresh-error") {
+                            Text(
+                                refreshError,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                     regularSections.forEachIndexed { sectionIndex, section ->
                         val sectionSongs =
                             section.items.filterIsInstance<SongItem>().distinctBy { it.id }

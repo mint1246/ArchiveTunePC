@@ -60,6 +60,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
@@ -105,6 +106,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     internal val browseRepository = DesktopBrowseRepository(
         backend = backend,
         coordinator = contentCoordinator,
+        accountScopeProvider = ::accountCacheScope,
+    )
+    internal val exploreRepository = DesktopExploreRepository(
+        backend = backend,
+        coordinator = contentCoordinator,
+        scope = runtime.applicationScope,
         accountScopeProvider = ::accountCacheScope,
     )
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
@@ -253,6 +260,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.applicationScope.launch { restoreQueueIfPresent() }
     }
 
+    suspend fun upNext(videoId: String) =
+        contentCoordinator.singleFlight(
+            key = "up-next:${accountCacheScope()}:$videoId",
+            priority = DesktopRequestPriority.FOREGROUND,
+        ) { backend.upNext(videoId) }
+
     /** Syncs liked songs, library songs, liked albums and subscribed artists into the home store. */
     suspend fun syncHomeLibrary() {
         if (account.state.value !is DesktopAccountState.SignedIn) {
@@ -273,6 +286,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
      */
     suspend fun loadSimilarRecommendations() {
         val snapshot = homeStore.snapshot.value
+        val accountScope = accountCacheScope()
         val playTimeBySong =
             snapshot.playHistory.groupBy { it.song.id }.mapValues { (_, events) -> events.sumOf { it.playTimeMs.toLong() } }
         val mostPlayedSongs =
@@ -300,7 +314,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 .take(3)
         for (artist in mostPlayedArtists) {
             val artistId = artist.id ?: continue
-            val page = backend.artist(artistId).getOrNull() ?: continue
+            val page =
+                contentCoordinator.singleFlight(
+                    "recommendation-artist:$accountScope:$artistId",
+                    DesktopRequestPriority.MAINTENANCE,
+                ) { backend.artist(artistId) }.getOrNull() ?: continue
             val items =
                 (page.sections.getOrNull(page.sections.size - 2)?.items.orEmpty() + page.sections.lastOrNull()?.items.orEmpty())
                     .shuffled()
@@ -311,8 +329,16 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
         // Song seeds: fetch related artists/albums/playlists through the related-items endpoint.
         for (song in mostPlayedSongs) {
-            val relatedEndpoint = backend.next(song.id).getOrNull()?.relatedEndpoint ?: continue
-            val page = backend.related(relatedEndpoint).getOrNull() ?: continue
+            val relatedEndpoint =
+                contentCoordinator.singleFlight(
+                    "related-next:$accountScope:${song.id}",
+                    DesktopRequestPriority.MAINTENANCE,
+                ) { backend.next(song.id) }.getOrNull()?.relatedEndpoint ?: continue
+            val page =
+                contentCoordinator.singleFlight(
+                    "related-page:$accountScope:${song.id}",
+                    DesktopRequestPriority.MAINTENANCE,
+                ) { backend.related(relatedEndpoint) }.getOrNull() ?: continue
             val items =
                 (page.songs.shuffled().take(8) + page.albums.shuffled().take(4) + page.artists.shuffled().take(4) + page.playlists.shuffled().take(4))
                     .shuffled()
@@ -327,41 +353,41 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private fun startHomeSyncObserver() {
         runtime.applicationScope.launch {
             account.state
-                .map { state -> (state as? DesktopAccountState.SignedIn)?.account }
+                // Session-cookie/PoToken refreshes must not replay the expensive Home maintenance
+                // pipeline. Only an actual account identity change should invalidate these stores.
+                .map { state ->
+                    (state as? DesktopAccountState.SignedIn)?.account?.cacheScope()
+                }
                 .distinctUntilChanged()
-                .collectLatest { signedInAccount ->
+                .collectLatest { signedInScope ->
                     libraryRepository.onAccountScopeChanged()
                     homeRepository.onAccountScopeChanged()
                     searchRepository.onAccountScopeChanged()
                     browseRepository.clearAccountCache()
-                    if (signedInAccount != null) {
-                        // Restore persistent Home/Library state immediately. Network refreshes can
-                        // then happen behind already-renderable cached content.
-                        runtime.applicationScope.launch(Dispatchers.IO) { homeRepository.activate() }
-                        runtime.applicationScope.launch(Dispatchers.IO) { libraryRepository.activate() }
-
-                        // Keep Android-style personalization sync out of the visible startup path.
-                        delay(BACKGROUND_MAINTENANCE_START_DELAY_MS)
-                        runtime.applicationScope.launch(Dispatchers.IO) {
-                            contentCoordinator.singleFlight(
-                                "home-library-sync:${accountCacheScope()}",
-                                DesktopRequestPriority.MAINTENANCE,
-                            ) {
-                                runCatching {
-                                    syncHomeLibrary()
-                                    Unit
+                    exploreRepository.onAccountScopeChanged()
+                    if (signedInScope != null) {
+                        // Tie all startup children to collectLatest so a real account switch
+                        // cancels stale work instead of leaving old-session maintenance running.
+                        coroutineScope {
+                            launch(Dispatchers.IO) { homeRepository.activate() }
+                            launch(Dispatchers.IO) { libraryRepository.activate() }
+                            launch(Dispatchers.IO) {
+                                delay(BACKGROUND_MAINTENANCE_START_DELAY_MS)
+                                contentCoordinator.singleFlight(
+                                    "home-library-sync:$signedInScope",
+                                    DesktopRequestPriority.MAINTENANCE,
+                                ) {
+                                    runCatching {
+                                        syncHomeLibrary()
+                                        Unit
+                                    }
                                 }
                             }
-                        }
-                        runtime.applicationScope.launch(Dispatchers.IO) {
-                            contentCoordinator.singleFlight(
-                                "home-recommendation-maintenance:${accountCacheScope()}",
-                                DesktopRequestPriority.MAINTENANCE,
-                            ) {
+                            launch(Dispatchers.IO) {
+                                delay(BACKGROUND_MAINTENANCE_START_DELAY_MS)
                                 runCatching {
                                     warmQuickPickRelatedCache()
                                     loadSimilarRecommendations()
-                                    Unit
                                 }
                             }
                         }
@@ -405,8 +431,17 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         if (homeStore.hasRelatedSongs(videoId)) return
         if (!relatedSongFetches.add(videoId)) return
         try {
-            val relatedEndpoint = backend.next(videoId).getOrNull()?.relatedEndpoint ?: return
-            val relatedSongs = backend.related(relatedEndpoint).getOrNull()?.songs.orEmpty()
+            val accountScope = accountCacheScope()
+            val relatedEndpoint =
+                contentCoordinator.singleFlight(
+                    "related-next:$accountScope:$videoId",
+                    DesktopRequestPriority.MAINTENANCE,
+                ) { backend.next(videoId) }.getOrNull()?.relatedEndpoint ?: return
+            val relatedSongs =
+                contentCoordinator.singleFlight(
+                    "related-page:$accountScope:$videoId",
+                    DesktopRequestPriority.MAINTENANCE,
+                ) { backend.related(relatedEndpoint) }.getOrNull()?.songs.orEmpty()
             if (relatedSongs.isNotEmpty()) {
                 homeStore.replaceRelatedSongs(videoId, relatedSongs)
             }

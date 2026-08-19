@@ -12,6 +12,7 @@ import moe.rukamori.archivetune.innertube.cache.DesktopRequestPriority
 import moe.rukamori.archivetune.innertube.cache.DesktopResourceCoordinator
 import moe.rukamori.archivetune.innertube.models.BrowseEndpoint
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
+import moe.rukamori.archivetune.innertube.pages.ArtistItemsContinuationPage
 import moe.rukamori.archivetune.innertube.pages.ArtistItemsPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
@@ -75,6 +76,12 @@ internal class DesktopBrowseRepository(
 
     suspend fun artistItems(route: DesktopBrowseRoute.ArtistItems, forceRefresh: Boolean = false): Result<ArtistItemsPage> =
         load(route, forceRefresh) { backend.artistItems(route.endpoint) }
+
+    suspend fun artistItemsContinuation(continuation: String): Result<ArtistItemsContinuationPage> =
+        coordinator.singleFlight(
+            key = "browse:${accountScopeProvider()}:artist-items-continuation:$continuation",
+            priority = DesktopRequestPriority.FOREGROUND,
+        ) { backend.artistItemsContinuation(continuation) }
 
     fun cachedAlbum(route: DesktopBrowseRoute.Album): AlbumPage? = cached(route)
     fun cachedArtist(route: DesktopBrowseRoute.Artist): ArtistPage? = cached(route)
