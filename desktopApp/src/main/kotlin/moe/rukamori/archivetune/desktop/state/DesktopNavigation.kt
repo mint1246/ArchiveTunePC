@@ -31,8 +31,15 @@ enum class DesktopDestination(
 }
 
 @Stable
-class DesktopNavigator(initialDestination: DesktopDestination) {
+class DesktopNavigator(
+    initialDestination: DesktopDestination,
+    private val maxHistoryEntries: Int = 32,
+) {
     private val history = mutableStateListOf(initialDestination)
+    init {
+        require(maxHistoryEntries > 0) { "Navigation history must keep at least one destination" }
+    }
+
     var current by mutableStateOf(initialDestination)
         private set
 
@@ -41,6 +48,7 @@ class DesktopNavigator(initialDestination: DesktopDestination) {
     fun navigate(destination: DesktopDestination) {
         if (destination == current) return
         history += destination
+        while (history.size > maxHistoryEntries) history.removeAt(0)
         current = destination
     }
 

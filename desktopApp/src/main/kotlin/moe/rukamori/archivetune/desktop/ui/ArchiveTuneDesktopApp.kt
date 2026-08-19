@@ -157,6 +157,8 @@ fun ArchiveTuneDesktopApp(
     windowControls: (@Composable () -> Unit)? = null,
     immersiveContent: (@Composable (Modifier, Boolean) -> Unit)? = null,
     onDismissImmersive: () -> Unit = {},
+    contentCanNavigateBack: Boolean = false,
+    onContentNavigateBack: () -> Boolean = { false },
     content: (@Composable (DesktopContentState, Modifier) -> Unit)? = null,
     playerContent: (@Composable (Modifier) -> Unit)? = null,
     queueContent: (@Composable (Modifier) -> Unit)? = null,
@@ -196,7 +198,9 @@ fun ArchiveTuneDesktopApp(
                                 searchFocusRequester.requestFocus()
                                 true
                             }
-                            event.isAltPressed && event.key == Key.DirectionLeft -> navigator.navigateBack()
+                            event.isAltPressed && event.key == Key.DirectionLeft -> {
+                                if (contentCanNavigateBack) onContentNavigateBack() else navigator.navigateBack()
+                            }
                             event.key == Key.Escape && searchQuery.isNotEmpty() -> {
                                 searchQuery = ""
                                 true
@@ -272,6 +276,7 @@ fun ArchiveTuneDesktopApp(
                             compact = layout == DesktopNavigationLayout.COMPACT,
                             windowDragModifier = windowDragModifier,
                             windowControls = windowControls,
+                            onNavigateBackOverride = if (contentCanNavigateBack) ({ onContentNavigateBack() }) else null,
                         )
 
                         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -504,7 +509,7 @@ private fun DesktopTopBar(
     ) {
         if (onNavigateBackOverride != null || navigator.canNavigateBack) {
             IconButton(onClick = { if (onNavigateBackOverride != null) onNavigateBackOverride() else navigator.navigateBack() }) {
-                Icon(Icons.Rounded.ArrowBack, contentDescription = if (onNavigateBackOverride != null) "Close lyrics" else "Back")
+                Icon(Icons.Rounded.ArrowBack, contentDescription = if (titleOverride != null) "Close lyrics" else "Back")
             }
         }
         if (!compact) {

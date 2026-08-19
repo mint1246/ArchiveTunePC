@@ -95,15 +95,18 @@ import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopAlbumIndex
+import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRepository
+import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRoute
 import moe.rukamori.archivetune.desktop.party.PartyMode
 import moe.rukamori.archivetune.desktop.party.PartyPhase
 import moe.rukamori.archivetune.desktop.party.PartyTransport
 import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPane
+import moe.rukamori.archivetune.desktop.state.DesktopBrowseHistory
+import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.util.logging.Logger
-import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.BrowseEndpoint
@@ -135,36 +138,151 @@ internal sealed interface Detail {
  * Shares the currently-viewed detail page (album/artist/playlist) between the main content area
  * and the mini player, so the mini player can open the album of the song that is playing.
  */
-internal class DesktopBrowseController {
+internal class DesktopBrowseController(
+    private val repository: DesktopBrowseRepository,
+    initialDestination: DesktopDestination = DesktopDestination.HOME,
+) {
+    private val history = DesktopBrowseHistory(initialDestination)
+    private var generation = 0L
     var detail by mutableStateOf<Detail?>(null)
+        private set
     var loading by mutableStateOf(false)
     var failure by mutableStateOf<String?>(null)
 
-    fun clear() {
-        detail = null
+    fun activate(destination: DesktopDestination) {
+        generation++
+        loading = false
         failure = null
+        history.activate(destination)
+        restoreCurrent()
     }
 
-    fun openAlbum(browseId: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
-        open(scope) { backend.album(browseId).map { Detail.Album(it) } }
+    fun goBack(): Boolean {
+        if (history.current() == null) return false
+        generation++
+        loading = false
+        failure = null
+        history.pop()
+        restoreCurrent()
+        return true
+    }
 
-    fun openArtist(id: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
-        open(scope) { backend.artist(id).map { Detail.Artist(it) } }
+    fun clearCurrentStack() {
+        generation++
+        loading = false
+        failure = null
+        history.clearCurrent()
+        detail = null
+    }
 
-    fun openArtistItems(endpoint: BrowseEndpoint, parent: ArtistPage, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
-        open(scope) { backend.artistItems(endpoint).map { Detail.ArtistItems(it, parent) } }
+    fun clearAll() {
+        generation++
+        loading = false
+        failure = null
+        history.clearAll()
+        detail = null
+    }
 
-    fun openPlaylist(id: String, backend: ArchiveTuneJvmClient, scope: CoroutineScope) =
-        open(scope) { backend.playlist(id).map { Detail.Playlist(it) } }
+    fun openAlbum(browseId: String, scope: CoroutineScope, forceRefresh: Boolean = false) {
+        val route = DesktopBrowseRoute.Album(browseId)
+        open(route, scope, forceRefresh, repository::cachedAlbum) {
+            repository.album(route, forceRefresh).map { Detail.Album(it) }
+        }
+    }
 
-    private fun open(scope: CoroutineScope, load: suspend () -> Result<Detail>) {
+    fun openArtist(id: String, scope: CoroutineScope, forceRefresh: Boolean = false) {
+        val route = DesktopBrowseRoute.Artist(id)
+        open(route, scope, forceRefresh, repository::cachedArtist) {
+            repository.artist(route, forceRefresh).map { Detail.Artist(it) }
+        }
+    }
+
+    fun openArtistItems(endpoint: BrowseEndpoint, parent: ArtistPage, scope: CoroutineScope, forceRefresh: Boolean = false) {
+        val route = DesktopBrowseRoute.ArtistItems(parent.artist.id, endpoint)
+        val cached: (DesktopBrowseRoute.ArtistItems) -> ArtistItemsPage? = repository::cachedArtistItems
+        open(route, scope, forceRefresh, cached) {
+            repository.artistItems(route, forceRefresh).map { Detail.ArtistItems(it, parent) }
+        }
+    }
+
+    fun openPlaylist(id: String, scope: CoroutineScope, forceRefresh: Boolean = false) {
+        val route = DesktopBrowseRoute.Playlist(id)
+        open(route, scope, forceRefresh, repository::cachedPlaylist) {
+            repository.playlist(route, forceRefresh).map { Detail.Playlist(it) }
+        }
+    }
+
+    private fun <R : DesktopBrowseRoute, P : Any> open(
+        route: R,
+        scope: CoroutineScope,
+        forceRefresh: Boolean,
+        cached: (R) -> P?,
+        load: suspend () -> Result<Detail>,
+    ) {
+        if (!forceRefresh) {
+            cached(route)?.let { page ->
+                history.push(route)
+                detail = when (route) {
+                    is DesktopBrowseRoute.Album -> Detail.Album(page as AlbumPage)
+                    is DesktopBrowseRoute.Artist -> Detail.Artist(page as ArtistPage)
+                    is DesktopBrowseRoute.Playlist -> Detail.Playlist(page as PlaylistPage)
+                    is DesktopBrowseRoute.ArtistItems -> {
+                        val parent = repository.cachedArtist(DesktopBrowseRoute.Artist(route.parentArtistId))
+                        if (parent == null) null else Detail.ArtistItems(page as ArtistItemsPage, parent)
+                    }
+                }
+                if (detail != null) {
+                    loading = false
+                    failure = null
+                    return
+                }
+            }
+        }
+
+        val requestGeneration = ++generation
+        val destination = history.activeDestination
         scope.launch {
             loading = true
             failure = null
             load()
-                .onSuccess { detail = it }
-                .onFailure { failure = it.message ?: "Could not load this item" }
-            loading = false
+                .onSuccess { loaded ->
+                    if (requestGeneration == generation && history.activeDestination == destination) {
+                        history.push(route)
+                        detail = loaded
+                    }
+                }
+                .onFailure {
+                    if (requestGeneration == generation && history.activeDestination == destination) {
+                        failure = it.message ?: "Could not load this item"
+                    }
+                }
+            if (requestGeneration == generation && history.activeDestination == destination) loading = false
+        }
+    }
+
+    private fun restoreCurrent() {
+        while (true) {
+            val route = history.current() ?: run {
+                detail = null
+                return
+            }
+            val restored = when (route) {
+                is DesktopBrowseRoute.Album -> repository.cachedAlbum(route)?.let(Detail::Album)
+                is DesktopBrowseRoute.Artist -> repository.cachedArtist(route)?.let(Detail::Artist)
+                is DesktopBrowseRoute.Playlist -> repository.cachedPlaylist(route)?.let(Detail::Playlist)
+                is DesktopBrowseRoute.ArtistItems -> {
+                    val page = repository.cachedArtistItems(route)
+                    val parent = repository.cachedArtist(DesktopBrowseRoute.Artist(route.parentArtistId))
+                    if (page != null && parent != null) Detail.ArtistItems(page, parent) else null
+                }
+            }
+            if (restored != null) {
+                detail = restored
+                return
+            }
+            // A route can outlive its parsed page after LRU eviction. Drop only that compact route
+            // and continue restoring older cached history rather than issuing a surprise request.
+            history.pop()
         }
     }
 }
@@ -173,6 +291,7 @@ internal class DesktopBrowseController {
 internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val accountState by services.account.state.collectAsState()
+    val browseAccountScope = services.currentBrowseAccountScope()
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
     val remoteLibraryState by services.libraryRepository.state.collectAsState()
     val searchState by services.searchRepository.state.collectAsState()
@@ -191,9 +310,13 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         libraryLoading = false
     }
     LaunchedEffect(state.destination) {
-        browse.clear()
+        browse.activate(state.destination)
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY) return@LaunchedEffect
         services.libraryRepository.activate()
+    }
+    LaunchedEffect(browseAccountScope) {
+        browse.clearAll()
+        browse.activate(state.destination)
     }
     LaunchedEffect(state.searchQuery, state.destination) {
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH) return@LaunchedEffect
@@ -233,16 +356,16 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                         )
                     }
             }
-            is AlbumItem -> browse.openAlbum(item.browseId, services.backend, scope)
-            is ArtistItem -> browse.openArtist(item.id, services.backend, scope)
-            is PlaylistItem -> browse.openPlaylist(item.id, services.backend, scope)
+            is AlbumItem -> browse.openAlbum(item.browseId, scope)
+            is ArtistItem -> browse.openArtist(item.id, scope)
+            is PlaylistItem -> browse.openPlaylist(item.id, scope)
         }
     }
     fun openBrowseItem(item: YTItem) {
         when (item) {
-            is AlbumItem -> browse.openAlbum(item.browseId, services.backend, scope)
-            is ArtistItem -> browse.openArtist(item.id, services.backend, scope)
-            is PlaylistItem -> browse.openPlaylist(item.id, services.backend, scope)
+            is AlbumItem -> browse.openAlbum(item.browseId, scope)
+            is ArtistItem -> browse.openArtist(item.id, scope)
+            is PlaylistItem -> browse.openPlaylist(item.id, scope)
             is SongItem -> Unit
         }
     }
@@ -388,7 +511,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
         is Detail.Playlist -> PlaylistDetailPage(
             page.page,
-            onBack = { browse.clear() },
+            onBack = { browse.goBack() },
             onPlay = { songs, index, title ->
                 scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
             },
@@ -402,7 +525,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onRemoveFromPlaylist = { song ->
                 scope.launch {
                     services.backend.removeSongFromPlaylist(page.page.playlist.id, song)
-                        .onSuccess { browse.openPlaylist(page.page.playlist.id, services.backend, scope) }
+                        .onSuccess { browse.openPlaylist(page.page.playlist.id, scope, forceRefresh = true) }
                         .onFailure { browse.failure = it.message ?: "Could not remove song from playlist" }
                 }
             },
@@ -412,7 +535,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 scope.launch {
                     services.backend.renamePlaylist(original.id, name)
                         .onSuccess {
-                            browse.openPlaylist(original.id, services.backend, scope)
+                            browse.openPlaylist(original.id, scope, forceRefresh = true)
                         }
                         .onFailure {
                             services.libraryRepository.upsertCached(original)
@@ -423,7 +546,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onDeletePlaylist = {
                 val original = page.page.playlist
                 services.libraryRepository.removeCached(original.id)
-                browse.clear()
+                browse.clearCurrentStack()
                 scope.launch {
                     services.backend.deletePlaylist(original.id)
                         .onFailure {
@@ -436,7 +559,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         )
         is Detail.ArtistItems -> ArtistItemsDetailPage(
             detail = page,
-            onBack = { browse.detail = Detail.Artist(page.parent) },
+            onBack = { browse.goBack() },
             onOpen = ::open,
             onDownload = ::downloadSong,
             onPlayNext = ::playNextSong,
@@ -451,10 +574,10 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             page,
             browse.loading,
             browse.failure,
-            onBack = { browse.clear() },
+            onBack = { browse.goBack() },
             onOpen = ::open,
             onOpenArtistItems = { endpoint ->
-                if (page is Detail.Artist) browse.openArtistItems(endpoint, page.page, services.backend, scope)
+                if (page is Detail.Artist) browse.openArtistItems(endpoint, page.page, scope)
             },
             onPlay = { songs, title, index -> scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } },
             onDownload = ::downloadSong,
@@ -1368,7 +1491,7 @@ private fun NowPlayingSubtitle(
         shape = MaterialTheme.shapes.large,
         border = dynamicGlassBorder(alpha = 0.14f),
     ) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, services.backend, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, services.backend, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, services.backend, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp)); Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }); NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }); }; TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }; IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }; FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }; IconButton({ scope.launch { services.playback.skipNext() } }, enabled = snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }; IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = item != null) { Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = item != null) { Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }; IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") }; Icon(Icons.Rounded.VolumeUp, null); Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp)) }
         if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth())
     } }
 }
@@ -1396,8 +1519,8 @@ internal fun DesktopLyricsView(
                     Artwork(item?.metadata?.artworkUri, Modifier.size(42.dp))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, services.backend, scope) }, Modifier.fillMaxWidth())
-                        NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, services.backend, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, services.backend, scope) }, modifier = Modifier.fillMaxWidth())
+                        NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) }, Modifier.fillMaxWidth())
+                        NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) }, modifier = Modifier.fillMaxWidth())
                     }
                     IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
                     FilledIconButton(onClick = { scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = item != null) {

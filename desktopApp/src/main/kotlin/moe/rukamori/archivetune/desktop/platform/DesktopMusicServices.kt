@@ -102,6 +102,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         scope = runtime.applicationScope,
         accountScopeProvider = ::accountCacheScope,
     )
+    internal val browseRepository = DesktopBrowseRepository(
+        backend = backend,
+        coordinator = contentCoordinator,
+        accountScopeProvider = ::accountCacheScope,
+    )
     @Volatile private var completedDownloadLookup: ((String) -> Path?)? = null
     /** Signed sources live only in memory and are discarded before their server expiry. */
     private val resolvedSourceCache = ConcurrentHashMap<String, CachedResolvedSource>()
@@ -328,6 +333,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     libraryRepository.onAccountScopeChanged()
                     homeRepository.onAccountScopeChanged()
                     searchRepository.onAccountScopeChanged()
+                    browseRepository.clearAccountCache()
                     if (signedInAccount != null) {
                         // Restore persistent Home/Library state immediately. Network refreshes can
                         // then happen behind already-renderable cached content.
@@ -373,6 +379,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             is DesktopAccountState.Expired -> state.account?.cacheScope() ?: "signed-out"
             else -> "signed-out"
         }
+
+    internal fun currentBrowseAccountScope(): String = accountCacheScope()
 
     private fun startPlayHistoryRecorder() {
         runtime.applicationScope.launch {

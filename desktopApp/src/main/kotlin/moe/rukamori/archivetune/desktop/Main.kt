@@ -101,7 +101,12 @@ fun main() {
             ) {
                 var showLyrics by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }
-                val browse = remember { moe.rukamori.archivetune.desktop.ui.DesktopBrowseController() }
+                val browse = remember(musicServices) {
+                    moe.rukamori.archivetune.desktop.ui.DesktopBrowseController(
+                        repository = musicServices.browseRepository,
+                        initialDestination = latestDestination,
+                    )
+                }
                 val dynamicArtworkUri by remember(musicServices) {
                     musicServices.playback.state
                         .map { it.currentItem?.metadata?.artworkUri }
@@ -137,6 +142,8 @@ fun main() {
                         windowControls = windowControls,
                         immersiveContent = lyricsContent.takeIf { showLyrics },
                         onDismissImmersive = { showLyrics = false },
+                        contentCanNavigateBack = browse.detail != null,
+                        onContentNavigateBack = browse::goBack,
                         onShellStateChanged = { destination, theme ->
                             latestDestination = destination
                             latestTheme = theme

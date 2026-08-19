@@ -485,6 +485,23 @@ Searching `radiohead` again soon should be an immediate cache hit.
 
 # Phase 5 - Real navigation stacks and route state
 
+**Status: completed 2026-08-19 (route/cache architecture; scroll restoration is finalized in Phase 8).**
+
+Implementation checkpoint:
+
+- Replaced the destructive single-detail navigation behavior with compact typed browse routes.
+- Added an independent bounded route stack per top-level destination, so switching Search/Library/Home no longer destroys nested detail history.
+- Added a 24-page access-ordered LRU for parsed album/artist/playlist/artist-items pages; navigation stacks retain IDs/endpoints rather than whole screens.
+- Returning through a still-hot detail route is a zero-network cache hit.
+- Late browse responses are generation/destination guarded so a slow page cannot overwrite a newer route.
+- Account-scope changes clear both cached detail pages and compact route history.
+- Shell Back/Alt+Left now consumes nested detail history before top-level destination history.
+- Capped top-level navigation history at 32 entries and nested history at 16 entries per destination.
+- Added focused navigation-state tests for per-destination restoration and bounded history.
+- Verified with `:desktopApp:test :desktopApp:compileKotlin`.
+
+Exact list scroll offsets remain compact view state rather than retained screens and are implemented/audited in Phase 8.
+
 ## Goal
 
 Back should return to the actual previous page/state.
@@ -868,7 +885,7 @@ No phase commit was made at this checkpoint because `DesktopMusicSurface.kt` alr
 - [x] phase 2 - Home repository + stale-while-revalidate (implementation + automated verification complete)
 - [x] phase 3 - Library cached-first behavior (implementation + automated verification complete)
 - [x] phase 4 - Search sessions/history/cache (implementation + automated verification complete)
-- [ ] phase 5 - real route/back-stack navigation
+- [x] phase 5 - real route/back-stack navigation (route/cache architecture + automated verification complete)
 - [ ] phase 6 - request priority/concurrency cleanup
 - [ ] phase 7 - async/coalesced persistence
 - [ ] phase 8 - Compose/rendering smoothness audit
