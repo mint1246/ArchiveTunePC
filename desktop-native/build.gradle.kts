@@ -36,7 +36,7 @@ nucleus.application {
     graalvm {
         isEnabled.set(true)
         imageName.set("ArchiveTune")
-        maxHeapSize.set("768m")
+        maxHeapSize.set("128m")
         optimization.set(NativeImageOptimization.SIZE)
         // Nucleus' static resource scanner sees native payloads for every supported platform in
         // a few dependencies. They can never be loaded by this Windows-x64 image, but Graal would
@@ -92,8 +92,18 @@ val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     group = "distribution"
     description = "Stages the production GraalVM distribution under desktopApp/build/compose/binaries/main-native."
     dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime)
-    from(nativeOutputDir)
+    from(nativeOutputDir) {
+        exclude("native/windows-x64/vlc/**")
+    }
     into(nativeReleaseDir)
+}
+
+val stageNativeReleaseVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNativeReleaseVlcRuntime") {
+    group = "distribution"
+    description = "Stages the production libVLC runtime with plugin timestamps preserved for plugins.dat."
+    dependsOn(stageNativeDistribution)
+    sourceDirectory.set(bundledVlcSourceDir)
+    destinationDirectory.set(nativeReleaseDir.map { it.dir("native/windows-x64/vlc") })
 }
 
 tasks.register<Exec>("packageNativeMsi") {
@@ -101,7 +111,7 @@ tasks.register<Exec>("packageNativeMsi") {
     description = "Builds the production per-user/upgradable MSI from the size-optimized GraalVM native distribution."
 
     dependsOn(
-        stageNativeDistribution,
+        stageNativeReleaseVlcRuntime,
         desktopAppProject.tasks.named("generateWindowsIcon"),
         rootProject.tasks.named("unzipWix"),
     )
