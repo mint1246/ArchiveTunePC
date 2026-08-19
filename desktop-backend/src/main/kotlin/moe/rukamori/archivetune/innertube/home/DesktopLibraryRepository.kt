@@ -20,6 +20,7 @@ import moe.rukamori.archivetune.innertube.models.Artist
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicLong
 
 data class DesktopRemoteLibraryState(
     val accountScope: String = "",
@@ -31,15 +32,34 @@ data class DesktopRemoteLibraryState(
 )
 
 /** Canonical account-playlist state shared by Library, Home and playlist pickers. */
-class DesktopLibraryRepository(
-    private val backend: ArchiveTuneJvmClient,
+class DesktopLibraryRepository private constructor(
     private val coordinator: DesktopResourceCoordinator,
     private val scope: CoroutineScope,
     private val accountScopeProvider: () -> String,
-    private val now: () -> Long = System::currentTimeMillis,
+    private val now: () -> Long,
+    private val playlistLoader: suspend () -> Result<List<PlaylistItem>>,
 ) {
     private val _state = MutableStateFlow(DesktopRemoteLibraryState())
     val state: StateFlow<DesktopRemoteLibraryState> = _state.asStateFlow()
+    private val requestGeneration = AtomicLong()
+
+    constructor(
+        backend: ArchiveTuneJvmClient,
+        coordinator: DesktopResourceCoordinator,
+        scope: CoroutineScope,
+        accountScopeProvider: () -> String,
+        now: () -> Long = System::currentTimeMillis,
+    ) : this(
+        coordinator = coordinator,
+        scope = scope,
+        accountScopeProvider = accountScopeProvider,
+        now = now,
+        playlistLoader = {
+            backend.libraryPlaylists().map { page ->
+                page.items.filterIsInstance<PlaylistItem>().filterNot { it.id == "SE" }.distinctBy(PlaylistItem::id)
+            }
+        },
+    )
 
     suspend fun activate(forceRefresh: Boolean = false) {
         val accountScope = accountScopeProvider()
@@ -58,6 +78,7 @@ class DesktopLibraryRepository(
     suspend fun refresh(priority: DesktopRequestPriority = DesktopRequestPriority.REFRESH): Result<List<PlaylistItem>> {
         val accountScope = accountScopeProvider()
         ensureScope(accountScope)
+        val generation = requestGeneration.incrementAndGet()
         val hadContent = _state.value.playlists.isNotEmpty()
         _state.value = _state.value.copy(
             isInitialLoading = !hadContent,
@@ -65,13 +86,10 @@ class DesktopLibraryRepository(
             error = null,
         )
         val result = coordinator.singleFlight("library-playlists:$accountScope", priority) {
-            withContext(Dispatchers.IO) {
-                backend.libraryPlaylists().map { page ->
-                    page.items.filterIsInstance<PlaylistItem>().filterNot { it.id == "SE" }.distinctBy(PlaylistItem::id)
-                }
-            }
+            withContext(Dispatchers.IO) { playlistLoader() }
         }
         result.onSuccess { playlists ->
+            if (generation != requestGeneration.get() || _state.value.accountScope != accountScope) return@onSuccess
             val updatedAt = now()
             _state.value = DesktopRemoteLibraryState(
                 accountScope = accountScope,
@@ -83,6 +101,7 @@ class DesktopLibraryRepository(
                 coordinator.writePersistent(cacheKey(accountScope), encodePlaylists(playlists), updatedAt)
             }
         }.onFailure { failure ->
+            if (generation != requestGeneration.get() || _state.value.accountScope != accountScope) return@onFailure
             _state.value = _state.value.copy(
                 isInitialLoading = false,
                 isRefreshing = false,
@@ -134,6 +153,7 @@ class DesktopLibraryRepository(
 
     private suspend fun ensureScope(accountScope: String) {
         if (_state.value.accountScope == accountScope) return
+        requestGeneration.incrementAndGet()
         val key = cacheKey(accountScope)
         val memory = coordinator.memoryValue<List<PlaylistItem>>(key)
         if (memory != null) {
@@ -168,8 +188,16 @@ class DesktopLibraryRepository(
     private fun isStale(updatedAt: Long?): Boolean = updatedAt == null || now() - updatedAt >= PLAYLIST_TTL_MS
     private fun cacheKey(scope: String) = "library-playlists-cache:$scope"
 
-    private companion object {
-        const val PLAYLIST_TTL_MS = 5L * 60L * 1000L
+    internal companion object {
+        private const val PLAYLIST_TTL_MS = 5L * 60L * 1000L
+
+        internal fun forTesting(
+            coordinator: DesktopResourceCoordinator,
+            scope: CoroutineScope,
+            accountScopeProvider: () -> String,
+            now: () -> Long = System::currentTimeMillis,
+            playlistLoader: suspend () -> Result<List<PlaylistItem>>,
+        ) = DesktopLibraryRepository(coordinator, scope, accountScopeProvider, now, playlistLoader)
     }
 }
 

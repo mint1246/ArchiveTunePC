@@ -330,8 +330,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     var showSpotifyImport by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
     var createPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
-    var addToPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
-    var playlistPickerLoading by remember { mutableStateOf(false) }
+    var playlistPickerSession by remember { mutableStateOf<AddToPlaylistPickerSession?>(null) }
     var downloadBatchNotice by remember { mutableStateOf<String?>(null) }
     suspend fun rescanLibrary() {
         if (libraryLoading) return
@@ -484,15 +483,13 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
     }
     fun choosePlaylist(song: SongItem) {
-        addToPlaylistSong = song
+        playlistPickerSession = AddToPlaylistPickerSession(song)
         scope.launch {
-            playlistPickerLoading = true
             services.libraryRepository.refresh()
-            playlistPickerLoading = false
         }
     }
     fun createPlaylist(song: SongItem? = null) {
-        addToPlaylistSong = null
+        playlistPickerSession = null
         createPlaylistSong = song
         showCreatePlaylist = true
     }
@@ -711,25 +708,37 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         )
     }
 
-    addToPlaylistSong?.let { song ->
+    playlistPickerSession?.let { session ->
+        val editablePlaylists = onlinePlaylists.filter { it.isEditable }
         AddToPlaylistDialog(
-            song = song,
-            playlists = onlinePlaylists.filter { it.isEditable },
-            loading = playlistPickerLoading,
-            onDismiss = { addToPlaylistSong = null },
-            onCreate = { createPlaylist(song) },
+            song = session.song,
+            playlists = editablePlaylists,
+            refreshing = remoteLibraryState.isInitialLoading || remoteLibraryState.isRefreshing,
+            refreshError = remoteLibraryState.error,
+            adding = session.adding,
+            addError = session.addError,
+            onDismiss = { playlistPickerSession = null },
+            onRetry = { scope.launch { services.libraryRepository.refresh() } },
+            onCreate = { createPlaylist(session.song) },
             onAdd = { playlist ->
-                addToPlaylistSong = null
                 browse.failure = null
+                playlistPickerSession = session.beginAdd()
                 scope.launch {
-                    services.backend.addSongToPlaylist(playlist.id, song.id)
-                        .onSuccess {
+                    val result = services.backend.addSongToPlaylist(playlist.id, session.song.id)
+                    val current = playlistPickerSession
+                    if (current?.song?.id != session.song.id || !current.adding) return@launch
+                    if (result.isSuccess) {
+                        playlistPickerSession = null
+                        result.onSuccess {
                             browse.invalidatePlaylist(playlist.id)
                             if ((browse.detail as? Detail.Playlist)?.page?.playlist?.id == playlist.id) {
                                 browse.openPlaylist(playlist.id, scope, forceRefresh = true)
                             }
                         }
-                        .onFailure { browse.failure = it.message ?: "Could not add song to playlist" }
+                    } else {
+                        playlistPickerSession = current.finishAdd(result)
+                        result.onFailure { browse.failure = it.message ?: "Could not add song to playlist" }
+                    }
                 }
             },
         )
@@ -899,32 +908,50 @@ private fun LocalTrackCard(
 private fun AddToPlaylistDialog(
     song: SongItem,
     playlists: List<PlaylistItem>,
-    loading: Boolean,
+    refreshing: Boolean,
+    refreshError: String?,
+    adding: Boolean,
+    addError: String?,
     onDismiss: () -> Unit,
+    onRetry: () -> Unit,
     onCreate: () -> Unit,
     onAdd: (PlaylistItem) -> Unit,
 ) {
+    val presentation = addToPlaylistPickerPresentation(playlists.size, refreshing, refreshError)
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!adding) onDismiss() },
         title = { Text("Add to playlist") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(song.title, style = MaterialTheme.typography.titleMedium)
-                when {
-                    loading -> Loading()
-                    playlists.isEmpty() -> Text("No editable playlists found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                if (presentation.showInitialLoading) Loading()
+                presentation.refreshError?.let { message ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(message, color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = onRetry, enabled = !refreshing && !adding) { Text("Retry") }
+                    }
+                }
+                addError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (presentation.showEmptyState) {
+                    Text("No editable playlists found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (playlists.isNotEmpty()) {
+                    if (refreshing) {
+                        Text("Refreshing playlists…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
                         items(playlists, key = { it.id }) { playlist ->
-                            TextButton(onClick = { onAdd(playlist) }, modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { onAdd(playlist) }, enabled = !adding, modifier = Modifier.fillMaxWidth()) {
                                 Text(playlist.title, modifier = Modifier.fillMaxWidth())
                             }
                         }
                     }
                 }
+                if (adding) Loading()
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        confirmButton = { TextButton(onClick = onCreate) { Text("New playlist") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !adding) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onCreate, enabled = !adding) { Text("New playlist") } },
     )
 }
 
@@ -1441,7 +1468,6 @@ private fun PlaylistDetailPage(
                 )
             }
         }
-        error?.let { message -> item { Error(message) } }
         if (page.songs.isEmpty()) {
             item { Text("This playlist has no available tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else if (filtered.isEmpty()) {
