@@ -8,10 +8,18 @@
 package moe.rukamori.archivetune.playback.desktop
 
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import uk.co.caprica.vlcj.media.callback.seekable.SeekableCallbackMedia
 
 /**
@@ -25,8 +33,17 @@ internal class VlcjRangeCallbackMedia(
     private val windowSize: Int = DEFAULT_WINDOW_SIZE,
     private val onHttpFailure: (Int) -> Unit = {},
     httpClient: OkHttpClient,
+    private val fallbackDirectory: Path? = null,
+    private val maxFullObjectFallbackBytes: Long = MAX_FULL_OBJECT_FALLBACK_BYTES,
 ) : SeekableCallbackMedia(), AutoCloseable {
-    private val source = RangeMediaSource(url, headers, windowSize, httpClient)
+    private val source = RangeMediaSource(
+        url = url,
+        headers = headers,
+        windowSize = windowSize,
+        client = httpClient,
+        fallbackDirectory = fallbackDirectory,
+        maxFullObjectFallbackBytes = maxFullObjectFallbackBytes,
+    )
     private val closed = AtomicBoolean(false)
 
     internal fun openSize(): Long =
@@ -42,6 +59,9 @@ internal class VlcjRangeCallbackMedia(
     override fun onOpen(): Boolean = source.isOpen
 
     override fun onRead(buffer: ByteArray, bufferSize: Int): Int =
+        readInto(buffer, bufferSize)
+
+    internal fun readInto(buffer: ByteArray, bufferSize: Int): Int =
         try {
             source.read(buffer, bufferSize)
         } catch (failure: RangeHttpException) {
@@ -49,7 +69,9 @@ internal class VlcjRangeCallbackMedia(
             throw failure
         }
 
-    override fun onSeek(offset: Long): Boolean = source.seek(offset)
+    override fun onSeek(offset: Long): Boolean = seekTo(offset)
+
+    internal fun seekTo(offset: Long): Boolean = source.seek(offset)
 
     override fun onClose() = close()
 
@@ -62,12 +84,18 @@ internal class VlcjRangeCallbackMedia(
         private val headers: Map<String, String>,
         private val windowSize: Int,
         private val client: OkHttpClient,
+        private val fallbackDirectory: Path?,
+        private val maxFullObjectFallbackBytes: Long,
     ) : AutoCloseable {
         private val lock = Any()
+        private val closed = AtomicBoolean(false)
+        private val activeCalls = ConcurrentHashMap.newKeySet<Call>()
         private var contentLength: Long? = null
         private var cursor = 0L
         private var windowStart = -1L
         private var window: ByteArray? = null
+        private var fallbackPath: Path? = null
+        private var fallbackChannel: FileChannel? = null
         private var opened = false
 
         val isOpen: Boolean
@@ -89,6 +117,10 @@ internal class VlcjRangeCallbackMedia(
 
         fun seek(offset: Long): Boolean = synchronized(lock) {
             if (offset < 0L) return false
+            if (fallbackChannel != null) {
+                cursor = contentLength?.let { minOf(offset, it) } ?: offset
+                return true
+            }
             val activeWindow = window
             if (
                 activeWindow != null &&
@@ -114,6 +146,16 @@ internal class VlcjRangeCallbackMedia(
         @Throws(IOException::class)
         fun read(buffer: ByteArray, length: Int): Int = synchronized(lock) {
             if (contentLength != null && cursor >= contentLength!!) return -1
+            fallbackChannel?.let { channel ->
+                val remaining = contentLength?.minus(cursor)?.coerceAtLeast(0L) ?: Long.MAX_VALUE
+                val requested = minOf(length.coerceAtLeast(0), buffer.size, remaining.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                if (requested <= 0) return -1
+                channel.position(cursor)
+                val count = channel.read(ByteBuffer.wrap(buffer, 0, requested))
+                if (count <= 0) return -1
+                cursor += count
+                return count
+            }
             if (window == null || cursor < windowStart || cursor >= windowStart + window!!.size) {
                 fetchWindow(cursor)
             }
@@ -121,7 +163,8 @@ internal class VlcjRangeCallbackMedia(
             val offset = (cursor - windowStart).toInt()
             val available = activeWindow.size - offset
             if (available <= 0) return -1
-            val count = minOf(length, available)
+            val count = minOf(length.coerceAtLeast(0), buffer.size, available)
+            if (count <= 0) return -1
             System.arraycopy(activeWindow, offset, buffer, 0, count)
             cursor += count
             count
@@ -129,6 +172,7 @@ internal class VlcjRangeCallbackMedia(
 
         @Throws(IOException::class)
         private fun fetchWindow(offset: Long) {
+            if (closed.get()) throw IOException("HTTP media source is closed")
             val end = offset + windowSize - 1
             var lastFailure: IOException? = null
             repeat(MAX_FETCH_ATTEMPTS) { attempt ->
@@ -144,7 +188,7 @@ internal class VlcjRangeCallbackMedia(
                 }
 
                 try {
-                    client.newCall(requestBuilder.build()).execute().use { response ->
+                    executeRequest(requestBuilder.build()) { response ->
                         if (!response.isSuccessful) {
                             if (
                                 response.code in FULL_OBJECT_FALLBACK_STATUS_CODES &&
@@ -152,30 +196,31 @@ internal class VlcjRangeCallbackMedia(
                             ) {
                                 return
                             }
+                            if (closed.get()) throw IOException("HTTP media source is closed")
                             throw RangeHttpException(response.code)
+                        }
+                        if (response.code != 206) {
+                            if (installWholeObjectFallback(response, offset)) return
+                            throw IOException("HTTP server ignored the media range and the full response was unusable")
                         }
                         val bytes = response.body.bytes()
                         if (bytes.isEmpty() && contentLength?.let { offset < it } != false) {
                             throw IOException("YouTube returned an empty media range")
                         }
-                        if (response.code == 206) {
-                            contentLength = response.header("Content-Range")
-                                ?.substringAfter('/')
-                                ?.toLongOrNull()
-                            windowStart = response.header("Content-Range")
-                                ?.substringBefore('-')
-                                ?.substringAfter("bytes ")
-                                ?.toLongOrNull()
-                                ?: offset
-                        } else {
-                            contentLength = bytes.size.toLong()
-                            windowStart = 0L
-                        }
+                        contentLength = response.header("Content-Range")
+                            ?.substringAfter('/')
+                            ?.toLongOrNull()
+                        windowStart = response.header("Content-Range")
+                            ?.substringBefore('-')
+                            ?.substringAfter("bytes ")
+                            ?.toLongOrNull()
+                            ?: offset
                         window = bytes
                         return
                     }
                 } catch (failure: IOException) {
                     lastFailure = failure
+                    if (closed.get()) throw IOException("HTTP media source is closed", failure)
                     if (attempt + 1 < MAX_FETCH_ATTEMPTS) {
                         try {
                             Thread.sleep(FETCH_RETRY_DELAY_MS * (attempt + 1L))
@@ -204,25 +249,84 @@ internal class VlcjRangeCallbackMedia(
                 }
             }
             return try {
-                client.newCall(requestBuilder.build()).execute().use { response ->
+                executeRequest(requestBuilder.build()) { response ->
                     if (!response.isSuccessful) return false
-                    val declaredLength = response.body.contentLength()
-                    if (declaredLength < 0L || declaredLength > MAX_FULL_OBJECT_FALLBACK_BYTES) return false
-                    val bytes = response.body.bytes()
-                    if (bytes.size.toLong() > MAX_FULL_OBJECT_FALLBACK_BYTES) return false
-                    if (requiredOffset > bytes.size.toLong()) return false
-                    contentLength = bytes.size.toLong()
-                    windowStart = 0L
-                    window = bytes
-                    true
+                    installWholeObjectFallback(response, requiredOffset)
                 }
             } catch (_: IOException) {
                 false
             }
         }
 
-        // The controller-scoped transport owns the shared OkHttpClient lifecycle.
-        override fun close() = Unit
+        private fun installWholeObjectFallback(response: Response, requiredOffset: Long): Boolean {
+            val declaredLength = response.body.contentLength()
+            if (declaredLength > maxFullObjectFallbackBytes) return false
+            if (declaredLength >= 0L && requiredOffset > declaredLength) return false
+
+            val path = fallbackDirectory?.let {
+                Files.createTempFile(it, "archivetune-vlcj-", ".media")
+            } ?: Files.createTempFile("archivetune-vlcj-", ".media")
+            var installed = false
+            try {
+                var total = 0L
+                response.body.byteStream().use { input ->
+                    Files.newOutputStream(path, StandardOpenOption.TRUNCATE_EXISTING).use { output ->
+                        val copyBuffer = ByteArray(FALLBACK_COPY_BUFFER_SIZE)
+                        while (true) {
+                            if (closed.get()) throw IOException("HTTP media source is closed")
+                            val count = input.read(copyBuffer)
+                            if (count < 0) break
+                            if (count == 0) continue
+                            total += count
+                            if (total > maxFullObjectFallbackBytes) return false
+                            output.write(copyBuffer, 0, count)
+                        }
+                    }
+                }
+                if (requiredOffset > total) return false
+                val channel = FileChannel.open(path, StandardOpenOption.READ)
+                fallbackChannel?.close()
+                fallbackPath?.let { runCatching { Files.deleteIfExists(it) } }
+                fallbackPath = path
+                fallbackChannel = channel
+                contentLength = total
+                windowStart = -1L
+                window = null
+                installed = true
+                return true
+            } finally {
+                if (!installed) runCatching { Files.deleteIfExists(path) }
+            }
+        }
+
+        private inline fun <T> executeRequest(request: Request, block: (Response) -> T): T {
+            if (closed.get()) throw IOException("HTTP media source is closed")
+            val call = client.newCall(request)
+            activeCalls += call
+            if (closed.get()) {
+                activeCalls.remove(call)
+                call.cancel()
+                throw IOException("HTTP media source is closed")
+            }
+            return try {
+                call.execute().use(block)
+            } finally {
+                activeCalls.remove(call)
+            }
+        }
+
+        override fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            activeCalls.toList().forEach(Call::cancel)
+            synchronized(lock) {
+                runCatching { fallbackChannel?.close() }
+                fallbackChannel = null
+                fallbackPath?.let { runCatching { Files.deleteIfExists(it) } }
+                fallbackPath = null
+                window = null
+                opened = false
+            }
+        }
     }
 
     private companion object {
@@ -230,6 +334,7 @@ internal class VlcjRangeCallbackMedia(
         const val MAX_FETCH_ATTEMPTS = 3
         const val FETCH_RETRY_DELAY_MS = 100L
         const val MAX_FULL_OBJECT_FALLBACK_BYTES = 32L * 1024L * 1024L
+        const val FALLBACK_COPY_BUFFER_SIZE = 64 * 1024
         val FULL_OBJECT_FALLBACK_STATUS_CODES = setOf(403, 416)
     }
 }
