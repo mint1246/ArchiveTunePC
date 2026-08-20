@@ -172,6 +172,14 @@ class SpicyPaneGlyphTest {
         assertEquals(2, geometry.wordLetters.size)
         assertTrue(geometry.wordRtl[0], "first word should be detected RTL")
         assertTrue(geometry.wordRtl[1], "second word should be detected RTL")
+        assertTrue(geometry.wordLetterCapable[0], "RTL words must use the same per-cluster animator as LTR")
+        assertTrue(geometry.wordLetterCapable[1], "RTL words must use the same per-cluster animator as LTR")
+        assertTrue(geometry.wordLetters.flatten().all { it.rtl }, "Hebrew cluster sweeps must resolve RTL")
+        assertEquals(
+            listOf(0L, 250L, 500L, 750L),
+            geometry.wordLetters[0].map { it.letter.startMs },
+            "a 1s Hebrew word should divide its actual duration across four logical clusters",
+        )
 
         // RTL letters advance right-to-left in physical space: later letters have
         // smaller X within a word.
@@ -275,6 +283,8 @@ class SpicyPaneGlyphTest {
         val geometry = geometryOf(text, line)
         assertEquals(4, geometry.wordLetters[0].size)
         assertTrue(geometry.wordRtl[0], "niqqud word must still be detected RTL")
+        assertTrue(geometry.wordLetterCapable[0], "niqqud word must retain per-cluster animation")
+        assertTrue(geometry.wordLetters[0].all { it.rtl }, "niqqud clusters must sweep right-to-left")
         // Every cluster box real and positive-width (marks share their base's advance).
         geometry.wordLetters[0].forEach { lt ->
             assertTrue(lt.width > 0f, "cluster ${lt.letter.ch} must carry the base letter's width")
@@ -292,6 +302,46 @@ class SpicyPaneGlyphTest {
 
         val geometry = geometryOf(text, line)
         assertTrue(geometry.wordLetters[1][0].width > 0f)
+    }
+
+    @Test
+    fun emojiZwJSequenceStaysOneAnimatedCluster() {
+        val family = "👩‍👩‍👧‍👦"
+        val line = lineOf(family, listOf(family to 0L))
+        val letters = lettersOf(line, line.words.single())
+
+        assertEquals(1, letters.size)
+        assertEquals(family, letters.single().ch)
+        assertTrue(geometryOf(family, line).wordLetterCapable.single())
+    }
+
+    @Test
+    fun arabicCombiningMarkStaysAttachedAndAnimatesRtl() {
+        // Arabic meem + fatha followed by reh. The vowel mark must never become an
+        // independently timed/animated band.
+        val text = "مَر"
+        val line = lineOf(text, listOf(text to 0L))
+        val letters = lettersOf(line, line.words.single())
+        val geometry = geometryOf(text, line)
+
+        assertEquals(listOf("مَ", "ر"), letters.map { it.ch })
+        assertTrue(geometry.wordRtl.single())
+        assertTrue(geometry.wordLetterCapable.single())
+        assertTrue(geometry.wordLetters.single().all { it.rtl })
+    }
+
+    @Test
+    fun mixedScriptWordUsesResolvedBidiDirectionPerCluster() {
+        val text = "abcשלום123"
+        val line = lineOf(text, listOf(text to 0L))
+        val geometry = geometryOf(text, line)
+        val clusters = geometry.wordLetters.single()
+
+        assertTrue(geometry.wordLetterCapable.single())
+        assertEquals(text, clusters.joinToString(separator = "") { it.letter.ch })
+        assertTrue(clusters.take(3).all { !it.rtl }, "Latin clusters must keep LTR sweep direction")
+        assertTrue(clusters.slice(3..6).all { it.rtl }, "Hebrew clusters must keep RTL sweep direction")
+        assertTrue(clusters.takeLast(3).all { !it.rtl }, "digit clusters must keep their resolved LTR run")
     }
 
     @Test

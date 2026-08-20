@@ -77,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -96,6 +97,7 @@ import org.jetbrains.skia.Paint as SkiaPaint
 import org.jetbrains.skia.Point
 import org.jetbrains.skia.Rect as SkiaRect
 import org.jetbrains.skia.Shader
+import java.util.regex.Pattern
 
 /* ---------------------------------------------------------------------------------- */
 /*  Typography / layout constants                                                      */
@@ -429,24 +431,8 @@ internal fun pinnedScrollAnchorLine(
 }
 
 
-private fun containsStrongRtl(text: String): Boolean {
-    var i = 0
-    while (i < text.length) {
-        val cp = text.codePointAt(i)
-        when (Character.getDirectionality(cp)) {
-            Character.DIRECTIONALITY_RIGHT_TO_LEFT,
-            Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC,
-            Character.DIRECTIONALITY_RIGHT_TO_LEFT_EMBEDDING,
-            Character.DIRECTIONALITY_RIGHT_TO_LEFT_OVERRIDE,
-            -> return true
-        }
-        i += Character.charCount(cp)
-    }
-    return false
-}
-
-private fun isLetterCapable(word: WordSpan, rtl: Boolean): Boolean =
-    !rtl && word.endMs - word.startMs >= LETTER_ANIMATION_MIN_MS
+private fun isLetterCapable(word: WordSpan): Boolean =
+    word.endMs - word.startMs >= LETTER_ANIMATION_MIN_MS
 
 /*
  * Keep the provider's real word boundary. Cutting 250 ms off every promoted word made
@@ -514,32 +500,21 @@ private fun lettersOf(line: CharLine, word: WordSpan, effectiveEndMs: Long): Lis
     }
 }
 
-/** Cluster-extend rule: a code point continues the current cluster if it is a Unicode
- * combining mark, a variation selector, or glued on by a zero-width joiner. */
-private fun continuesCluster(text: String, i: Int): Boolean {
-    val cp = text.codePointAt(i)
-    return when (Character.getType(cp)) {
-        Character.NON_SPACING_MARK.toInt(),
-        Character.COMBINING_SPACING_MARK.toInt(),
-        Character.ENCLOSING_MARK.toInt(),
-        -> true
-        else -> cp == 0x200D || cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF
-    }
-}
+/**
+ * Java's `\X` implements Unicode extended grapheme clusters. That gives the animator
+ * the same user-visible units the shaper sees: combining marks stay attached to their
+ * base, surrogate pairs never split, and emoji ZWJ/variation-selector sequences remain
+ * one timed unit. Match ranges remain UTF-16 offsets because Compose text APIs use those.
+ */
+private val GraphemePattern = Pattern.compile("\\X")
 
-/** Grapheme-cluster boundaries over the UTF-16 sub-range [start, end). */
+/** Extended grapheme-cluster boundaries over the UTF-16 sub-range [start, end). */
 private fun clusterRanges(text: String, start: Int, end: Int): List<IntRange> {
-    val ranges = mutableListOf<IntRange>()
-    var i = start
-    while (i < end) {
-        val clusterStart = i
-        i += Character.charCount(text.codePointAt(i))
-        while (i < end && continuesCluster(text, i)) {
-            i += Character.charCount(text.codePointAt(i))
-        }
-        ranges += clusterStart until i
+    if (start >= end) return emptyList()
+    val matcher = GraphemePattern.matcher(text).region(start, end)
+    return buildList {
+        while (matcher.find()) add(matcher.start() until matcher.end())
     }
-    return ranges
 }
 
 /**
@@ -574,7 +549,7 @@ internal class LineTextGeometry(
     val wordBottom: List<Float>,
     /** word index -> true when the word's run reads right-to-left (Hebrew, Arabic, …). */
     val wordRtl: List<Boolean>,
-    /** Canvas renderer split: timed non-RTL words >= 500 ms become letter groups. */
+    /** Canvas renderer split: timed words >= 500 ms become grapheme-cluster groups. */
     val wordLetterCapable: List<Boolean>,
     /** Provider-accurate animation end for each word. */
     val wordAnimationEndMs: List<Long>,
@@ -606,14 +581,16 @@ internal class LineTextGeometry(
             )
             val rawLetters = line.words.map { word -> lettersOf(line, word) }
             val rawBoxes = rawLetters.map { letters -> letters.map { layout.getBoundingBox(it.charOffset) } }
-            val wordRtl = rawBoxes.mapIndexed { wi, boxes ->
-                val visible = boxes.filter { it.width > 0f }
-                val geometricRtl = visible.size >= 2 && visible.first().left > visible.last().right
-                val word = line.words[wi]
-                val logicalText = line.text.substring(word.startChar, word.endChar)
-                geometricRtl || containsStrongRtl(logicalText)
+            val rawDirections = rawLetters.map { letters ->
+                letters.map { letter ->
+                    layout.getBidiRunDirection(letter.charOffset) == ResolvedTextDirection.Rtl
+                }
             }
-            val wordLetterCapable = line.words.mapIndexed { i, word -> isLetterCapable(word, wordRtl[i]) }
+            // Use the shaper's resolved reading direction rather than guessing from the
+            // script or physical X positions. This also handles neutral punctuation and
+            // mixed-script tokens according to the exact BiDi context Compose rendered.
+            val wordRtl = rawDirections.map { directions -> directions.firstOrNull() ?: false }
+            val wordLetterCapable = line.words.map(::isLetterCapable)
             val wordAnimationEndMs = line.words.mapIndexed { i, word ->
                 animationEndMs(word, wordLetterCapable[i])
             }
@@ -633,6 +610,7 @@ internal class LineTextGeometry(
                         box = box,
                         width = box.width,
                         lineIndex = visualLine,
+                        rtl = rawDirections[wi][i],
                     )
                 }
             }
@@ -709,6 +687,8 @@ internal class LetterText(
     val width: Float,
     /** Visual row in the wrapped TextLayoutResult that owns this cluster. */
     val lineIndex: Int,
+    /** Resolved BiDi direction of this cluster inside the full shaped paragraph. */
+    val rtl: Boolean,
 )
 
 /**
@@ -1811,7 +1791,7 @@ private fun DrawScope.drawAnimatedLine(
                                 right = bandRight,
                                 bottom = letterText.box.bottom,
                                 t = t,
-                                rtl = false,
+                                rtl = letterText.rtl,
                                 glow = letterGlow,
                             )
                             native.restore()
