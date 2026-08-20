@@ -28,6 +28,9 @@ interface DesktopAudioEffects {
     suspend fun presetEqualizer(name: String): DesktopEqualizerProfile?
 
     suspend fun applyEqualizer(profile: DesktopEqualizerProfile)
+
+    /** Local-only output correction; does not alter PlaybackSnapshot.volume. */
+    suspend fun setLoudnessNormalizationEnabled(enabled: Boolean)
 }
 
 internal interface EqualizerBackend {
@@ -44,6 +47,7 @@ internal interface EqualizerBackend {
  * the backend reapplies the latest requested profile.
  */
 internal class VlcjAudioEffects(
+    private val applyLoudnessNormalizationEnabled: suspend (Boolean) -> Unit = {},
     private val ensureBackend: suspend () -> EqualizerBackend,
 ) : DesktopAudioEffects {
     private val desiredProfile = AtomicReference(DesktopEqualizerProfile())
@@ -59,6 +63,10 @@ internal class VlcjAudioEffects(
         val sanitized = profile.sanitized()
         desiredProfile.set(sanitized)
         backend.get()?.apply(sanitized)
+    }
+
+    override suspend fun setLoudnessNormalizationEnabled(enabled: Boolean) {
+        applyLoudnessNormalizationEnabled(enabled)
     }
 
     fun attach(attached: EqualizerBackend) {

@@ -88,6 +88,7 @@ class DesktopSettingsStoreTest {
             repeatMode = DesktopRepeatMode.ALL,
             shuffleEnabled = true,
             audioOutputDeviceId = "headphones-device-id",
+            loudnessNormalizationEnabled = true,
             downloadConcurrency = 7,
             partialCleanupPolicy = DesktopPartialCleanupPolicy.KEEP_ON_CANCEL,
             lyricsProviderIds = listOf("lrclib", "betterlyrics"),
@@ -98,6 +99,7 @@ class DesktopSettingsStoreTest {
         assertEquals(expected, DesktopSettingsStore(file).snapshot())
         val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
         assertEquals("headphones-device-id", persisted.getProperty("playback.audioOutputDevice"))
+        assertEquals("true", persisted.getProperty("playback.loudnessNormalization"))
     }
 
     @Test

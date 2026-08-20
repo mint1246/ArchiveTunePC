@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertFalse
 
 class DesktopAudioEffectsTest {
     @Test
@@ -52,6 +53,26 @@ class DesktopAudioEffectsTest {
         assertEquals(backend.capabilities, effects.equalizerCapabilities())
         assertEquals(backend.preset("Rock"), effects.presetEqualizer("Rock"))
         assertNull(effects.presetEqualizer("Missing"))
+    }
+
+    @Test
+    fun `loudness toggle stays independent from equalizer backend lifecycle`() = runBlocking {
+        var ensured = false
+        var normalizationEnabled = false
+        val backend = FakeEqualizerBackend()
+        val effects = VlcjAudioEffects(
+            applyLoudnessNormalizationEnabled = { normalizationEnabled = it },
+            ensureBackend = { ensured = true; backend },
+        )
+
+        effects.setLoudnessNormalizationEnabled(true)
+        assertEquals(true, normalizationEnabled)
+        assertFalse(ensured)
+
+        effects.attach(backend)
+        effects.applyEqualizer(DesktopEqualizerProfile(enabled = true, preampDb = 2f, bandGainsDb = listOf(1f, -1f)))
+        assertEquals(2, backend.applied.size)
+        assertEquals(2f, backend.applied.last().preampDb)
     }
 
     private class FakeEqualizerBackend : EqualizerBackend {

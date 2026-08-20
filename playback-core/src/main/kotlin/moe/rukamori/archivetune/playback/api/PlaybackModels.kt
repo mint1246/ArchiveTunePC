@@ -76,6 +76,10 @@ data class ResolvedPlaybackSource(
     val mimeType: String? = null,
     val headers: Map<String, String> = emptyMap(),
     val expiresAtEpochMs: Long? = null,
+    /** YouTube's loudness offset in dB. Optional so local/general sources stay neutral. */
+    val loudnessDb: Double? = null,
+    /** Preferred perceptual loudness offset when supplied by the player response. */
+    val perceptualLoudnessDb: Double? = null,
 )
 
 fun interface PlaybackSourceResolver {

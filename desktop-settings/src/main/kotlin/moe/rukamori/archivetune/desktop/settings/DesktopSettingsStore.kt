@@ -71,6 +71,7 @@ data class DesktopSettings(
     val accentSeedArgb: Long? = null,
     val volume: Float = 1f,
     val speed: Float = 1f,
+    val loudnessNormalizationEnabled: Boolean = false,
     val repeatMode: DesktopRepeatMode = DesktopRepeatMode.OFF,
     val shuffleEnabled: Boolean = false,
     val equalizer: DesktopEqualizerSettings = DesktopEqualizerSettings(),
@@ -145,6 +146,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 accentSeedArgb = values.getProperty("appearance.accentArgb")?.toLongOrNull(),
                 volume = values.getProperty("playback.volume")?.toFloatOrNull() ?: 1f,
                 speed = values.getProperty("playback.speed")?.toFloatOrNull() ?: 1f,
+                loudnessNormalizationEnabled = values.getProperty("playback.loudnessNormalization")?.toBooleanStrictOrNull() ?: false,
                 repeatMode = values.enumValue("playback.repeatMode", DesktopRepeatMode.OFF),
                 shuffleEnabled = values.getProperty("playback.shuffle")?.toBooleanStrictOrNull() ?: false,
                 equalizer = DesktopEqualizerSettings(
@@ -179,6 +181,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             settings.accentSeedArgb?.let { setProperty("appearance.accentArgb", it.toString()) }
             setProperty("playback.volume", settings.volume.toString())
             setProperty("playback.speed", settings.speed.toString())
+            setProperty("playback.loudnessNormalization", settings.loudnessNormalizationEnabled.toString())
             setProperty("playback.repeatMode", settings.repeatMode.name)
             setProperty("playback.shuffle", settings.shuffleEnabled.toString())
             setProperty("playback.equalizer.enabled", settings.equalizer.enabled.toString())

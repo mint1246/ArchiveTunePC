@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.logging.Level
 import java.util.logging.Logger
 import kotlin.math.roundToLong
-import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -91,6 +90,7 @@ class VlcjPlaybackController(
     private var nativeLogListener: LogEventListener? = null
     private var player: MediaPlayer? = null
     private var equalizerBackend: EqualizerBackend? = null
+    private var outputVolumeBackend: OutputVolumeBackend? = null
     private var listener: MediaPlayerEventAdapter? = null
     private var activeCallbackMedia: VlcjRangeCallbackMedia? = null
     private var generation = 0L
@@ -104,10 +104,14 @@ class VlcjPlaybackController(
 
     override val state = _state.asStateFlow()
     override val events = _events.asSharedFlow()
-    private val vlcjAudioEffects = VlcjAudioEffects {
-        ensurePlayer()
-        synchronized(nativeLifecycleLock) { checkNotNull(equalizerBackend) }
-    }
+    private val outputGain = DesktopOutputGain()
+    private val vlcjAudioEffects = VlcjAudioEffects(
+        ensureBackend = {
+            ensurePlayer()
+            synchronized(nativeLifecycleLock) { checkNotNull(equalizerBackend) }
+        },
+        applyLoudnessNormalizationEnabled = ::setLoudnessNormalizationEnabled,
+    )
     val audioEffects: DesktopAudioEffects = vlcjAudioEffects
     override val audioOutputState = audioOutputSelection.state
 
@@ -462,8 +466,13 @@ class VlcjPlaybackController(
         val safeVolume = volume.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 1f
         commandMutex.withLock {
             _state.update { it.copy(volume = safeVolume) }
-            player?.audio()?.setVolume((safeVolume * 100f).roundToInt())
+            outputGain.setUserVolume(safeVolume)
         }
+    }
+
+    private suspend fun setLoudnessNormalizationEnabled(enabled: Boolean) {
+        checkOpen()
+        commandMutex.withLock { outputGain.setNormalizationEnabled(enabled) }
     }
 
     override suspend fun setSpeed(speed: Float) {
@@ -599,6 +608,7 @@ class VlcjPlaybackController(
                 stopActiveFileLocked()
                 activeGeneration = request.generation
                 activeResolvedSource = resolved
+                outputGain.setSource(resolved)
                 httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
                 pendingSeek = pendingSeek?.takeIf { it.first == request.generation }
                     ?: (request.generation to request.startPositionMs)
@@ -644,7 +654,9 @@ class VlcjPlaybackController(
                     )
                     return@withLock
                 }
-                activePlayer.audio().setVolume((_state.value.volume * 100f).roundToInt())
+                // media.play can reset native output state on some VLC builds, so replay the
+                // already-computed user-volume × normalization gain after every track start.
+                outputGain.reapply()
                 activePlayer.controls().setRate(_state.value.speed)
                 activePlayer.controls().setPause(!_state.value.playWhenReady)
                 armLoadWatchdog(request)
@@ -699,6 +711,7 @@ class VlcjPlaybackController(
                     }
                     val newPlayer = newFactory.mediaPlayers().newMediaPlayer()
                     val newEqualizerBackend = VlcjEqualizerBackend(newFactory, newPlayer)
+                    val newOutputVolumeBackend = OutputVolumeBackend { percent -> newPlayer.audio().setVolume(percent) }
                     val newListener = createEventListener()
                     newPlayer.events().addMediaPlayerEventListener(newListener)
                     factory = newFactory
@@ -706,7 +719,9 @@ class VlcjPlaybackController(
                     nativeLogListener = newNativeLogListener
                     player = newPlayer
                     equalizerBackend = newEqualizerBackend
+                    outputVolumeBackend = newOutputVolumeBackend
                     listener = newListener
+                    outputGain.attach(newOutputVolumeBackend)
                     vlcjAudioEffects.attach(newEqualizerBackend)
                     audioOutputSelection.replaceBackend(VlcjAudioOutputBackend(newPlayer))
                     newPlayer
@@ -1148,6 +1163,7 @@ class VlcjPlaybackController(
         val callbackMedia = activeCallbackMedia
         activeGeneration = null
         activeResolvedSource = null
+        outputGain.setSource(null)
         activeCallbackMedia = null
         httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
         pendingSeek = null
@@ -1176,6 +1192,7 @@ class VlcjPlaybackController(
             runCatching { activeCallbackMedia?.close() }
             runCatching { rangeHttpTransport.close() }
             equalizerBackend?.let(vlcjAudioEffects::detach)
+            outputVolumeBackend?.let(outputGain::detach)
             runCatching { player?.release() }
             runCatching { nativeLog?.release() }
             runCatching { factory?.release() }
@@ -1185,6 +1202,7 @@ class VlcjPlaybackController(
             player = null
             equalizerBackend = null
             audioOutputSelection.replaceBackend(null)
+            outputVolumeBackend = null
             activeCallbackMedia = null
             factory = null
             _state.update { it.copy(status = PlaybackStatus.IDLE, playWhenReady = false) }

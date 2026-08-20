@@ -210,6 +210,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             playback.setRepeatMode(restored.repeatMode.toPlaybackMode())
             playback.setShuffleEnabled(restored.shuffleEnabled)
             playback.audioEffects.applyEqualizer(restored.equalizer.toPlaybackProfile())
+            playback.audioEffects.setLoudnessNormalizationEnabled(restored.loudnessNormalizationEnabled)
         }
         runtime.applicationScope.launch {
             playback.audioOutputState
@@ -512,7 +513,14 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                                     "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
                                     "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
                             )
-                            val resolved = ResolvedPlaybackSource(it.url, it.mimeType, it.requestHeaders, it.expiresAtEpochMillis)
+                            val resolved = ResolvedPlaybackSource(
+                                uri = it.url,
+                                mimeType = it.mimeType,
+                                headers = it.requestHeaders,
+                                expiresAtEpochMs = it.expiresAtEpochMillis,
+                                loudnessDb = it.audioConfig?.loudnessDb,
+                                perceptualLoudnessDb = it.audioConfig?.perceptualLoudnessDb,
+                            )
                             cacheSource(
                                 key = source.key,
                                 source = resolved,

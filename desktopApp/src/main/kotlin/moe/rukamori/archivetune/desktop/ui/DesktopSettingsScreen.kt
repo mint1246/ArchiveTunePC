@@ -195,6 +195,22 @@ fun DesktopSettingsPanel(
                     settings = settingsStore.update { it.copy(volume = value) }
                     scope.launch { playback?.setVolume(value) }
                 }, Modifier.fillMaxWidth())
+                ToggleRow(
+                    "Normalize track loudness",
+                    settings.loudnessNormalizationEnabled,
+                    Icons.Rounded.VolumeUp,
+                ) { enabled ->
+                    update { it.copy(loudnessNormalizationEnabled = enabled) }
+                    scope.launch {
+                        runCatching { audioEffects?.setLoudnessNormalizationEnabled(enabled) }
+                            .onFailure { error = it.message ?: "Could not update loudness normalization." }
+                    }
+                }
+                Text(
+                    "Uses YouTube's per-track loudness metadata when available. Your volume slider stays unchanged; local files without metadata are played at the normal level.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 SettingSlider("Playback speed", "${"%.2f".format(settings.speed)}×", Icons.Rounded.Speed)
                 Slider(settings.speed, { value ->
                     val safe = (value * 4f).toInt() / 4f
