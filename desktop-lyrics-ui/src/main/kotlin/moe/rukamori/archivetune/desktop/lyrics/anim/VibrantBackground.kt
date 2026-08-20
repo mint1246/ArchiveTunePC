@@ -36,8 +36,6 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.asComposeShader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import moe.rukamori.archivetune.desktop.artwork.DesktopArtworkImage
-import moe.rukamori.archivetune.desktop.artwork.loadDesktopArtwork
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Canvas
 import org.jetbrains.skia.FilterTileMode
@@ -50,6 +48,7 @@ import org.jetbrains.skia.RuntimeEffect
 import org.jetbrains.skia.RuntimeShaderBuilder
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Shader
+import java.net.URI
 
 /** Same size Kawarp blurs to. */
 private const val BLUR_SIZE = 128
@@ -126,10 +125,21 @@ float4 main(float2 coord) {
 }
 """.trimIndent()
 
+/** Convert a cover URI into a loadable http(s) URL, or null if it can't be fetched. */
+private fun resolveCoverUrl(artworkUri: String?): String? {
+    if (artworkUri.isNullOrBlank()) return null
+    return when {
+        artworkUri.startsWith("http://") || artworkUri.startsWith("https://") -> artworkUri
+        artworkUri.startsWith("spotify:image:") -> "https://i.scdn.co/image/" + artworkUri.removePrefix("spotify:image:")
+        else -> null
+    }
+}
+
 /** Decode artwork and produce the blurred 128x128 colour field Skia Image (Kawarp blur equivalent). */
-internal fun makeVibrantColourField(artwork: DesktopArtworkImage): Image? {
+private fun makeColourField(uri: String): Image? {
     return runCatching {
-        var image = artwork.toSkiaImage()
+        val bytes = URI(uri).toURL().readBytes()
+        var image = Image.makeFromEncoded(bytes)
         try {
             if (image.width <= 0 || image.height <= 0) return null
 
@@ -182,28 +192,6 @@ internal fun makeVibrantColourField(artwork: DesktopArtworkImage): Image? {
     }.getOrNull()
 }
 
-private fun DesktopArtworkImage.toSkiaImage(): Image {
-    // N32 premultiplied pixels are BGRA on Windows' little-endian JVM. The shared artwork is
-    // already downsampled to <=256px, so this transfers a tiny pixel field directly into Skia
-    // instead of asking Skia to decode the original full-resolution encoded cover again.
-    val bytes = ByteArray(argb.size * 4)
-    var offset = 0
-    argb.forEach { pixel ->
-        val alpha = pixel ushr 24 and 0xFF
-        val red = pixel ushr 16 and 0xFF
-        val green = pixel ushr 8 and 0xFF
-        val blue = pixel and 0xFF
-        bytes[offset++] = ((blue * alpha + 127) / 255).toByte()
-        bytes[offset++] = ((green * alpha + 127) / 255).toByte()
-        bytes[offset++] = ((red * alpha + 127) / 255).toByte()
-        bytes[offset++] = alpha.toByte()
-    }
-    return Bitmap().use { bitmap ->
-        check(bitmap.installPixels(ImageInfo.makeN32Premul(width, height), bytes, width * 4))
-        Image.makeFromBitmap(bitmap)
-    }
-}
-
 @Composable
 fun VibrantLyricsBackground(
     artworkUri: String?,
@@ -224,11 +212,11 @@ fun VibrantLyricsBackground(
 
     // Load artwork when the URI changes and build the child colour-field shader.
     LaunchedEffect(artworkUri) {
-        val artwork = loadDesktopArtwork(artworkUri)
-        val next = if (artwork == null) {
+        val url = resolveCoverUrl(artworkUri)
+        val next = if (url == null) {
             null
         } else {
-            withContext(Dispatchers.Default) { makeVibrantColourField(artwork) }?.use { img ->
+            withContext(Dispatchers.IO) { makeColourField(url) }?.use { img ->
                 img.makeShader(
                     FilterTileMode.CLAMP,
                     FilterTileMode.CLAMP,
