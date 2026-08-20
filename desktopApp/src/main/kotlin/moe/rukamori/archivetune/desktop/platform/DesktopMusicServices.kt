@@ -133,6 +133,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         },
         initialAudioOutputDeviceId = settings.snapshot().audioOutputDeviceId,
     )
+    private val nextTrackPrefetcher = NextTrackPrefetcher(runtime.applicationScope) { item, cacheAllowed ->
+        resolve(item, cacheResolvedRemote = cacheAllowed, reportFailure = false)
+    }
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     private val lyricsPresenter = lazy {
@@ -196,6 +199,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         }
         startPlayHistoryRecorder()
         startHomeSyncObserver()
+        runtime.applicationScope.launch {
+            playback.state.collect(nextTrackPrefetcher::onSnapshot)
+        }
         if (library.folders.isNotEmpty()) {
             runtime.applicationScope.launch(Dispatchers.IO) {
                 contentCoordinator.singleFlight("local-library-scan", DesktopRequestPriority.MAINTENANCE) {
@@ -493,7 +499,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         homeStore.recordPlay(DesktopPlayEvent(current.first, current.second, playTimeMs))
     }
 
-    private suspend fun resolve(item: PlaybackItem): Result<ResolvedPlaybackSource> = when (val source = item.source) {
+    private suspend fun resolve(
+        item: PlaybackItem,
+        cacheResolvedRemote: () -> Boolean = { true },
+        reportFailure: Boolean = true,
+    ): Result<ResolvedPlaybackSource> = when (val source = item.source) {
         is PlaybackSource.Deferred -> resolveDeferredPreferCompletedDownload(
             item = item,
             completedDownloadLookup = completedDownloadLookup,
@@ -521,18 +531,22 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                                 loudnessDb = it.audioConfig?.loudnessDb,
                                 perceptualLoudnessDb = it.audioConfig?.perceptualLoudnessDb,
                             )
-                            cacheSource(
-                                key = source.key,
-                                source = resolved,
-                                resolvedVideoId = it.videoId,
-                                streamClientKey = it.clientKey,
-                                streamAuthFingerprint = it.authFingerprint,
-                            )
+                            if (cacheResolvedRemote()) {
+                                cacheSource(
+                                    key = source.key,
+                                    source = resolved,
+                                    resolvedVideoId = it.videoId,
+                                    streamClientKey = it.clientKey,
+                                    streamAuthFingerprint = it.authFingerprint,
+                                )
+                            }
                             Result.success(resolved)
                         },
                         onFailure = { failure ->
                             val classification = classifyStreamResolutionFailure(failure)
-                            runtime.logger.warning("stream_resolution event=player_handoff result=${classification.name}")
+                            if (reportFailure) {
+                                runtime.logger.warning("stream_resolution event=player_handoff result=${classification.name}")
+                            }
                             Result.failure(DesktopStreamResolutionException(classification, failure))
                         },
                     )
@@ -646,6 +660,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             lyricsPresenter.value.close()
             lyricsScope.value.cancel()
         }
+        nextTrackPrefetcher.close()
         windowsMediaControls?.close()
         homeStore.close()
         albumIndex.close()

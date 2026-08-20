@@ -42,6 +42,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.json)
     testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
 }
 
 val desktopIconPng = rootProject.file("app/src/main/res/mipmap-xxxhdpi/ic_launcher.png")
