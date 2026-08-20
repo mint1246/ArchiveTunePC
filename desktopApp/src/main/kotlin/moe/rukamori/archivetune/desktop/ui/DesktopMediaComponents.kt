@@ -9,6 +9,7 @@ package moe.rukamori.archivetune.desktop.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,8 +47,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -155,7 +161,24 @@ fun DesktopMediaGridCard(
     val hasMenu =
         onPlayNext != null || onAddToQueue != null || onDownload != null || onAddToPlaylist != null ||
             onSetLiked != null || onPin != null || onNotInterested != null
-    Column(modifier = modifier.clickable(onClick = onClick)) {
+    var hovered by remember { mutableStateOf(false) }
+    var focusWithin by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val showOverflowButton = shouldShowMediaOverflowButton(hasMenu, hovered, focusWithin, menuOpen)
+    Column(
+        modifier =
+            modifier
+                .onFocusChanged { focusWithin = it.hasFocus }
+                .desktopMediaPointerInteractions(
+                    enabled = hasMenu,
+                    onHoverChanged = { hovered = it },
+                    onSecondaryClick = { menuOpen = true },
+                )
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = if (hasMenu) ({ menuOpen = true }) else null,
+                ),
+    ) {
         Box {
             DesktopMediaArtwork(
                 url = item.thumbnail,
@@ -177,6 +200,9 @@ fun DesktopMediaGridCard(
                     onNotInterested = onNotInterested,
                     isLiked = isLiked,
                     isPinned = isPinned,
+                    expanded = menuOpen,
+                    onExpandedChange = { menuOpen = it },
+                    showButton = showOverflowButton,
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                 )
             }
@@ -228,8 +254,27 @@ fun DesktopMediaListRow(
     isLiked: Boolean = false,
     isPinned: Boolean = false,
 ) {
+    val hasMenu =
+        onPlayNext != null || onAddToQueue != null || onDownload != null || onAddToPlaylist != null ||
+            onSetLiked != null || onPin != null || onNotInterested != null
+    var hovered by remember { mutableStateOf(false) }
+    var focusWithin by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val showOverflowButton = shouldShowMediaOverflowButton(hasMenu, hovered, focusWithin, menuOpen)
     Row(
-        modifier = modifier.clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 8.dp),
+        modifier =
+            modifier
+                .onFocusChanged { focusWithin = it.hasFocus }
+                .desktopMediaPointerInteractions(
+                    enabled = hasMenu,
+                    onHoverChanged = { hovered = it },
+                    onSecondaryClick = { menuOpen = true },
+                )
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = if (hasMenu) ({ menuOpen = true }) else null,
+                )
+                .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -271,23 +316,47 @@ fun DesktopMediaListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (
-            onPlayNext != null || onAddToQueue != null || onDownload != null || onAddToPlaylist != null ||
-                onSetLiked != null || onPin != null || onNotInterested != null
-        ) {
-            MediaOverflowMenu(
-                onPlayNext = onPlayNext,
-                onAddToQueue = onAddToQueue,
-                onDownload = onDownload,
-                onAddToPlaylist = onAddToPlaylist,
-                onSetLiked = onSetLiked,
-                onPin = onPin,
-                onNotInterested = onNotInterested,
-                isLiked = isLiked,
-                isPinned = isPinned,
-            )
+        if (hasMenu) {
+            Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
+                MediaOverflowMenu(
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onDownload = onDownload,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onSetLiked = onSetLiked,
+                    onPin = onPin,
+                    onNotInterested = onNotInterested,
+                    isLiked = isLiked,
+                    isPinned = isPinned,
+                    expanded = menuOpen,
+                    onExpandedChange = { menuOpen = it },
+                    showButton = showOverflowButton,
+                )
+            }
         }
     }
+}
+
+internal fun shouldShowMediaOverflowButton(
+    hasMenu: Boolean,
+    hovered: Boolean,
+    focusWithin: Boolean,
+    menuOpen: Boolean,
+): Boolean = hasMenu && (hovered || focusWithin || menuOpen)
+
+@OptIn(ExperimentalComposeUiApi::class)
+private fun Modifier.desktopMediaPointerInteractions(
+    enabled: Boolean,
+    onHoverChanged: (Boolean) -> Unit,
+    onSecondaryClick: () -> Unit,
+): Modifier {
+    if (!enabled) return this
+    return this
+        .onPointerEvent(PointerEventType.Enter) { onHoverChanged(true) }
+        .onPointerEvent(PointerEventType.Exit) { onHoverChanged(false) }
+        .onPointerEvent(PointerEventType.Press) { event ->
+            if (event.buttons.isSecondaryPressed) onSecondaryClick()
+        }
 }
 
 @Composable
@@ -301,31 +370,40 @@ internal fun MediaOverflowMenu(
     onNotInterested: (() -> Unit)?,
     isLiked: Boolean,
     isPinned: Boolean,
+    expanded: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
+    showButton: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    var open by remember { mutableStateOf(false) }
+    var internalExpanded by remember { mutableStateOf(false) }
+    val menuExpanded = expanded ?: internalExpanded
+    val setExpanded: (Boolean) -> Unit = { value ->
+        if (onExpandedChange != null) onExpandedChange(value) else internalExpanded = value
+    }
     Box(modifier) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            shape = CircleShape,
-        ) {
-            IconButton(onClick = { open = true }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "More actions", modifier = Modifier.size(18.dp))
+        if (showButton) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = CircleShape,
+            ) {
+                IconButton(onClick = { setExpanded(true) }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "More actions", modifier = Modifier.size(18.dp))
+                }
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { setExpanded(false) }) {
             onPlayNext?.let { action ->
-                DropdownMenuItem(text = { Text("Play next") }, onClick = { open = false; action() })
+                DropdownMenuItem(text = { Text("Play next") }, onClick = { setExpanded(false); action() })
             }
             onAddToQueue?.let { action ->
-                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { open = false; action() })
+                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { setExpanded(false); action() })
             }
             onDownload?.let { action ->
                 DropdownMenuItem(
                     text = { Text("Download") },
                     leadingIcon = { Icon(Icons.Rounded.Download, contentDescription = null) },
-                    onClick = { open = false; action() },
+                    onClick = { setExpanded(false); action() },
                 )
             }
             onSetLiked?.let { action ->
@@ -334,26 +412,26 @@ internal fun MediaOverflowMenu(
                     leadingIcon = {
                         Icon(if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, contentDescription = null)
                     },
-                    onClick = { open = false; action(!isLiked) },
+                    onClick = { setExpanded(false); action(!isLiked) },
                 )
             }
             onAddToPlaylist?.let { action ->
                 DropdownMenuItem(
                     text = { Text("Add to playlist") },
                     leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
-                    onClick = { open = false; action() },
+                    onClick = { setExpanded(false); action() },
                 )
             }
             onPin?.let { action ->
                 DropdownMenuItem(
                     text = { Text(if (isPinned) "Unpin from speed dial" else "Pin to speed dial") },
-                    onClick = { open = false; action() },
+                    onClick = { setExpanded(false); action() },
                 )
             }
             onNotInterested?.let { action ->
                 DropdownMenuItem(
                     text = { Text("Not interested") },
-                    onClick = { open = false; action() },
+                    onClick = { setExpanded(false); action() },
                 )
             }
         }
