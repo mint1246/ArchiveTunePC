@@ -15,13 +15,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import moe.rukamori.archivetune.desktop.artwork.desktopArtworkCacheKey
+import moe.rukamori.archivetune.desktop.artwork.loadDesktopArtwork
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
-import java.net.URI
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.LinkedHashMap
-import javax.imageio.ImageIO
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -53,7 +51,7 @@ internal fun rememberDynamicThemePalette(artworkUri: String?): DynamicThemePalet
             palette = DynamicThemePalette.Fallback
             return@LaunchedEffect
         }
-        val next = withContext(Dispatchers.IO) { cachedDynamicThemePalette(artworkUri) }
+        val next = cachedDynamicThemePalette(artworkUri)
         palette = next ?: DynamicThemePalette.Fallback
     }
     return palette
@@ -84,17 +82,20 @@ private val paletteCache = object : LinkedHashMap<String, DynamicThemePalette>(P
         size > PALETTE_CACHE_SIZE
 }
 
-private fun cachedDynamicThemePalette(uri: String): DynamicThemePalette? {
-    synchronized(paletteCache) { paletteCache[uri] }?.let { return it }
+private suspend fun cachedDynamicThemePalette(uri: String): DynamicThemePalette? {
+    val key = desktopArtworkCacheKey(uri) ?: uri
+    synchronized(paletteCache) { paletteCache[key] }?.let { return it }
     // Artwork decoding/processing is best-effort. A malformed or unusual cover must never
     // cancel the Compose LaunchedEffect and take down the desktop app.
-    val extracted = runCatching { extractDynamicThemePalette(uri) }.getOrNull() ?: return null
-    synchronized(paletteCache) { paletteCache[uri] = extracted }
+    val artwork = loadDesktopArtwork(uri) ?: return null
+    val extracted = withContext(Dispatchers.Default) {
+        runCatching { extractDynamicThemePalette(artwork.toBufferedImage()) }.getOrNull()
+    } ?: return null
+    synchronized(paletteCache) { paletteCache[key] = extracted }
     return extracted
 }
 
-private fun extractDynamicThemePalette(uri: String): DynamicThemePalette? {
-    val source = loadArtwork(uri) ?: return null
+private fun extractDynamicThemePalette(source: BufferedImage): DynamicThemePalette? {
     val field = makeSpicyColourField(source)
     val colors = quantize(field)
     if (colors.isEmpty()) return null
@@ -201,6 +202,7 @@ private fun scale(source: BufferedImage, width: Int, height: Int): BufferedImage
 
 private fun quantize(image: BufferedImage): List<QuantizedColor> {
     val buckets = HashMap<Int, ColorBucket>()
+    val hsb = FloatArray(3)
     for (y in 0 until image.height step SAMPLE_STEP) {
         for (x in 0 until image.width step SAMPLE_STEP) {
             val argb = image.getRGB(x, y)
@@ -208,7 +210,7 @@ private fun quantize(image: BufferedImage): List<QuantizedColor> {
             val red = argb ushr 16 and 0xFF
             val green = argb ushr 8 and 0xFF
             val blue = argb and 0xFF
-            val hsb = java.awt.Color.RGBtoHSB(red, green, blue, null)
+            java.awt.Color.RGBtoHSB(red, green, blue, hsb)
             val hueBin = (hsb[0] * HUE_BINS).toInt().coerceIn(0, HUE_BINS - 1)
             val saturationBin = (hsb[1] * SATURATION_BINS).toInt().coerceIn(0, SATURATION_BINS - 1)
             val brightnessBin = (hsb[2] * BRIGHTNESS_BINS).toInt().coerceIn(0, BRIGHTNESS_BINS - 1)
@@ -222,36 +224,24 @@ private fun quantize(image: BufferedImage): List<QuantizedColor> {
         }
     }
 
+    val averageHsb = FloatArray(3)
     return buckets.values.mapNotNull { bucket ->
         if (bucket.population <= 0) return@mapNotNull null
         val red = (bucket.red / bucket.population).toInt().coerceIn(0, 255)
         val green = (bucket.green / bucket.population).toInt().coerceIn(0, 255)
         val blue = (bucket.blue / bucket.population).toInt().coerceIn(0, 255)
-        val hsb = java.awt.Color.RGBtoHSB(red, green, blue, null)
+        java.awt.Color.RGBtoHSB(red, green, blue, averageHsb)
         QuantizedColor(
             red = red / 255f,
             green = green / 255f,
             blue = blue / 255f,
-            hue = hsb[0] * 360f,
-            saturation = hsb[1],
-            brightness = hsb[2],
+            hue = averageHsb[0] * 360f,
+            saturation = averageHsb[1],
+            brightness = averageHsb[2],
             population = bucket.population,
         )
     }
 }
-
-private fun loadArtwork(artworkUri: String): BufferedImage? = runCatching {
-    when {
-        artworkUri.startsWith("spotify:image:") ->
-            ImageIO.read(URI("https://i.scdn.co/image/" + artworkUri.removePrefix("spotify:image:")).toURL())
-        artworkUri.startsWith("http://") || artworkUri.startsWith("https://") || artworkUri.startsWith("file:") ->
-            ImageIO.read(URI(artworkUri).toURL())
-        else -> {
-            val path = Path.of(artworkUri)
-            if (Files.isRegularFile(path)) ImageIO.read(path.toFile()) else null
-        }
-    }
-}.getOrNull()
 
 private fun QuantizedColor.shiftHue(degrees: Float): QuantizedColor {
     val shifted = ((hue + degrees) % 360f + 360f) % 360f
