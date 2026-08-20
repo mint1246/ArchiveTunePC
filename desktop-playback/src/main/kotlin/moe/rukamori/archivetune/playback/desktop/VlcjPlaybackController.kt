@@ -93,7 +93,12 @@ class VlcjPlaybackController(
     private var outputVolumeBackend: OutputVolumeBackend? = null
     private var listener: MediaPlayerEventAdapter? = null
     private var activeCallbackMedia: VlcjRangeCallbackMedia? = null
-    private var generation = 0L
+    @Volatile private var generation = 0L
+    private val loadJobOwner = LatestLoadJobOwner(
+        scope = scope,
+        accept = { request: LoadRequest -> !closed.get() && request.generation == generation },
+        execute = ::executeLoad,
+    )
     @Volatile private var activeGeneration: Long? = null
     @Volatile private var activeResolvedSource: ResolvedPlaybackSource? = null
     private val httpRecoveryGeneration = AtomicLong(NO_RECOVERY_GENERATION)
@@ -175,7 +180,7 @@ class VlcjPlaybackController(
         val request = commandMutex.withLock {
             val previous = queue.current
             queue.replace(items, startIndex)
-            generation++
+            advanceLoadGeneration()
             stopActiveFileLocked()
             publishQueueLocked(title)
             val position = startPositionMs.coerceAtLeast(0L)
@@ -237,7 +242,7 @@ class VlcjPlaybackController(
     override suspend fun stop() {
         checkOpen()
         commandMutex.withLock {
-            generation++
+            advanceLoadGeneration()
             activeGeneration = null
             pendingSeek = null
             stopActiveFileLocked()
@@ -287,7 +292,7 @@ class VlcjPlaybackController(
         val request = commandMutex.withLock {
             val previous = queue.current
             val selected = queue.select(index)
-            generation++
+            advanceLoadGeneration()
             stopActiveFileLocked()
             publishQueueLocked()
             val position = positionMs.coerceAtLeast(0L)
@@ -312,7 +317,7 @@ class VlcjPlaybackController(
             val previous = queue.current
             val selected = queue.advance(automatic = false)
             if (selected == null) {
-                generation++
+                advanceLoadGeneration()
                 activeGeneration = null
                 stopActiveFileLocked()
                 _state.update { it.copy(status = PlaybackStatus.ENDED, playWhenReady = false) }
@@ -345,7 +350,7 @@ class VlcjPlaybackController(
             val mutation = queue.append(items)
             publishQueueLocked()
             mutation.current?.takeIf { mutation.currentChanged }?.let {
-                generation++
+                advanceLoadGeneration()
                 _state.update { state -> state.copy(status = PlaybackStatus.RESOLVING, error = null) }
                 transition(previous, it.item, TransitionReason.QUEUE_REPLACED)
                 LoadRequest(generation, it.item, 0L)
@@ -361,7 +366,7 @@ class VlcjPlaybackController(
             val mutation = queue.insertNext(items)
             publishQueueLocked()
             mutation.current?.takeIf { mutation.currentChanged }?.let {
-                generation++
+                advanceLoadGeneration()
                 _state.update { state -> state.copy(status = PlaybackStatus.RESOLVING, error = null) }
                 transition(previous, it.item, TransitionReason.QUEUE_REPLACED)
                 LoadRequest(generation, it.item, 0L)
@@ -378,7 +383,7 @@ class VlcjPlaybackController(
             publishQueueLocked()
             when {
                 queue.current == null -> {
-                    generation++
+                    advanceLoadGeneration()
                     activeGeneration = null
                     stopActiveFileLocked()
                     _state.update {
@@ -427,7 +432,7 @@ class VlcjPlaybackController(
             queue.clear()
             publishQueueLocked()
             if (queue.current == null) {
-                generation++
+                advanceLoadGeneration()
                 activeGeneration = null
                 stopActiveFileLocked()
                 _state.update {
@@ -507,7 +512,7 @@ class VlcjPlaybackController(
 
     private fun prepareReloadLocked(reason: TransitionReason, positionMs: Long): LoadRequest? {
         val item = queue.current ?: return null
-        generation++
+        advanceLoadGeneration()
         stopActiveFileLocked()
         _state.update { it.copy(status = PlaybackStatus.RESOLVING, error = null) }
         transition(item, item, reason)
@@ -519,7 +524,7 @@ class VlcjPlaybackController(
         selection: PlaybackQueue.Selection,
         reason: TransitionReason,
     ): LoadRequest {
-        generation++
+        advanceLoadGeneration()
         stopActiveFileLocked()
         publishQueueLocked()
         _state.update {
@@ -1111,9 +1116,12 @@ class VlcjPlaybackController(
         loadWatchdog = null
     }
 
-    private fun enqueueLoad(request: LoadRequest) {
-        scope.launch { executeLoad(request) }
+    private fun advanceLoadGeneration() {
+        generation++
+        loadJobOwner.cancelCurrent()
     }
+
+    private fun enqueueLoad(request: LoadRequest) = loadJobOwner.submit(request)
 
     private suspend fun failIfCurrent(request: LoadRequest, failure: PlaybackFailure) {
         commandMutex.withLock { if (isCurrentLocked(request)) failLocked(failure) }
@@ -1178,6 +1186,7 @@ class VlcjPlaybackController(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        loadJobOwner.close()
         synchronized(nativeLifecycleLock) {
             generation++
             activeGeneration = null
