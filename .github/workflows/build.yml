@@ -20,6 +20,12 @@ jobs:
     name: Build GraalVM Native Image MSI
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
     runs-on: windows-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: archivetune-updates
+      R2_ENDPOINT: https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com
+      R2_PUBLIC_URL: https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev
 
     steps:
       - name: Checkout
@@ -83,3 +89,24 @@ jobs:
           name: ArchiveTune-Windows-MSI
           path: ${{ steps.msi.outputs.path }}
           if-no-files-found: error
+
+      - name: Install AWS CLI
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: python -m pip install awscli
+
+      - name: Publish desktop update to R2
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          $versionLine = Select-String -Path 'desktopApp/build.gradle.kts' -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $versionLine) {
+            throw 'Could not determine desktop version from desktopApp/build.gradle.kts.'
+          }
+          $version = $versionLine.Matches[0].Groups[1].Value
+          .\scripts\publish-r2-update.ps1 `
+            -MsiPath '${{ steps.msi.outputs.path }}' `
+            -Version $version `
+            -Bucket $env:R2_BUCKET `
+            -Endpoint $env:R2_ENDPOINT `
+            -PublicBaseUrl $env:R2_PUBLIC_URL
