@@ -41,10 +41,12 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.WindowState
+import moe.rukamori.archivetune.windowsmedia.WindowsWindowGeometry
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Frame
@@ -54,16 +56,16 @@ import java.awt.Rectangle
 import java.awt.Window
 import kotlin.math.roundToInt
 
-private val WindowResizeGrip = 6.dp
+private val WindowResizeGrip = 10.dp
 
 /**
  * Supplies the app shell with native-like window interactions.
  *
  * The controls are rendered by the app's own top bar, alongside search/navigation, rather
  * than in a detached title strip. This keeps the lyrics dialog and every destination under
- * the same chrome. Dragging compares the AWT pointer and window bounds in the same absolute
- * coordinate space. Window-relative Compose deltas feed the window's own movement back into
- * subsequent events and caused the previous title bar to jump or move in the wrong direction.
+ * the same chrome. On Windows, floating-window drags use Win32 physical coordinates end-to-end;
+ * AWT's mixed-DPI virtual coordinates are discontinuous across monitors and caused the old jump,
+ * resize, and cursor-offset behavior. The AWT path remains as a fallback.
  */
 @Composable
 fun WindowScope.ArchiveTuneWindowChrome(
@@ -97,12 +99,17 @@ fun WindowScope.ArchiveTuneWindowChrome(
             .pointerInput(window, windowState) {
                 var startWindowLocation: Point? = null
                 var startPointerLocation: Point? = null
+                var nativeGeometry: WindowsWindowGeometry? = null
+                var nativeStartWindowBounds: Rectangle? = null
+                var nativeStartPointerLocation: Point? = null
+                var nativeScaleX: Double? = null
+                var nativeScaleY: Double? = null
                 var restoreAnchor: WindowDragRestoreAnchor? = null
                 var restoreSize: Dimension? = null
                 detectDragGestures(
                     onDragStart = {
-                        val pointer = pointerLocation() ?: return@detectDragGestures
                         if (windowState.placement == WindowPlacement.Maximized) {
+                            val pointer = pointerLocation() ?: return@detectDragGestures
                             // Windows restores a maximized window once a title-bar drag passes the
                             // drag threshold, keeping the same point of the restored title bar under
                             // the cursor. Do the same rather than making maximized windows immovable.
@@ -116,12 +123,75 @@ fun WindowScope.ArchiveTuneWindowChrome(
                         } else {
                             restoreAnchor = null
                             restoreSize = null
-                            startWindowLocation = window.location
-                            startPointerLocation = pointer
+                            val geometry = WindowsWindowGeometry.forWindow(window)
+                            val nativeBounds = geometry?.windowBounds()
+                            val nativePointer = geometry?.cursorPosition()
+                            if (geometry != null && nativeBounds != null && nativePointer != null) {
+                                nativeGeometry = geometry
+                                nativeStartWindowBounds = nativeBounds
+                                nativeStartPointerLocation = nativePointer
+                                val transform = window.graphicsConfiguration?.defaultTransform
+                                nativeScaleX = transform?.scaleX
+                                nativeScaleY = transform?.scaleY
+                                startWindowLocation = null
+                                startPointerLocation = null
+                            } else {
+                                // Only the non-Windows/fallback path depends on AWT MouseInfo. The
+                                // previous code fetched it before even attempting Win32, so one
+                                // transient null pointer sample made an otherwise valid drag inert.
+                                val pointer = pointerLocation() ?: return@detectDragGestures
+                                nativeGeometry = null
+                                nativeStartWindowBounds = null
+                                nativeStartPointerLocation = null
+                                nativeScaleX = null
+                                nativeScaleY = null
+                                startWindowLocation = window.location
+                                startPointerLocation = pointer
+                            }
                         }
                     },
                     onDrag = { change, _ ->
                         change.consume()
+                        val geometry = nativeGeometry
+                        val nativeBounds = nativeStartWindowBounds
+                        val nativePointerStart = nativeStartPointerLocation
+                        if (geometry != null && nativeBounds != null && nativePointerStart != null) {
+                            val nativePointer = geometry.cursorPosition()
+                            if (nativePointer != null) {
+                                val targetX = nativeBounds.x + nativePointer.x - nativePointerStart.x
+                                val targetY = nativeBounds.y + nativePointer.y - nativePointerStart.y
+                                if (
+                                    geometry.moveTo(
+                                        targetX,
+                                        targetY,
+                                        nativeBounds.width,
+                                        nativeBounds.height,
+                                    )
+                                ) {
+                                    // Compose WindowState is measured in dp. When the monitor DPI
+                                    // changes, keep that state synchronized with the *same physical
+                                    // window size* so the next recomposition cannot scale the window
+                                    // back up/down after Win32 has already kept the drag stable.
+                                    val transform = window.graphicsConfiguration?.defaultTransform
+                                    val scaleX = transform?.scaleX
+                                    val scaleY = transform?.scaleY
+                                    if (
+                                        scaleX != null && scaleY != null &&
+                                        (scaleX != nativeScaleX || scaleY != nativeScaleY)
+                                    ) {
+                                        windowState.size = physicalPixelsToDpSize(
+                                            width = nativeBounds.width,
+                                            height = nativeBounds.height,
+                                            scaleX = scaleX,
+                                            scaleY = scaleY,
+                                        )
+                                        nativeScaleX = scaleX
+                                        nativeScaleY = scaleY
+                                    }
+                                }
+                                return@detectDragGestures
+                            }
+                        }
                         val pointer = pointerLocation() ?: return@detectDragGestures
                         restoreAnchor?.let { anchor ->
                             val restoredSize = restoreSize ?: fallbackRestoredSize(anchor.maximizedBounds, window.minimumSize)
@@ -157,14 +227,51 @@ fun WindowScope.ArchiveTuneWindowChrome(
                         }
                     },
                     onDragEnd = {
+                        // AWT may finish processing WM_DPICHANGED just after the final pointer
+                        // event. Reassert the original physical size once more at release so a
+                        // fast cross-monitor drag cannot end with the destination monitor's DPI
+                        // scaling applied to the window.
+                        val geometry = nativeGeometry
+                        val nativeBounds = nativeStartWindowBounds
+                        if (geometry != null && nativeBounds != null) {
+                            geometry.windowBounds()?.let { current ->
+                                geometry.moveTo(
+                                    current.x,
+                                    current.y,
+                                    nativeBounds.width,
+                                    nativeBounds.height,
+                                )
+                                val transform = window.graphicsConfiguration?.defaultTransform
+                                val scaleX = transform?.scaleX
+                                val scaleY = transform?.scaleY
+                                if (scaleX != null && scaleY != null) {
+                                    windowState.size = physicalPixelsToDpSize(
+                                        width = nativeBounds.width,
+                                        height = nativeBounds.height,
+                                        scaleX = scaleX,
+                                        scaleY = scaleY,
+                                    )
+                                }
+                            }
+                        }
                         startWindowLocation = null
                         startPointerLocation = null
+                        nativeGeometry = null
+                        nativeStartWindowBounds = null
+                        nativeStartPointerLocation = null
+                        nativeScaleX = null
+                        nativeScaleY = null
                         restoreAnchor = null
                         restoreSize = null
                     },
                     onDragCancel = {
                         startWindowLocation = null
                         startPointerLocation = null
+                        nativeGeometry = null
+                        nativeStartWindowBounds = null
+                        nativeStartPointerLocation = null
+                        nativeScaleX = null
+                        nativeScaleY = null
                         restoreAnchor = null
                         restoreSize = null
                     },
@@ -201,6 +308,17 @@ fun WindowScope.ArchiveTuneWindowChrome(
         }
     }
 }
+
+/** Convert a fixed Win32 pixel size to Compose dp for the destination monitor's scale. */
+internal fun physicalPixelsToDpSize(
+    width: Int,
+    height: Int,
+    scaleX: Double,
+    scaleY: Double,
+): DpSize = DpSize(
+    (width / scaleX.coerceAtLeast(0.01)).toFloat().dp,
+    (height / scaleY.coerceAtLeast(0.01)).toFloat().dp,
+)
 
 @Composable
 private fun WindowChromeControls(

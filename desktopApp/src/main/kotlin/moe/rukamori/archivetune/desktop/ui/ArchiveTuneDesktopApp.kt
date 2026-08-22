@@ -554,7 +554,15 @@ private fun DesktopTopBar(
             }
         }
         if (!compact) {
-            Column(Modifier.weight(1f).then(windowDragModifier)) {
+            // Make the whole 64dp title lane draggable, not only the text's measured height.
+            // The old ~45dp content-sized Column left thin dead strips above/below it, which made
+            // grabbing the apparent title bar intermittently do nothing.
+            Column(
+                // fillMaxHeight() here can make the min-height top bar consume all available
+                // vertical space. Keep the draggable lane explicitly at the intended 64dp.
+                Modifier.weight(1f).height(64.dp).then(windowDragModifier),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Text(titleOverride ?: destination.title, style = MaterialTheme.typography.titleLarge)
                 Text(
                     descriptionOverride ?: destination.description,
@@ -650,6 +658,9 @@ fun FoundationDestinationContent(
     libraryScanError: String? = null,
     onLibraryFoldersChanged: (List<java.nio.file.Path>) -> Unit = {},
     onLibraryRescan: () -> Unit = {},
+    onKeybindsChanged: () -> Unit = {},
+    onKeybindCaptureChanged: (Boolean) -> Unit = {},
+    keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>? = null,
     modifier: Modifier = Modifier,
 ) {
     when (state.destination) {
@@ -672,6 +683,9 @@ fun FoundationDestinationContent(
             libraryScanError,
             onLibraryFoldersChanged,
             onLibraryRescan,
+            onKeybindsChanged,
+            onKeybindCaptureChanged,
+            keybindPressedKeys,
             modifier,
         )
         else -> FoundationEmptyState(state.destination, state.searchQuery, modifier)
@@ -823,6 +837,9 @@ private fun FoundationSettings(
     libraryScanError: String?,
     onLibraryFoldersChanged: (List<java.nio.file.Path>) -> Unit,
     onLibraryRescan: () -> Unit,
+    onKeybindsChanged: () -> Unit,
+    onKeybindCaptureChanged: (Boolean) -> Unit,
+    keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>?,
     modifier: Modifier = Modifier,
 ) {
     if (settingsStore == null) {
@@ -846,6 +863,9 @@ private fun FoundationSettings(
         libraryScanError = libraryScanError,
         onLibraryFoldersChanged = onLibraryFoldersChanged,
         onLibraryRescan = onLibraryRescan,
+        onKeybindsChanged = onKeybindsChanged,
+        onKeybindCaptureChanged = onKeybindCaptureChanged,
+        keybindPressedKeys = keybindPressedKeys,
         account = account,
         accountContent = { if (account != null) DesktopAccountCard(account) else AnonymousAccountCard() },
         modifier = modifier,

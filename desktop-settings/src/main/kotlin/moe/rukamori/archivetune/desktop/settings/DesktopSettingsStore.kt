@@ -49,6 +49,43 @@ enum class DesktopPartialCleanupPolicy {
     KEEP_ON_CANCEL,
 }
 
+enum class DesktopKeybindAction {
+    PLAY_PAUSE,
+    NEXT,
+    PREVIOUS,
+    VOLUME_UP,
+    VOLUME_DOWN,
+    MUTE_TOGGLE,
+    SEEK_FORWARD,
+    SEEK_BACKWARD,
+    SPEED_UP,
+    SPEED_DOWN,
+    SPEED_RESET,
+    SHUFFLE_TOGGLE,
+    REPEAT_CYCLE,
+    TOGGLE_LYRICS,
+    TOGGLE_QUEUE,
+}
+
+val DesktopKeybindAction.supportsHoldRepeat: Boolean
+    get() = when (this) {
+        DesktopKeybindAction.VOLUME_UP,
+        DesktopKeybindAction.VOLUME_DOWN,
+        DesktopKeybindAction.SEEK_FORWARD,
+        DesktopKeybindAction.SEEK_BACKWARD,
+        DesktopKeybindAction.SPEED_UP,
+        DesktopKeybindAction.SPEED_DOWN,
+        -> true
+        else -> false
+    }
+
+/** Windows virtual-key chord assigned to one desktop action. */
+data class DesktopKeybind(
+    val action: DesktopKeybindAction,
+    val virtualKeys: List<Int>,
+    val repeatWhileHeld: Boolean = false,
+)
+
 data class DesktopWindowPlacement(
     val widthDp: Float = 1_280f,
     val heightDp: Float = 800f,
@@ -84,6 +121,7 @@ data class DesktopSettings(
     val partialCleanupPolicy: DesktopPartialCleanupPolicy = DesktopPartialCleanupPolicy.DELETE_ON_CANCEL,
     /** Empty means all built-in lyrics providers, preserving the Android fallback behavior. */
     val lyricsProviderIds: List<String> = emptyList(),
+    val keybinds: List<DesktopKeybind> = emptyList(),
 )
 
 /**
@@ -169,6 +207,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 downloadConcurrency = values.getProperty("downloads.concurrency")?.toIntOrNull() ?: 2,
                 partialCleanupPolicy = values.enumValue("downloads.partialCleanup", DesktopPartialCleanupPolicy.DELETE_ON_CANCEL),
                 lyricsProviderIds = readStrings(values, "lyrics.provider"),
+                keybinds = readKeybinds(values),
             ).sanitized()
         }.getOrDefault(DesktopSettings())
     }
@@ -202,6 +241,11 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             setProperty("downloads.concurrency", settings.downloadConcurrency.toString())
             setProperty("downloads.partialCleanup", settings.partialCleanupPolicy.name)
             settings.lyricsProviderIds.forEachIndexed { index, id -> setProperty("lyrics.provider.$index", id) }
+            settings.keybinds.forEachIndexed { index, binding ->
+                setProperty("keybind.$index.action", binding.action.name)
+                setProperty("keybind.$index.keys", binding.virtualKeys.joinToString(","))
+                setProperty("keybind.$index.repeat", binding.repeatWhileHeld.toString())
+            }
         }
         val temporary = Files.createTempFile(parent, ".${file.fileName}.", ".tmp")
         try {
@@ -227,7 +271,18 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         libraryFolders = libraryFolders.map(Path::absolute).map(Path::normalize).distinct().take(MAX_LIBRARY_FOLDERS),
         downloadLocation = downloadLocation?.absolute()?.normalize(),
         lyricsProviderIds = lyricsProviderIds.map(String::trim).filter(String::isNotEmpty).distinct().take(MAX_LYRICS_PROVIDERS),
+        keybinds = keybinds
+            .mapNotNull { it.sanitizedOrNull() }
+            .distinctBy { it.action },
     )
+
+    private fun DesktopKeybind.sanitizedOrNull(): DesktopKeybind? {
+        val keys = virtualKeys.filter { it in MIN_WINDOWS_VIRTUAL_KEY..MAX_WINDOWS_VIRTUAL_KEY }.distinct()
+        return takeIf { keys.isNotEmpty() }?.copy(
+            virtualKeys = keys,
+            repeatWhileHeld = repeatWhileHeld && action.supportsHoldRepeat,
+        )
+    }
 
     private fun DesktopWindowPlacement.sanitized(): DesktopWindowPlacement = copy(
         widthDp = widthDp.finiteOr(1_280f).coerceIn(640f, 5_120f),
@@ -268,6 +323,21 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
     private fun readFloats(values: Properties, prefix: String, limit: Int): List<Float> =
         (0 until limit).mapNotNull { values.getProperty("$prefix.$it")?.toFloatOrNull() }
 
+    private fun readKeybinds(values: Properties): List<DesktopKeybind> =
+        (0 until DesktopKeybindAction.entries.size).mapNotNull { index ->
+            val actionName = values.getProperty("keybind.$index.action") ?: return@mapNotNull null
+            val action = DesktopKeybindAction.entries.firstOrNull { it.name == actionName } ?: return@mapNotNull null
+            val keys = values.getProperty("keybind.$index.keys")
+                ?.split(',')
+                ?.mapNotNull { it.trim().toIntOrNull() }
+                .orEmpty()
+            DesktopKeybind(
+                action = action,
+                virtualKeys = keys,
+                repeatWhileHeld = values.getProperty("keybind.$index.repeat")?.toBooleanStrictOrNull() ?: false,
+            )
+        }
+
     private fun String.toPathOrNull(): Path? = runCatching { Path.of(this).absolute().normalize() }.getOrNull()
 
     private companion object {
@@ -279,6 +349,8 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         const val MIN_EQUALIZER_GAIN_DB = -20f
         const val MAX_EQUALIZER_GAIN_DB = 20f
         const val MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH = 1_024
+        const val MIN_WINDOWS_VIRTUAL_KEY = 1
+        const val MAX_WINDOWS_VIRTUAL_KEY = 0xFF
         const val WRITE_DEBOUNCE_MILLIS = 250L
         val states = ConcurrentHashMap<Path, SharedState>()
         val flusher = Executors.newSingleThreadScheduledExecutor { runnable ->

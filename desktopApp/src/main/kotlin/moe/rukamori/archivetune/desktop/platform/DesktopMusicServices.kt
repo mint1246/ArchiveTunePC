@@ -17,6 +17,7 @@ import moe.rukamori.archivetune.desktop.library.DesktopLibrary
 import moe.rukamori.archivetune.desktop.library.DesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktop.library.PropertiesDesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
+import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
@@ -47,6 +48,8 @@ import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import moe.rukamori.archivetune.playback.desktop.PlaybackQueueStore
 import moe.rukamori.archivetune.windowsmedia.PlaybackMediaCommandRouter
+import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBinding
+import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBindings
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
 import moe.rukamori.archivetune.windowsmedia.windowsMediaUpdateKey
 import java.io.File
@@ -69,6 +72,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.delay
 
@@ -177,6 +182,23 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     } else {
         null
     }
+    private val keybindCommands = MutableSharedFlow<DesktopKeybindAction>(extraBufferCapacity = 64)
+    private val _appKeybindActions = MutableSharedFlow<DesktopKeybindAction>(extraBufferCapacity = 16)
+    val appKeybindActions = _appKeybindActions.asSharedFlow()
+    private val _keybindPressedKeys = MutableStateFlow<List<Int>>(emptyList())
+    val keybindPressedKeys = _keybindPressedKeys.asStateFlow()
+    private var lastAudibleVolume = settings.snapshot().volume.takeIf { it > 0.001f } ?: 1f
+    @Volatile private var keybindCaptureActive = false
+    private val globalKeyBindings = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        WindowsGlobalKeyBindings(
+            onAction = { actionId ->
+                DesktopKeybindAction.entries.firstOrNull { it.name == actionId }?.let(keybindCommands::tryEmit)
+            },
+            onPressedKeysChanged = { keys -> _keybindPressedKeys.value = keys.sorted() },
+        )
+    } else {
+        null
+    }
     @Volatile private var partyPlaybackPolicyProvider: () -> DesktopPartyPlaybackPolicy = { DesktopPartyPlaybackPolicy() }
     private val mediaCommandRouter = windowsMediaControls?.let {
         PlaybackMediaCommandRouter(playback, commandAllowed = { partyPlaybackPolicy().localTransportAllowed })
@@ -272,18 +294,109 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 controls.commands.collect { command -> mediaCommandRouter?.handle(command) }
             }
         }
+        runtime.applicationScope.launch {
+            keybindCommands.collect(::handleKeybindAction)
+        }
+        refreshKeybindings()
+    }
+
+    fun refreshKeybindings() {
+        runCatching {
+            globalKeyBindings?.updateBindings(
+                settings.snapshot().keybinds.map { binding ->
+                    WindowsGlobalKeyBinding(
+                        actionId = binding.action.name,
+                        virtualKeys = binding.virtualKeys.toSet(),
+                        repeatWhileHeld = binding.repeatWhileHeld,
+                    )
+                },
+            )
+        }.onFailure { failure ->
+            runtime.logger.warning("Could not update global keybinds: ${failure.message}")
+        }
+    }
+
+    fun setKeybindCaptureActive(active: Boolean) {
+        if (keybindCaptureActive == active) return
+        keybindCaptureActive = active
+        globalKeyBindings?.setCaptureActive(active)
+        if (!active) _keybindPressedKeys.value = emptyList()
+    }
+
+    private suspend fun handleKeybindAction(action: DesktopKeybindAction) {
+        val policy = partyPlaybackPolicy()
+        val snapshot = playback.state.value
+        when (action) {
+            DesktopKeybindAction.PLAY_PAUSE -> if (policy.localTransportAllowed) {
+                if (snapshot.isPlaying) playback.pause() else playback.play()
+            }
+            DesktopKeybindAction.NEXT -> if (policy.localTransportAllowed) playback.skipNext()
+            DesktopKeybindAction.PREVIOUS -> if (policy.localTransportAllowed) playback.skipPrevious()
+            DesktopKeybindAction.VOLUME_UP -> {
+                val volume = (snapshot.volume + KEYBIND_VOLUME_STEP).coerceAtMost(1f)
+                if (volume > 0.001f) lastAudibleVolume = volume
+                playback.setVolume(volume)
+            }
+            DesktopKeybindAction.VOLUME_DOWN -> {
+                val volume = (snapshot.volume - KEYBIND_VOLUME_STEP).coerceAtLeast(0f)
+                if (volume > 0.001f) lastAudibleVolume = volume
+                playback.setVolume(volume)
+            }
+            DesktopKeybindAction.MUTE_TOGGLE -> {
+                if (snapshot.volume > 0.001f) {
+                    lastAudibleVolume = snapshot.volume
+                    playback.setVolume(0f)
+                } else {
+                    playback.setVolume(lastAudibleVolume.coerceIn(KEYBIND_VOLUME_STEP, 1f))
+                }
+            }
+            DesktopKeybindAction.SEEK_FORWARD -> if (policy.localTransportAllowed) {
+                playback.seekTo(snapshot.positionMs + KEYBIND_SEEK_STEP_MS)
+            }
+            DesktopKeybindAction.SEEK_BACKWARD -> if (policy.localTransportAllowed) {
+                playback.seekTo((snapshot.positionMs - KEYBIND_SEEK_STEP_MS).coerceAtLeast(0L))
+            }
+            DesktopKeybindAction.SPEED_UP -> if (policy.persistSpeedAndRepeat) {
+                playback.setSpeed((snapshot.speed + KEYBIND_SPEED_STEP).coerceAtMost(4f))
+            }
+            DesktopKeybindAction.SPEED_DOWN -> if (policy.persistSpeedAndRepeat) {
+                playback.setSpeed((snapshot.speed - KEYBIND_SPEED_STEP).coerceAtLeast(0.25f))
+            }
+            DesktopKeybindAction.SPEED_RESET -> if (policy.persistSpeedAndRepeat) playback.setSpeed(1f)
+            DesktopKeybindAction.SHUFFLE_TOGGLE -> if (policy.persistShuffle) {
+                playback.setShuffleEnabled(!snapshot.shuffleEnabled)
+            }
+            DesktopKeybindAction.REPEAT_CYCLE -> if (policy.persistSpeedAndRepeat) {
+                playback.setRepeatMode(
+                    when (snapshot.repeatMode) {
+                        RepeatMode.OFF -> RepeatMode.ALL
+                        RepeatMode.ALL -> RepeatMode.ONE
+                        RepeatMode.ONE -> RepeatMode.OFF
+                    },
+                )
+            }
+            DesktopKeybindAction.TOGGLE_LYRICS,
+            DesktopKeybindAction.TOGGLE_QUEUE,
+            -> _appKeybindActions.emit(action)
+        }
     }
 
     private suspend fun restoreQueueIfPresent() {
         val persisted = queueStore.load() ?: return
         if (persisted.items.isEmpty()) return
+        val resumeAfterUpdate = Files.deleteIfExists(runtime.paths.data.resolve(RESUME_AFTER_UPDATE_MARKER))
         playback.replaceQueue(
             items = persisted.items,
             startIndex = persisted.currentIndex.coerceIn(0, persisted.items.lastIndex),
             startPositionMs = persisted.positionMs,
             title = persisted.title,
-            playWhenReady = false,
+            playWhenReady = resumeAfterUpdate,
         )
+    }
+
+    suspend fun prepareForUpdateRestart() = withContext(Dispatchers.IO) {
+        queueStore.save(playback.state.value)
+        Files.writeString(runtime.paths.data.resolve(RESUME_AFTER_UPDATE_MARKER), "resume")
     }
 
     /** Connects the download service after both platform coordinators have been constructed. */
@@ -661,6 +774,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             lyricsScope.value.cancel()
         }
         nextTrackPrefetcher.close()
+        globalKeyBindings?.close()
         windowsMediaControls?.close()
         homeStore.close()
         albumIndex.close()
@@ -695,6 +809,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         const val MIN_PLAY_HISTORY_EVENT_MS = 5_000L
         const val MAX_PLAY_HISTORY_EVENT_MS = 1_800_000L
         const val BACKGROUND_MAINTENANCE_START_DELAY_MS = 1_500L
+        const val KEYBIND_VOLUME_STEP = 0.02f
+        const val KEYBIND_SPEED_STEP = 0.05f
+        const val KEYBIND_SEEK_STEP_MS = 5_000L
+        const val RESUME_AFTER_UPDATE_MARKER = "resume-after-update"
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
 }

@@ -8,6 +8,7 @@ package moe.rukamori.archivetune.desktop
 
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,19 +35,23 @@ import androidx.compose.ui.window.rememberWindowState
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.memory.MemoryCache
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopPartyPlaybackPolicy
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
+import moe.rukamori.archivetune.desktop.platform.DesktopUpdateCoordinator
 import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneDesktopApp
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneWindowChrome
 import moe.rukamori.archivetune.desktop.settings.DesktopLastDestination
+import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.desktop.settings.DesktopThemeMode
 import moe.rukamori.archivetune.desktop.settings.DesktopWindowPlacement
+import moe.rukamori.archivetune.windowsmedia.WindowsWorkingSetTrimmer
 import java.awt.Dimension
 import java.awt.GraphicsEnvironment
 import kotlin.math.max
@@ -59,6 +64,7 @@ fun main() {
     val runtime = DesktopRuntime.start()
     val musicServices = runtime.own(DesktopMusicServices(runtime))
     val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
+    val updateCoordinator = DesktopUpdateCoordinator(runtime, musicServices.playback)
     val playTogether = runtime.own(PlayTogetherManager(musicServices.playback, runtime.paths.cache, runtime.logger))
     musicServices.attachPartyPlaybackPolicyProvider {
         val party = playTogether.state.value
@@ -69,6 +75,7 @@ fun main() {
         )
     }
     musicServices.attachCompletedDownloadLookup(downloadServices::completedFileFor)
+    updateCoordinator.start()
     val restored = runtime.settings.snapshot()
     var latestDestination = restored.lastDestination.asDesktopDestination()
     var latestTheme = restored.themeMode.asDesktopThemePreference()
@@ -109,9 +116,52 @@ fun main() {
                 icon = painterResource("icons/archivetune.png"),
                 undecorated = true,
                 transparent = true,
+                resizable = true,
             ) {
                 var showLyrics by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }
+                var hasEnteredLyrics by remember { mutableStateOf(false) }
+
+                // Keep the event-driven trims, and also periodically ask Windows to evict cold pages.
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        delay(WORKING_SET_TRIM_INTERVAL_MS)
+                        WindowsWorkingSetTrimmer.trimCurrentProcess()
+                    }
+                }
+                LaunchedEffect(windowState.isMinimized) {
+                    if (windowState.isMinimized) {
+                        delay(MINIMIZED_WORKING_SET_TRIM_DELAY_MS)
+                        if (windowState.isMinimized) {
+                            WindowsWorkingSetTrimmer.trimCurrentProcess()
+                        }
+                    }
+                }
+                LaunchedEffect(showLyrics) {
+                    if (showLyrics) {
+                        hasEnteredLyrics = true
+                    } else if (hasEnteredLyrics) {
+                        delay(LEAVING_LYRICS_WORKING_SET_TRIM_DELAY_MS)
+                        WindowsWorkingSetTrimmer.trimCurrentProcess()
+                    }
+                }
+                LaunchedEffect(musicServices) {
+                    musicServices.appKeybindActions.collect { action ->
+                        when (action) {
+                            DesktopKeybindAction.TOGGLE_LYRICS -> showLyrics = !showLyrics
+                            DesktopKeybindAction.TOGGLE_QUEUE -> showQueue = !showQueue
+                            else -> Unit
+                        }
+                    }
+                }
+                LaunchedEffect(updateCoordinator) {
+                    updateCoordinator.restartRequests.collect {
+                        musicServices.prepareForUpdateRestart()
+                        if (updateCoordinator.launchInstallerHandoff()) {
+                            closeApplication()
+                        }
+                    }
+                }
                 val browse = remember(musicServices) {
                     moe.rukamori.archivetune.desktop.ui.DesktopBrowseController(
                         repository = musicServices.browseRepository,
@@ -137,8 +187,13 @@ fun main() {
                 }
                 DisposableEffect(window) {
                     val previousMinimum = window.minimumSize
+                    val previousResizable = window.isResizable
                     window.minimumSize = Dimension(640, 480)
-                    onDispose { window.minimumSize = previousMinimum }
+                    window.isResizable = true
+                    onDispose {
+                        window.minimumSize = previousMinimum
+                        window.isResizable = previousResizable
+                    }
                 }
 
                 ArchiveTuneWindowChrome(
@@ -261,7 +316,10 @@ private fun hasVisibleTitlebar(x: Float, y: Float): Boolean = runCatching {
 
 private const val MIN_VISIBLE_TITLEBAR_WIDTH_DP = 96f
 private const val MIN_VISIBLE_TITLEBAR_HEIGHT_DP = 32f
-private const val DESKTOP_IMAGE_MEMORY_CACHE_BYTES = 64L * 1024L * 1024L
+private const val DESKTOP_IMAGE_MEMORY_CACHE_BYTES = 32L * 1024L * 1024L
+private const val WORKING_SET_TRIM_INTERVAL_MS = 60_000L
+private const val MINIMIZED_WORKING_SET_TRIM_DELAY_MS = 30_000L
+private const val LEAVING_LYRICS_WORKING_SET_TRIM_DELAY_MS = 2_000L
 
 private fun DesktopLastDestination.asDesktopDestination(): DesktopDestination = DesktopDestination.valueOf(name)
 

@@ -11,6 +11,7 @@ plugins {
 group = "moe.rukamori.archivetune"
 val desktopAppProject = evaluationDependsOn(":desktopApp")
 version = desktopAppProject.version
+val generatedWindowsIcon = desktopAppProject.layout.buildDirectory.file("generated/desktop/icon/ArchiveTune.ico")
 
 kotlin {
     jvmToolchain(21)
@@ -33,11 +34,25 @@ configurations.runtimeClasspath {
 nucleus.application {
     mainClass = "moe.rukamori.archivetune.native.NativeMainKt"
 
+    nativeDistributions {
+        appName = "ArchiveTune"
+        packageName = "ArchiveTune"
+        packageVersion = version.toString()
+        windows {
+            iconFile.set(generatedWindowsIcon)
+        }
+    }
+
     graalvm {
         isEnabled.set(true)
         imageName.set("ArchiveTune")
         maxHeapSize.set("128m")
         optimization.set(NativeImageOptimization.SIZE)
+        // Keep the native image's Serial GC from holding on to a large reserve of completely
+        // free heap after a collection. This biases the app toward the compact steady-state
+        // working set we see after it has been running for a while, without forcing System.gc()
+        // or using Windows working-set trimming (both of which just trade RAM for stalls/faults).
+        buildArgs.add("-H:MaxHeapFree=16m")
         // Nucleus' static resource scanner sees native payloads for every supported platform in
         // a few dependencies. They can never be loaded by this Windows-x64 image, but Graal would
         // otherwise embed them verbatim in the executable's image heap.
@@ -63,7 +78,10 @@ val nativeReleaseDir = desktopAppProject.layout.buildDirectory.dir("compose/bina
 val nativeMsiOutputDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/msi")
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val desktopVersion = version.toString()
-val generatedWindowsIcon = desktopAppProject.layout.buildDirectory.file("generated/desktop/icon/ArchiveTune.ico")
+
+tasks.matching { it.name == "generateGraalvmWindowsResources" }.configureEach {
+    dependsOn(desktopAppProject.tasks.named("generateWindowsIcon"))
+}
 
 val stageNativeRuntimeShims = tasks.register<Copy>("stageNativeRuntimeShims") {
     group = "distribution"

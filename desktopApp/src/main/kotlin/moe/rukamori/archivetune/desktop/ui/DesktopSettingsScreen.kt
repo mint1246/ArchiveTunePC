@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Speed
@@ -46,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -60,16 +62,21 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.DesktopPlatform
 import moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy
+import moe.rukamori.archivetune.desktop.settings.DesktopKeybind
+import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.desktop.settings.DesktopEqualizerSettings
 import moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode
 import moe.rukamori.archivetune.desktop.settings.DesktopSettings
 import moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore
+import moe.rukamori.archivetune.desktop.settings.supportsHoldRepeat
 import moe.rukamori.archivetune.desktop.state.DesktopThemePreference
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
@@ -79,6 +86,7 @@ import moe.rukamori.archivetune.playback.desktop.DesktopAudioOutputControl
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerCapabilities
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import java.nio.file.Path
+import java.awt.event.KeyEvent
 import java.util.logging.Logger
 import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
@@ -102,11 +110,16 @@ fun DesktopSettingsPanel(
     libraryScanError: String?,
     onLibraryFoldersChanged: (List<Path>) -> Unit,
     onLibraryRescan: () -> Unit,
+    onKeybindsChanged: () -> Unit = {},
+    onKeybindCaptureChanged: (Boolean) -> Unit = {},
+    keybindPressedKeys: StateFlow<List<Int>>? = null,
     account: DesktopSessionManager?,
     accountContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val emptyKeybindPressedKeys = remember { MutableStateFlow<List<Int>>(emptyList()) }
+    val observedKeybindKeys by (keybindPressedKeys ?: emptyKeybindPressedKeys).collectAsState()
     var settings by remember(settingsStore) { mutableStateOf(settingsStore.snapshot()) }
     // Keep this mirror in sync when the host reloads/migrates its folder list while this
     // settings surface remains mounted. Without the key, a successful external update leaves
@@ -114,6 +127,7 @@ fun DesktopSettingsPanel(
     var localFolders by remember(libraryFolders) { mutableStateOf(libraryFolders) }
     var notice by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var recordingKeybindAction by remember { mutableStateOf<DesktopKeybindAction?>(null) }
     var equalizerCapabilities by remember(audioEffects) { mutableStateOf<DesktopEqualizerCapabilities?>(null) }
     var equalizerUnavailable by remember(audioEffects) { mutableStateOf(audioEffects == null) }
     val libraryFeedback = localLibraryScanFeedback(
@@ -123,8 +137,37 @@ fun DesktopSettingsPanel(
         error = libraryScanError,
     )
 
+    DisposableEffect(Unit) {
+        onDispose { onKeybindCaptureChanged(false) }
+    }
+
+    fun setRecordingKeybindAction(action: DesktopKeybindAction?) {
+        val wasRecording = recordingKeybindAction != null
+        recordingKeybindAction = action
+        val isRecording = action != null
+        if (wasRecording != isRecording) onKeybindCaptureChanged(isRecording)
+    }
+
     fun update(transform: (DesktopSettings) -> DesktopSettings) {
         settings = settingsStore.update(transform)
+    }
+
+    fun updateKeybind(binding: DesktopKeybind) {
+        settings = settingsStore.update { current ->
+            val action = binding.action
+            val chord = binding.virtualKeys.toSet()
+            current.copy(
+                keybinds = current.keybinds
+                    .filterNot { it.action == action || it.virtualKeys.toSet() == chord }
+                    .plus(binding),
+            )
+        }
+        onKeybindsChanged()
+    }
+
+    fun clearKeybind(action: DesktopKeybindAction) {
+        settings = settingsStore.update { current -> current.copy(keybinds = current.keybinds.filterNot { it.action == action }) }
+        onKeybindsChanged()
     }
 
     fun applyEqualizer(next: DesktopEqualizerSettings) {
@@ -432,6 +475,51 @@ fun DesktopSettingsPanel(
         Text("Account", style = MaterialTheme.typography.headlineMedium)
         accountContent()
 
+        Text("Keybinds", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Keyboard, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Global shortcuts", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Use any exact key combination, including 3+ keys. Continuous actions can repeat while the chord is held.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.size(6.dp))
+                DesktopKeybindAction.entries.forEachIndexed { index, action ->
+                    val binding = settings.keybinds.firstOrNull { it.action == action }
+                    KeybindRow(
+                        action = action,
+                        binding = binding,
+                        recording = recordingKeybindAction == action,
+                        observedKeys = observedKeybindKeys,
+                        onRecordingChanged = { recording ->
+                            setRecordingKeybindAction(action.takeIf { recording })
+                        },
+                        onRecorded = { virtualKeys ->
+                            updateKeybind(
+                                DesktopKeybind(
+                                    action = action,
+                                    virtualKeys = virtualKeys,
+                                    repeatWhileHeld = binding?.repeatWhileHeld == true,
+                                ),
+                            )
+                        },
+                        onRepeatChanged = { repeat ->
+                            binding?.let { updateKeybind(it.copy(repeatWhileHeld = repeat)) }
+                        },
+                        onClear = { clearKeybind(action) },
+                    )
+                    if (index != DesktopKeybindAction.entries.lastIndex) HorizontalDivider()
+                }
+            }
+        }
+
         Text("Windows and startup", style = MaterialTheme.typography.headlineMedium)
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -448,6 +536,157 @@ fun DesktopSettingsPanel(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }
+
+@Composable
+private fun KeybindRow(
+    action: DesktopKeybindAction,
+    binding: DesktopKeybind?,
+    recording: Boolean,
+    observedKeys: List<Int>,
+    onRecordingChanged: (Boolean) -> Unit,
+    onRecorded: (List<Int>) -> Unit,
+    onRepeatChanged: (Boolean) -> Unit,
+    onClear: () -> Unit,
+) {
+    var chordPreview by remember(action) { mutableStateOf<List<Int>>(emptyList()) }
+    var bestChord by remember(action) { mutableStateOf<List<Int>>(emptyList()) }
+
+    LaunchedEffect(recording, observedKeys) {
+        if (!recording) {
+            bestChord = emptyList()
+            chordPreview = emptyList()
+            return@LaunchedEffect
+        }
+
+        val keys = observedKeys.distinct()
+        if (keys.isNotEmpty()) {
+            if (keys.size >= bestChord.size) {
+                bestChord = keys
+                chordPreview = keys
+            }
+        } else if (bestChord.isNotEmpty()) {
+            val completed = bestChord
+            bestChord = emptyList()
+            chordPreview = emptyList()
+            onRecorded(completed)
+            onRecordingChanged(false)
+        }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(action.keybindLabel, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    action.keybindDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(
+                onClick = {
+                    onRecordingChanged(!recording)
+                    bestChord = emptyList()
+                    chordPreview = emptyList()
+                },
+            ) { Text(if (recording) "Cancel" else if (binding == null) "Set" else "Change") }
+            if (binding != null) {
+                Spacer(Modifier.width(6.dp))
+                TextButton(onClick = onClear) { Text("Clear") }
+            }
+        }
+        val shownKeys = if (recording) chordPreview else binding?.virtualKeys.orEmpty()
+        Text(
+            when {
+                recording && shownKeys.isEmpty() -> "Press the shortcut keys together…"
+                recording -> "Recording: ${formatKeyChord(shownKeys)}"
+                shownKeys.isEmpty() -> "Not assigned"
+                else -> formatKeyChord(shownKeys)
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (shownKeys.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (action.supportsHoldRepeat && binding != null) {
+            Row(
+                Modifier.toggleable(
+                    value = binding.repeatWhileHeld,
+                    role = Role.Checkbox,
+                    onValueChange = onRepeatChanged,
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(binding.repeatWhileHeld, onCheckedChange = null)
+                Text("Repeat while held", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+private fun formatKeyChord(keys: List<Int>): String = keys.joinToString(" + ") { key ->
+    when (key) {
+        0x10 -> "Shift"
+        0x11 -> "Ctrl"
+        0x12 -> "Alt"
+        0x5B -> "Win"
+        0x5D -> "Menu"
+        0xBA -> ";"
+        0xBB -> "="
+        0xBC -> ","
+        0xBD -> "-"
+        0xBE -> "."
+        0xBF -> "/"
+        0xC0 -> "`"
+        0xDB -> "["
+        0xDC -> "\\"
+        0xDD -> "]"
+        0xDE -> "'"
+        else -> KeyEvent.getKeyText(key)
+    }
+}
+
+private val DesktopKeybindAction.keybindLabel: String
+    get() = when (this) {
+        DesktopKeybindAction.PLAY_PAUSE -> "Play / pause"
+        DesktopKeybindAction.NEXT -> "Next track"
+        DesktopKeybindAction.PREVIOUS -> "Previous track"
+        DesktopKeybindAction.VOLUME_UP -> "Volume up"
+        DesktopKeybindAction.VOLUME_DOWN -> "Volume down"
+        DesktopKeybindAction.MUTE_TOGGLE -> "Mute / unmute"
+        DesktopKeybindAction.SEEK_FORWARD -> "Seek forward"
+        DesktopKeybindAction.SEEK_BACKWARD -> "Seek backward"
+        DesktopKeybindAction.SPEED_UP -> "Playback speed up"
+        DesktopKeybindAction.SPEED_DOWN -> "Playback speed down"
+        DesktopKeybindAction.SPEED_RESET -> "Reset playback speed"
+        DesktopKeybindAction.SHUFFLE_TOGGLE -> "Toggle shuffle"
+        DesktopKeybindAction.REPEAT_CYCLE -> "Cycle repeat mode"
+        DesktopKeybindAction.TOGGLE_LYRICS -> "Show / hide lyrics"
+        DesktopKeybindAction.TOGGLE_QUEUE -> "Show / hide queue"
+    }
+
+private val DesktopKeybindAction.keybindDescription: String
+    get() = when (this) {
+        DesktopKeybindAction.PLAY_PAUSE,
+        DesktopKeybindAction.NEXT,
+        DesktopKeybindAction.PREVIOUS,
+        -> "Alternative to the Windows media keys."
+        DesktopKeybindAction.VOLUME_UP,
+        DesktopKeybindAction.VOLUME_DOWN,
+        -> "Changes ArchiveTune's own player volume by 2%."
+        DesktopKeybindAction.MUTE_TOGGLE -> "Mutes ArchiveTune without changing Windows system volume."
+        DesktopKeybindAction.SEEK_FORWARD,
+        DesktopKeybindAction.SEEK_BACKWARD,
+        -> "Moves through the current track in 5 second steps."
+        DesktopKeybindAction.SPEED_UP,
+        DesktopKeybindAction.SPEED_DOWN,
+        -> "Changes playback speed in 0.05× steps."
+        DesktopKeybindAction.SPEED_RESET -> "Returns playback speed to 1.00×."
+        DesktopKeybindAction.SHUFFLE_TOGGLE -> "Turns queue shuffle on or off."
+        DesktopKeybindAction.REPEAT_CYCLE -> "Cycles off → all → one."
+        DesktopKeybindAction.TOGGLE_LYRICS -> "Opens or closes the existing lyrics view."
+        DesktopKeybindAction.TOGGLE_QUEUE -> "Opens or closes the existing queue."
+    }
 
 @Composable
 private fun AudioOutputSetting(

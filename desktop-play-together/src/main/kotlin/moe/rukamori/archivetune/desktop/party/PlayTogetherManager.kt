@@ -433,6 +433,16 @@ class PlayTogetherManager(
                     sendSignal(hostPeer, pongMessage(nonce))
                 }
             }
+            "set_playing" -> {
+                val shouldPlay = message.optBoolean("playWhenReady", false)
+                withCurrentSessionMutation(hostPeer.generation) {
+                    if (!hostPeer.canControlPlayback) return@withCurrentSessionMutation
+                    val snapshot = playback.state.value
+                    if (shouldPlay != snapshot.playWhenReady) {
+                        if (shouldPlay) playback.play() else playback.pause()
+                    }
+                }
+            }
             "queue_add" -> {
                 val itemsJson = message.optJSONArray("items") ?: return
                 if (itemsJson.length() !in 1..MAX_QUEUE_REQUEST_ITEMS) return
@@ -569,6 +579,7 @@ class PlayTogetherManager(
                     id = peer.id,
                     name = "Guest ${peer.id.take(4)}",
                     canEditQueue = peer.canEditQueue,
+                    canControlPlayback = peer.canControlPlayback,
                 )
             }
         _state.update { current ->
@@ -587,6 +598,40 @@ class PlayTogetherManager(
         hostPeer.canEditQueue = enabled
         updateHostParticipantCount()
         scope.launch { sendHostPeer(hostPeer, encodePermissions(hostPeer)) }
+    }
+
+    fun setGuestPlaybackControl(peerId: String, enabled: Boolean) {
+        if (_state.value.mode != PartyMode.HOST) return
+        val hostPeer = hostPeers[peerId] ?: return
+        hostPeer.canControlPlayback = enabled
+        updateHostParticipantCount()
+        scope.launch { sendHostPeer(hostPeer, encodePermissions(hostPeer)) }
+    }
+
+    suspend fun togglePlayback(): Boolean {
+        val current = _state.value
+        val generation = sessionGeneration
+        return when (current.mode) {
+            PartyMode.GUEST -> {
+                if (current.phase != PartyPhase.CONNECTED || !current.canControlPlayback) {
+                    false
+                } else {
+                    val shouldPlay = !playback.state.value.isPlaying
+                    sendGuestMessage(
+                        generation,
+                        JSONObject()
+                            .put("type", "set_playing")
+                            .put("playWhenReady", shouldPlay)
+                            .toString(),
+                    )
+                }
+            }
+            PartyMode.HOST, PartyMode.NONE -> {
+                val snapshot = playback.state.value
+                if (snapshot.isPlaying) playback.pause() else playback.play()
+                true
+            }
+        }
     }
 
     suspend fun addToQueue(items: List<PlaybackItem>): Boolean {
@@ -817,6 +862,7 @@ class PlayTogetherManager(
                 _state.update { current ->
                     if (!isCurrentSession(generation) || current.mode != PartyMode.GUEST) current else current.copy(
                         canEditQueue = message.optBoolean("canEditQueue", false),
+                        canControlPlayback = message.optBoolean("canControlPlayback", false),
                     )
                 }
             }
@@ -1235,6 +1281,7 @@ class PlayTogetherManager(
         @Volatile var channel: DataChannel? = null
         @Volatile var directOpen: Boolean = false
         @Volatile var canEditQueue: Boolean = true
+        @Volatile var canControlPlayback: Boolean = true
     }
 
     companion object {
@@ -1357,6 +1404,7 @@ class PlayTogetherManager(
         private fun encodePermissions(hostPeer: HostPeer): String = JSONObject()
             .put("type", "permissions")
             .put("canEditQueue", hostPeer.canEditQueue)
+            .put("canControlPlayback", hostPeer.canControlPlayback)
             .toString()
 
         private fun encodeFullSnapshot(snapshot: PlaybackSnapshot): String = JSONObject()
@@ -1445,6 +1493,7 @@ data class PlayTogetherState(
     val roundTripMs: Long? = null,
     val message: String? = null,
     val canEditQueue: Boolean = false,
+    val canControlPlayback: Boolean = false,
     val queueRevision: String? = null,
     val participants: List<PartyParticipant> = emptyList(),
 ) {
@@ -1465,4 +1514,5 @@ data class PartyParticipant(
     val id: String,
     val name: String,
     val canEditQueue: Boolean = true,
+    val canControlPlayback: Boolean = true,
 )

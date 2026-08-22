@@ -92,6 +92,10 @@ class DesktopSettingsStoreTest {
             downloadConcurrency = 7,
             partialCleanupPolicy = DesktopPartialCleanupPolicy.KEEP_ON_CANCEL,
             lyricsProviderIds = listOf("lrclib", "betterlyrics"),
+            keybinds = listOf(
+                DesktopKeybind(DesktopKeybindAction.VOLUME_UP, listOf(0x11, 0x12, 0x26), repeatWhileHeld = true),
+                DesktopKeybind(DesktopKeybindAction.TOGGLE_LYRICS, listOf(0x11, 0x4C)),
+            ),
         )
 
         DesktopSettingsStore(file).save(expected)
@@ -100,6 +104,28 @@ class DesktopSettingsStoreTest {
         val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
         assertEquals("headphones-device-id", persisted.getProperty("playback.audioOutputDevice"))
         assertEquals("true", persisted.getProperty("playback.loudnessNormalization"))
+        assertEquals("VOLUME_UP", persisted.getProperty("keybind.0.action"))
+        assertEquals("17,18,38", persisted.getProperty("keybind.0.keys"))
+        assertEquals("true", persisted.getProperty("keybind.0.repeat"))
+    }
+
+    @Test
+    fun sanitizesKeybindsWithoutArtificialChordLengthLimit() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val longChord = (1..0xFF).toList()
+        DesktopSettingsStore(file).save(
+            DesktopSettings(
+                keybinds = listOf(
+                    DesktopKeybind(DesktopKeybindAction.VOLUME_DOWN, longChord + 0 + 300 + 0x11, repeatWhileHeld = true),
+                    DesktopKeybind(DesktopKeybindAction.VOLUME_DOWN, listOf(0x41)),
+                ),
+            ),
+        )
+
+        val restored = DesktopSettingsStore(file).snapshot().keybinds
+        assertEquals(1, restored.size)
+        assertEquals((1..0xFF).toList(), restored.single().virtualKeys)
+        assertEquals(true, restored.single().repeatWhileHeld)
     }
 
     @Test

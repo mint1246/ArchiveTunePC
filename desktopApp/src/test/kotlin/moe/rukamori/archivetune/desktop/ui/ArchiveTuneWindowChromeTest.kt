@@ -106,4 +106,17 @@ class ArchiveTuneWindowChromeTest {
             fallbackRestoredBounds(Rectangle(-1536, 278, 1280, 720), Dimension(640, 480)),
         )
     }
+
+    @Test
+    fun `fixed physical window size converts to destination monitor dp`() {
+        assertEquals(
+            800f,
+            physicalPixelsToDpSize(1200, 900, scaleX = 1.5, scaleY = 1.5).width.value,
+        )
+        assertEquals(
+            600f,
+            physicalPixelsToDpSize(1200, 900, scaleX = 1.5, scaleY = 1.5).height.value,
+        )
+    }
+
 }

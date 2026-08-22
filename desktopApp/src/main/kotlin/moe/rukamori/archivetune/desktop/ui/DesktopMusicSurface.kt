@@ -598,6 +598,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                     scope.launch { rescanLibrary() }
                 },
                 onLibraryRescan = { scope.launch { rescanLibrary() } },
+                onKeybindsChanged = services::refreshKeybindings,
+                onKeybindCaptureChanged = services::setKeybindCaptureActive,
+                keybindPressedKeys = services.keybindPressedKeys,
                 modifier = modifier,
             )
         }
@@ -1744,15 +1747,22 @@ private fun NowPlayingSubtitle(
                                         checked = participant.canEditQueue,
                                         onCheckedChange = { playTogether.setGuestQueueEditing(participant.id, it) },
                                     )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text("Play / pause", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(8.dp))
+                                    Switch(
+                                        checked = participant.canControlPlayback,
+                                        onCheckedChange = { playTogether.setGuestPlaybackControl(participant.id, it) },
+                                    )
                                 }
                             }
                         }
                         partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
                             Text(
                                 when (partyState.transport) {
-                                    PartyTransport.DIRECT -> "Connected directly P2P. the host controls playback."
-                                    PartyTransport.RELAY -> "Connected through the Quick Tunnel fallback. the host controls playback."
-                                    else -> partyState.message ?: "Connected. the host controls playback."
+                                    PartyTransport.DIRECT -> if (partyState.canControlPlayback) "Connected directly P2P. you can play or pause for everyone." else "Connected directly P2P. the host controls playback."
+                                    PartyTransport.RELAY -> if (partyState.canControlPlayback) "Connected through the Quick Tunnel fallback. you can play or pause for everyone." else "Connected through the Quick Tunnel fallback. the host controls playback."
+                                    else -> partyState.message ?: if (partyState.canControlPlayback) "Connected. you can play or pause for everyone." else "Connected. the host controls playback."
                                 },
                             )
                             partyState.roundTripMs?.let { Text("${it} ms round trip", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -1827,7 +1837,7 @@ private fun NowPlayingSubtitle(
             }
             TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }
             IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
-            FilledIconButton({ scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }
+            FilledIconButton({ scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }
             IconButton({ scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }
             DesktopTooltip(if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off") {
                 IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) {
@@ -1885,7 +1895,7 @@ internal fun DesktopLyricsView(
                         )
                     }
                     IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
-                    FilledIconButton(onClick = { scope.launch { if (snapshot.isPlaying) services.playback.pause() else services.playback.play() } }, enabled = !guestInParty && item != null) {
+                    FilledIconButton(onClick = { scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) {
 AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) }, label = "mini-player-play-state") { playing -> Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play") }
                     }
                     IconButton(onClick = { scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }

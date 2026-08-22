@@ -22,6 +22,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
 import moe.rukamori.archivetune.playback.api.PlaybackQueueEntry
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
+import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import tel.schich.libdatachannel.DataChannelCallback
 import tel.schich.libdatachannel.GatheringState
@@ -85,6 +86,20 @@ class PlayTogetherManagerTest {
         assertFalse(guestConnected.localTransportCommandsAllowed)
         assertFalse(guestConnected.persistSpeedAndRepeat)
         assertFalse(guestConnected.persistShuffle)
+    }
+
+    @Test
+    fun `host and non party playback toggle stays local`() = runBlocking {
+        val playback = RecordingPlaybackController(PlaybackSnapshot(status = PlaybackStatus.READY, playWhenReady = true))
+        PlayTogetherManager(playback, Files.createTempDirectory("party-toggle-test"), Logger.getAnonymousLogger()).use { manager ->
+            assertTrue(manager.togglePlayback())
+            assertFalse(playback.state.value.playWhenReady)
+
+            val generation = manager.beginSession(PartyMode.HOST, "Hosting")
+            assertTrue(manager.togglePlayback())
+            assertTrue(playback.state.value.playWhenReady)
+            manager.finishSession(generation, PlayTogetherState())
+        }
     }
 
     @Test
@@ -220,6 +235,7 @@ class PlayTogetherManagerTest {
             phase = PartyPhase.STARTING,
             transport = PartyTransport.SIGNALING,
             canEditQueue = true,
+            canControlPlayback = true,
             queueRevision = "revision-42",
             roundTripMs = 18,
             message = "Joining listening party…",
@@ -229,6 +245,7 @@ class PlayTogetherManagerTest {
         assertEquals(PartyPhase.CONNECTED, relay.phase)
         assertEquals(PartyTransport.RELAY, relay.transport)
         assertTrue(relay.canEditQueue)
+        assertTrue(relay.canControlPlayback)
         assertEquals("revision-42", relay.queueRevision)
         assertEquals(18, relay.roundTripMs)
         assertEquals(2, relay.participantCount)
@@ -244,6 +261,7 @@ class PlayTogetherManagerTest {
         assertEquals(1, direct.directPeerCount)
         assertEquals("Connected directly P2P", direct.message)
         assertTrue(direct.canEditQueue)
+        assertTrue(direct.canControlPlayback)
         assertEquals("revision-42", direct.queueRevision)
         assertEquals(18, direct.roundTripMs)
     }
