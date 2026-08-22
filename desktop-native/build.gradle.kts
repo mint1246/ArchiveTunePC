@@ -112,6 +112,13 @@ val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime)
     from(nativeOutputDir) {
         exclude("native/windows-x64/vlc/**")
+        // The clean CI build does not reliably leave the generated executable in Nucleus' output
+        // directory even though nativeImageCompile produced it successfully. Stage the executable
+        // from nativeCompile below, which is the authoritative GraalVM build output.
+        exclude("ArchiveTune.exe")
+    }
+    from(nativeCompileDir) {
+        include("ArchiveTune.exe")
     }
     into(nativeReleaseDir)
 }
