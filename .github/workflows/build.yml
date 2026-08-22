@@ -23,6 +23,7 @@ jobs:
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
       R2_BUCKET: archivetune-updates
       R2_ENDPOINT: https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com
       R2_PUBLIC_URL: https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev
@@ -54,6 +55,24 @@ jobs:
       - name: Verify Java runtime
         shell: pwsh
         run: java -version
+
+      - name: Install AWS CLI
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: python -m pip install awscli
+
+      - name: Verify R2 credentials
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          aws s3api list-objects-v2 `
+            --bucket $env:R2_BUCKET `
+            --max-keys 1 `
+            --endpoint-url $env:R2_ENDPOINT `
+            --region auto | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "R2 credential preflight failed (aws exit code $LASTEXITCODE)."
+          }
 
       - name: Build GraalVM Native Image MSI
         shell: pwsh
@@ -89,11 +108,6 @@ jobs:
           name: ArchiveTune-Windows-MSI
           path: ${{ steps.msi.outputs.path }}
           if-no-files-found: error
-
-      - name: Install AWS CLI
-        if: github.ref == 'refs/heads/main'
-        shell: pwsh
-        run: python -m pip install awscli
 
       - name: Publish desktop update to R2
         if: github.ref == 'refs/heads/main'

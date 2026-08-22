@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:AWS_DEFAULT_REGION = "auto"
 
 if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY) {
     throw "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must contain the R2 API credentials."
@@ -18,7 +19,10 @@ $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedMsi).Hash.ToLowe
 $objectKey = "releases/$fileName"
 $publicBase = $PublicBaseUrl.TrimEnd('/')
 
-aws s3 cp $resolvedMsi "s3://$Bucket/$objectKey" --endpoint-url $Endpoint --content-type "application/x-msi"
+aws s3 cp $resolvedMsi "s3://$Bucket/$objectKey" --endpoint-url $Endpoint --region auto --content-type "application/x-msi"
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to upload MSI to R2 (aws exit code $LASTEXITCODE)."
+}
 
 $manifest = [ordered]@{
     version = $Version
@@ -29,7 +33,10 @@ $manifest = [ordered]@{
 $manifestPath = Join-Path $env:TEMP "archivetune-latest-$Version.json"
 try {
     [IO.File]::WriteAllText($manifestPath, $manifest, [Text.UTF8Encoding]::new($false))
-    aws s3 cp $manifestPath "s3://$Bucket/latest.json" --endpoint-url $Endpoint --content-type "application/json" --cache-control "no-cache"
+    aws s3 cp $manifestPath "s3://$Bucket/latest.json" --endpoint-url $Endpoint --region auto --content-type "application/json" --cache-control "no-cache"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to upload latest.json to R2 (aws exit code $LASTEXITCODE)."
+    }
 } finally {
     Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
 }
