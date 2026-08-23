@@ -484,7 +484,7 @@ fun DesktopSettingsPanel(
                     Column(Modifier.weight(1f)) {
                         Text("Global shortcuts", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Use any exact key combination, including 3+ keys. Continuous actions can repeat while the chord is held.",
+                            "Use any key combination, including 3+ keys. Shortcuts keep working while other keys are held, and continuous actions can repeat.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

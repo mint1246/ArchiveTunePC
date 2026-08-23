@@ -7,12 +7,15 @@
 package moe.rukamori.archivetune.windowsmedia
 
 import com.sun.jna.Platform
+import com.sun.jna.platform.win32.Kernel32
 import com.sun.jna.platform.win32.User32
+import com.sun.jna.platform.win32.WinUser
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
-/** One global Windows shortcut. Chords are exact: extra held keys do not also trigger a subset. */
+/** One global Windows shortcut. Unrelated held keys do not block a configured chord. */
 data class WindowsGlobalKeyBinding(
     val actionId: String,
     val virtualKeys: Set<Int>,
@@ -22,11 +25,12 @@ data class WindowsGlobalKeyBinding(
 /**
  * Owns the Windows key-state poller used for user-configurable shortcuts.
  *
- * RegisterHotKey cannot express arbitrary three-or-more-key chords or key-up/held state, so custom
- * bindings sample GetAsyncKeyState instead. This intentionally avoids a native callback: JNA's
- * WH_KEYBOARD_LL callback path is unreliable in the Graal native executable even though it works on
- * the JVM. Polling also sees SendInput-style macro keys that Compose/AWT's KeyEventDispatcher may not
- * receive.
+ * RegisterHotKey is used when Windows can represent the chord (modifiers + one key), which makes
+ * ordinary shortcuts reliable even while a game owns the foreground input path. Arbitrary chords and
+ * held/repeat state are still sampled with GetAsyncKeyState. This intentionally avoids a native
+ * callback: JNA's WH_KEYBOARD_LL callback path is unreliable in the Graal native executable even
+ * though it works on the JVM. Polling also sees SendInput-style macro keys that Compose/AWT's
+ * KeyEventDispatcher may not receive.
  */
 class WindowsGlobalKeyBindings(
     private val onAction: (String) -> Unit,
@@ -35,9 +39,11 @@ class WindowsGlobalKeyBindings(
     private val lock = Any()
     private var currentBindings: List<WindowsGlobalKeyBinding> = emptyList()
     private var matcher = WindowsChordMatcher(emptyList())
-    private var captureActive = false
+    @Volatile private var captureActive = false
     private var lastSample = emptySet<Int>()
     private var closed = false
+    private var registeredHotKeys: WindowsRegisteredGlobalHotKeys? = null
+    private var registrationGeneration = 0L
     private val poller: ScheduledExecutorService? = if (Platform.isWindows()) {
         Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "archive-tune-win-keybind-poller").apply { isDaemon = true }
@@ -59,12 +65,32 @@ class WindowsGlobalKeyBindings(
                 binding.takeIf { keys.isNotEmpty() }?.copy(virtualKeys = keys)
             }
             .distinctBy { it.actionId }
+        val oldRegistration: WindowsRegisteredGlobalHotKeys?
+        val generation: Long
         synchronized(lock) {
             if (closed || sanitized == currentBindings) return
+            registrationGeneration += 1L
+            generation = registrationGeneration
+            oldRegistration = registeredHotKeys
+            registeredHotKeys = null
             currentBindings = sanitized
             matcher = WindowsChordMatcher(sanitized)
             lastSample = emptySet()
         }
+        oldRegistration?.close()
+
+        val newRegistration = WindowsRegisteredGlobalHotKeys.start(sanitized) { actionId ->
+            onRegisteredHotKey(generation, actionId)
+        }
+        val installed = synchronized(lock) {
+            if (!closed && registrationGeneration == generation && currentBindings == sanitized) {
+                registeredHotKeys = newRegistration
+                true
+            } else {
+                false
+            }
+        }
+        if (!installed) newRegistration?.close()
     }
 
     fun setCaptureActive(active: Boolean) {
@@ -105,15 +131,31 @@ class WindowsGlobalKeyBindings(
         if (!capture) actions.forEach { actionId -> runCatching { onAction(actionId) } }
     }
 
+    private fun onRegisteredHotKey(generation: Long, actionId: String) {
+        val shouldFire = synchronized(lock) {
+            if (closed || captureActive || generation != registrationGeneration) {
+                false
+            } else {
+                matcher.activateExternally(actionId, System.currentTimeMillis())
+            }
+        }
+        if (shouldFire) runCatching { onAction(actionId) }
+    }
+
     override fun close() {
+        val registration: WindowsRegisteredGlobalHotKeys?
         synchronized(lock) {
             if (closed) return
             closed = true
+            registrationGeneration += 1L
             currentBindings = emptyList()
             matcher.clear()
             captureActive = false
             lastSample = emptySet()
+            registration = registeredHotKeys
+            registeredHotKeys = null
         }
+        registration?.close()
         poller?.shutdownNow()
         onPressedKeysChanged(emptySet())
     }
@@ -145,7 +187,7 @@ internal class WindowsChordMatcher(
         return recalculate(nowMs)
     }
 
-    /** Atomically replaces the observed chord so an extra simultaneous key cannot fire a subset. */
+    /** Atomically replaces the observed keyboard state before evaluating configured chords. */
     @Synchronized
     fun updatePressed(virtualKeys: Set<Int>, nowMs: Long): List<String> {
         pressed.clear()
@@ -173,6 +215,15 @@ internal class WindowsChordMatcher(
         return fired
     }
 
+    /** Marks an OS-delivered hotkey active so the polling path cannot fire the same press twice. */
+    @Synchronized
+    fun activateExternally(actionId: String, nowMs: Long): Boolean {
+        if (active.containsKey(actionId)) return false
+        val binding = bindings[actionId] ?: return false
+        active[actionId] = if (binding.repeatWhileHeld) nowMs + initialRepeatDelayMs else Long.MAX_VALUE
+        return true
+    }
+
     @Synchronized
     fun clear() {
         pressed.clear()
@@ -180,7 +231,16 @@ internal class WindowsChordMatcher(
     }
 
     private fun recalculate(nowMs: Long): List<String> {
-        val matching = bindings.values.filter { it.virtualKeys == pressed }.mapTo(linkedSetOf()) { it.actionId }
+        val candidates = bindings.values.filter { binding -> pressed.containsAll(binding.virtualKeys) }
+        val matching = candidates
+            .filter { candidate ->
+                candidates.none { other ->
+                    other.actionId != candidate.actionId &&
+                        other.virtualKeys.size > candidate.virtualKeys.size &&
+                        other.virtualKeys.containsAll(candidate.virtualKeys)
+                }
+            }
+            .mapTo(linkedSetOf()) { it.actionId }
         active.keys.retainAll(matching)
         val newlyActive = matching.filterNot(active::containsKey)
         newlyActive.forEach { actionId ->
@@ -188,6 +248,105 @@ internal class WindowsChordMatcher(
             active[actionId] = if (binding.repeatWhileHeld) nowMs + initialRepeatDelayMs else Long.MAX_VALUE
         }
         return newlyActive
+    }
+}
+
+internal data class WindowsRegisterableGlobalHotKey(
+    val actionId: String,
+    val virtualKey: Int,
+    val modifiers: Int,
+)
+
+internal fun WindowsGlobalKeyBinding.toRegisterableHotKey(): WindowsRegisterableGlobalHotKey? {
+    val normalized = virtualKeys.mapTo(linkedSetOf(), ::normalizeWindowsVirtualKey)
+    val nonModifiers = normalized.filterNot(::isWindowsModifierKey)
+    if (nonModifiers.size != 1) return null
+
+    var modifiers = MOD_NOREPEAT
+    if (VK_SHIFT in normalized) modifiers = modifiers or MOD_SHIFT
+    if (VK_CONTROL in normalized) modifiers = modifiers or MOD_CONTROL
+    if (VK_MENU in normalized) modifiers = modifiers or MOD_ALT
+    if (VK_LWIN in normalized) modifiers = modifiers or MOD_WIN
+    return WindowsRegisterableGlobalHotKey(actionId, nonModifiers.single(), modifiers)
+}
+
+/** Dedicated RegisterHotKey message loop for the subset of user bindings Windows can represent. */
+private class WindowsRegisteredGlobalHotKeys private constructor(
+    private val bindings: List<WindowsRegisterableGlobalHotKey>,
+    private val onAction: (String) -> Unit,
+) : AutoCloseable {
+    private val started = CountDownLatch(1)
+    private val stopped = CountDownLatch(1)
+    @Volatile private var threadId = 0
+    @Volatile private var closed = false
+    private val thread = Thread(::runLoop, "archive-tune-win-global-hotkeys").apply {
+        isDaemon = true
+        start()
+    }
+
+    init {
+        if (!started.await(2, TimeUnit.SECONDS)) {
+            close()
+            throw UnsupportedOperationException("Windows global-hotkey loop did not start")
+        }
+    }
+
+    private fun runLoop() {
+        threadId = Kernel32.INSTANCE.GetCurrentThreadId()
+        val owned = mutableListOf<Int>()
+        try {
+            val actionsById = linkedMapOf<Int, String>()
+            bindings.forEachIndexed { index, binding ->
+                val id = REGISTERED_HOTKEY_ID_BASE + index
+                if (User32.INSTANCE.RegisterHotKey(null, id, binding.modifiers, binding.virtualKey)) {
+                    owned += id
+                    actionsById[id] = binding.actionId
+                }
+            }
+            started.countDown()
+            if (owned.isEmpty()) return
+
+            val message = WinUser.MSG()
+            while (User32.INSTANCE.GetMessage(message, null, 0, 0) > 0) {
+                if (message.message == WinUser.WM_HOTKEY) {
+                    actionsById[message.wParam.toInt()]?.let(onAction)
+                }
+            }
+        } finally {
+            started.countDown()
+            owned.forEach { id -> runCatching { User32.INSTANCE.UnregisterHotKey(null, id) } }
+            stopped.countDown()
+        }
+    }
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        val id = threadId
+        if (id != 0) User32.INSTANCE.PostThreadMessage(id, WinUser.WM_QUIT, null, null)
+        stopped.await(2, TimeUnit.SECONDS)
+    }
+
+    companion object {
+        fun start(
+            bindings: List<WindowsGlobalKeyBinding>,
+            onAction: (String) -> Unit,
+        ): WindowsRegisteredGlobalHotKeys? {
+            if (!Platform.isWindows()) return null
+            val registerable = bindings
+                .filter { binding ->
+                    bindings.none { other ->
+                        other.actionId != binding.actionId &&
+                            other.virtualKeys.size > binding.virtualKeys.size &&
+                            other.virtualKeys.containsAll(binding.virtualKeys)
+                    }
+                }
+                .mapNotNull(WindowsGlobalKeyBinding::toRegisterableHotKey)
+            if (registerable.isEmpty()) return null
+            return runCatching { WindowsRegisteredGlobalHotKeys(registerable, onAction) }.getOrNull()
+        }
+
+        private const val REGISTERED_HOTKEY_ID_BASE = 0x4100
     }
 }
 
@@ -220,3 +379,11 @@ private const val VK_LCONTROL = 0xA2
 private const val VK_RCONTROL = 0xA3
 private const val VK_LMENU = 0xA4
 private const val VK_RMENU = 0xA5
+private const val MOD_ALT = 0x0001
+private const val MOD_CONTROL = 0x0002
+private const val MOD_SHIFT = 0x0004
+private const val MOD_WIN = 0x0008
+private const val MOD_NOREPEAT = 0x4000
+
+private fun isWindowsModifierKey(virtualKey: Int): Boolean =
+    virtualKey == VK_SHIFT || virtualKey == VK_CONTROL || virtualKey == VK_MENU || virtualKey == VK_LWIN
