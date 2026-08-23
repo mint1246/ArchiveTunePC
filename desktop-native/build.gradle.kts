@@ -11,6 +11,9 @@ plugins {
 group = "moe.rukamori.archivetune"
 val desktopAppProject = evaluationDependsOn(":desktopApp")
 version = desktopAppProject.version
+val windowsPackageVersion = version.toString().let { value ->
+    if (value.count { it == '.' } == 1) "$value.0" else value
+}
 val generatedWindowsIcon = desktopAppProject.layout.buildDirectory.file("generated/desktop/icon/ArchiveTune.ico")
 
 kotlin {
@@ -37,7 +40,7 @@ nucleus.application {
     nativeDistributions {
         appName = "ArchiveTune"
         packageName = "ArchiveTune"
-        packageVersion = version.toString()
+        packageVersion = windowsPackageVersion
         windows {
             iconFile.set(generatedWindowsIcon)
         }
@@ -77,7 +80,6 @@ val nativeMsiScript = rootProject.layout.projectDirectory.file("packaging/window
 val nativeReleaseDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/app/ArchiveTune")
 val nativeMsiOutputDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/msi")
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
-val desktopVersion = version.toString()
 
 tasks.matching { it.name == "generateGraalvmWindowsResources" }.configureEach {
     dependsOn(desktopAppProject.tasks.named("generateWindowsIcon"))
@@ -138,7 +140,7 @@ tasks.register<Exec>("packageNativeMsi") {
     inputs.file(nativeMsiScript)
     inputs.file(rootProject.layout.projectDirectory.file("LICENSE"))
     inputs.file(generatedWindowsIcon)
-    outputs.file(nativeMsiOutputDir.map { it.file("ArchiveTune-$desktopVersion.msi") })
+    outputs.file(nativeMsiOutputDir.map { it.file("ArchiveTune-$windowsPackageVersion.msi") })
 
     commandLine(
         "powershell.exe",
@@ -158,6 +160,6 @@ tasks.register<Exec>("packageNativeMsi") {
         "-LicensePath",
         rootProject.layout.projectDirectory.file("LICENSE").asFile.absolutePath,
         "-Version",
-        desktopVersion,
+        windowsPackageVersion,
     )
 }

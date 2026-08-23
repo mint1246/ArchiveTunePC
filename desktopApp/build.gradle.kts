@@ -8,7 +8,10 @@ plugins {
 }
 
 group = "moe.rukamori.archivetune"
-version = "14.1.0"
+version = "14.11"
+val windowsPackageVersion = version.toString().let { value ->
+    if (value.count { it == '.' } == 1) "$value.0" else value
+}
 val windowsInstallationPath = "ArchiveTune App"
 
 val buildingWithOpenJ9 =
@@ -94,7 +97,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "ArchiveTune"
-            packageVersion = project.version.toString()
+            packageVersion = windowsPackageVersion
             description = "A private, feature-rich YouTube Music client and music player."
             copyright = "Copyright © 2026 Rukamori and ArchiveTune contributors"
             vendor = "ArchiveTune"
@@ -243,7 +246,7 @@ fun installerJpackageArgs(
     "--resource-dir", customWixResourceDir.asFile.absolutePath,
     "--dest", dest.get().asFile.absolutePath,
     "--name", "ArchiveTune",
-    "--app-version", project.version.toString(),
+    "--app-version", windowsPackageVersion,
     "--vendor", "ArchiveTune",
     "--description", "A private, feature-rich YouTube Music client and music player.",
     "--copyright", "Copyright © 2026 Rukamori and ArchiveTune contributors",
