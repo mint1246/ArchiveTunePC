@@ -53,7 +53,18 @@ class DesktopUpdateCoordinator(
 
     fun start() {
         val baseUrl = DesktopBuildInfo.UPDATE_BASE_URL.trim().trimEnd('/')
-        if (!isWindows() || baseUrl.isBlank()) {
+        val installedExecutable = installedExecutable()
+        val currentExecutable = currentExecutable()
+        if (
+            !isWindows() ||
+            baseUrl.isBlank() ||
+            installedExecutable == null ||
+            currentExecutable == null ||
+            currentExecutable != installedExecutable
+        ) {
+            if (currentExecutable != null && installedExecutable != null && currentExecutable != installedExecutable) {
+                runtime.logger.info("Automatic updates disabled for non-installed build: $currentExecutable")
+            }
             _state.value = DesktopUpdateState.Disabled
             return
         }
@@ -69,7 +80,7 @@ class DesktopUpdateCoordinator(
 
     suspend fun launchInstallerHandoff(): Boolean = withContext(Dispatchers.IO) {
         val ready = staged ?: return@withContext false
-        val executable = currentExecutable() ?: return@withContext false
+        val executable = installedExecutable() ?: return@withContext false
         Files.createDirectories(updateDirectory)
         val script = updateDirectory.resolve("apply-${sanitizeVersion(ready.version)}.ps1")
         Files.writeString(script, handoffScript(ready.msi, executable, ProcessHandle.current().pid()))
@@ -186,6 +197,15 @@ class DesktopUpdateCoordinator(
     private fun currentExecutable(): Path? =
         ProcessHandle.current().info().command().orElse(null)
             ?.let(Path::of)
+            ?.toAbsolutePath()
+            ?.normalize()
+
+    private fun installedExecutable(): Path? =
+        System.getenv("LOCALAPPDATA")
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?.resolve("ArchiveTune App")
+            ?.resolve("ArchiveTune.exe")
             ?.toAbsolutePath()
             ?.normalize()
 
