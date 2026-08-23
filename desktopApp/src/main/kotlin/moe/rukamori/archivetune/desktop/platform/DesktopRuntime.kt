@@ -54,7 +54,7 @@ class DesktopRuntime private constructor(
                 settings = DesktopSettingsStore(paths.config.resolve("desktop-settings.properties")),
                 logging = logging,
             )
-            runtime.logger.info("Starting ArchiveTune Desktop 14.12 on ${System.getProperty("os.name")} ${System.getProperty("os.arch")}")
+            runtime.logger.info("Starting ArchiveTune Desktop 14.13 on ${System.getProperty("os.name")} ${System.getProperty("os.arch")}")
             runtime.logger.info("Resolved desktop application directories: ${paths.logSummary()}")
             Thread.setDefaultUncaughtExceptionHandler { thread, error ->
                 runtime.logger.log(Level.SEVERE, "Uncaught exception on thread ${thread.name}", error)

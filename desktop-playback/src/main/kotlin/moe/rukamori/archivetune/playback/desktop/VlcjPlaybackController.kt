@@ -1156,33 +1156,29 @@ class VlcjPlaybackController(
                 runCatching { secondary.events().removeMediaPlayerEventListener(readinessListener) }
                 if (!becameReady || !crossfadeStillValid(runId, outgoingGeneration, target)) return
 
-                val fadeDurationMs = commandMutex.withLock {
-                    if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) {
-                        null
-                    } else {
-                        val snapshot = _state.value
-                        val remainingMs =
-                            (snapshot.durationMs - maxOf(snapshot.positionMs, latestPositionMs.get()))
-                                .coerceAtLeast(0L)
-                        (remainingMs - CROSSFADE_END_GUARD_MS)
-                            .coerceAtMost(config.durationMs)
-                            .takeIf { it >= MIN_CROSSFADE_DURATION_MS }
-                            ?.also { crossfadeSuppressFinishedRunId = runId }
-                    }
-                } ?: return
+                // The prepare-ahead window is for opening and buffering the secondary source only.
+                // Hold it muted at its readiness position so the fade starts at the configured
+                // point instead of cutting the end of the outgoing track early.
+                runCatching { secondary.controls().pause() }
+                val fadeDurationMs =
+                    waitForCrossfadeFadeStart(runId, outgoingGeneration, target, config, secondary)
+                        ?: return
 
                 logger.fine("Starting ${fadeDurationMs}ms crossfade to ${target.item.logLabel()}")
                 val fadeStartNanos = System.nanoTime()
                 while (true) {
                     val elapsedMs = (System.nanoTime() - fadeStartNanos) / 1_000_000L
                     val progress = (elapsedMs.toFloat() / fadeDurationMs.toFloat()).coerceIn(0f, 1f)
+                    val gains = equalPowerGains(progress)
                     val valid = commandMutex.withLock {
                         if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) {
                             false
                         } else {
-                            outputGain.setFadeMultiplier(1f - progress)
+                            outputGain.setFadeMultiplier(gains.outgoing)
                             runCatching {
-                                secondary.audio().setVolume(outputGain.volumePercentForSource(resolved, progress))
+                                secondary.audio().setVolume(
+                                    outputGain.volumePercentForSource(resolved, gains.incoming),
+                                )
                             }
                             true
                         }
@@ -1223,47 +1219,50 @@ class VlcjPlaybackController(
                 } ?: return
                 enqueueLoad(loadRequest)
 
-                val primaryReadyDeadline = System.nanoTime() + CROSSFADE_PRIMARY_READY_TIMEOUT_MS * 1_000_000L
-                var primaryReady = false
-                while (System.nanoTime() < primaryReadyDeadline) {
-                    val readiness = commandMutex.withLock {
-                        when {
-                            activeCrossfadeRunId != runId || generation != loadRequest.generation -> -1
-                            activeGeneration == loadRequest.generation && _state.value.status == PlaybackStatus.READY -> 1
-                            _state.value.status == PlaybackStatus.ERROR -> -1
-                            else -> 0
-                        }
-                    }
-                    if (readiness > 0) {
-                        primaryReady = true
-                        break
-                    }
-                    if (readiness < 0) return
-                    delay(CROSSFADE_HANDOFF_POLL_MS)
-                }
-                if (!primaryReady) return
+                if (!awaitCrossfadePrimaryReady(runId, loadRequest.generation)) return
 
-                // The temporary player kept advancing while the primary source opened. Align the
-                // primary before the short handoff so there is no audible repeated fragment.
-                val alignedPositionMs = runCatching { secondary.status().time() }.getOrDefault(handoffPositionMs).coerceAtLeast(0L)
-                commandMutex.withLock {
-                    if (activeCrossfadeRunId != runId || generation != loadRequest.generation) return@withLock
-                    runCatching { player?.controls()?.setTime(alignedPositionMs) }
-                    latestPositionMs.set(alignedPositionMs)
-                    _state.update {
-                        it.copy(
-                            positionMs = alignedPositionMs.coerceAtMostPositive(it.durationMs),
-                            bufferedPositionMs = maxOf(it.bufferedPositionMs, alignedPositionMs.coerceAtMostPositive(it.durationMs)),
-                        )
-                    }
-                }
-                delay(CROSSFADE_PRIMARY_SEEK_SETTLE_MS)
+                // VLC can report READY while a handoff seek is still settling. Keep the working
+                // secondary audible until the primary verifiably advances past the seek target;
+                // releasing it earlier can strand a silent primary until a manual seek.
+                val confirmedPrimaryPositionMs =
+                    confirmOrRestartCrossfadePrimary(runId, loadRequest, secondary)
+                        ?: return
 
-                val handoffStartNanos = System.nanoTime()
+                var handoffElapsedMs = 0L
+                var lastFrameNanos = System.nanoTime()
+                var lastConfirmedPrimaryMs = confirmedPrimaryPositionMs
+                var lastPrimaryAdvanceNanos = lastFrameNanos
                 while (true) {
-                    val elapsedMs = (System.nanoTime() - handoffStartNanos) / 1_000_000L
+                    val primaryStatus = runCatching { player?.status() }.getOrNull()
+                    val primaryPositionMs = primaryStatus?.time()?.coerceAtLeast(0L) ?: 0L
+                    val primaryAdvancing =
+                        primaryStatus?.isPlaying() == true &&
+                            hasPlaybackPositionAdvanced(lastConfirmedPrimaryMs, primaryPositionMs)
+                    val nowNanos = System.nanoTime()
+                    if (primaryAdvancing) {
+                        lastConfirmedPrimaryMs = primaryPositionMs
+                        lastPrimaryAdvanceNanos = nowNanos
+                        handoffElapsedMs += (nowNanos - lastFrameNanos) / 1_000_000L
+                        lastFrameNanos = nowNanos
+                    } else if (
+                        nowNanos - lastPrimaryAdvanceNanos >=
+                        CROSSFADE_HANDOFF_RETRY_MS * 1_000_000L
+                    ) {
+                        val recoveredPositionMs =
+                            confirmOrRestartCrossfadePrimary(runId, loadRequest, secondary)
+                                ?: return
+                        lastConfirmedPrimaryMs = recoveredPositionMs
+                        lastPrimaryAdvanceNanos = System.nanoTime()
+                        lastFrameNanos = lastPrimaryAdvanceNanos
+                        continue
+                    } else {
+                        lastFrameNanos = nowNanos
+                    }
+
                     val progress =
-                        (elapsedMs.toFloat() / CROSSFADE_HANDOFF_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+                        (handoffElapsedMs.toFloat() / CROSSFADE_HANDOFF_DURATION_MS.toFloat())
+                            .coerceIn(0f, 1f)
+                    val gains = equalPowerGains(progress)
                     val valid = commandMutex.withLock {
                         if (
                             activeCrossfadeRunId != runId ||
@@ -1273,9 +1272,11 @@ class VlcjPlaybackController(
                         ) {
                             false
                         } else {
-                            outputGain.setFadeMultiplier(progress)
+                            outputGain.setFadeMultiplier(gains.incoming)
                             runCatching {
-                                secondary.audio().setVolume(outputGain.volumePercentForSource(resolved, 1f - progress))
+                                secondary.audio().setVolume(
+                                    outputGain.volumePercentForSource(resolved, gains.outgoing),
+                                )
                             }
                             true
                         }
@@ -1308,6 +1309,186 @@ class VlcjPlaybackController(
                 }
             }
         }
+    }
+
+    private suspend fun awaitCrossfadePrimaryReady(
+        runId: Long,
+        loadGeneration: Long,
+    ): Boolean {
+        val deadlineNanos = System.nanoTime() + CROSSFADE_PRIMARY_READY_TIMEOUT_MS * 1_000_000L
+        while (System.nanoTime() < deadlineNanos) {
+            val readiness = commandMutex.withLock {
+                when {
+                    activeCrossfadeRunId != runId || generation != loadGeneration -> -1
+                    activeGeneration == loadGeneration && _state.value.status == PlaybackStatus.READY -> 1
+                    _state.value.status == PlaybackStatus.ERROR -> -1
+                    else -> 0
+                }
+            }
+            if (readiness > 0) return true
+            if (readiness < 0) return false
+            delay(CROSSFADE_HANDOFF_POLL_MS)
+        }
+        return false
+    }
+
+    private suspend fun confirmOrRestartCrossfadePrimary(
+        runId: Long,
+        loadRequest: LoadRequest,
+        secondary: MediaPlayer,
+    ): Long? {
+        awaitCrossfadePrimaryAdvance(runId, loadRequest.generation, secondary)
+            ?.let { return it }
+
+        val retryPositionMs =
+            runCatching { secondary.status().time() }.getOrDefault(0L).coerceAtLeast(0L)
+        logger.warning(
+            "Primary player stalled after crossfade; retrying ${loadRequest.item.logLabel()} " +
+                "from ${retryPositionMs}ms while retaining the secondary player",
+        )
+        val retryAccepted = commandMutex.withLock {
+            val stillActive =
+                activeCrossfadeRunId == runId &&
+                    generation == loadRequest.generation &&
+                    activeGeneration == loadRequest.generation &&
+                    _state.value.playWhenReady
+            if (stillActive) {
+                _state.update { it.copy(status = PlaybackStatus.RESOLVING, error = null) }
+            }
+            stillActive
+        }
+        if (!retryAccepted) return null
+
+        enqueueLoad(
+            LoadRequest(
+                generation = loadRequest.generation,
+                item = loadRequest.item,
+                startPositionMs = retryPositionMs,
+            ),
+        )
+        if (!awaitCrossfadePrimaryReady(runId, loadRequest.generation)) return null
+        return awaitCrossfadePrimaryAdvance(runId, loadRequest.generation, secondary)
+    }
+
+    private suspend fun waitForCrossfadeFadeStart(
+        runId: Long,
+        outgoingGeneration: Long,
+        target: CrossfadeTarget,
+        config: DesktopCrossfadeConfiguration,
+        secondary: MediaPlayer,
+    ): Long? {
+        while (true) {
+            var pollMs = CROSSFADE_FADE_START_POLL_MS
+            val fadeDurationMs =
+                commandMutex.withLock {
+                    if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) {
+                        return@withLock -1L
+                    }
+                    val snapshot = _state.value
+                    val remainingMs =
+                        (snapshot.durationMs - maxOf(snapshot.positionMs, latestPositionMs.get()))
+                            .coerceAtLeast(0L)
+                    val availableFadeMs = remainingMs - CROSSFADE_END_GUARD_MS
+                    when {
+                        availableFadeMs > config.durationMs -> {
+                            pollMs =
+                                (availableFadeMs - config.durationMs)
+                                    .coerceAtMost(CROSSFADE_FADE_START_POLL_MS)
+                                    .coerceAtLeast(1L)
+                            0L
+                        }
+
+                        availableFadeMs >= MIN_CROSSFADE_DURATION_MS -> {
+                            runCatching { secondary.controls().play() }
+                            runCatching { secondary.audio().setVolume(0) }
+                            crossfadeSuppressFinishedRunId = runId
+                            availableFadeMs
+                        }
+
+                        else -> -1L
+                    }
+                }
+            if (fadeDurationMs < 0L) return null
+            if (fadeDurationMs > 0L) return fadeDurationMs
+            delay(pollMs)
+        }
+    }
+
+    private suspend fun awaitCrossfadePrimaryAdvance(
+        runId: Long,
+        loadGeneration: Long,
+        secondary: MediaPlayer,
+    ): Long? {
+        val deadlineNanos = System.nanoTime() + CROSSFADE_HANDOFF_ADVANCE_TIMEOUT_MS * 1_000_000L
+        var seekTargetMs = -1L
+        var nextRetryNanos = 0L
+
+        while (System.nanoTime() < deadlineNanos) {
+            val secondaryPositionMs =
+                runCatching { secondary.status().time() }
+                    .getOrNull()
+                    ?.coerceAtLeast(0L) ?: 0L
+            val primaryStatus = runCatching { player?.status() }.getOrNull()
+            val primaryPositionMs = primaryStatus?.time()?.coerceAtLeast(0L) ?: 0L
+            val primaryAdvancing =
+                primaryStatus?.isPlaying() == true &&
+                    seekTargetMs >= 0L &&
+                    hasPlaybackPositionAdvanced(seekTargetMs, primaryPositionMs)
+
+            val action =
+                commandMutex.withLock {
+                    val stillActive =
+                        activeCrossfadeRunId == runId &&
+                            generation == loadGeneration &&
+                            activeGeneration == loadGeneration &&
+                            _state.value.playWhenReady &&
+                            _state.value.status != PlaybackStatus.ERROR
+                    when {
+                        !stillActive -> -1
+
+                        primaryAdvancing && !needsCorrectiveCrossfadeSeek(
+                            primaryPositionMs = primaryPositionMs,
+                            secondaryPositionMs = secondaryPositionMs,
+                            maximumDriftMs = CROSSFADE_HANDOFF_MAX_DRIFT_MS,
+                        ) -> {
+                            latestPositionMs.set(primaryPositionMs)
+                            1
+                        }
+
+                        primaryAdvancing || System.nanoTime() >= nextRetryNanos -> {
+                            if (primaryStatus?.isPlaying() != true) {
+                                runCatching { player?.controls()?.play() }
+                            }
+                            runCatching { player?.controls()?.setTime(secondaryPositionMs) }
+                            latestPositionMs.set(secondaryPositionMs)
+                            _state.update {
+                                it.copy(
+                                    positionMs = secondaryPositionMs.coerceAtMostPositive(it.durationMs),
+                                    bufferedPositionMs = maxOf(
+                                        it.bufferedPositionMs,
+                                        secondaryPositionMs.coerceAtMostPositive(it.durationMs),
+                                    ),
+                                )
+                            }
+                            0
+                        }
+
+                        else -> 2
+                    }
+                }
+
+            when (action) {
+                -1 -> return null
+                1 -> return primaryPositionMs
+                0 -> {
+                    seekTargetMs = secondaryPositionMs
+                    nextRetryNanos =
+                        System.nanoTime() + CROSSFADE_HANDOFF_RETRY_MS * 1_000_000L
+                }
+            }
+            delay(CROSSFADE_HANDOFF_POLL_MS)
+        }
+        return null
     }
 
     private suspend fun crossfadeStillValid(
@@ -1660,7 +1841,10 @@ class VlcjPlaybackController(
         const val CROSSFADE_SECONDARY_READY_TIMEOUT_MS = 3_000L
         const val CROSSFADE_PRIMARY_READY_TIMEOUT_MS = 10_000L
         const val CROSSFADE_HANDOFF_POLL_MS = 25L
-        const val CROSSFADE_PRIMARY_SEEK_SETTLE_MS = 80L
+        const val CROSSFADE_FADE_START_POLL_MS = 50L
+        const val CROSSFADE_HANDOFF_MAX_DRIFT_MS = 75L
+        const val CROSSFADE_HANDOFF_RETRY_MS = 750L
+        const val CROSSFADE_HANDOFF_ADVANCE_TIMEOUT_MS = 5_000L
         const val CROSSFADE_HANDOFF_DURATION_MS = 220L
         const val CROSSFADE_HANDOFF_FRAME_MS = 16L
         const val NO_RECOVERY_GENERATION = -1L
