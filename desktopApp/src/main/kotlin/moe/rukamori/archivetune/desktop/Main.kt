@@ -189,6 +189,7 @@ fun main() {
                     }
                 }
                 DisposableEffect(window) {
+                    musicServices.attachWindowsMediaWindow(window)
                     val previousMinimum = window.minimumSize
                     val previousResizable = window.isResizable
                     window.minimumSize = Dimension(640, 480)

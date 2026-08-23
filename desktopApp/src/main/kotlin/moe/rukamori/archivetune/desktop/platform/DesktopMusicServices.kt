@@ -55,6 +55,7 @@ import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBindings
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
 import moe.rukamori.archivetune.windowsmedia.windowsMediaUpdateKey
 import java.io.File
+import java.awt.Window
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
@@ -178,7 +179,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         }
         return spotifyPlaylistImporter.import(link, onProgress)
     }
-    // This is intentionally hardware-key only. Windows SMTC/flyout publishing is not implemented.
     private val windowsMediaControls = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
         WindowsMediaControls()
     } else {
@@ -228,6 +228,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     internal fun attachPartySeekHandler(handler: suspend (Long) -> Boolean) {
         partySeekHandler = handler
+    }
+
+    fun attachWindowsMediaWindow(window: Window) {
+        windowsMediaControls?.attachWindow(window)
     }
 
     private fun partyPlaybackPolicy(): DesktopPartyPlaybackPolicy =
@@ -327,6 +331,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     } else {
                         val snapshot = playback.state.value
                         when (command) {
+                            MediaCommand.PLAY -> if (!snapshot.isPlaying) partyPlayPauseHandler()
+                            MediaCommand.PAUSE -> if (snapshot.isPlaying) partyPlayPauseHandler()
                             MediaCommand.PLAY_PAUSE -> partyPlayPauseHandler()
                             MediaCommand.NEXT -> partySkipNextHandler()
                             MediaCommand.PREVIOUS -> partySkipPreviousHandler()

@@ -15,11 +15,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
+import java.awt.Window
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** Commands which may be supplied by a platform media-control surface. */
-enum class MediaCommand { PLAY_PAUSE, NEXT, PREVIOUS, SEEK_FORWARD, SEEK_BACKWARD }
+enum class MediaCommand { PLAY, PAUSE, PLAY_PAUSE, NEXT, PREVIOUS, SEEK_FORWARD, SEEK_BACKWARD }
 
 /** Sanitized now-playing data retained by the integration for a future native publisher. */
 data class NowPlayingMetadata(
@@ -61,6 +62,7 @@ fun PlaybackSnapshot.windowsMediaUpdateKey(): WindowsMediaUpdateKey =
 
 enum class WindowsMediaAvailability {
     NOT_STARTED,
+    ACTIVE_SMTC,
     ACTIVE_HOTKEYS_ONLY,
     UNSUPPORTED,
     CLOSED,
@@ -69,13 +71,13 @@ enum class WindowsMediaAvailability {
 /**
  * Platform-neutral bridge from [PlaybackSnapshot] to operating-system media controls.
  *
- * The current Windows implementation registers the standard global media-key virtual keys.
- * It deliberately does not claim System Media Transport Controls (SMTC) publishing: JNA ships
- * Win32 bindings, not a maintained projection for the required WinRT SMTC APIs. The latest
- * presentation remains observable so a proper WinRT implementation can publish it later.
+ * Standard media-key hotkeys are retained as a fallback. Once the Compose/AWT top-level window is
+ * available, [attachWindow] also publishes metadata/playback state through Windows SMTC and routes
+ * shell transport-button presses back through [commands].
  */
 class WindowsMediaControls(
     private val hotKeys: WindowsHotKeySource = JnaWindowsHotKeySource(),
+    private val smtcPublisher: WindowsSmtcPublisher = JnaWindowsSmtcPublisher(),
     private val callbackExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "archive-tune-media-controls").apply { isDaemon = true }
     },
@@ -96,7 +98,7 @@ class WindowsMediaControls(
     /** Starts global hardware media-key capture. Safe to call repeatedly. */
     fun start() {
         synchronized(lock) {
-        if (closed || registration != null) return
+        if (closed || registration != null || _availability.value == WindowsMediaAvailability.ACTIVE_SMTC) return
         val startedRegistration: AutoCloseable? = try {
             hotKeys.start { command ->
                 // Win32 message-loop callbacks must never execute app playback on the native thread.
@@ -115,6 +117,27 @@ class WindowsMediaControls(
         } else {
             WindowsMediaAvailability.ACTIVE_HOTKEYS_ONLY
         }
+        }
+    }
+
+    /** Binds the real top-level desktop HWND to Windows System Media Transport Controls. */
+    fun attachWindow(window: Window) {
+        synchronized(lock) {
+            if (closed) return
+        }
+        val attached = runCatching {
+            smtcPublisher.attach(window) { command ->
+                callbackExecutor.execute { _commands.tryEmit(command) }
+            }
+        }.getOrDefault(false)
+        synchronized(lock) {
+            if (!closed && attached) {
+                // Let Windows own media-key routing once SMTC is live. Keeping RegisterHotKey active
+                // here would steal media keys from whichever system media session is actually active.
+                registration?.close()
+                registration = null
+                _availability.value = WindowsMediaAvailability.ACTIVE_SMTC
+            }
         }
     }
 
@@ -138,6 +161,7 @@ class WindowsMediaControls(
             positionMs = snapshot.positionMs.coerceAtLeast(0L),
             durationMs = snapshot.durationMs.coerceAtLeast(0L),
         )
+        runCatching { smtcPublisher.update(snapshot) }
     }
 
     override fun close() {
@@ -146,6 +170,7 @@ class WindowsMediaControls(
         closed = true
         registration?.close()
         registration = null
+        smtcPublisher.close()
         callbackExecutor.shutdownNow()
         _availability.value = WindowsMediaAvailability.CLOSED
         }
@@ -163,6 +188,8 @@ class PlaybackMediaCommandRouter(
     suspend fun handle(command: MediaCommand) {
         if (!commandAllowed()) return
         when (command) {
+            MediaCommand.PLAY -> if (!controller.state.value.isPlaying) controller.play()
+            MediaCommand.PAUSE -> if (controller.state.value.isPlaying) controller.pause()
             MediaCommand.PLAY_PAUSE -> if (controller.state.value.isPlaying) controller.pause() else controller.play()
             MediaCommand.NEXT -> controller.skipNext()
             MediaCommand.PREVIOUS -> controller.skipPrevious()

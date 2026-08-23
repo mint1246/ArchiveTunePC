@@ -48,6 +48,26 @@
       "allPublicFields": true
     },
     {
+      "type": "moe.rukamori.archivetune.windowsmedia.QueryInterfaceCallback",
+      "jniAccessible": true,
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "moe.rukamori.archivetune.windowsmedia.AddRefCallback",
+      "jniAccessible": true,
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "moe.rukamori.archivetune.windowsmedia.ReleaseCallback",
+      "jniAccessible": true,
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "moe.rukamori.archivetune.windowsmedia.InvokeCallback",
+      "jniAccessible": true,
+      "allDeclaredMethods": true
+    },
+    {
       "type": "sun.awt.windows.WComponentPeer",
       "jniAccessible": true,
       "methods": [
