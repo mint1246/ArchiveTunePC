@@ -77,6 +77,7 @@ fun DesktopLyricsPane(
     modifier: Modifier = Modifier,
     drawBackground: Boolean = true,
     seekEnabled: Boolean = true,
+    onSeek: ((Long) -> Unit)? = null,
 ) {
     DisposableEffect(presenter) {
         presenter.setActive(true)
@@ -145,14 +146,22 @@ fun DesktopLyricsPane(
                                 lyrics = built,
                                 positionMsState = presenter.positionMsFlow,
                                 modifier = Modifier.fillMaxSize(),
-                                onSeek = { if (seekEnabled) presenter.seekToMs(it) },
+                                onSeek = {
+                                    if (seekEnabled) {
+                                        if (onSeek != null) onSeek(it) else presenter.seekToMs(it)
+                                    }
+                                },
                                 isPlaying = playback.isPlaying,
                             )
                         } else {
                             SimpleLyricsView(
                                 timeline = current.timeline,
                                 modifier = Modifier.fillMaxSize(),
-                                onSeek = { if (seekEnabled) presenter.seekToMs(it) },
+                                onSeek = {
+                                    if (seekEnabled) {
+                                        if (onSeek != null) onSeek(it) else presenter.seekToMs(it)
+                                    }
+                                },
                             )
                         }
                     }

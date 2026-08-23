@@ -103,6 +103,41 @@ class PlayTogetherManagerTest {
     }
 
     @Test
+    fun `new guest transport permissions default off`() {
+        val state = PlayTogetherState(mode = PartyMode.GUEST, phase = PartyPhase.CONNECTED)
+        assertFalse(state.canChangeSong)
+        assertFalse(state.canSeek)
+
+        val participant = PartyParticipant(id = "guest", name = "Guest")
+        assertTrue(participant.canEditQueue)
+        assertTrue(participant.canControlPlayback)
+        assertFalse(participant.canChangeSong)
+        assertFalse(participant.canSeek)
+    }
+
+    @Test
+    fun `host and non party change song and seek actions stay local`() = runBlocking {
+        val first = PlaybackItem(PlaybackMetadata(id = "first", title = "First"))
+        val second = PlaybackItem(PlaybackMetadata(id = "second", title = "Second"))
+        val playback = RecordingPlaybackController(
+            PlaybackSnapshot(queue = listOf(first, second), currentIndex = 0, status = PlaybackStatus.READY),
+        )
+        PlayTogetherManager(playback, Files.createTempDirectory("party-transport-test"), Logger.getAnonymousLogger()).use { manager ->
+            assertTrue(manager.seekTo(2_500L))
+            assertEquals(2_500L, playback.state.value.positionMs)
+            assertTrue(manager.selectQueueItem(1))
+            assertEquals(1, playback.state.value.currentIndex)
+
+            val generation = manager.beginSession(PartyMode.HOST, "Hosting")
+            assertTrue(manager.playQueue(listOf(first, second), startIndex = 0, title = "Shared"))
+            assertEquals(0, playback.state.value.currentIndex)
+            assertEquals("Shared", playback.state.value.queueTitle)
+            assertTrue(playback.state.value.playWhenReady)
+            manager.finishSession(generation, PlayTogetherState())
+        }
+    }
+
+    @Test
     fun `guest session restores exact pre-party playback modes`() = runBlocking {
         val playback = RecordingPlaybackController(
             PlaybackSnapshot(speed = 1.25f, repeatMode = RepeatMode.ONE, shuffleEnabled = true),
@@ -236,6 +271,8 @@ class PlayTogetherManagerTest {
             transport = PartyTransport.SIGNALING,
             canEditQueue = true,
             canControlPlayback = true,
+            canChangeSong = true,
+            canSeek = true,
             queueRevision = "revision-42",
             roundTripMs = 18,
             message = "Joining listening party…",
@@ -246,6 +283,8 @@ class PlayTogetherManagerTest {
         assertEquals(PartyTransport.RELAY, relay.transport)
         assertTrue(relay.canEditQueue)
         assertTrue(relay.canControlPlayback)
+        assertTrue(relay.canChangeSong)
+        assertTrue(relay.canSeek)
         assertEquals("revision-42", relay.queueRevision)
         assertEquals(18, relay.roundTripMs)
         assertEquals(2, relay.participantCount)
@@ -262,6 +301,8 @@ class PlayTogetherManagerTest {
         assertEquals("Connected directly P2P", direct.message)
         assertTrue(direct.canEditQueue)
         assertTrue(direct.canControlPlayback)
+        assertTrue(direct.canChangeSong)
+        assertTrue(direct.canSeek)
         assertEquals("revision-42", direct.queueRevision)
         assertEquals(18, direct.roundTripMs)
     }

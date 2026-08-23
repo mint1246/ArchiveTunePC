@@ -74,6 +74,9 @@ fun main() {
             persistShuffle = party.persistShuffle,
         )
     }
+    musicServices.attachPartyPlayPauseHandler(playTogether::togglePlayback)
+    musicServices.attachPartySkipHandlers(playTogether::skipNext, playTogether::skipPrevious)
+    musicServices.attachPartySeekHandler(playTogether::seekTo)
     musicServices.attachCompletedDownloadLookup(downloadServices::completedFileFor)
     updateCoordinator.start()
     val restored = runtime.settings.snapshot()

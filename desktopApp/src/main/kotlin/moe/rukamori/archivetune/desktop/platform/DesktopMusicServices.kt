@@ -48,6 +48,7 @@ import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import moe.rukamori.archivetune.playback.desktop.PlaybackQueueStore
 import moe.rukamori.archivetune.windowsmedia.PlaybackMediaCommandRouter
+import moe.rukamori.archivetune.windowsmedia.MediaCommand
 import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBinding
 import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBindings
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
@@ -200,12 +201,32 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         null
     }
     @Volatile private var partyPlaybackPolicyProvider: () -> DesktopPartyPlaybackPolicy = { DesktopPartyPlaybackPolicy() }
+    @Volatile private var partyPlayPauseHandler: suspend () -> Boolean = { false }
+    @Volatile private var partySkipNextHandler: suspend () -> Boolean = { false }
+    @Volatile private var partySkipPreviousHandler: suspend () -> Boolean = { false }
+    @Volatile private var partySeekHandler: suspend (Long) -> Boolean = { false }
     private val mediaCommandRouter = windowsMediaControls?.let {
         PlaybackMediaCommandRouter(playback, commandAllowed = { partyPlaybackPolicy().localTransportAllowed })
     }
 
     internal fun attachPartyPlaybackPolicyProvider(provider: () -> DesktopPartyPlaybackPolicy) {
         partyPlaybackPolicyProvider = provider
+    }
+
+    internal fun attachPartyPlayPauseHandler(handler: suspend () -> Boolean) {
+        partyPlayPauseHandler = handler
+    }
+
+    internal fun attachPartySkipHandlers(
+        next: suspend () -> Boolean,
+        previous: suspend () -> Boolean,
+    ) {
+        partySkipNextHandler = next
+        partySkipPreviousHandler = previous
+    }
+
+    internal fun attachPartySeekHandler(handler: suspend (Long) -> Boolean) {
+        partySeekHandler = handler
     }
 
     private fun partyPlaybackPolicy(): DesktopPartyPlaybackPolicy =
@@ -291,7 +312,21 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     .collect(controls::update)
             }
             runtime.applicationScope.launch {
-                controls.commands.collect { command -> mediaCommandRouter?.handle(command) }
+                controls.commands.collect { command ->
+                    val policy = partyPlaybackPolicy()
+                    if (policy.localTransportAllowed) {
+                        mediaCommandRouter?.handle(command)
+                    } else {
+                        val snapshot = playback.state.value
+                        when (command) {
+                            MediaCommand.PLAY_PAUSE -> partyPlayPauseHandler()
+                            MediaCommand.NEXT -> partySkipNextHandler()
+                            MediaCommand.PREVIOUS -> partySkipPreviousHandler()
+                            MediaCommand.SEEK_FORWARD -> partySeekHandler(snapshot.positionMs + 10_000L)
+                            MediaCommand.SEEK_BACKWARD -> partySeekHandler((snapshot.positionMs - 10_000L).coerceAtLeast(0L))
+                        }
+                    }
+                }
             }
         }
         runtime.applicationScope.launch {
@@ -329,9 +364,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         when (action) {
             DesktopKeybindAction.PLAY_PAUSE -> if (policy.localTransportAllowed) {
                 if (snapshot.isPlaying) playback.pause() else playback.play()
+            } else {
+                partyPlayPauseHandler()
             }
-            DesktopKeybindAction.NEXT -> if (policy.localTransportAllowed) playback.skipNext()
-            DesktopKeybindAction.PREVIOUS -> if (policy.localTransportAllowed) playback.skipPrevious()
+            DesktopKeybindAction.NEXT -> if (policy.localTransportAllowed) playback.skipNext() else partySkipNextHandler()
+            DesktopKeybindAction.PREVIOUS -> if (policy.localTransportAllowed) playback.skipPrevious() else partySkipPreviousHandler()
             DesktopKeybindAction.VOLUME_UP -> {
                 val volume = (snapshot.volume + KEYBIND_VOLUME_STEP).coerceAtMost(1f)
                 if (volume > 0.001f) lastAudibleVolume = volume
@@ -352,9 +389,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             }
             DesktopKeybindAction.SEEK_FORWARD -> if (policy.localTransportAllowed) {
                 playback.seekTo(snapshot.positionMs + KEYBIND_SEEK_STEP_MS)
+            } else {
+                partySeekHandler(snapshot.positionMs + KEYBIND_SEEK_STEP_MS)
             }
             DesktopKeybindAction.SEEK_BACKWARD -> if (policy.localTransportAllowed) {
                 playback.seekTo((snapshot.positionMs - KEYBIND_SEEK_STEP_MS).coerceAtLeast(0L))
+            } else {
+                partySeekHandler((snapshot.positionMs - KEYBIND_SEEK_STEP_MS).coerceAtLeast(0L))
             }
             DesktopKeybindAction.SPEED_UP -> if (policy.persistSpeedAndRepeat) {
                 playback.setSpeed((snapshot.speed + KEYBIND_SPEED_STEP).coerceAtMost(4f))

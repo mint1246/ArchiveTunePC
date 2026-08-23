@@ -366,14 +366,14 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     fun open(item: YTItem) {
         when (item) {
             is SongItem -> {
-                if (guestInParty) return
+                if (guestInParty && !partyState.canChangeSong) return
                 scope.launch {
                     browse.failure = null
                     services.upNext(item.id)
                     .onSuccess { next ->
                         val songs = next.items
                         if (songs.isEmpty()) {
-                            services.playback.replaceQueue(
+                            playTogether.playQueue(
                                 listOf(toPlaybackItem(item, services.albumIndex)),
                                 title = "Up next",
                             )
@@ -384,7 +384,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                             next.currentIndex
                                 ?: songs.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }
                                 ?: 0
-                        services.playback.replaceQueue(
+                        playTogether.playQueue(
                             songs.map { toPlaybackItem(it, services.albumIndex) },
                             selectedIndex.coerceIn(0, songs.lastIndex),
                             title = next.title ?: "Up next",
@@ -392,7 +392,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                     }
                     .onFailure {
                         browse.failure = it.message ?: "Could not load Up next"
-                        services.playback.replaceQueue(
+                        playTogether.playQueue(
                             listOf(toPlaybackItem(item, services.albumIndex)),
                             title = "Up next",
                         )
@@ -413,9 +413,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
     }
     fun playQueue(songs: List<SongItem>, startIndex: Int, title: String) {
-        if (songs.isEmpty() || guestInParty) return
+        if (songs.isEmpty() || (guestInParty && !partyState.canChangeSong)) return
         scope.launch {
-            services.playback.replaceQueue(
+            playTogether.playQueue(
                 songs.map { toPlaybackItem(it, services.albumIndex) },
                 startIndex.coerceIn(0, songs.lastIndex),
                 title = title,
@@ -445,8 +445,11 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
     }
     fun playNextSong(song: SongItem) {
-        if (guestInParty) return
-        scope.launch { services.playback.playNext(listOf(toPlaybackItem(song, services.albumIndex))) }
+        scope.launch {
+            if (!playTogether.playNext(listOf(toPlaybackItem(song, services.albumIndex))) && guestInParty) {
+                browse.failure = if (partyState.canEditQueue) "Could not add this song next in the shared queue." else "The party owner disabled queue editing for you."
+            }
+        }
     }
     fun enqueueSong(song: SongItem) {
         scope.launch {
@@ -607,9 +610,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         is Detail.Playlist -> PlaylistDetailPage(
             page.page,
             error = browse.failure,
-            onPlay = { songs, index, title ->
-                if (!guestInParty) scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) }
-            },
+            onPlay = { songs, index, title -> playQueue(songs, index, title) },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
             onPlayNext = ::playNextSong,
@@ -673,7 +674,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onOpenArtistItems = { endpoint ->
                 if (page is Detail.Artist) browse.openArtistItems(endpoint, page.page, scope)
             },
-            onPlay = { songs, title, index -> if (!guestInParty) scope.launch { services.playback.replaceQueue(songs.map { toPlaybackItem(it, services.albumIndex) }, index, title = title) } },
+            onPlay = { songs, title, index -> playQueue(songs, index, title) },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
             onPlayNext = ::playNextSong,
@@ -1739,21 +1740,36 @@ private fun NowPlayingSubtitle(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             partyState.participants.forEach { participant ->
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(participant.name, modifier = Modifier.weight(1f))
-                                    Text("Queue", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(8.dp))
-                                    Switch(
-                                        checked = participant.canEditQueue,
-                                        onCheckedChange = { playTogether.setGuestQueueEditing(participant.id, it) },
-                                    )
-                                    Spacer(Modifier.width(14.dp))
-                                    Text("Play / pause", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(8.dp))
-                                    Switch(
-                                        checked = participant.canControlPlayback,
-                                        onCheckedChange = { playTogether.setGuestPlaybackControl(participant.id, it) },
-                                    )
+                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(participant.name, style = MaterialTheme.typography.titleSmall)
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Queue", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Switch(
+                                            checked = participant.canEditQueue,
+                                            onCheckedChange = { playTogether.setGuestQueueEditing(participant.id, it) },
+                                        )
+                                        Spacer(Modifier.width(14.dp))
+                                        Text("Play / pause", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(Modifier.width(8.dp))
+                                        Switch(
+                                            checked = participant.canControlPlayback,
+                                            onCheckedChange = { playTogether.setGuestPlaybackControl(participant.id, it) },
+                                        )
+                                    }
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Skip / play new songs", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Switch(
+                                            checked = participant.canChangeSong,
+                                            onCheckedChange = { playTogether.setGuestSongChanging(participant.id, it) },
+                                        )
+                                        Spacer(Modifier.width(14.dp))
+                                        Text("Seek", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(Modifier.width(8.dp))
+                                        Switch(
+                                            checked = participant.canSeek,
+                                            onCheckedChange = { playTogether.setGuestSeeking(participant.id, it) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1836,9 +1852,9 @@ private fun NowPlayingSubtitle(
                 NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) })
             }
             TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }
-            IconButton({ scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
+            IconButton({ scope.launch { playTogether.skipPrevious() } }, enabled = snapshot.canSkipPrevious && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
             FilledIconButton({ scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }
-            IconButton({ scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }
+            IconButton({ scope.launch { playTogether.skipNext() } }, enabled = snapshot.canSkipNext && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipNext, "Next") }
             DesktopTooltip(if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off") {
                 IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) {
                     Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1854,7 +1870,7 @@ private fun NowPlayingSubtitle(
             Icon(Icons.Rounded.VolumeUp, null)
             Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp))
         }
-        if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth(), enabled = !guestInParty)
+        if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { playTogether.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth(), enabled = !guestInParty || partyState.canSeek)
     } }
 }
 
@@ -1894,25 +1910,26 @@ internal fun DesktopLyricsView(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    IconButton(onClick = { scope.launch { services.playback.skipPrevious() } }, enabled = !guestInParty && snapshot.canSkipPrevious) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
+                    IconButton(onClick = { scope.launch { playTogether.skipPrevious() } }, enabled = snapshot.canSkipPrevious && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
                     FilledIconButton(onClick = { scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) {
 AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) }, label = "mini-player-play-state") { playing -> Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play") }
                     }
-                    IconButton(onClick = { scope.launch { services.playback.skipNext() } }, enabled = !guestInParty && snapshot.canSkipNext) { Icon(Icons.Rounded.SkipNext, "Next") }
+                    IconButton(onClick = { scope.launch { playTogether.skipNext() } }, enabled = snapshot.canSkipNext && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipNext, "Next") }
                 }
                 if (item != null) {
                     Slider(
                         value = if (snapshot.durationMs > 0) (snapshot.positionMs.toFloat() / snapshot.durationMs).coerceIn(0f, 1f) else 0f,
-                        onValueChange = { scope.launch { services.playback.seekTo((it * snapshot.durationMs).roundToLong()) } },
+                        onValueChange = { scope.launch { playTogether.seekTo((it * snapshot.durationMs).roundToLong()) } },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
-                        enabled = !guestInParty,
+                        enabled = !guestInParty || partyState.canSeek,
                     )
                 }
                 DesktopLyricsPane(
                     presenter = services.lyrics,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     drawBackground = !useShellDynamicBackdrop,
-                    seekEnabled = !guestInParty,
+                    seekEnabled = !guestInParty || partyState.canSeek,
+                    onSeek = { positionMs -> scope.launch { playTogether.seekTo(positionMs) } },
                 )
             }
     }

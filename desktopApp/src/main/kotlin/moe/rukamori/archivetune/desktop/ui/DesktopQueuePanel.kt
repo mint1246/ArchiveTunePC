@@ -127,6 +127,7 @@ fun DesktopQueuePanel(
                     playTogether = playTogether,
                     guestInParty = guestInParty,
                     guestCanEditQueue = partyState.canEditQueue,
+                    guestCanChangeSong = partyState.canChangeSong,
                     scope = scope,
                 )
             }
@@ -226,6 +227,7 @@ private fun QueueList(
     playTogether: PlayTogetherManager,
     guestInParty: Boolean,
     guestCanEditQueue: Boolean,
+    guestCanChangeSong: Boolean,
     scope: CoroutineScope,
 ) {
     val order = remember { mutableStateListOf<PlaybackQueueEntry>() }
@@ -253,10 +255,16 @@ private fun QueueList(
                 entry = entry,
                 snapshot = snapshot,
                 isDragging = draggedId == entry.id,
-                playbackActionsEnabled = !guestInParty,
+                playNowEnabled = !guestInParty || guestCanChangeSong,
+                playNextEnabled = !guestInParty,
                 removeEnabled = !guestInParty || (guestCanEditQueue && !entry.isCurrent),
                 dragHandleEnabled = !guestInParty && !entry.isCurrent,
-                onRowClick = { scope.launch { playback.seekToItem(entry.logicalIndex) } },
+                onRowClick = {
+                    scope.launch {
+                        if (guestInParty) playTogether.selectQueueItem(entry.logicalIndex)
+                        else playback.seekToItem(entry.logicalIndex)
+                    }
+                },
                 onPlayNext = { scope.launch { playback.moveQueueItemToNext(entry.logicalIndex) } },
                 onRemove = {
                     scope.launch {
@@ -390,7 +398,8 @@ private fun QueueRow(
     entry: PlaybackQueueEntry,
     snapshot: PlaybackSnapshot,
     isDragging: Boolean,
-    playbackActionsEnabled: Boolean,
+    playNowEnabled: Boolean,
+    playNextEnabled: Boolean,
     removeEnabled: Boolean,
     dragHandleEnabled: Boolean,
     onRowClick: () -> Unit,
@@ -418,8 +427,8 @@ private fun QueueRow(
             .background(if (isDragging) MaterialTheme.colorScheme.primaryContainer else rowBackground)
             .hoverable(interactionSource)
             .combinedClickable(
-                onClick = { if (playbackActionsEnabled) onRowClick() },
-                onLongClick = { if (playbackActionsEnabled || removeEnabled) menuOpen = true },
+                onClick = { if (playNowEnabled) onRowClick() },
+                onLongClick = { if (playNowEnabled || playNextEnabled || removeEnabled) menuOpen = true },
             ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -457,19 +466,19 @@ private fun QueueRow(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (playbackActionsEnabled || removeEnabled) {
+        if (playNowEnabled || playNextEnabled || removeEnabled) {
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Rounded.MoreVert, contentDescription = "Queue item actions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (playbackActionsEnabled) {
+                    if (playNowEnabled) {
                         DropdownMenuItem(
                             text = { Text("Play now") },
                             onClick = { menuOpen = false; onRowClick() },
                         )
                     }
-                    if (playbackActionsEnabled && !isCurrent) {
+                    if (playNextEnabled && !isCurrent) {
                         DropdownMenuItem(
                             text = { Text("Play next") },
                             onClick = { menuOpen = false; onPlayNext() },

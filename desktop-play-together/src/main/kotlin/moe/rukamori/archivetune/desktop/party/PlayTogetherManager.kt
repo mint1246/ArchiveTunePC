@@ -443,6 +443,66 @@ class PlayTogetherManager(
                     }
                 }
             }
+            "skip_next" -> withCurrentSessionMutation(hostPeer.generation) {
+                if (hostPeer.canChangeSong) playback.skipNext()
+            }
+            "skip_previous" -> withCurrentSessionMutation(hostPeer.generation) {
+                if (hostPeer.canChangeSong) playback.skipPrevious()
+            }
+            "seek" -> {
+                val requestedPosition = message.optLong("positionMs", -1L)
+                if (requestedPosition < 0L) return
+                withCurrentSessionMutation(hostPeer.generation) {
+                    if (!hostPeer.canSeek) return@withCurrentSessionMutation
+                    val duration = playback.state.value.durationMs
+                    playback.seekTo(if (duration > 0L) requestedPosition.coerceAtMost(duration) else requestedPosition)
+                }
+            }
+            "queue_select" -> {
+                val index = message.optInt("logicalIndex", -1)
+                val expectedId = message.optString("expectedId")
+                var resyncSnapshot: PlaybackSnapshot? = null
+                withCurrentSessionMutation(hostPeer.generation) {
+                    if (!hostPeer.canChangeSong) return@withCurrentSessionMutation
+                    val snapshot = playback.state.value
+                    if (message.optString("queueRevision") != queueSignature(snapshot)) {
+                        resyncSnapshot = snapshot
+                        return@withCurrentSessionMutation
+                    }
+                    if (index !in snapshot.queue.indices || expectedId.isBlank() || snapshot.queue[index].metadata.id != expectedId) {
+                        resyncSnapshot = snapshot
+                        return@withCurrentSessionMutation
+                    }
+                    playback.seekToItem(index, 0L)
+                    if (!playback.state.value.playWhenReady) playback.play()
+                }
+                resyncSnapshot?.let { sendHostPeer(hostPeer, encodeFullSnapshot(it)) }
+            }
+            "queue_replace" -> {
+                val itemsJson = message.optJSONArray("items") ?: return
+                if (itemsJson.length() !in 1..MAX_SHARED_QUEUE_ITEMS) return
+                val items = runCatching {
+                    buildList(itemsJson.length()) {
+                        for (index in 0 until itemsJson.length()) {
+                            val item = decodePlaybackItem(itemsJson.getJSONObject(index))
+                            require(item.metadata.id.length in 1..MAX_MEDIA_ID_LENGTH)
+                            add(item)
+                        }
+                    }
+                }.getOrNull() ?: return
+                val startIndex = message.optInt("startIndex", 0)
+                if (startIndex !in items.indices) return
+                val title = message.optString("queueTitle").takeIf(String::isNotBlank)?.take(MAX_QUEUE_TITLE_LENGTH)
+                withCurrentSessionMutation(hostPeer.generation) {
+                    if (!hostPeer.canChangeSong) return@withCurrentSessionMutation
+                    playback.replaceQueue(
+                        items = items,
+                        startIndex = startIndex,
+                        title = title,
+                        playWhenReady = true,
+                    )
+                }
+            }
             "queue_add" -> {
                 val itemsJson = message.optJSONArray("items") ?: return
                 if (itemsJson.length() !in 1..MAX_QUEUE_REQUEST_ITEMS) return
@@ -464,6 +524,30 @@ class PlayTogetherManager(
                         return@withCurrentSessionMutation
                     }
                     playback.enqueue(items)
+                }
+                resyncSnapshot?.let { sendHostPeer(hostPeer, encodeFullSnapshot(it)) }
+            }
+            "queue_play_next" -> {
+                val itemsJson = message.optJSONArray("items") ?: return
+                if (itemsJson.length() !in 1..MAX_QUEUE_REQUEST_ITEMS) return
+                val items = runCatching {
+                    buildList(itemsJson.length()) {
+                        for (index in 0 until itemsJson.length()) {
+                            val item = decodePlaybackItem(itemsJson.getJSONObject(index))
+                            require(item.metadata.id.length in 1..MAX_MEDIA_ID_LENGTH)
+                            add(item)
+                        }
+                    }
+                }.getOrNull() ?: return
+                var resyncSnapshot: PlaybackSnapshot? = null
+                withCurrentSessionMutation(hostPeer.generation) {
+                    if (!hostPeer.canEditQueue) return@withCurrentSessionMutation
+                    val snapshot = playback.state.value
+                    if (message.optString("queueRevision") != queueSignature(snapshot)) {
+                        resyncSnapshot = snapshot
+                        return@withCurrentSessionMutation
+                    }
+                    playback.playNext(items)
                 }
                 resyncSnapshot?.let { sendHostPeer(hostPeer, encodeFullSnapshot(it)) }
             }
@@ -580,6 +664,8 @@ class PlayTogetherManager(
                     name = "Guest ${peer.id.take(4)}",
                     canEditQueue = peer.canEditQueue,
                     canControlPlayback = peer.canControlPlayback,
+                    canChangeSong = peer.canChangeSong,
+                    canSeek = peer.canSeek,
                 )
             }
         _state.update { current ->
@@ -608,6 +694,22 @@ class PlayTogetherManager(
         scope.launch { sendHostPeer(hostPeer, encodePermissions(hostPeer)) }
     }
 
+    fun setGuestSongChanging(peerId: String, enabled: Boolean) {
+        if (_state.value.mode != PartyMode.HOST) return
+        val hostPeer = hostPeers[peerId] ?: return
+        hostPeer.canChangeSong = enabled
+        updateHostParticipantCount()
+        scope.launch { sendHostPeer(hostPeer, encodePermissions(hostPeer)) }
+    }
+
+    fun setGuestSeeking(peerId: String, enabled: Boolean) {
+        if (_state.value.mode != PartyMode.HOST) return
+        val hostPeer = hostPeers[peerId] ?: return
+        hostPeer.canSeek = enabled
+        updateHostParticipantCount()
+        scope.launch { sendHostPeer(hostPeer, encodePermissions(hostPeer)) }
+    }
+
     suspend fun togglePlayback(): Boolean {
         val current = _state.value
         val generation = sessionGeneration
@@ -629,6 +731,99 @@ class PlayTogetherManager(
             PartyMode.HOST, PartyMode.NONE -> {
                 val snapshot = playback.state.value
                 if (snapshot.isPlaying) playback.pause() else playback.play()
+                true
+            }
+        }
+    }
+
+    suspend fun skipNext(): Boolean = changeSongCommand("skip_next") { playback.skipNext() }
+
+    suspend fun skipPrevious(): Boolean = changeSongCommand("skip_previous") { playback.skipPrevious() }
+
+    private suspend fun changeSongCommand(type: String, localAction: suspend () -> Unit): Boolean {
+        val current = _state.value
+        val generation = sessionGeneration
+        return when (current.mode) {
+            PartyMode.GUEST -> {
+                if (current.phase != PartyPhase.CONNECTED || !current.canChangeSong) false
+                else sendGuestMessage(generation, JSONObject().put("type", type).toString())
+            }
+            PartyMode.HOST, PartyMode.NONE -> {
+                localAction()
+                true
+            }
+        }
+    }
+
+    suspend fun seekTo(positionMs: Long): Boolean {
+        if (positionMs < 0L) return false
+        val current = _state.value
+        val generation = sessionGeneration
+        return when (current.mode) {
+            PartyMode.GUEST -> {
+                if (current.phase != PartyPhase.CONNECTED || !current.canSeek) false
+                else sendGuestMessage(
+                    generation,
+                    JSONObject().put("type", "seek").put("positionMs", positionMs).toString(),
+                )
+            }
+            PartyMode.HOST, PartyMode.NONE -> {
+                playback.seekTo(positionMs)
+                true
+            }
+        }
+    }
+
+    suspend fun selectQueueItem(logicalIndex: Int): Boolean {
+        val snapshot = playback.state.value
+        if (logicalIndex !in snapshot.queue.indices) return false
+        val current = _state.value
+        val generation = sessionGeneration
+        return when (current.mode) {
+            PartyMode.GUEST -> {
+                if (current.phase != PartyPhase.CONNECTED || !current.canChangeSong) false
+                else sendGuestMessage(
+                    generation,
+                    JSONObject()
+                        .put("type", "queue_select")
+                        .put("queueRevision", current.queueRevision ?: "")
+                        .put("logicalIndex", logicalIndex)
+                        .put("expectedId", snapshot.queue[logicalIndex].metadata.id)
+                        .toString(),
+                )
+            }
+            PartyMode.HOST, PartyMode.NONE -> {
+                playback.seekToItem(logicalIndex, 0L)
+                if (!playback.state.value.playWhenReady) playback.play()
+                true
+            }
+        }
+    }
+
+    suspend fun playQueue(
+        items: List<PlaybackItem>,
+        startIndex: Int = 0,
+        title: String? = null,
+    ): Boolean {
+        if (items.isEmpty() || startIndex !in items.indices || items.size > MAX_SHARED_QUEUE_ITEMS) return false
+        if (items.any { it.source is PlaybackSource.LocalFile }) return false
+        val current = _state.value
+        val generation = sessionGeneration
+        return when (current.mode) {
+            PartyMode.GUEST -> {
+                if (current.phase != PartyPhase.CONNECTED || !current.canChangeSong) false
+                else sendGuestMessage(
+                    generation,
+                    JSONObject()
+                        .put("type", "queue_replace")
+                        .put("startIndex", startIndex)
+                        .put("queueTitle", title.orEmpty().take(MAX_QUEUE_TITLE_LENGTH))
+                        .put("items", JSONArray().apply { items.forEach { put(encodePlaybackItem(it)) } })
+                        .toString(),
+                )
+            }
+            PartyMode.HOST, PartyMode.NONE -> {
+                playback.replaceQueue(items, startIndex, title = title, playWhenReady = true)
                 true
             }
         }
@@ -667,6 +862,39 @@ class PlayTogetherManager(
             }
             PartyMode.NONE -> {
                 playback.enqueue(items)
+                true
+            }
+        }
+    }
+
+    suspend fun playNext(items: List<PlaybackItem>): Boolean {
+        if (items.isEmpty() || items.size > MAX_QUEUE_REQUEST_ITEMS) return false
+        val current = _state.value
+        val generation = sessionGeneration
+        return when (current.mode) {
+            PartyMode.GUEST -> {
+                if (current.phase != PartyPhase.CONNECTED || !current.canEditQueue || items.any { it.source is PlaybackSource.LocalFile }) {
+                    false
+                } else {
+                    sendGuestMessage(
+                        generation,
+                        JSONObject()
+                            .put("type", "queue_play_next")
+                            .put("queueRevision", current.queueRevision ?: "")
+                            .put("items", JSONArray().apply { items.forEach { put(encodePlaybackItem(it)) } })
+                            .toString(),
+                    )
+                }
+            }
+            PartyMode.HOST -> {
+                if (items.any { it.source is PlaybackSource.LocalFile }) false
+                else {
+                    playback.playNext(items)
+                    true
+                }
+            }
+            PartyMode.NONE -> {
+                playback.playNext(items)
                 true
             }
         }
@@ -863,6 +1091,8 @@ class PlayTogetherManager(
                     if (!isCurrentSession(generation) || current.mode != PartyMode.GUEST) current else current.copy(
                         canEditQueue = message.optBoolean("canEditQueue", false),
                         canControlPlayback = message.optBoolean("canControlPlayback", false),
+                        canChangeSong = message.optBoolean("canChangeSong", false),
+                        canSeek = message.optBoolean("canSeek", false),
                     )
                 }
             }
@@ -1282,6 +1512,8 @@ class PlayTogetherManager(
         @Volatile var directOpen: Boolean = false
         @Volatile var canEditQueue: Boolean = true
         @Volatile var canControlPlayback: Boolean = true
+        @Volatile var canChangeSong: Boolean = false
+        @Volatile var canSeek: Boolean = false
     }
 
     companion object {
@@ -1304,8 +1536,10 @@ class PlayTogetherManager(
         private const val CONNECTION_TIMEOUT_MS = 20_000L
         private const val TUNNEL_START_TIMEOUT_MS = 45_000L
         private const val MAX_QUEUE_REQUEST_ITEMS = 50
-        private const val MAX_QUEUE_MESSAGE_CHARS = 64 * 1024
+        private const val MAX_QUEUE_MESSAGE_CHARS = 512 * 1024
         private const val MAX_MEDIA_ID_LENGTH = 256
+        private const val MAX_SHARED_QUEUE_ITEMS = 1_000
+        private const val MAX_QUEUE_TITLE_LENGTH = 512
 
         fun parseInvite(text: String): URI {
             val raw = text.trim()
@@ -1405,6 +1639,8 @@ class PlayTogetherManager(
             .put("type", "permissions")
             .put("canEditQueue", hostPeer.canEditQueue)
             .put("canControlPlayback", hostPeer.canControlPlayback)
+            .put("canChangeSong", hostPeer.canChangeSong)
+            .put("canSeek", hostPeer.canSeek)
             .toString()
 
         private fun encodeFullSnapshot(snapshot: PlaybackSnapshot): String = JSONObject()
@@ -1494,6 +1730,8 @@ data class PlayTogetherState(
     val message: String? = null,
     val canEditQueue: Boolean = false,
     val canControlPlayback: Boolean = false,
+    val canChangeSong: Boolean = false,
+    val canSeek: Boolean = false,
     val queueRevision: String? = null,
     val participants: List<PartyParticipant> = emptyList(),
 ) {
@@ -1515,4 +1753,6 @@ data class PartyParticipant(
     val name: String,
     val canEditQueue: Boolean = true,
     val canControlPlayback: Boolean = true,
+    val canChangeSong: Boolean = false,
+    val canSeek: Boolean = false,
 )
