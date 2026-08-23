@@ -70,7 +70,7 @@ nucleus.application {
     }
 }
 
-val nativeOutputDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/output/${project.name}")
+val nativeOutputDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/output/ArchiveTune")
 val nativeCompileDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/nativeCompile")
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
 val nativeMsiScript = rootProject.layout.projectDirectory.file("packaging/windows/build-native-msi.ps1")
@@ -112,13 +112,6 @@ val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime)
     from(nativeOutputDir) {
         exclude("native/windows-x64/vlc/**")
-        // The clean CI build does not reliably leave the generated executable in Nucleus' output
-        // directory even though nativeImageCompile produced it successfully. Stage the executable
-        // from nativeCompile below, which is the authoritative GraalVM build output.
-        exclude("ArchiveTune.exe")
-    }
-    from(nativeCompileDir) {
-        include("ArchiveTune.exe")
     }
     into(nativeReleaseDir)
 }
