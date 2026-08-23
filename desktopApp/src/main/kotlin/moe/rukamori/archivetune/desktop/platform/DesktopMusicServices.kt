@@ -44,6 +44,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import moe.rukamori.archivetune.playback.desktop.DesktopConcretePlaybackSourceResolver
+import moe.rukamori.archivetune.playback.desktop.DesktopCrossfadeConfiguration
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import moe.rukamori.archivetune.playback.desktop.PlaybackQueueStore
@@ -260,6 +261,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             playback.setShuffleEnabled(restored.shuffleEnabled)
             playback.audioEffects.applyEqualizer(restored.equalizer.toPlaybackProfile())
             playback.audioEffects.setLoudnessNormalizationEnabled(restored.loudnessNormalizationEnabled)
+            playback.setCrossfadeConfiguration(
+                DesktopCrossfadeConfiguration(
+                    enabled = restored.crossfadeEnabled,
+                    durationMs = (restored.crossfadeDurationSeconds * 1_000f).toLong(),
+                    preserveGaplessAlbumTransitions = restored.crossfadeGaplessAlbumTransitions,
+                ),
+            )
         }
         runtime.applicationScope.launch {
             playback.audioOutputState

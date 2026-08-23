@@ -89,6 +89,9 @@ class DesktopSettingsStoreTest {
             shuffleEnabled = true,
             audioOutputDeviceId = "headphones-device-id",
             loudnessNormalizationEnabled = true,
+            crossfadeEnabled = true,
+            crossfadeDurationSeconds = 7.5f,
+            crossfadeGaplessAlbumTransitions = false,
             downloadConcurrency = 7,
             partialCleanupPolicy = DesktopPartialCleanupPolicy.KEEP_ON_CANCEL,
             lyricsProviderIds = listOf("lrclib", "betterlyrics"),
@@ -104,6 +107,9 @@ class DesktopSettingsStoreTest {
         val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
         assertEquals("headphones-device-id", persisted.getProperty("playback.audioOutputDevice"))
         assertEquals("true", persisted.getProperty("playback.loudnessNormalization"))
+        assertEquals("true", persisted.getProperty("playback.crossfade.enabled"))
+        assertEquals("7.5", persisted.getProperty("playback.crossfade.durationSeconds"))
+        assertEquals("false", persisted.getProperty("playback.crossfade.gaplessAlbumTransitions"))
         assertEquals("VOLUME_UP", persisted.getProperty("keybind.0.action"))
         assertEquals("17,18,38", persisted.getProperty("keybind.0.keys"))
         assertEquals("true", persisted.getProperty("keybind.0.repeat"))
@@ -157,6 +163,18 @@ class DesktopSettingsStoreTest {
 
         store.save(DesktopSettings(audioOutputDeviceId = "x".repeat(2_000)))
         assertEquals(1_024, store.snapshot().audioOutputDeviceId?.length)
+    }
+
+    @Test
+    fun sanitizesCrossfadeDurationToAndroidCompatibleRange() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+
+        store.save(DesktopSettings(crossfadeDurationSeconds = 99f))
+        assertEquals(10f, store.snapshot().crossfadeDurationSeconds, 0.0001f)
+
+        store.save(DesktopSettings(crossfadeDurationSeconds = Float.NaN))
+        assertEquals(5f, store.snapshot().crossfadeDurationSeconds, 0.0001f)
     }
 
     @Test

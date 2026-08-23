@@ -109,6 +109,10 @@ data class DesktopSettings(
     val volume: Float = 1f,
     val speed: Float = 1f,
     val loudnessNormalizationEnabled: Boolean = false,
+    val crossfadeEnabled: Boolean = false,
+    val crossfadeDurationSeconds: Float = 5f,
+    /** Preserve seamless album sequencing by skipping crossfade between tracks from the same album. */
+    val crossfadeGaplessAlbumTransitions: Boolean = true,
     val repeatMode: DesktopRepeatMode = DesktopRepeatMode.OFF,
     val shuffleEnabled: Boolean = false,
     val equalizer: DesktopEqualizerSettings = DesktopEqualizerSettings(),
@@ -185,6 +189,9 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 volume = values.getProperty("playback.volume")?.toFloatOrNull() ?: 1f,
                 speed = values.getProperty("playback.speed")?.toFloatOrNull() ?: 1f,
                 loudnessNormalizationEnabled = values.getProperty("playback.loudnessNormalization")?.toBooleanStrictOrNull() ?: false,
+                crossfadeEnabled = values.getProperty("playback.crossfade.enabled")?.toBooleanStrictOrNull() ?: false,
+                crossfadeDurationSeconds = values.getProperty("playback.crossfade.durationSeconds")?.toFloatOrNull() ?: 5f,
+                crossfadeGaplessAlbumTransitions = values.getProperty("playback.crossfade.gaplessAlbumTransitions")?.toBooleanStrictOrNull() ?: true,
                 repeatMode = values.enumValue("playback.repeatMode", DesktopRepeatMode.OFF),
                 shuffleEnabled = values.getProperty("playback.shuffle")?.toBooleanStrictOrNull() ?: false,
                 equalizer = DesktopEqualizerSettings(
@@ -221,6 +228,9 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             setProperty("playback.volume", settings.volume.toString())
             setProperty("playback.speed", settings.speed.toString())
             setProperty("playback.loudnessNormalization", settings.loudnessNormalizationEnabled.toString())
+            setProperty("playback.crossfade.enabled", settings.crossfadeEnabled.toString())
+            setProperty("playback.crossfade.durationSeconds", settings.crossfadeDurationSeconds.toString())
+            setProperty("playback.crossfade.gaplessAlbumTransitions", settings.crossfadeGaplessAlbumTransitions.toString())
             setProperty("playback.repeatMode", settings.repeatMode.name)
             setProperty("playback.shuffle", settings.shuffleEnabled.toString())
             setProperty("playback.equalizer.enabled", settings.equalizer.enabled.toString())
@@ -264,6 +274,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         accentSeedArgb = accentSeedArgb?.takeIf { it in 0..ARGB_MAX },
         volume = volume.finiteOr(1f).coerceIn(0f, 1f),
         speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
+        crossfadeDurationSeconds = crossfadeDurationSeconds.finiteOr(5f).coerceIn(0f, 10f),
         equalizer = equalizer.sanitized(),
         audioOutputDeviceId = audioOutputDeviceId?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH),
         downloadConcurrency = downloadConcurrency.coerceIn(1, 8),

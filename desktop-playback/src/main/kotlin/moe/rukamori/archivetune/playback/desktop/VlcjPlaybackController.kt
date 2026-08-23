@@ -15,6 +15,7 @@ import java.util.logging.Level
 import java.util.logging.Logger
 import kotlin.math.roundToLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackFailure
@@ -50,7 +52,8 @@ import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 
 /**
- * In-process desktop playback backed by one application-scoped VLCJ/libVLC player.
+ * In-process desktop playback backed by one application-scoped VLCJ/libVLC primary player, plus a
+ * short-lived second player while crossfading between tracks.
  *
  * ArchiveTune resolves deferred YouTube items before this class is called. Local/general media is
  * handed directly to libVLC; signed Googlevideo media uses the application HTTP callback transport
@@ -62,11 +65,18 @@ class VlcjPlaybackController(
     private val runtimeConfiguration: VlcRuntimeConfiguration = VlcRuntimeConfiguration(),
     private val onStreamHttpFailure: suspend (PlaybackItem, ResolvedPlaybackSource, Int) -> Boolean = { _, _, _ -> false },
     initialAudioOutputDeviceId: String? = null,
-) : PlaybackController, DesktopAudioOutputControl {
+) : PlaybackController, DesktopAudioOutputControl, DesktopCrossfadeControl {
     private data class LoadRequest(
         val generation: Long,
         val item: PlaybackItem,
         val startPositionMs: Long,
+    )
+
+    private data class CrossfadeTarget(
+        val outgoingOccurrenceId: Long,
+        val incomingOccurrenceId: Long,
+        val item: PlaybackItem,
+        val repeated: Boolean,
     )
 
     private val closed = AtomicBoolean(false)
@@ -93,6 +103,14 @@ class VlcjPlaybackController(
     private var outputVolumeBackend: OutputVolumeBackend? = null
     private var listener: MediaPlayerEventAdapter? = null
     private var activeCallbackMedia: VlcjRangeCallbackMedia? = null
+    private var secondaryCrossfadePlayer: MediaPlayer? = null
+    private var secondaryCrossfadeCallbackMedia: VlcjRangeCallbackMedia? = null
+    @Volatile private var crossfadeConfiguration = DesktopCrossfadeConfiguration()
+    private var crossfadeJob: Job? = null
+    private var crossfadeAttemptedOccurrenceId: Long? = null
+    private var crossfadeRunSequence = 0L
+    private var activeCrossfadeRunId: Long? = null
+    private var crossfadeSuppressFinishedRunId: Long? = null
     @Volatile private var generation = 0L
     private val loadJobOwner = LatestLoadJobOwner(
         scope = scope,
@@ -127,7 +145,20 @@ class VlcjPlaybackController(
 
     override suspend fun selectAudioOutputDevice(deviceId: String?): DesktopAudioOutputState = withContext(Dispatchers.IO) {
         ensurePlayer()
-        audioOutputSelection.select(deviceId)
+        audioOutputSelection.select(deviceId).also { selected ->
+            secondaryCrossfadePlayer?.let { secondary ->
+                runCatching { VlcjAudioOutputBackend(secondary).selectOutputDevice(selected.selectedDeviceId) }
+            }
+        }
+    }
+
+    override suspend fun setCrossfadeConfiguration(configuration: DesktopCrossfadeConfiguration) {
+        checkOpen()
+        val sanitized = configuration.sanitized()
+        crossfadeConfiguration = sanitized
+        commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
+        }
     }
 
     init {
@@ -165,6 +196,7 @@ class VlcjPlaybackController(
                         }
                     }
                 }
+                maybeStartCrossfade()
             }
         }
     }
@@ -234,6 +266,7 @@ class VlcjPlaybackController(
     override suspend fun pause() {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             _state.update { it.copy(playWhenReady = false) }
             player?.controls()?.setPause(true)
         }
@@ -261,6 +294,7 @@ class VlcjPlaybackController(
     override suspend fun seekTo(positionMs: Long) {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             val duration = _state.value.durationMs
             val safePosition = positionMs.coerceAtLeast(0L).let { requested ->
                 if (duration > 0L) requested.coerceAtMost(duration) else requested
@@ -362,6 +396,7 @@ class VlcjPlaybackController(
     override suspend fun playNext(items: List<PlaybackItem>) {
         checkOpen()
         val request = commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             val previous = queue.current
             val mutation = queue.insertNext(items)
             publishQueueLocked()
@@ -378,6 +413,7 @@ class VlcjPlaybackController(
     override suspend fun removeQueueItem(index: Int) {
         checkOpen()
         val request = commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             val previous = queue.current
             val mutation = queue.removeAt(index)
             publishQueueLocked()
@@ -412,6 +448,7 @@ class VlcjPlaybackController(
     override suspend fun moveQueueItem(fromIndex: Int, toIndex: Int) {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             queue.moveVisual(fromIndex, toIndex)
             publishQueueLocked()
         }
@@ -420,6 +457,7 @@ class VlcjPlaybackController(
     override suspend fun moveQueueItemToNext(index: Int) {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             queue.moveToNext(index)
             publishQueueLocked()
         }
@@ -428,6 +466,7 @@ class VlcjPlaybackController(
     override suspend fun clearQueue() {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             val previous = queue.current
             queue.clear()
             publishQueueLocked()
@@ -453,6 +492,7 @@ class VlcjPlaybackController(
     override suspend fun setRepeatMode(mode: RepeatMode) {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             queue.setRepeatMode(mode)
             publishQueueLocked()
         }
@@ -461,6 +501,7 @@ class VlcjPlaybackController(
     override suspend fun setShuffleEnabled(enabled: Boolean) {
         checkOpen()
         commandMutex.withLock {
+            cancelCrossfadeLocked(resetAttempt = true)
             queue.setShuffleEnabled(enabled)
             publishQueueLocked()
         }
@@ -486,6 +527,7 @@ class VlcjPlaybackController(
         commandMutex.withLock {
             _state.update { it.copy(speed = safeSpeed) }
             player?.controls()?.setRate(safeSpeed)
+            secondaryCrossfadePlayer?.controls()?.setRate(safeSpeed)
         }
     }
 
@@ -745,7 +787,7 @@ class VlcjPlaybackController(
         LogEventListener { level, module, file, line, name, header, id, message ->
             val nativeMessage = message.orEmpty()
             if (
-                activeCallbackMedia != null &&
+                (activeCallbackMedia != null || secondaryCrossfadeCallbackMedia != null) &&
                 module == "imem" &&
                 nativeMessage.contains("Invalid get/release function pointers", ignoreCase = true)
             ) {
@@ -861,6 +903,9 @@ class VlcjPlaybackController(
             override fun finished(mediaPlayer: MediaPlayer) = dispatch {
                 val request = commandMutex.withLock {
                     if (!isActiveEventLocked()) return@withLock null
+                    // Once the incoming player is audible, the crossfade coroutine owns the
+                    // transition. Letting the outgoing VLC player auto-advance here would race it.
+                    if (crossfadeSuppressFinishedRunId != null) return@withLock null
                     cancelLoadWatchdog()
                     val previous = queue.current
                     val snapshot = _state.value
@@ -955,6 +1000,376 @@ class VlcjPlaybackController(
                 // values here, including transient teardown values, so do not feed them back.
             }
         }
+
+    private suspend fun maybeStartCrossfade() {
+        commandMutex.withLock {
+            val config = crossfadeConfiguration
+            val snapshot = _state.value
+            if (
+                !config.enabled ||
+                config.durationMs < MIN_CROSSFADE_DURATION_MS ||
+                !snapshot.isPlaying ||
+                snapshot.durationMs <= 0L ||
+                activeGeneration != generation ||
+                activeCrossfadeRunId != null
+            ) {
+                return@withLock
+            }
+
+            val target = crossfadeTargetLocked(config) ?: return@withLock
+            if (crossfadeAttemptedOccurrenceId == target.outgoingOccurrenceId) return@withLock
+
+            val remainingMs =
+                (snapshot.durationMs - maxOf(snapshot.positionMs, latestPositionMs.get()))
+                    .coerceAtLeast(0L)
+            val triggerWindowMs = config.durationMs + CROSSFADE_PREPARE_AHEAD_MS + CROSSFADE_END_GUARD_MS
+            if (remainingMs > triggerWindowMs) return@withLock
+            if (remainingMs <= MIN_CROSSFADE_DURATION_MS + CROSSFADE_END_GUARD_MS) {
+                crossfadeAttemptedOccurrenceId = target.outgoingOccurrenceId
+                return@withLock
+            }
+
+            crossfadeAttemptedOccurrenceId = target.outgoingOccurrenceId
+            val outgoingGeneration = generation
+            val runId = ++crossfadeRunSequence
+            activeCrossfadeRunId = runId
+            crossfadeJob = scope.launch(CoroutineName("ArchiveTuneDesktopCrossfade")) {
+                performCrossfade(runId, outgoingGeneration, target, config)
+            }
+        }
+    }
+
+    private fun crossfadeTargetLocked(config: DesktopCrossfadeConfiguration): CrossfadeTarget? {
+        val entries = queue.entries()
+        val currentVisualIndex = entries.indexOfFirst { it.isCurrent }
+        if (currentVisualIndex < 0) return null
+        val outgoing = entries[currentVisualIndex]
+        val repeated = queue.repeatMode == RepeatMode.ONE
+        val incoming = when {
+            repeated -> outgoing
+            currentVisualIndex < entries.lastIndex -> entries[currentVisualIndex + 1]
+            queue.repeatMode == RepeatMode.ALL -> entries.firstOrNull()
+            else -> null
+        } ?: return null
+        if (
+            !repeated &&
+            config.preserveGaplessAlbumTransitions &&
+            sameAlbum(outgoing.item, incoming.item)
+        ) {
+            return null
+        }
+        return CrossfadeTarget(
+            outgoingOccurrenceId = outgoing.id,
+            incomingOccurrenceId = incoming.id,
+            item = incoming.item,
+            repeated = repeated,
+        )
+    }
+
+    private suspend fun performCrossfade(
+        runId: Long,
+        outgoingGeneration: Long,
+        target: CrossfadeTarget,
+        config: DesktopCrossfadeConfiguration,
+    ) {
+        try {
+            val resolved = try {
+                sourceResolver.resolve(target.item).getOrElse { throw it }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                logger.log(Level.FINE, "Crossfade source resolution failed for ${target.item.logLabel()}", error)
+                return
+            }
+            if (
+                resolved.uri.isBlank() ||
+                resolved.expiresAtEpochMs?.let { it <= System.currentTimeMillis() + MIN_URL_LIFETIME_MS } == true
+            ) {
+                return
+            }
+
+            ensurePlayer()
+            if (!crossfadeStillValid(runId, outgoingGeneration, target)) return
+
+            val activeFactory = synchronized(nativeLifecycleLock) { factory } ?: return
+            val secondary = activeFactory.mediaPlayers().newMediaPlayer()
+            val ready = CompletableDeferred<Boolean>()
+            val readinessListener = object : MediaPlayerEventAdapter() {
+                override fun playing(mediaPlayer: MediaPlayer) {
+                    ready.complete(true)
+                }
+
+                override fun error(mediaPlayer: MediaPlayer) {
+                    ready.complete(false)
+                }
+
+                override fun finished(mediaPlayer: MediaPlayer) {
+                    ready.complete(false)
+                }
+            }
+            secondary.events().addMediaPlayerEventListener(readinessListener)
+
+            var callbackMedia: VlcjRangeCallbackMedia? = null
+            var adopted = false
+            try {
+                vlcjAudioEffects.applyCurrentTo(VlcjEqualizerBackend(activeFactory, secondary))
+                VlcjAudioOutputBackend(secondary).selectOutputDevice(audioOutputSelection.state.value.selectedDeviceId)
+                secondary.controls().setRate(_state.value.speed)
+                secondary.audio().setVolume(0)
+
+                callbackMedia = if (resolved.shouldUseApplicationHttpTransport()) {
+                    rangeHttpTransport.media(
+                        url = resolved.uri,
+                        headers = resolved.headers,
+                        onHttpFailure = { ready.complete(false) },
+                    )
+                } else {
+                    null
+                }
+
+                val started = commandMutex.withLock {
+                    if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) {
+                        false
+                    } else {
+                        secondaryCrossfadePlayer = secondary
+                        secondaryCrossfadeCallbackMedia = callbackMedia
+                        adopted = true
+                        if (callbackMedia != null) {
+                            secondary.media().play(
+                                callbackMedia,
+                                *resolved.toCallbackMediaOptions().toTypedArray(),
+                            )
+                        } else {
+                            secondary.media().play(
+                                resolved.uri,
+                                *resolved.headers.toVlcMediaOptions().toTypedArray(),
+                            )
+                        }.also {
+                            // libVLC may rewrite volume while opening media.
+                            secondary.audio().setVolume(0)
+                        }
+                    }
+                }
+                if (!started) return
+
+                val becameReady = withTimeoutOrNull(CROSSFADE_SECONDARY_READY_TIMEOUT_MS) { ready.await() } == true
+                runCatching { secondary.events().removeMediaPlayerEventListener(readinessListener) }
+                if (!becameReady || !crossfadeStillValid(runId, outgoingGeneration, target)) return
+
+                val fadeDurationMs = commandMutex.withLock {
+                    if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) {
+                        null
+                    } else {
+                        val snapshot = _state.value
+                        val remainingMs =
+                            (snapshot.durationMs - maxOf(snapshot.positionMs, latestPositionMs.get()))
+                                .coerceAtLeast(0L)
+                        (remainingMs - CROSSFADE_END_GUARD_MS)
+                            .coerceAtMost(config.durationMs)
+                            .takeIf { it >= MIN_CROSSFADE_DURATION_MS }
+                            ?.also { crossfadeSuppressFinishedRunId = runId }
+                    }
+                } ?: return
+
+                logger.fine("Starting ${fadeDurationMs}ms crossfade to ${target.item.logLabel()}")
+                val fadeStartNanos = System.nanoTime()
+                while (true) {
+                    val elapsedMs = (System.nanoTime() - fadeStartNanos) / 1_000_000L
+                    val progress = (elapsedMs.toFloat() / fadeDurationMs.toFloat()).coerceIn(0f, 1f)
+                    val valid = commandMutex.withLock {
+                        if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) {
+                            false
+                        } else {
+                            outputGain.setFadeMultiplier(1f - progress)
+                            runCatching {
+                                secondary.audio().setVolume(outputGain.volumePercentForSource(resolved, progress))
+                            }
+                            true
+                        }
+                    }
+                    if (!valid) return
+                    if (progress >= 1f) break
+                    delay(CROSSFADE_FRAME_MS)
+                }
+
+                val handoffPositionMs = runCatching { secondary.status().time() }.getOrDefault(0L).coerceAtLeast(0L)
+                val loadRequest = commandMutex.withLock {
+                    if (!crossfadeStillValidLocked(runId, outgoingGeneration, target)) return@withLock null
+                    val previous = queue.current
+                    val selected = queue.advance(automatic = true) ?: return@withLock null
+                    val currentOccurrence = queue.entries().firstOrNull { it.isCurrent }
+                    if (currentOccurrence?.id != target.incomingOccurrenceId) return@withLock null
+
+                    advanceLoadGeneration(cancelCrossfade = false)
+                    outputGain.setFadeMultiplier(0f)
+                    stopActiveFileLocked()
+                    publishQueueLocked()
+                    latestPositionMs.set(handoffPositionMs)
+                    _state.update {
+                        it.copy(
+                            status = PlaybackStatus.RESOLVING,
+                            positionMs = handoffPositionMs,
+                            bufferedPositionMs = handoffPositionMs,
+                            durationMs = selected.item.metadata.durationHintMs?.coerceAtLeast(0L) ?: 0L,
+                            error = null,
+                        )
+                    }
+                    transition(
+                        previous,
+                        selected.item,
+                        if (selected.repeated) TransitionReason.REPEAT else TransitionReason.AUTO_ADVANCE,
+                    )
+                    LoadRequest(generation, selected.item, handoffPositionMs)
+                } ?: return
+                enqueueLoad(loadRequest)
+
+                val primaryReadyDeadline = System.nanoTime() + CROSSFADE_PRIMARY_READY_TIMEOUT_MS * 1_000_000L
+                var primaryReady = false
+                while (System.nanoTime() < primaryReadyDeadline) {
+                    val readiness = commandMutex.withLock {
+                        when {
+                            activeCrossfadeRunId != runId || generation != loadRequest.generation -> -1
+                            activeGeneration == loadRequest.generation && _state.value.status == PlaybackStatus.READY -> 1
+                            _state.value.status == PlaybackStatus.ERROR -> -1
+                            else -> 0
+                        }
+                    }
+                    if (readiness > 0) {
+                        primaryReady = true
+                        break
+                    }
+                    if (readiness < 0) return
+                    delay(CROSSFADE_HANDOFF_POLL_MS)
+                }
+                if (!primaryReady) return
+
+                // The temporary player kept advancing while the primary source opened. Align the
+                // primary before the short handoff so there is no audible repeated fragment.
+                val alignedPositionMs = runCatching { secondary.status().time() }.getOrDefault(handoffPositionMs).coerceAtLeast(0L)
+                commandMutex.withLock {
+                    if (activeCrossfadeRunId != runId || generation != loadRequest.generation) return@withLock
+                    runCatching { player?.controls()?.setTime(alignedPositionMs) }
+                    latestPositionMs.set(alignedPositionMs)
+                    _state.update {
+                        it.copy(
+                            positionMs = alignedPositionMs.coerceAtMostPositive(it.durationMs),
+                            bufferedPositionMs = maxOf(it.bufferedPositionMs, alignedPositionMs.coerceAtMostPositive(it.durationMs)),
+                        )
+                    }
+                }
+                delay(CROSSFADE_PRIMARY_SEEK_SETTLE_MS)
+
+                val handoffStartNanos = System.nanoTime()
+                while (true) {
+                    val elapsedMs = (System.nanoTime() - handoffStartNanos) / 1_000_000L
+                    val progress =
+                        (elapsedMs.toFloat() / CROSSFADE_HANDOFF_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+                    val valid = commandMutex.withLock {
+                        if (
+                            activeCrossfadeRunId != runId ||
+                            generation != loadRequest.generation ||
+                            activeGeneration != loadRequest.generation ||
+                            !_state.value.playWhenReady
+                        ) {
+                            false
+                        } else {
+                            outputGain.setFadeMultiplier(progress)
+                            runCatching {
+                                secondary.audio().setVolume(outputGain.volumePercentForSource(resolved, 1f - progress))
+                            }
+                            true
+                        }
+                    }
+                    if (!valid) return
+                    if (progress >= 1f) break
+                    delay(CROSSFADE_HANDOFF_FRAME_MS)
+                }
+            } finally {
+                runCatching { secondary.events().removeMediaPlayerEventListener(readinessListener) }
+                if (!adopted) {
+                    runCatching { secondary.controls().stop() }
+                    runCatching { secondary.media().reset() }
+                    runCatching { callbackMedia?.close() }
+                    runCatching { secondary.release() }
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            logger.log(Level.WARNING, "Crossfade failed for ${target.item.logLabel()}", error)
+        } finally {
+            commandMutex.withLock {
+                if (activeCrossfadeRunId == runId) {
+                    outputGain.setFadeMultiplier(1f)
+                    releaseSecondaryCrossfadePlayerLocked()
+                    crossfadeSuppressFinishedRunId = null
+                    activeCrossfadeRunId = null
+                    crossfadeJob = null
+                }
+            }
+        }
+    }
+
+    private suspend fun crossfadeStillValid(
+        runId: Long,
+        outgoingGeneration: Long,
+        target: CrossfadeTarget,
+    ): Boolean = commandMutex.withLock {
+        crossfadeStillValidLocked(runId, outgoingGeneration, target)
+    }
+
+    private fun crossfadeStillValidLocked(
+        runId: Long,
+        outgoingGeneration: Long,
+        target: CrossfadeTarget,
+    ): Boolean {
+        if (
+            closed.get() ||
+            activeCrossfadeRunId != runId ||
+            generation != outgoingGeneration ||
+            !_state.value.playWhenReady
+        ) {
+            return false
+        }
+        val current = queue.entries().firstOrNull { it.isCurrent } ?: return false
+        if (current.id != target.outgoingOccurrenceId) return false
+        val expected = crossfadeTargetLocked(crossfadeConfiguration) ?: return false
+        return expected.incomingOccurrenceId == target.incomingOccurrenceId && expected.item === target.item
+    }
+
+    private fun cancelCrossfadeLocked(resetAttempt: Boolean = false) {
+        crossfadeRunSequence++
+        activeCrossfadeRunId = null
+        crossfadeSuppressFinishedRunId = null
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        outputGain.setFadeMultiplier(1f)
+        releaseSecondaryCrossfadePlayerLocked()
+        if (resetAttempt) crossfadeAttemptedOccurrenceId = null
+    }
+
+    private fun releaseSecondaryCrossfadePlayerLocked() {
+        val secondary = secondaryCrossfadePlayer
+        val callbackMedia = secondaryCrossfadeCallbackMedia
+        secondaryCrossfadePlayer = null
+        secondaryCrossfadeCallbackMedia = null
+        runCatching { secondary?.controls()?.stop() }
+        runCatching { secondary?.media()?.reset() }
+        runCatching { callbackMedia?.close() }
+        runCatching { secondary?.release() }
+    }
+
+    private fun sameAlbum(first: PlaybackItem, second: PlaybackItem): Boolean {
+        val firstAlbum = first.metadata.album ?: return false
+        val secondAlbum = second.metadata.album ?: return false
+        val firstId = firstAlbum.id?.trim()?.takeIf(String::isNotEmpty)
+        val secondId = secondAlbum.id?.trim()?.takeIf(String::isNotEmpty)
+        if (firstId != null && secondId != null) return firstId == secondId
+
+        val firstTitle = firstAlbum.title.trim().takeIf(String::isNotEmpty) ?: return false
+        val secondTitle = secondAlbum.title.trim().takeIf(String::isNotEmpty) ?: return false
+        return firstTitle.equals(secondTitle, ignoreCase = true)
+    }
 
     private suspend fun recoverAfterStreamHttpFailure(
         failedGeneration: Long,
@@ -1116,7 +1531,8 @@ class VlcjPlaybackController(
         loadWatchdog = null
     }
 
-    private fun advanceLoadGeneration() {
+    private fun advanceLoadGeneration(cancelCrossfade: Boolean = true) {
+        if (cancelCrossfade) cancelCrossfadeLocked(resetAttempt = true)
         generation++
         loadJobOwner.cancelCurrent()
     }
@@ -1159,6 +1575,7 @@ class VlcjPlaybackController(
     }
 
     private fun transition(previous: PlaybackItem?, current: PlaybackItem?, reason: TransitionReason) {
+        crossfadeAttemptedOccurrenceId = null
         if (previous?.metadata?.id != current?.metadata?.id) {
             recoveryAttemptedMediaId = null
             prematureFinishRetriedMediaId = null
@@ -1188,6 +1605,11 @@ class VlcjPlaybackController(
         if (!closed.compareAndSet(false, true)) return
         loadJobOwner.close()
         synchronized(nativeLifecycleLock) {
+            crossfadeJob?.cancel()
+            crossfadeJob = null
+            activeCrossfadeRunId = null
+            crossfadeSuppressFinishedRunId = null
+            releaseSecondaryCrossfadePlayerLocked()
             generation++
             activeGeneration = null
             cancelLoadWatchdog()
@@ -1231,6 +1653,16 @@ class VlcjPlaybackController(
         const val POSITION_POLL_INTERVAL_MS = 50L
         const val LOAD_WATCHDOG_TIMEOUT_MS = 30_000L
         const val PREMATURE_FINISH_TOLERANCE_MS = 5_000L
+        const val MIN_CROSSFADE_DURATION_MS = 250L
+        const val CROSSFADE_PREPARE_AHEAD_MS = 1_000L
+        const val CROSSFADE_END_GUARD_MS = 150L
+        const val CROSSFADE_FRAME_MS = 32L
+        const val CROSSFADE_SECONDARY_READY_TIMEOUT_MS = 3_000L
+        const val CROSSFADE_PRIMARY_READY_TIMEOUT_MS = 10_000L
+        const val CROSSFADE_HANDOFF_POLL_MS = 25L
+        const val CROSSFADE_PRIMARY_SEEK_SETTLE_MS = 80L
+        const val CROSSFADE_HANDOFF_DURATION_MS = 220L
+        const val CROSSFADE_HANDOFF_FRAME_MS = 16L
         const val NO_RECOVERY_GENERATION = -1L
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }

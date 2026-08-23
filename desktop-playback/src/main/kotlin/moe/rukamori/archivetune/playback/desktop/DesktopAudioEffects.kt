@@ -78,6 +78,11 @@ internal class VlcjAudioEffects(
         backend.compareAndSet(detached, null)
     }
 
+    /** Applies the current desired profile to a temporary crossfade player without reattaching it. */
+    fun applyCurrentTo(temporaryBackend: EqualizerBackend) {
+        temporaryBackend.apply(desiredProfile.get())
+    }
+
     private suspend fun currentOrEnsureBackend(): EqualizerBackend =
         backend.get() ?: ensureBackend().also { attached ->
             backend.compareAndSet(null, attached)

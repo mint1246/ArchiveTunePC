@@ -69,6 +69,25 @@ class DesktopOutputGainTest {
         assertTrue(first.values.isNotEmpty())
     }
 
+    @Test
+    fun `crossfade multiplier scales primary and secondary without changing user volume`() {
+        val backend = RecordingVolumeBackend()
+        val gain = DesktopOutputGain()
+        gain.attach(backend)
+        gain.setUserVolume(0.8f)
+        gain.setFadeMultiplier(0.25f)
+
+        assertEquals(20, backend.last)
+        assertEquals(0.8f, gain.userVolumeForTest())
+
+        val quieterSource = ResolvedPlaybackSource(
+            "https://example",
+            perceptualLoudnessDb = 6.020599913,
+        )
+        gain.setNormalizationEnabled(true)
+        assertEquals(10, gain.volumePercentForSource(quieterSource, 0.25f))
+    }
+
     private class RecordingVolumeBackend : OutputVolumeBackend {
         val values = mutableListOf<Int>()
         val last: Int get() = values.last()

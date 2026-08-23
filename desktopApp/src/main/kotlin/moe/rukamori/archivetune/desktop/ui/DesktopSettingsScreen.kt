@@ -83,6 +83,8 @@ import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.desktop.DesktopAudioEffects
 import moe.rukamori.archivetune.playback.desktop.DesktopAudioOutputControl
+import moe.rukamori.archivetune.playback.desktop.DesktopCrossfadeConfiguration
+import moe.rukamori.archivetune.playback.desktop.DesktopCrossfadeControl
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerCapabilities
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
 import java.nio.file.Path
@@ -90,6 +92,7 @@ import java.awt.event.KeyEvent
 import java.util.logging.Logger
 import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
+import kotlin.math.roundToInt
 
 /** Desktop equivalents of Android settings that have an actual JVM/Windows consumer. */
 @Composable
@@ -179,6 +182,15 @@ fun DesktopSettingsPanel(
         }
     }
 
+    fun updateCrossfade(transform: (DesktopSettings) -> DesktopSettings) {
+        settings = settingsStore.update(transform)
+        val configuration = settings.toCrossfadeConfiguration()
+        scope.launch {
+            runCatching { (playback as? DesktopCrossfadeControl)?.setCrossfadeConfiguration(configuration) }
+                .onFailure { error = it.message ?: "Could not update crossfade settings." }
+        }
+    }
+
     LaunchedEffect(audioEffects) {
         equalizerCapabilities = null
         equalizerUnavailable = audioEffects == null
@@ -254,6 +266,47 @@ fun DesktopSettingsPanel(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HorizontalDivider()
+                ToggleRow(
+                    "Crossfade between tracks",
+                    settings.crossfadeEnabled,
+                    Icons.Rounded.Shuffle,
+                ) { enabled ->
+                    updateCrossfade { it.copy(crossfadeEnabled = enabled) }
+                }
+                Text(
+                    "Overlap the end of the current track with the start of the next track.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (settings.crossfadeEnabled) {
+                    val duration = settings.crossfadeDurationSeconds
+                    val durationLabel = if (duration % 1f == 0f) "${duration.toInt()} s" else "${"%.1f".format(duration)} s"
+                    SettingSlider("Crossfade duration", durationLabel, Icons.Rounded.Shuffle)
+                    Slider(
+                        value = duration,
+                        onValueChange = { value ->
+                            val snapped = (value * 2f).roundToInt() / 2f
+                            updateCrossfade { it.copy(crossfadeDurationSeconds = snapped) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        valueRange = 0f..10f,
+                        steps = 19,
+                    )
+                    ToggleRow(
+                        "Preserve gapless album transitions",
+                        settings.crossfadeGaplessAlbumTransitions,
+                        Icons.Rounded.LibraryMusic,
+                    ) { enabled ->
+                        updateCrossfade { it.copy(crossfadeGaplessAlbumTransitions = enabled) }
+                    }
+                    Text(
+                        "Skips crossfade between consecutive tracks from the same album.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider()
                 SettingSlider("Playback speed", "${"%.2f".format(settings.speed)}×", Icons.Rounded.Speed)
                 Slider(settings.speed, { value ->
                     val safe = (value * 4f).toInt() / 4f
@@ -900,6 +953,13 @@ private fun DesktopEqualizerSettings.toPlaybackProfile(): DesktopEqualizerProfil
         enabled = enabled,
         preampDb = preampDb,
         bandGainsDb = bandGainsDb,
+    )
+
+private fun DesktopSettings.toCrossfadeConfiguration(): DesktopCrossfadeConfiguration =
+    DesktopCrossfadeConfiguration(
+        enabled = crossfadeEnabled,
+        durationMs = (crossfadeDurationSeconds * 1_000f).toLong(),
+        preserveGaplessAlbumTransitions = crossfadeGaplessAlbumTransitions,
     )
 
 @Composable

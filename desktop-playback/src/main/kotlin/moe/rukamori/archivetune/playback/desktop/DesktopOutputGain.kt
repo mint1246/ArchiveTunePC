@@ -25,6 +25,7 @@ internal class DesktopOutputGain {
     private var userVolume = 1f
     private var normalizationEnabled = false
     private var sourceNormalizationFactor = 1f
+    private var fadeMultiplier = 1f
 
     @Synchronized
     fun setUserVolume(volume: Float): Float {
@@ -47,6 +48,26 @@ internal class DesktopOutputGain {
             loudnessDb = source?.loudnessDb,
         )
         applyLocked()
+    }
+
+    @Synchronized
+    fun setFadeMultiplier(multiplier: Float) {
+        fadeMultiplier = sanitizeFadeMultiplier(multiplier)
+        applyLocked()
+    }
+
+    /** Returns the matching volume for a second player without changing the primary output. */
+    @Synchronized
+    fun volumePercentForSource(source: ResolvedPlaybackSource?, multiplier: Float = 1f): Int {
+        val factor = loudnessNormalizationFactor(
+            enabled = normalizationEnabled,
+            perceptualLoudnessDb = source?.perceptualLoudnessDb,
+            loudnessDb = source?.loudnessDb,
+        )
+        return effectiveVlcVolumePercent(
+            userVolume = userVolume * sanitizeFadeMultiplier(multiplier),
+            normalizationFactor = factor,
+        )
     }
 
     @Synchronized
@@ -74,7 +95,7 @@ internal class DesktopOutputGain {
     private fun applyLocked() {
         backend?.setVolumePercent(
             effectiveVlcVolumePercent(
-                userVolume = userVolume,
+                userVolume = userVolume * fadeMultiplier,
                 normalizationFactor = if (normalizationEnabled) sourceNormalizationFactor else 1f,
             ),
         )
@@ -108,6 +129,9 @@ internal fun effectiveVlcVolumePercent(userVolume: Float, normalizationFactor: F
 }
 
 private fun sanitizeUserVolume(volume: Float): Float = volume.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 1f
+
+private fun sanitizeFadeMultiplier(multiplier: Float): Float =
+    multiplier.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 1f
 
 private fun sanitizeLoudnessDb(value: Double?): Double? =
     value?.takeIf { it.isFinite() && it in MIN_VALID_LOUDNESS_DB..MAX_VALID_LOUDNESS_DB }
