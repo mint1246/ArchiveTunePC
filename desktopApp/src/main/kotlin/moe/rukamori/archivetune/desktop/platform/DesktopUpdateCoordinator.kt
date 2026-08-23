@@ -10,6 +10,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Duration
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -70,11 +71,15 @@ class DesktopUpdateCoordinator(
         }
 
         runtime.applicationScope.launch(Dispatchers.IO) {
-            runCatching { checkAndStage(baseUrl) }
-                .onFailure { failure ->
-                    runtime.logger.warning("Update check failed: ${failure.message}")
-                    _state.value = DesktopUpdateState.Failed(failure.message ?: "Update check failed")
-                }
+            while (true) {
+                runCatching { checkAndStage(baseUrl) }
+                    .onFailure { failure ->
+                        runtime.logger.warning("Update check failed: ${failure.message}")
+                        _state.value = DesktopUpdateState.Failed(failure.message ?: "Update check failed")
+                    }
+
+                delay(UPDATE_CHECK_INTERVAL_MS)
+            }
         }
     }
 
@@ -227,6 +232,10 @@ class DesktopUpdateCoordinator(
     private fun powershellSingleQuoted(value: String): String = value.replace("'", "''")
 
     private fun isWindows(): Boolean = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+
+    private companion object {
+        const val UPDATE_CHECK_INTERVAL_MS = 30L * 60L * 1000L
+    }
 }
 
 internal fun compareVersions(left: String, right: String): Int {
