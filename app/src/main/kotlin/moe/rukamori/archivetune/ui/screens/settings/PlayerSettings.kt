@@ -144,7 +144,7 @@ fun PlayerSettings(navController: NavController) {
     val (lowDataMode, onLowDataModeChange) =
         rememberPreference(
             LowDataModeKey,
-            defaultValue = true,
+            defaultValue = false,
         )
     val (persistentQueue, onPersistentQueueChange) =
         rememberPreference(
