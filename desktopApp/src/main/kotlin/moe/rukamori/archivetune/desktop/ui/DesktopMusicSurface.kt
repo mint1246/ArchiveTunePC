@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.MoreVert
@@ -1728,6 +1729,7 @@ private fun NowPlayingSubtitle(
     playTogether: PlayTogetherManager,
     browse: DesktopBrowseController,
     onShowLyrics: () -> Unit,
+    onShowStems: () -> Unit,
     onShowQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -1883,6 +1885,11 @@ private fun NowPlayingSubtitle(
                 NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) })
             }
             TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }
+            DesktopTooltip("Stem player") {
+                IconButton(onClick = onShowStems, enabled = item != null) {
+                    Icon(Icons.Rounded.GraphicEq, "Stem player")
+                }
+            }
             IconButton({ scope.launch { playTogether.skipPrevious() } }, enabled = snapshot.canSkipPrevious && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
             FilledIconButton({ scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }
             IconButton({ scope.launch { playTogether.skipNext() } }, enabled = snapshot.canSkipNext && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipNext, "Next") }

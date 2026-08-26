@@ -26,6 +26,7 @@ internal class DesktopOutputGain {
     private var normalizationEnabled = false
     private var sourceNormalizationFactor = 1f
     private var fadeMultiplier = 1f
+    private var externalRendererMultiplier = 1f
 
     @Synchronized
     fun setUserVolume(volume: Float): Float {
@@ -56,6 +57,17 @@ internal class DesktopOutputGain {
         applyLocked()
     }
 
+    /**
+     * Temporarily suppress libVLC's audible output while another renderer owns the same transport.
+     * This deliberately does not alter [userVolume], so UI/settings volume remains stable and can
+     * be restored instantly when the external renderer exits.
+     */
+    @Synchronized
+    fun setExternalRendererActive(active: Boolean) {
+        externalRendererMultiplier = if (active) 0f else 1f
+        applyLocked()
+    }
+
     /** Returns the matching volume for a second player without changing the primary output. */
     @Synchronized
     fun volumePercentForSource(source: ResolvedPlaybackSource?, multiplier: Float = 1f): Int {
@@ -65,7 +77,7 @@ internal class DesktopOutputGain {
             loudnessDb = source?.loudnessDb,
         )
         return effectiveVlcVolumePercent(
-            userVolume = userVolume * sanitizeFadeMultiplier(multiplier),
+            userVolume = userVolume * sanitizeFadeMultiplier(multiplier) * externalRendererMultiplier,
             normalizationFactor = factor,
         )
     }
@@ -95,7 +107,7 @@ internal class DesktopOutputGain {
     private fun applyLocked() {
         backend?.setVolumePercent(
             effectiveVlcVolumePercent(
-                userVolume = userVolume * fadeMultiplier,
+                userVolume = userVolume * fadeMultiplier * externalRendererMultiplier,
                 normalizationFactor = if (normalizationEnabled) sourceNormalizationFactor else 1f,
             ),
         )

@@ -9,6 +9,9 @@ package moe.rukamori.archivetune.playback.desktop
 
 import java.io.FileNotFoundException
 import java.net.URI
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.logging.Level
@@ -124,6 +127,7 @@ class VlcjPlaybackController(
     private var prematureFinishRetriedMediaId: String? = null
     private var pendingSeek: Pair<Long, Long>? = null
     private var suppressStoppedEvents = 0
+    @Volatile private var externalAudioRendererActive = false
 
     override val state = _state.asStateFlow()
     override val events = _events.asSharedFlow()
@@ -143,6 +147,190 @@ class VlcjPlaybackController(
         audioOutputSelection.refresh()
     }
 
+    /**
+     * Decode [item] through the same libVLC/runtime and signed-source transport used by playback,
+     * but into a deterministic 44.1 kHz stereo PCM WAV for on-device stem separation.
+     *
+     * This uses a separate short-lived media player, so normal playback is never paused or
+     * reconfigured while the stem input is being prepared.
+     */
+    suspend fun decodeStemInput(item: PlaybackItem, output: Path): Path = withContext(Dispatchers.IO) {
+        checkOpen()
+        val resolved = sourceResolver.resolve(item).getOrElse { throw it }
+        ensurePlayer()
+        output.parent?.let(Files::createDirectories)
+        runCatching { Files.deleteIfExists(output) }
+
+        val activeFactory = synchronized(nativeLifecycleLock) { factory }
+            ?: throw IllegalStateException("libVLC factory is unavailable")
+        val decoder = activeFactory.mediaPlayers().newMediaPlayer()
+        val finished = CompletableDeferred<Boolean>()
+        val eventListener = object : MediaPlayerEventAdapter() {
+            override fun finished(mediaPlayer: MediaPlayer) {
+                finished.complete(true)
+            }
+
+            override fun error(mediaPlayer: MediaPlayer) {
+                finished.complete(false)
+            }
+        }
+        decoder.events().addMediaPlayerEventListener(eventListener)
+
+        var materializedSource: Path? = null
+        try {
+            val sourceLocation: String
+            val sourceOptions: List<String>
+            if (resolved.shouldUseApplicationHttpTransport()) {
+                materializedSource = output.resolveSibling(".${output.fileName}.source")
+                rangeHttpTransport.materialize(
+                    url = resolved.uri,
+                    headers = resolved.headers,
+                    destination = materializedSource,
+                )
+                sourceLocation = materializedSource.toUri().toASCIIString()
+                // The temporary file deliberately has no meaningful extension. Preserve the
+                // resolver's known container hint so VLC does not need to probe arbitrary bytes.
+                sourceOptions = resolved.toCallbackMediaOptions()
+            } else {
+                sourceLocation = resolved.uri
+                sourceOptions = resolved.headers.toVlcMediaOptions()
+            }
+
+            val destination = output.toAbsolutePath().normalize().toString().replace('\\', '/')
+            val transcodeOption =
+                ":sout=#transcode{vcodec=none,acodec=s16l,channels=2,samplerate=44100}:" +
+                    "std{access=file,mux=wav,dst='$destination'}"
+            val options = buildList {
+                add(transcodeOption)
+                add(":no-video")
+                addAll(sourceOptions)
+            }
+            val started = decoder.media().play(sourceLocation, *options.toTypedArray())
+            if (!started) throw IllegalStateException("libVLC rejected the stem decode source")
+
+            val expectedMs = item.metadata.durationHintMs?.coerceAtLeast(0L) ?: 0L
+            val timeoutMs = (expectedMs * 2 + STEM_DECODE_TIMEOUT_SLACK_MS)
+                .coerceAtLeast(MIN_STEM_DECODE_TIMEOUT_MS)
+            val completed = withTimeoutOrNull(timeoutMs) { finished.await() } == true
+            if (!completed || !Files.isRegularFile(output) || Files.size(output) <= STEM_WAV_HEADER_BYTES) {
+                throw IllegalStateException("libVLC could not decode the track for stem separation")
+            }
+            output
+        } finally {
+            runCatching { decoder.events().removeMediaPlayerEventListener(eventListener) }
+            runCatching { decoder.controls().stop() }
+            runCatching { decoder.release() }
+            runCatching { materializedSource?.let(Files::deleteIfExists) }
+        }
+    }
+
+    /**
+     * Compress a generated PCM stem into the persistent on-disk cache format.
+     *
+     * Opus is used instead of MP3 because it keeps good quality at a much lower bitrate. The
+     * source WAV is intentionally not deleted here; callers delete it only after this method has
+     * produced and verified a non-empty Ogg/Opus file so a failed encode cannot destroy the only
+     * generated stem.
+     */
+    suspend fun compressStemForCache(
+        sourceWav: Path,
+        outputOpus: Path,
+        channels: Int = 2,
+        bitrateKbps: Int = STEM_OPUS_BITRATE_KBPS,
+    ): Path = withContext(Dispatchers.IO) {
+        checkOpen()
+        require(Files.isRegularFile(sourceWav)) { "Stem WAV does not exist: $sourceWav" }
+        require(channels in 1..8) { "Opus cache channel count must be between 1 and 8" }
+        require(bitrateKbps > 0) { "Opus cache bitrate must be positive" }
+        ensurePlayer()
+        outputOpus.parent?.let(Files::createDirectories)
+        runCatching { Files.deleteIfExists(outputOpus) }
+
+        val activeFactory = synchronized(nativeLifecycleLock) { factory }
+            ?: throw IllegalStateException("libVLC factory is unavailable")
+        val encoder = activeFactory.mediaPlayers().newMediaPlayer()
+        val finished = CompletableDeferred<Boolean>()
+        val eventListener = object : MediaPlayerEventAdapter() {
+            override fun finished(mediaPlayer: MediaPlayer) {
+                finished.complete(true)
+            }
+
+            override fun error(mediaPlayer: MediaPlayer) {
+                finished.complete(false)
+            }
+        }
+        encoder.events().addMediaPlayerEventListener(eventListener)
+
+        try {
+            val destination = outputOpus.toAbsolutePath().normalize().toString().replace('\\', '/')
+            val transcodeOption =
+                ":sout=#transcode{vcodec=none,acodec=opus,ab=$bitrateKbps,channels=$channels,samplerate=48000}:" +
+                    "std{access=file,mux=ogg,dst='$destination'}"
+            val started = encoder.media().play(
+                sourceWav.toUri().toASCIIString(),
+                transcodeOption,
+                ":no-video",
+            )
+            if (!started) throw IllegalStateException("libVLC rejected the generated stem for Opus compression")
+
+            val completed = withTimeoutOrNull(STEM_CACHE_ENCODE_TIMEOUT_MS) { finished.await() } == true
+            if (!completed || !isUsableOggOpus(outputOpus)) {
+                runCatching { Files.deleteIfExists(outputOpus) }
+                throw IllegalStateException("libVLC could not compress the generated stem to Opus")
+            }
+            outputOpus
+        } finally {
+            runCatching { encoder.events().removeMediaPlayerEventListener(eventListener) }
+            runCatching { encoder.controls().stop() }
+            runCatching { encoder.release() }
+        }
+    }
+
+    /**
+     * Convert the worker's four temporary stereo WAVs into persistent Opus cache files.
+     *
+     * Do not combine arbitrary stems into a standard 8-channel Opus stream: surround channel
+     * mapping gives those channels speaker semantics (including LFE filtering), which can alter or
+     * permute stem audio. The native renderer still decodes these four files onto one shared sample
+     * clock, so separate storage files do not imply separate playback clocks.
+     */
+    suspend fun compressGeneratedStemSetForCache(directory: Path): List<Path> = withContext(Dispatchers.IO) {
+        val pending = STEM_CACHE_SOURCE_NAMES.map { name ->
+            val wav = directory.resolve("$name.wav")
+            require(Files.isRegularFile(wav)) { "Generated stem is missing: $wav" }
+            StemCachePendingFile(
+                wav = wav,
+                partial = directory.resolve(".$name.opus.part"),
+                target = directory.resolve("$name.opus"),
+            )
+        }
+        try {
+            pending.forEach { file ->
+                runCatching { Files.deleteIfExists(file.partial) }
+                compressStemForCache(file.wav, file.partial)
+            }
+
+            pending.forEach { file ->
+                try {
+                    Files.move(
+                        file.partial,
+                        file.target,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE,
+                    )
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(file.partial, file.target, StandardCopyOption.REPLACE_EXISTING)
+                }
+                check(isUsableOggOpus(file.target)) { "Compressed stem cache is invalid: ${file.target}" }
+            }
+
+            pending.forEach { file -> Files.deleteIfExists(file.wav) }
+            pending.map(StemCachePendingFile::target)
+        } catch (error: Throwable) {
+            pending.forEach { file -> runCatching { Files.deleteIfExists(file.partial) } }
+            throw error
+        }
+    }
     override suspend fun selectAudioOutputDevice(deviceId: String?): DesktopAudioOutputState = withContext(Dispatchers.IO) {
         ensurePlayer()
         audioOutputSelection.select(deviceId).also { selected ->
@@ -513,6 +701,20 @@ class VlcjPlaybackController(
         commandMutex.withLock {
             _state.update { it.copy(volume = safeVolume) }
             outputGain.setUserVolume(safeVolume)
+        }
+    }
+
+    /**
+     * Mute only libVLC's renderer while preserving the transport and user volume state. Stem
+     * playback uses this to let VLC continue driving queue/seek/SMTC state while the native stem
+     * renderer owns the audible output.
+     */
+    suspend fun setExternalAudioRendererActive(active: Boolean) {
+        checkOpen()
+        commandMutex.withLock {
+            externalAudioRendererActive = active
+            if (active) cancelCrossfadeLocked(resetAttempt = true)
+            outputGain.setExternalRendererActive(active)
         }
     }
 
@@ -1006,6 +1208,7 @@ class VlcjPlaybackController(
             val config = crossfadeConfiguration
             val snapshot = _state.value
             if (
+                externalAudioRendererActive ||
                 !config.enabled ||
                 config.durationMs < MIN_CROSSFADE_DURATION_MS ||
                 !snapshot.isPlaying ||
@@ -1832,6 +2035,11 @@ class VlcjPlaybackController(
         const val MAX_SPEED = 4f
         const val MIN_URL_LIFETIME_MS = 5_000L
         const val POSITION_POLL_INTERVAL_MS = 50L
+        const val STEM_DECODE_TIMEOUT_SLACK_MS = 60_000L
+        const val MIN_STEM_DECODE_TIMEOUT_MS = 120_000L
+        const val STEM_WAV_HEADER_BYTES = 44L
+        const val STEM_OPUS_BITRATE_KBPS = 96
+        const val STEM_CACHE_ENCODE_TIMEOUT_MS = 120_000L
         const val LOAD_WATCHDOG_TIMEOUT_MS = 30_000L
         const val PREMATURE_FINISH_TOLERANCE_MS = 5_000L
         const val MIN_CROSSFADE_DURATION_MS = 250L
@@ -1848,8 +2056,26 @@ class VlcjPlaybackController(
         const val CROSSFADE_HANDOFF_DURATION_MS = 220L
         const val CROSSFADE_HANDOFF_FRAME_MS = 16L
         const val NO_RECOVERY_GENERATION = -1L
+        val STEM_CACHE_SOURCE_NAMES = listOf("drums", "bass", "other", "vocals")
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
+}
+
+private data class StemCachePendingFile(
+    val wav: Path,
+    val partial: Path,
+    val target: Path,
+)
+
+private fun isUsableOggOpus(path: Path): Boolean {
+    if (!Files.isRegularFile(path)) return false
+    if (runCatching { Files.size(path) }.getOrDefault(0L) <= 64L) return false
+    return runCatching {
+        Files.newInputStream(path).use { input ->
+            val magic = ByteArray(4)
+            input.read(magic) == magic.size && magic.contentEquals(byteArrayOf('O'.code.toByte(), 'g'.code.toByte(), 'g'.code.toByte(), 'S'.code.toByte()))
+        }
+    }.getOrDefault(false)
 }
 
 private fun PlaybackItem.logLabel(): String =

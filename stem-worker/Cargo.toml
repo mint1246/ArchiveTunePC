@@ -1,0 +1,20 @@
+[package]
+name = "archivetune-stems"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+cpal = "0.18.2"
+hound = "3.5"
+ogg = "0.9.2"
+opus = "0.4.0"
+realfft = "3.5"
+serde_json = "1.0"
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic", "directml", "api-24"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = true

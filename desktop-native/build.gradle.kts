@@ -80,6 +80,11 @@ val nativeMsiScript = rootProject.layout.projectDirectory.file("packaging/window
 val nativeReleaseDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/app/ArchiveTune")
 val nativeMsiOutputDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/msi")
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
+val stemWorkerProjectDir = rootProject.layout.projectDirectory.dir("stem-worker")
+val stemWorkerExe = stemWorkerProjectDir.file("target/release/archivetune-stems.exe")
+val stemRuntimeBuildDir = rootProject.layout.buildDirectory.dir("stem-runtime/windows-x64")
+val stemOrtPackage = rootProject.layout.buildDirectory.file("stem-runtime/packages/onnxruntime-directml-1.24.4.nupkg")
+val stemDirectMlPackage = rootProject.layout.buildDirectory.file("stem-runtime/packages/directml-1.15.4.nupkg")
 
 tasks.matching { it.name == "generateGraalvmWindowsResources" }.configureEach {
     dependsOn(desktopAppProject.tasks.named("generateWindowsIcon"))
@@ -104,14 +109,77 @@ val stageNativeVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNat
     mustRunAfter("packageGraalvmNative")
 }
 
+val buildStemWorker = tasks.register<Exec>("buildStemWorker") {
+    group = "distribution"
+    description = "Builds ArchiveTune's native DirectML stem-separation sidecar."
+    workingDir(stemWorkerProjectDir)
+    commandLine("cargo", "build", "--release", "--locked")
+    inputs.file(stemWorkerProjectDir.file("Cargo.toml"))
+    inputs.file(stemWorkerProjectDir.file("Cargo.lock"))
+    inputs.dir(stemWorkerProjectDir.dir("src"))
+    outputs.file(stemWorkerExe)
+}
+
+val downloadStemOrtRuntime = tasks.register<Exec>("downloadStemOrtRuntime") {
+    group = "distribution"
+    description = "Downloads the redistributable ONNX Runtime DirectML package for the stem worker."
+    val target = stemOrtPackage.get().asFile.absolutePath
+    outputs.file(target)
+    commandLine(
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        "New-Item -ItemType Directory -Force -Path (Split-Path -Parent '$target') | Out-Null; " +
+            "Invoke-WebRequest -UseBasicParsing -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.24.4/microsoft.ml.onnxruntime.directml.1.24.4.nupkg' -OutFile '$target'",
+    )
+}
+
+val downloadStemDirectMlRuntime = tasks.register<Exec>("downloadStemDirectMlRuntime") {
+    group = "distribution"
+    description = "Downloads Microsoft's redistributable DirectML package for the stem worker."
+    val target = stemDirectMlPackage.get().asFile.absolutePath
+    outputs.file(target)
+    commandLine(
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        "New-Item -ItemType Directory -Force -Path (Split-Path -Parent '$target') | Out-Null; " +
+            "Invoke-WebRequest -UseBasicParsing -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg' -OutFile '$target'",
+    )
+}
+
+val prepareStemRuntime = tasks.register<Sync>("prepareStemRuntime") {
+    group = "distribution"
+    description = "Extracts only the Windows x64 DLLs required by the native stem worker."
+    dependsOn(downloadStemOrtRuntime, downloadStemDirectMlRuntime)
+    from(stemOrtPackage.map { zipTree(it) }) {
+        include("runtimes/win-x64/native/onnxruntime.dll")
+        include("runtimes/win-x64/native/onnxruntime_providers_shared.dll")
+        eachFile { path = name }
+    }
+    from(stemDirectMlPackage.map { zipTree(it) }) {
+        include("bin/x64-win/DirectML.dll")
+        include("runtimes/win-x64/native/DirectML.dll")
+        eachFile { path = name }
+    }
+    includeEmptyDirs = false
+    into(stemRuntimeBuildDir)
+}
+
+val stageNativeStemRuntime = tasks.register<Copy>("stageNativeStemRuntime") {
+    group = "distribution"
+    description = "Stages ArchiveTune's stem worker and DirectML runtime beside the native executable."
+    dependsOn(buildStemWorker, prepareStemRuntime)
+    from(stemWorkerExe)
+    from(stemRuntimeBuildDir)
+    into(nativeOutputDir.map { it.dir("stem-worker") })
+    mustRunAfter("packageGraalvmNative")
+}
+
 tasks.matching { it.name == "packageGraalvmNative" }.configureEach {
-    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime)
+    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime)
 }
 
 val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     group = "distribution"
     description = "Stages the production GraalVM distribution under desktopApp/build/compose/binaries/main-native."
-    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime)
+    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime)
     from(nativeOutputDir) {
         exclude("native/windows-x64/vlc/**")
     }

@@ -116,6 +116,134 @@ class VlcjLocalPlaybackIntegrationTest {
         }
     }
 
+    @Test
+    fun `decodes local media to stereo 44k stem input wav`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val source = createWaveFile()
+        val output = Files.createTempFile("archivetune-stem-input-", ".wav")
+        Files.deleteIfExists(output)
+        val item = PlaybackItem(
+            metadata = PlaybackMetadata(id = "stem-decode", title = "Stem decode", durationHintMs = 2_000L),
+            source = PlaybackSource.LocalFile(source.toString()),
+        )
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+
+        try {
+            controller.decodeStemInput(item, output)
+            val format = AudioSystem.getAudioFileFormat(output.toFile()).format
+            assertEquals(44_100f, format.sampleRate)
+            assertEquals(2, format.channels)
+            assertTrue(Files.size(output) > 44L)
+        } finally {
+            controller.close()
+            Files.deleteIfExists(source)
+            Files.deleteIfExists(output)
+        }
+    }
+
+    @Test
+    fun `decodes optional external media to stem input wav`() = runBlocking {
+        val external = System.getenv("ARCHIVETUNE_STEM_DECODE_FILE")
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?.takeIf(Files::isRegularFile)
+            ?: return@runBlocking
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val output = Files.createTempFile("archivetune-stem-external-", ".wav")
+        Files.deleteIfExists(output)
+        val item = PlaybackItem(
+            metadata = PlaybackMetadata(id = "stem-external", title = external.fileName.toString()),
+            source = PlaybackSource.LocalFile(external.toString()),
+        )
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+
+        try {
+            controller.decodeStemInput(item, output)
+            val format = AudioSystem.getAudioFileFormat(output.toFile()).format
+            assertEquals(44_100f, format.sampleRate)
+            assertEquals(2, format.channels)
+            assertTrue(Files.size(output) > 44L)
+        } finally {
+            controller.close()
+            Files.deleteIfExists(output)
+        }
+    }
+
+    @Test
+    fun `compresses generated stem wav to opus cache`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val source = createWaveFile(durationSeconds = 8, channels = 2)
+        val opus = Files.createTempFile("archivetune-stem-cache-", ".opus")
+        val decoded = Files.createTempFile("archivetune-stem-cache-decoded-", ".wav")
+        Files.deleteIfExists(opus)
+        Files.deleteIfExists(decoded)
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+
+        try {
+            controller.compressStemForCache(source, opus)
+            assertTrue(Files.isRegularFile(opus))
+            assertTrue(Files.size(opus) < Files.size(source) / 4)
+            Files.newInputStream(opus).use { input ->
+                val magic = ByteArray(4)
+                assertEquals(4, input.read(magic))
+                assertTrue(magic.contentEquals(byteArrayOf('O'.code.toByte(), 'g'.code.toByte(), 'g'.code.toByte(), 'S'.code.toByte())))
+            }
+
+            val item = PlaybackItem(
+                metadata = PlaybackMetadata(id = "stem-opus-roundtrip", title = "Stem Opus roundtrip"),
+                source = PlaybackSource.LocalFile(opus.toString()),
+            )
+            controller.decodeStemInput(item, decoded)
+            val format = AudioSystem.getAudioFileFormat(decoded.toFile()).format
+            assertEquals(44_100f, format.sampleRate)
+            assertEquals(2, format.channels)
+            assertTrue(Files.size(decoded) > 44L)
+        } finally {
+            controller.close()
+            Files.deleteIfExists(source)
+            Files.deleteIfExists(opus)
+            Files.deleteIfExists(decoded)
+        }
+    }
+
+    @Test
+    fun `commits generated stem set as opus and removes temporary wavs`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val directory = Files.createTempDirectory("archivetune-stem-set-")
+        val template = createWaveFile(durationSeconds = 4, channels = 2)
+        val names = listOf("drums", "bass", "other", "vocals")
+        names.forEach { name -> Files.copy(template, directory.resolve("$name.wav")) }
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+
+        try {
+            val compressed = controller.compressGeneratedStemSetForCache(directory)
+            assertEquals(4, compressed.size)
+            names.forEach { name ->
+                assertTrue(Files.isRegularFile(directory.resolve("$name.opus")))
+                assertTrue(!Files.exists(directory.resolve("$name.wav")))
+                assertTrue(!Files.exists(directory.resolve(".$name.opus.part")))
+            }
+        } finally {
+            controller.close()
+            Files.deleteIfExists(template)
+            Files.walk(directory).use { paths ->
+                paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+            }
+        }
+    }
+
     private suspend fun awaitState(
         controller: VlcjPlaybackController,
         label: String,
@@ -130,17 +258,19 @@ class VlcjLocalPlaybackIntegrationTest {
         }
     }
 
-    private fun createWaveFile(): Path {
+    private fun createWaveFile(durationSeconds: Int = 2, channels: Int = 1): Path {
         val sampleRate = 44_100
-        val durationSeconds = 2
         val samples = sampleRate * durationSeconds
-        val data = ByteArray(samples * 2)
+        val data = ByteArray(samples * channels * 2)
         for (index in 0 until samples) {
             val value = (kotlin.math.sin(index * 2.0 * Math.PI * 440.0 / sampleRate) * 8_000.0).toInt()
-            data[index * 2] = (value and 0xff).toByte()
-            data[index * 2 + 1] = (value shr 8).toByte()
+            for (channel in 0 until channels) {
+                val offset = (index * channels + channel) * 2
+                data[offset] = (value and 0xff).toByte()
+                data[offset + 1] = (value shr 8).toByte()
+            }
         }
-        val format = AudioFormat(sampleRate.toFloat(), 16, 1, true, false)
+        val format = AudioFormat(sampleRate.toFloat(), 16, channels, true, false)
         val path = Files.createTempFile("archivetune-vlcj-", ".wav")
         AudioInputStream(data.inputStream(), format, samples.toLong()).use { input ->
             AudioSystem.write(input, AudioFileFormat.Type.WAVE, path.toFile())

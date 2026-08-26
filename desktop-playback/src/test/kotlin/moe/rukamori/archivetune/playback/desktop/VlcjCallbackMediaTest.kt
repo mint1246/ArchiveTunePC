@@ -18,6 +18,48 @@ import kotlin.test.assertTrue
 
 class VlcjCallbackMediaTest {
     @Test
+    fun `materialize downloads the complete ranged object and preserves headers`() {
+        val body = ByteArray(4 * 1024 * 1024 + 257) { index -> (index % 251).toByte() }
+        withServer(
+            handler = { exchange ->
+                if (exchange.requestHeaders.getFirst("X-ArchiveTune-Test") != "preserved") {
+                    exchange.sendResponseHeaders(400, -1)
+                    exchange.close()
+                    return@withServer
+                }
+                val range = exchange.requestHeaders.getFirst("Range")
+                    ?: error("materialize request did not include Range")
+                val requested = range.removePrefix("bytes=").split('-', limit = 2)
+                val start = requested[0].toLong()
+                val requestedEnd = requested[1].toLong()
+                val end = minOf(requestedEnd, body.lastIndex.toLong())
+                val length = (end - start + 1).toInt()
+                exchange.responseHeaders.add("Content-Range", "bytes $start-$end/${body.size}")
+                exchange.sendResponseHeaders(206, length.toLong())
+                exchange.responseBody.use { output ->
+                    output.write(body, start.toInt(), length)
+                }
+                exchange.close()
+            },
+        ) { url, requestCount ->
+            val destination = Files.createTempFile("archivetune-materialized-", ".media")
+            try {
+                VlcjRangeHttpTransport().use { transport ->
+                    transport.materialize(
+                        url = url,
+                        headers = mapOf("X-ArchiveTune-Test" to "preserved", "Range" to "ignored"),
+                        destination = destination,
+                    )
+                }
+                assertEquals(2, requestCount.get())
+                assertContentEquals(body, Files.readAllBytes(destination))
+            } finally {
+                Files.deleteIfExists(destination)
+            }
+        }
+    }
+
+    @Test
     fun `initial http failure reaches recovery callback`() {
         listOf(403, 416).forEach { status ->
             withServer(

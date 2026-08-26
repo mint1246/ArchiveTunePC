@@ -88,6 +88,23 @@ class DesktopOutputGainTest {
         assertEquals(10, gain.volumePercentForSource(quieterSource, 0.25f))
     }
 
+    @Test
+    fun `external renderer suppression mutes primary and secondary without changing user volume`() {
+        val backend = RecordingVolumeBackend()
+        val gain = DesktopOutputGain()
+        gain.attach(backend)
+        gain.setUserVolume(0.72f)
+
+        gain.setExternalRendererActive(true)
+        assertEquals(0, backend.last)
+        assertEquals(0, gain.volumePercentForSource(ResolvedPlaybackSource("https://example")))
+        assertEquals(0.72f, gain.userVolumeForTest())
+
+        gain.setExternalRendererActive(false)
+        assertEquals(72, backend.last)
+        assertEquals(0.72f, gain.userVolumeForTest())
+    }
+
     private class RecordingVolumeBackend : OutputVolumeBackend {
         val values = mutableListOf<Int>()
         val last: Int get() = values.last()

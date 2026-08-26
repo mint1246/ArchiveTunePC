@@ -359,12 +359,129 @@ internal class VlcjRangeHttpTransport(
         )
     }
 
+    /**
+     * Materialize one signed media object to disk using the same HTTP stack/headers as callback
+     * playback. libVLC's stream-output pipeline is not reliable when its input itself is callback
+     * media, so stem generation first turns Googlevideo into an ordinary local encoded file and
+     * then lets libVLC perform the fast local decode/transcode step.
+     *
+     * Use bounded range requests instead of one giant response: Googlevideo is explicitly a range
+     * endpoint and some variants cap an open-ended range. The loop also lets us verify that the
+     * complete object was received before handing it to a container demuxer.
+     */
+    fun materialize(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        destination: Path,
+    ): Path {
+        check(!closed.get()) { "HTTP transport is closed" }
+        destination.parent?.let(Files::createDirectories)
+        Files.deleteIfExists(destination)
+
+        var offset = 0L
+        var totalLength: Long? = null
+        try {
+            FileChannel.open(
+                destination,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE,
+            ).use { output ->
+                while (totalLength == null || offset < totalLength!!) {
+                    if (closed.get()) throw IOException("HTTP transport is closed")
+                    val end = offset + MATERIALIZE_RANGE_SIZE - 1L
+                    val requestBuilder = Request.Builder()
+                        .url(url)
+                        .header("Range", "bytes=$offset-$end")
+                    headers.forEach { (name, value) ->
+                        if (name.isNotBlank() && value.isNotBlank() && !name.equals("Range", ignoreCase = true)) {
+                            requestBuilder.header(name, value)
+                        }
+                    }
+
+                    client.newCall(requestBuilder.build()).execute().use { response ->
+                        if (!response.isSuccessful) throw RangeHttpException(response.code)
+                        val body = response.body
+                        if (response.code == 200) {
+                            if (offset != 0L) throw IOException("HTTP media source stopped honoring ranges")
+                            val copied = copyResponseBody(body.byteStream(), output)
+                            if (copied <= 0L) throw IOException("YouTube returned an empty media object")
+                            offset = copied
+                            totalLength = copied
+                            return@use
+                        }
+                        if (response.code != 206) {
+                            throw IOException("Unexpected HTTP ${response.code} while materializing media")
+                        }
+
+                        val contentRange = response.header("Content-Range")
+                            ?: throw IOException("Ranged media response is missing Content-Range")
+                        val returnedStart = contentRange
+                            .substringBefore('-')
+                            .substringAfter("bytes ")
+                            .trim()
+                            .toLongOrNull()
+                            ?: throw IOException("Invalid Content-Range: $contentRange")
+                        if (returnedStart != offset) {
+                            throw IOException("Media range started at $returnedStart instead of $offset")
+                        }
+                        val responseTotal = contentRange.substringAfter('/').trim().toLongOrNull()
+                        if (responseTotal != null) {
+                            totalLength?.let { previous ->
+                                if (previous != responseTotal) throw IOException("Media size changed while downloading")
+                            }
+                            totalLength = responseTotal
+                        }
+
+                        output.position(offset)
+                        val copied = copyResponseBody(body.byteStream(), output)
+                        if (copied <= 0L) throw IOException("YouTube returned an empty media range")
+                        offset += copied
+                        if (totalLength != null && offset > totalLength!!) {
+                            throw IOException("Downloaded media exceeded declared content length")
+                        }
+                    }
+                }
+            }
+
+            val size = Files.size(destination)
+            if (size <= 0L || totalLength?.let { it != size } == true) {
+                throw IOException("Incomplete media download: received $size of ${totalLength ?: "unknown"} bytes")
+            }
+            return destination
+        } catch (error: Throwable) {
+            runCatching { Files.deleteIfExists(destination) }
+            throw error
+        }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         client.dispatcher.cancelAll()
         client.connectionPool.evictAll()
         client.dispatcher.executorService.shutdown()
         runCatching { client.cache?.close() }
+    }
+
+    private fun copyResponseBody(input: java.io.InputStream, output: FileChannel): Long {
+        val buffer = ByteArray(MATERIALIZE_COPY_BUFFER_SIZE)
+        var copied = 0L
+        input.use { stream ->
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                if (count == 0) continue
+                var bytes = ByteBuffer.wrap(buffer, 0, count)
+                while (bytes.hasRemaining()) output.write(bytes)
+                copied += count
+            }
+        }
+        return copied
+    }
+
+    private companion object {
+        const val MATERIALIZE_RANGE_SIZE = 4L * 1024L * 1024L
+        const val MATERIALIZE_COPY_BUFFER_SIZE = 64 * 1024
     }
 }
 

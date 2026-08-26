@@ -122,6 +122,7 @@ fun main() {
                 resizable = true,
             ) {
                 var showLyrics by remember { mutableStateOf(false) }
+                var showStems by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }
                 var hasEnteredLyrics by remember { mutableStateOf(false) }
 
@@ -188,6 +189,16 @@ fun main() {
                         )
                     }
                 }
+                val stemContent: @Composable (Modifier, Boolean) -> Unit = remember {
+                    { modifier, useShellDynamicBackdrop ->
+                        moe.rukamori.archivetune.desktop.ui.DesktopStemPlayerView(
+                            services = musicServices,
+                            paths = runtime.paths,
+                            modifier = modifier,
+                            useShellDynamicBackdrop = useShellDynamicBackdrop,
+                        )
+                    }
+                }
                 DisposableEffect(window) {
                     musicServices.attachWindowsMediaWindow(window)
                     val previousMinimum = window.minimumSize
@@ -213,8 +224,17 @@ fun main() {
                         dynamicArtworkUri = dynamicArtworkUri,
                         windowDragModifier = windowDragModifier,
                         windowControls = windowControls,
-                        immersiveContent = lyricsContent.takeIf { showLyrics },
-                        onDismissImmersive = { showLyrics = false },
+                        immersiveContent = when {
+                            showStems -> stemContent
+                            showLyrics -> lyricsContent
+                            else -> null
+                        },
+                        immersiveTitle = if (showStems) "Stem player" else "Lyrics",
+                        immersiveDescription = if (showStems) "4-track stem mix" else "Immersive now playing",
+                        onDismissImmersive = {
+                            showLyrics = false
+                            showStems = false
+                        },
                         queueVisible = showQueue,
                         onDismissQueue = { showQueue = false },
                         contentCanNavigateBack = browse.detail != null,
@@ -242,7 +262,14 @@ fun main() {
                                 services = musicServices,
                                 playTogether = playTogether,
                                 browse = browse,
-                                onShowLyrics = { showLyrics = true },
+                                onShowLyrics = {
+                                    showStems = false
+                                    showLyrics = true
+                                },
+                                onShowStems = {
+                                    showLyrics = false
+                                    showStems = true
+                                },
                                 onShowQueue = { showQueue = !showQueue },
                                 modifier = modifier,
                             )

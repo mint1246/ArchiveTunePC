@@ -141,6 +141,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         },
         initialAudioOutputDeviceId = settings.snapshot().audioOutputDeviceId,
     )
+    val stems = DesktopStemCoordinator(runtime, playback)
     private val nextTrackPrefetcher = NextTrackPrefetcher(runtime.applicationScope) { item, cacheAllowed ->
         resolve(item, cacheResolvedRemote = cacheAllowed, reportFailure = false)
     }
@@ -833,6 +834,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         windowsMediaControls?.close()
         homeStore.close()
         albumIndex.close()
+        stems.close()
         playback.close()
         resolvedSourceCache.clear()
         backend.bindSessionProvider(null)
