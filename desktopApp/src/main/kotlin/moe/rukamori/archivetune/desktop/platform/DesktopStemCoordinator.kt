@@ -15,6 +15,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.Properties
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Level
@@ -84,6 +85,49 @@ data class DesktopStemMix(
     internal fun workerGains(): List<Float> = listOf(drums, bass, other, vocals, guitar, piano)
 }
 
+data class DesktopStemChannelControl(
+    val value: Float = 1f,
+    val muted: Boolean = false,
+    val solo: Boolean = false,
+) {
+    internal fun sanitized(): DesktopStemChannelControl = copy(value = value.sanitizeStemGain())
+}
+
+data class DesktopStemControls(
+    val vocals: DesktopStemChannelControl = DesktopStemChannelControl(),
+    val drums: DesktopStemChannelControl = DesktopStemChannelControl(),
+    val bass: DesktopStemChannelControl = DesktopStemChannelControl(),
+    val guitar: DesktopStemChannelControl = DesktopStemChannelControl(),
+    val piano: DesktopStemChannelControl = DesktopStemChannelControl(),
+    val other: DesktopStemChannelControl = DesktopStemChannelControl(),
+) {
+    internal fun sanitized(): DesktopStemControls = copy(
+        vocals = vocals.sanitized(),
+        drums = drums.sanitized(),
+        bass = bass.sanitized(),
+        guitar = guitar.sanitized(),
+        piano = piano.sanitized(),
+        other = other.sanitized(),
+    )
+
+    internal fun effectiveMix(): DesktopStemMix {
+        val channels = listOf(vocals, drums, bass, guitar, piano, other)
+        val anySolo = channels.any(DesktopStemChannelControl::solo)
+        fun effective(channel: DesktopStemChannelControl): Float =
+            if (!channel.muted && (!anySolo || channel.solo)) channel.value else 0f
+        return DesktopStemMix(
+            vocals = effective(vocals),
+            drums = effective(drums),
+            bass = effective(bass),
+            guitar = effective(guitar),
+            piano = effective(piano),
+            other = effective(other),
+        )
+    }
+
+    internal fun isDefault(): Boolean = this == DesktopStemControls()
+}
+
 /** Owns the decode -> DirectML separator -> Opus-cache lifecycle for desktop stems. */
 class DesktopStemCoordinator(
     private val runtime: DesktopRuntime,
@@ -100,13 +144,41 @@ class DesktopStemCoordinator(
     private var rendererWriter: BufferedWriter? = null
     private var rendererJob: Job? = null
     @Volatile private var rendererTrackId: String? = null
-    @Volatile private var desiredMix = DesktopStemMix()
+    private val controlsByTrackId = ConcurrentHashMap<String, DesktopStemControls>()
+
+    init {
+        runtime.applicationScope.launch(CoroutineName("ArchiveTuneStemMixFollow")) {
+            var previousTrackId: String? = null
+            playback.state.collect { snapshot ->
+                val item = snapshot.currentItem
+                val trackId = item?.metadata?.id
+                if (trackId == previousTrackId) return@collect
+                previousTrackId = trackId
+
+                if (rendererTrackId != null && rendererTrackId != trackId) {
+                    deactivateRenderer()
+                }
+                if (item != null && !controlsFor(item).effectiveMix().isNeutral()) {
+                    val cache = trackDirectory(item)
+                    if (isUsableCache(cache)) {
+                        inspect(item)
+                        activateRenderer(item)
+                    }
+                }
+            }
+        }
+    }
 
     fun inspect(item: PlaybackItem?) {
         if (item == null) {
             _state.value = DesktopStemState()
             return
         }
+        val previous = _state.value
+        val keepRenderer =
+            previous.trackId == item.metadata.id &&
+                previous.rendererActive &&
+                rendererTrackId == item.metadata.id
         val cache = trackDirectory(item)
         _state.value = if (isUsableCache(cache)) {
             DesktopStemState(
@@ -114,6 +186,8 @@ class DesktopStemCoordinator(
                 phase = DesktopStemPhase.READY,
                 progress = 1f,
                 cacheDirectory = cache,
+                rendererActive = keepRenderer,
+                rendererMessage = if (keepRenderer) previous.rendererMessage else null,
             )
         } else {
             DesktopStemState(trackId = item.metadata.id, phase = DesktopStemPhase.IDLE)
@@ -147,7 +221,7 @@ class DesktopStemCoordinator(
     }
 
     /** Start the sample-synchronous stem renderer for an already-generated current track. */
-    fun activateRenderer(item: PlaybackItem?) {
+    private fun activateRenderer(item: PlaybackItem?) {
         if (item == null) {
             deactivateRenderer()
             return
@@ -167,7 +241,7 @@ class DesktopStemCoordinator(
         }
     }
 
-    fun deactivateRenderer() {
+    private fun deactivateRenderer() {
         val epoch = rendererEpoch.incrementAndGet()
         rendererTrackId = null
         rendererJob?.cancel()
@@ -181,14 +255,27 @@ class DesktopStemCoordinator(
         }
     }
 
-    fun setMix(mix: DesktopStemMix) {
-        val safe = mix.sanitized()
-        desiredMix = safe
-        sendRendererCommand(
-            JSONObject()
-                .put("type", "gains")
-                .put("values", safe.workerGains()),
-        )
+    fun controlsFor(item: PlaybackItem?): DesktopStemControls =
+        item?.metadata?.id?.let(controlsByTrackId::get) ?: DesktopStemControls()
+
+    fun setControls(item: PlaybackItem?, controls: DesktopStemControls) {
+        val trackId = item?.metadata?.id ?: return
+        val safeControls = controls.sanitized()
+        if (safeControls.isDefault()) controlsByTrackId.remove(trackId) else controlsByTrackId[trackId] = safeControls
+        val safeMix = safeControls.effectiveMix()
+        if (safeMix.isNeutral()) {
+            if (rendererTrackId == trackId) deactivateRenderer()
+            return
+        }
+        if (rendererTrackId == trackId && _state.value.rendererActive) {
+            sendRendererCommand(
+                JSONObject()
+                    .put("type", "gains")
+                    .put("values", safeMix.workerGains()),
+            )
+        } else if (playback.state.value.currentItem?.metadata?.id == trackId) {
+            activateRenderer(item)
+        }
     }
 
     private suspend fun generate(item: PlaybackItem) {
@@ -258,6 +345,7 @@ class DesktopStemCoordinator(
                 message = "Stems ready",
                 cacheDirectory = targetDirectory,
             )
+            if (!controlsFor(item).effectiveMix().isNeutral()) activateRenderer(item)
         } catch (cancelled: CancellationException) {
             activeProcess.getAndSet(null)?.let(::terminateProcess)
             throw cancelled
@@ -421,7 +509,7 @@ class DesktopStemCoordinator(
                     terminateProcess(process)
                     return@coroutineScope
                 }
-                sendMixCommand(desiredMix)
+                sendMixCommand(controlsFor(item).effectiveMix())
                 sendMasterCommand(aligned.volume)
                 sendSeekCommand(aligned.positionMs)
                 sendPauseCommand(true)
@@ -616,6 +704,8 @@ class DesktopStemCoordinator(
 }
 
 private fun Float.sanitizeStemGain(): Float = takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 1f
+
+private fun DesktopStemMix.isNeutral(): Boolean = workerGains().all { gain -> abs(gain - 1f) <= 0.001f }
 
 private fun Float.isStemPlaybackRateSupported(): Boolean = isFinite() && abs(this - 1f) <= 0.001f
 

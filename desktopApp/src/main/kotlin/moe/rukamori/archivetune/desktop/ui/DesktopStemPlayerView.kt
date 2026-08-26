@@ -49,7 +49,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -79,7 +78,8 @@ import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopStemStorage
 import moe.rukamori.archivetune.desktop.platform.DesktopStemStorageUsage
 import moe.rukamori.archivetune.desktop.platform.DesktopStemPhase
-import moe.rukamori.archivetune.desktop.platform.DesktopStemMix
+import moe.rukamori.archivetune.desktop.platform.DesktopStemChannelControl
+import moe.rukamori.archivetune.desktop.platform.DesktopStemControls
 import moe.rukamori.archivetune.desktop.platform.DesktopStemState
 import moe.rukamori.archivetune.desktop.platform.formatStemStorageBytes
 import kotlin.math.roundToInt
@@ -104,39 +104,40 @@ internal fun DesktopStemPlayerView(
     val item = snapshot.currentItem
     val scope = rememberCoroutineScope()
     val channels = remember(item?.metadata?.id) {
+        val remembered = services.stems.controlsFor(item)
         mutableStateListOf(
-            StemChannel("Vocals", "VOX"),
-            StemChannel("Drums", "DRM"),
-            StemChannel("Bass", "BAS"),
-            StemChannel("Guitar", "GTR"),
-            StemChannel("Piano", "PNO"),
-            StemChannel("Other", "OTH"),
+            StemChannel("Vocals", "VOX", remembered.vocals.value, remembered.vocals.muted, remembered.vocals.solo),
+            StemChannel("Drums", "DRM", remembered.drums.value, remembered.drums.muted, remembered.drums.solo),
+            StemChannel("Bass", "BAS", remembered.bass.value, remembered.bass.muted, remembered.bass.solo),
+            StemChannel("Guitar", "GTR", remembered.guitar.value, remembered.guitar.muted, remembered.guitar.solo),
+            StemChannel("Piano", "PNO", remembered.piano.value, remembered.piano.muted, remembered.piano.solo),
+            StemChannel("Other", "OTH", remembered.other.value, remembered.other.muted, remembered.other.solo),
         )
     }
     var storage by remember { mutableStateOf(DesktopStemStorageUsage(0L, 0L)) }
     var storageLoading by remember { mutableStateOf(true) }
 
-    fun publishMix() {
-        val anySolo = channels.any(StemChannel::solo)
-        fun effective(index: Int): Float {
+    fun publishControls() {
+        fun control(index: Int): DesktopStemChannelControl {
             val channel = channels[index]
-            return if (!channel.muted && (!anySolo || channel.solo)) channel.value else 0f
+            return DesktopStemChannelControl(channel.value, channel.muted, channel.solo)
         }
-        services.stems.setMix(
-            DesktopStemMix(
-                vocals = effective(0),
-                drums = effective(1),
-                bass = effective(2),
-                guitar = effective(3),
-                piano = effective(4),
-                other = effective(5),
+        services.stems.setControls(
+            item,
+            DesktopStemControls(
+                vocals = control(0),
+                drums = control(1),
+                bass = control(2),
+                guitar = control(3),
+                piano = control(4),
+                other = control(5),
             ),
         )
     }
 
     fun updateChannel(index: Int, channel: StemChannel) {
         channels[index] = channel
-        publishMix()
+        publishControls()
     }
 
     fun refreshStorage() {
@@ -155,13 +156,8 @@ internal fun DesktopStemPlayerView(
         if (stemState.phase == DesktopStemPhase.READY) refreshStorage()
     }
     LaunchedEffect(item?.metadata?.id, stemState.rendererActive) {
-        publishMix()
+        publishControls()
     }
-    DisposableEffect(item?.metadata?.id, stemState.cacheDirectory) {
-        if (item != null && stemState.ready) services.stems.activateRenderer(item)
-        onDispose { services.stems.deactivateRenderer() }
-    }
-
     Surface(
         modifier = modifier.fillMaxSize(),
         color = if (useShellDynamicBackdrop) Color.Transparent else MaterialTheme.colorScheme.background,
@@ -192,7 +188,7 @@ internal fun DesktopStemPlayerView(
                         onSkipPrevious = { scope.launch { services.playback.skipPrevious() } },
                         onSkipNext = { scope.launch { services.playback.skipNext() } },
                         onSeek = { progress -> scope.launch { services.playback.seekTo((progress * snapshot.durationMs).toLong()) } },
-                        enabled = stemState.ready && stemState.rendererActive,
+                        enabled = stemState.ready,
                         modifier = Modifier.height(520.dp).fillMaxWidth().widthIn(max = 720.dp),
                     )
                     StemStorageCard(storage, storageLoading, ::refreshStorage, Modifier.fillMaxWidth().widthIn(max = 720.dp))
@@ -246,7 +242,7 @@ internal fun DesktopStemPlayerView(
                             onSkipPrevious = { scope.launch { services.playback.skipPrevious() } },
                             onSkipNext = { scope.launch { services.playback.skipNext() } },
                             onSeek = { progress -> scope.launch { services.playback.seekTo((progress * snapshot.durationMs).toLong()) } },
-                            enabled = stemState.ready && stemState.rendererActive,
+                            enabled = stemState.ready,
                             modifier = Modifier.fillMaxWidth(0.84f).fillMaxHeight(0.84f).widthIn(max = 980.dp),
                         )
                     }
