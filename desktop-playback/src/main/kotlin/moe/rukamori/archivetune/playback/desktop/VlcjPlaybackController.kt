@@ -287,11 +287,11 @@ class VlcjPlaybackController(
     }
 
     /**
-     * Convert the worker's four temporary stereo WAVs into persistent Opus cache files.
+     * Convert the worker's temporary stereo WAVs into persistent Opus cache files.
      *
      * Do not combine arbitrary stems into a standard 8-channel Opus stream: surround channel
      * mapping gives those channels speaker semantics (including LFE filtering), which can alter or
-     * permute stem audio. The native renderer still decodes these four files onto one shared sample
+     * permute stem audio. The native renderer still decodes these files onto one shared sample
      * clock, so separate storage files do not imply separate playback clocks.
      */
     suspend fun compressGeneratedStemSetForCache(directory: Path): List<Path> = withContext(Dispatchers.IO) {
@@ -2056,7 +2056,7 @@ class VlcjPlaybackController(
         const val CROSSFADE_HANDOFF_DURATION_MS = 220L
         const val CROSSFADE_HANDOFF_FRAME_MS = 16L
         const val NO_RECOVERY_GENERATION = -1L
-        val STEM_CACHE_SOURCE_NAMES = listOf("drums", "bass", "other", "vocals")
+        val STEM_CACHE_SOURCE_NAMES = listOf("drums", "bass", "other", "vocals", "guitar", "piano")
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }
 }

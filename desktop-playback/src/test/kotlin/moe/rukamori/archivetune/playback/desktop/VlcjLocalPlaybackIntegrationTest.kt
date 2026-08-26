@@ -220,7 +220,7 @@ class VlcjLocalPlaybackIntegrationTest {
         val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
         val directory = Files.createTempDirectory("archivetune-stem-set-")
         val template = createWaveFile(durationSeconds = 4, channels = 2)
-        val names = listOf("drums", "bass", "other", "vocals")
+        val names = listOf("drums", "bass", "other", "vocals", "guitar", "piano")
         names.forEach { name -> Files.copy(template, directory.resolve("$name.wav")) }
         val controller = VlcjPlaybackController(
             sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
@@ -229,7 +229,7 @@ class VlcjLocalPlaybackIntegrationTest {
 
         try {
             val compressed = controller.compressGeneratedStemSetForCache(directory)
-            assertEquals(4, compressed.size)
+            assertEquals(6, compressed.size)
             names.forEach { name ->
                 assertTrue(Files.isRegularFile(directory.resolve("$name.opus")))
                 assertTrue(!Files.exists(directory.resolve("$name.wav")))

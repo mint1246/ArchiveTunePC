@@ -23,12 +23,12 @@ use opus::MSDecoder;
 use serde_json::{json, Value};
 
 const OPUS_RATE: u32 = 48_000;
-const STEM_CHANNELS: usize = 8;
-const STEM_COUNT: usize = 4;
+const STEM_COUNT: usize = 6;
 const OUTPUT_CHANNELS: usize = 2;
+const STEM_CHANNELS: usize = STEM_COUNT * OUTPUT_CHANNELS;
 const MAX_OPUS_FRAME: usize = 5_760;
 const QUEUED_CHUNKS: usize = 48;
-const STEM_NAMES: [&str; STEM_COUNT] = ["drums", "bass", "other", "vocals"];
+const STEM_NAMES: [&str; STEM_COUNT] = ["drums", "bass", "other", "vocals", "guitar", "piano"];
 
 #[derive(Debug)]
 struct Args {
@@ -162,7 +162,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         "type": "ready",
         "sample_rate": OPUS_RATE,
         "stems": STEM_COUNT,
-        "source_order": ["drums", "bass", "other", "vocals"],
+        "source_order": ["drums", "bass", "other", "vocals", "guitar", "piano"],
     }));
 
     while !controls.stop.load(Ordering::Acquire) && !output_drained.load(Ordering::Acquire) {

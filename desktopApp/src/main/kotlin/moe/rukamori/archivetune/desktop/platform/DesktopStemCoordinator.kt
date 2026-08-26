@@ -68,16 +68,20 @@ data class DesktopStemMix(
     val drums: Float = 1f,
     val bass: Float = 1f,
     val other: Float = 1f,
+    val guitar: Float = 1f,
+    val piano: Float = 1f,
 ) {
     internal fun sanitized(): DesktopStemMix = copy(
         vocals = vocals.sanitizeStemGain(),
         drums = drums.sanitizeStemGain(),
         bass = bass.sanitizeStemGain(),
         other = other.sanitizeStemGain(),
+        guitar = guitar.sanitizeStemGain(),
+        piano = piano.sanitizeStemGain(),
     )
 
-    /** Worker/source order is drums, bass, other, vocals. */
-    internal fun workerGains(): List<Float> = listOf(drums, bass, other, vocals)
+    /** Worker/source order is drums, bass, other, vocals, guitar, piano. */
+    internal fun workerGains(): List<Float> = listOf(drums, bass, other, vocals, guitar, piano)
 }
 
 /** Owns the decode -> DirectML separator -> Opus-cache lifecycle for desktop stems. */
@@ -561,7 +565,7 @@ class DesktopStemCoordinator(
 
     private fun writeManifest(directory: Path, item: PlaybackItem) {
         val properties = Properties().apply {
-            setProperty("format", "ogg-opus-4x-stereo")
+            setProperty("format", "ogg-opus-6x-stereo")
             setProperty("model", MODEL_CACHE_VERSION)
             setProperty("trackId", item.metadata.id)
             setProperty("title", item.metadata.title)
@@ -591,10 +595,10 @@ class DesktopStemCoordinator(
     }
 
     private companion object {
-        const val MODEL_CACHE_VERSION = "htdemucs-1s-dml-v1"
+        const val MODEL_CACHE_VERSION = "htdemucs-6s-1s-dml-v1"
         const val RENDERER_READY_TIMEOUT_MS = 8_000L
         const val TRANSPORT_SEEK_RESYNC_THRESHOLD_MS = 650.0
-        val STEM_CACHE_NAMES = listOf("drums", "bass", "other", "vocals")
+        val STEM_CACHE_NAMES = listOf("drums", "bass", "other", "vocals", "guitar", "piano")
 
         fun isUsableCache(directory: Path): Boolean =
             Files.isDirectory(directory) && STEM_CACHE_NAMES.all { name ->
@@ -617,7 +621,8 @@ private fun Float.isStemPlaybackRateSupported(): Boolean = isFinite() && abs(thi
 
 private object DesktopStemRuntime {
     private const val WORKER_NAME = "archivetune-stems.exe"
-    private const val MODEL_NAME = "htdemucs-core-1s-dml.onnx"
+    private const val MODEL_NAME = "htdemucs-6s-core-1s-dml.onnx"
+    private val LEGACY_MODEL_NAMES = listOf("htdemucs-core-1s-dml.onnx")
 
     fun findWorker(): Path? {
         val explicit = System.getenv("ARCHIVETUNE_STEM_WORKER")
@@ -658,8 +663,13 @@ private object DesktopStemRuntime {
             ?.normalize()
         if (explicit != null && Files.isRegularFile(explicit)) return explicit
 
-        val cached = DesktopStemStorage.modelsDirectory(paths).resolve(MODEL_NAME)
-        return cached.takeIf(Files::isRegularFile)
+        val modelsDirectory = DesktopStemStorage.modelsDirectory(paths)
+        val cached = modelsDirectory.resolve(MODEL_NAME)
+        if (!Files.isRegularFile(cached)) return null
+        LEGACY_MODEL_NAMES.forEach { legacyName ->
+            runCatching { Files.deleteIfExists(modelsDirectory.resolve(legacyName)) }
+        }
+        return cached
     }
 
     fun configureWorkerEnvironment(builder: ProcessBuilder, worker: Path) {

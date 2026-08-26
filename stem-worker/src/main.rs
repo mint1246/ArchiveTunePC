@@ -15,7 +15,7 @@ mod playback;
 
 const SAMPLE_RATE: usize = 44_100;
 const CHANNELS: usize = 2;
-const SOURCES: usize = 4;
+const SOURCES: usize = 6;
 const NFFT: usize = 4096;
 const HOP: usize = 1024;
 const FREQ_BINS: usize = 2048;
@@ -401,10 +401,10 @@ fn reflected_sample(input: &[f32], mut index: isize) -> f32 {
 }
 
 fn write_stems(directory: &Path, stems: &[Vec<Vec<f32>>]) -> Result<()> {
-    // Raw model source order is drums, bass, other, vocals. Keep each stem stereo on disk; an
+    // Raw model source order is drums, bass, other, vocals, guitar, piano. Keep each stem stereo on disk; an
     // 8-channel audio container would assign surround-speaker semantics (including an LFE channel)
     // and can therefore alter arbitrary stem channels during encode/decode.
-    let names = ["drums", "bass", "other", "vocals"];
+    let names = ["drums", "bass", "other", "vocals", "guitar", "piano"];
     for (source, name) in names.into_iter().enumerate() {
         let path = directory.join(format!("{name}.wav"));
         let spec = WavSpec {

@@ -108,6 +108,8 @@ internal fun DesktopStemPlayerView(
             StemChannel("Vocals", "VOX"),
             StemChannel("Drums", "DRM"),
             StemChannel("Bass", "BAS"),
+            StemChannel("Guitar", "GTR"),
+            StemChannel("Piano", "PNO"),
             StemChannel("Other", "OTH"),
         )
     }
@@ -125,7 +127,9 @@ internal fun DesktopStemPlayerView(
                 vocals = effective(0),
                 drums = effective(1),
                 bass = effective(2),
-                other = effective(3),
+                guitar = effective(3),
+                piano = effective(4),
+                other = effective(5),
             ),
         )
     }
@@ -206,7 +210,7 @@ internal fun DesktopStemPlayerView(
                         StemTrackHeader(item?.metadata?.artworkUri, item?.metadata?.title, item?.metadata?.artistText)
                         Spacer(Modifier.height(28.dp))
                         Text(
-                            "split the track into four parts, then shape the mix without leaving now playing.",
+                            "split the track into six parts, then shape the mix without leaving now playing.",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -329,7 +333,7 @@ private fun StemDevice(
             ) {
                 Column {
                     Text("STEM PLAYER", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    Text("4-track mix", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("6-track mix", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 OutlinedButton(
                     onClick = {
@@ -342,7 +346,7 @@ private fun StemDevice(
 
             Row(
                 Modifier.fillMaxWidth().weight(1f).padding(vertical = 22.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 channels.forEachIndexed { index, channel ->
@@ -511,9 +515,9 @@ private fun StemGenerationStatus(
                 state.phase == DesktopStemPhase.READY -> {
                     Text(
                         if (state.rendererActive) {
-                            "4 stereo stems • live sample-synchronous mix"
+                            "6 stereo stems • live sample-synchronous mix"
                         } else {
-                            state.rendererMessage ?: "4 stereo stems • cached locally as compact Opus files"
+                            state.rendererMessage ?: "6 stereo stems • cached locally as compact Opus files"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
