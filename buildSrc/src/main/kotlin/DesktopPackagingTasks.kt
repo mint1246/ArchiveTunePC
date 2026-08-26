@@ -137,9 +137,25 @@ abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
             it.isFile && it.extension.equals("dll", ignoreCase = true)
         }
         val hasUsablePluginCache = pluginCache.isFile && pluginCache.length() > MIN_PLUGIN_CACHE_BYTES
-        if (!libVlc.isFile || !libVlcCore.isFile || !hasPluginDlls || !hasUsablePluginCache) {
+        val requiredStemPlugins = listOf(
+            "stream_out/libstream_out_transcode_plugin.dll",
+            "stream_out/libstream_out_standard_plugin.dll",
+            "access_output/libaccess_output_file_plugin.dll",
+            "mux/libmux_wav_plugin.dll",
+            "mux/libmux_ogg_plugin.dll",
+        )
+        val missingStemPlugins = requiredStemPlugins.filterNot { plugins.resolve(it).isFile }
+        if (
+            !libVlc.isFile ||
+            !libVlcCore.isFile ||
+            !hasPluginDlls ||
+            !hasUsablePluginCache ||
+            missingStemPlugins.isNotEmpty()
+        ) {
             throw GradleException(
-                "Incomplete libVLC runtime at ${root.absolutePath}; expected libVLC DLLs, plugin DLLs, and a generated plugins/plugins.dat cache",
+                "Incomplete libVLC runtime at ${root.absolutePath}; expected libVLC DLLs, plugin DLLs, " +
+                    "a generated plugins/plugins.dat cache, and stem stream-output plugins. " +
+                    "Missing stem plugins: ${missingStemPlugins.joinToString()}",
             )
         }
         if (accidentalNestedPlugins.exists()) {
