@@ -14,6 +14,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.time.Instant
 import java.util.Properties
 import java.util.UUID
@@ -235,64 +236,115 @@ class DesktopDownloadManager(
     private suspend fun streamOnce(id: String, request: DownloadRequest, part: Path, final: Path) {
         val coroutineContext = currentCoroutineContext()
         coroutineContext.ensureActive()
-        val builder = Request.Builder().url(request.url)
-        request.headers.forEach { (name, value) -> builder.header(name, value) }
-        val call = client.newCall(builder.build())
-        synchronized(stateLock) {
-            coroutineContext.ensureActive()
-            // Cancellation may win just before the request starts. Avoid publishing a call after
-            // that transition without cancelling it immediately.
-            if (snapshot(id)?.status == DownloadStatus.CANCELLED) {
-                call.cancel()
-                throw CancellationException("Cancelled by user")
-            }
-            activeCalls[id] = call
-        }
-        try {
-            call.execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Server returned HTTP ${response.code}")
-            val body = response.body
-            val total = body.contentLength().takeIf { it >= 0 }
-            currentCoroutineContext().ensureActive()
-            synchronized(stateLock) {
-                val current = snapshot(id) ?: return
-                if (current.status == DownloadStatus.CANCELLED) {
-                    throw CancellationException("Cancelled by user")
+        var downloaded = 0L
+        var totalBytes: Long? = null
+        var lastProgressPublishNanos = 0L
+
+        Files.newOutputStream(
+            part,
+            StandardOpenOption.CREATE,
+            StandardOpenOption.TRUNCATE_EXISTING,
+            StandardOpenOption.WRITE,
+        ).use { output ->
+            while (totalBytes?.let { downloaded < it } != false) {
+                coroutineContext.ensureActive()
+                val rangeEnd = downloaded + DOWNLOAD_RANGE_SIZE_BYTES - 1L
+                val builder =
+                    Request.Builder()
+                        .url(request.url)
+                        .header("Range", "bytes=$downloaded-$rangeEnd")
+                request.headers.forEach { (name, value) ->
+                    if (!name.equals("Range", ignoreCase = true)) builder.header(name, value)
                 }
-                update(current.copy(status = DownloadStatus.DOWNLOADING, totalBytes = total, error = null))
-            }
-            Files.newOutputStream(part).use { output ->
-                body.byteStream().use { input ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var downloaded = 0L
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        currentCoroutineContext().ensureActive()
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        synchronized(stateLock) {
-                            val current = snapshot(id) ?: return
-                            // cancel() publishes CANCELLED under this same lock. Never let a
-                            // late body read resurrect the transfer or make finalization win.
-                            if (current.status == DownloadStatus.CANCELLED) {
-                                throw CancellationException("Cancelled by user")
+                val call = client.newCall(builder.build())
+                synchronized(stateLock) {
+                    coroutineContext.ensureActive()
+                    if (snapshot(id)?.status == DownloadStatus.CANCELLED) {
+                        call.cancel()
+                        throw CancellationException("Cancelled by user")
+                    }
+                    activeCalls[id] = call
+                }
+
+                try {
+                    call.execute().use { response ->
+                        if (!response.isSuccessful) throw IOException("Server returned HTTP ${response.code}")
+                        val body = response.body
+                        val contentRange = response.header("Content-Range")
+                        val ranged = response.code == 206 || contentRange != null
+
+                        // Googlevideo can pace a normal full-object GET near the media bitrate.
+                        // Playback already avoids that by fetching byte ranges, so downloads use the
+                        // same access pattern instead of taking roughly the song's full duration.
+                        if (downloaded > 0L && !ranged) {
+                            throw IOException("Server stopped honoring byte ranges during download")
+                        }
+
+                        val rangeStart =
+                            contentRange
+                                ?.substringBefore('-')
+                                ?.substringAfter("bytes ")
+                                ?.toLongOrNull()
+                        if (rangeStart != null && rangeStart != downloaded) {
+                            throw IOException("Server returned an unexpected byte range")
+                        }
+                        val responseTotal =
+                            contentRange
+                                ?.substringAfterLast('/', missingDelimiterValue = "")
+                                ?.takeUnless { it == "*" }
+                                ?.toLongOrNull()
+                        if (responseTotal != null) totalBytes = responseTotal
+                        if (!ranged && downloaded == 0L) {
+                            totalBytes = body.contentLength().takeIf { it >= 0L }
+                        }
+
+                        publishDownloadProgress(id, downloaded, totalBytes)
+
+                        var responseBytes = 0L
+                        body.byteStream().use { input ->
+                            val buffer = ByteArray(DOWNLOAD_COPY_BUFFER_SIZE)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                if (read == 0) continue
+                                coroutineContext.ensureActive()
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                responseBytes += read
+
+                                val now = System.nanoTime()
+                                if (now - lastProgressPublishNanos >= PROGRESS_PUBLISH_INTERVAL_NANOS) {
+                                    publishDownloadProgress(id, downloaded, totalBytes)
+                                    lastProgressPublishNanos = now
+                                }
                             }
-                            update(
-                                current.copy(
-                                    status = DownloadStatus.DOWNLOADING,
-                                    bytesDownloaded = downloaded,
-                                    totalBytes = total,
-                                    error = null,
-                                ),
-                                persistState = false,
-                            )
+                        }
+
+                        publishDownloadProgress(id, downloaded, totalBytes)
+                        lastProgressPublishNanos = System.nanoTime()
+
+                        if (!ranged) {
+                            if (totalBytes == null) totalBytes = downloaded
+                        } else {
+                            if (responseBytes == 0L) {
+                                if (totalBytes?.let { downloaded >= it } != true) {
+                                    throw IOException("Server returned an empty media range")
+                                }
+                            }
+                            if (totalBytes == null && responseBytes < DOWNLOAD_RANGE_SIZE_BYTES) {
+                                totalBytes = downloaded
+                            }
                         }
                     }
+                } finally {
+                    activeCalls.remove(id, call)
                 }
+
+                if (totalBytes?.let { downloaded >= it } == true) break
             }
         }
+
         // Serialize final-file publication with cancel(). Whichever operation acquires the lock
         // first wins; cancellation cannot subsequently hide a completed file.
         currentCoroutineContext().ensureActive()
@@ -303,9 +355,24 @@ class DesktopDownloadManager(
             }
             moveAtomically(part, final)
             update(current.copy(status = DownloadStatus.COMPLETED, bytesDownloaded = Files.size(final), error = null))
+        }
+    }
+
+    private fun publishDownloadProgress(id: String, downloaded: Long, totalBytes: Long?) {
+        synchronized(stateLock) {
+            val current = snapshot(id) ?: return
+            if (current.status == DownloadStatus.CANCELLED) {
+                throw CancellationException("Cancelled by user")
             }
-        } finally {
-            activeCalls.remove(id, call)
+            update(
+                current.copy(
+                    status = DownloadStatus.DOWNLOADING,
+                    bytesDownloaded = downloaded,
+                    totalBytes = totalBytes,
+                    error = null,
+                ),
+                persistState = false,
+            )
         }
     }
 
@@ -426,6 +493,9 @@ class DesktopDownloadManager(
     private fun publicError(error: Throwable) = error.message?.replace(Regex("https?://\\S+"), "remote stream")?.take(180) ?: "Download failed"
 
     private companion object {
+        const val DOWNLOAD_RANGE_SIZE_BYTES = 512 * 1024L
+        const val DOWNLOAD_COPY_BUFFER_SIZE = 64 * 1024
+        const val PROGRESS_PUBLISH_INTERVAL_NANOS = 100_000_000L
         val WINDOWS_RESERVED_NAMES = buildSet {
             addAll(listOf("CON", "PRN", "AUX", "NUL"))
             (1..9).forEach { index ->

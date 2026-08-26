@@ -7,8 +7,10 @@ import java.util.Properties
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -44,6 +46,39 @@ class DesktopDownloadManagerTest {
             val id = manager.enqueue(DownloadRequest(server.url("/retry").toString(), emptyMap(), "retry"))
             manager.downloads.filter { it.any { item -> item.id == id && item.status == DownloadStatus.COMPLETED } }.first()
             assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test fun `range capable servers are downloaded in playback sized bursts`() = runBlocking {
+        val body = "x".repeat(700 * 1024)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val range = requireNotNull(request.getHeader("Range"))
+                val match = requireNotNull(Regex("bytes=(\\d+)-(\\d+)").matchEntire(range))
+                val start = match.groupValues[1].toInt()
+                val requestedEnd = match.groupValues[2].toInt()
+                if (start >= body.length) {
+                    return MockResponse().setResponseCode(416)
+                }
+                val end = minOf(requestedEnd, body.lastIndex)
+                return MockResponse()
+                    .setResponseCode(206)
+                    .setHeader("Content-Range", "bytes $start-$end/${body.length}")
+                    .setBody(body.substring(start, end + 1))
+            }
+        }
+
+        DesktopDownloadManager(directory).use { manager ->
+            val id = manager.enqueue(DownloadRequest(server.url("/ranged").toString(), emptyMap(), "ranged"))
+            manager.downloads.filter { snapshots ->
+                snapshots.any { it.id == id && it.status == DownloadStatus.COMPLETED }
+            }.first()
+
+            val completed = requireNotNull(manager.completedFileForDownload(id))
+            assertEquals(body.length.toLong(), Files.size(completed))
+            assertEquals(2, server.requestCount)
+            assertEquals("bytes=0-524287", server.takeRequest().getHeader("Range"))
+            assertEquals("bytes=524288-1048575", server.takeRequest().getHeader("Range"))
         }
     }
 
