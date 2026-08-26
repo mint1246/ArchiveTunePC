@@ -425,7 +425,7 @@ private fun ExpandedSidebar(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             Text(
-                "14.13 • Windows x64",
+                "14.14 • Windows x64",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
