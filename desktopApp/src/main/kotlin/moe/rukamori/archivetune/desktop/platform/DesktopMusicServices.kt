@@ -140,6 +140,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             recoverFromStreamHttpFailure(item, source, httpStatus)
         },
         initialAudioOutputDeviceId = settings.snapshot().audioOutputDeviceId,
+        initialPitchSemitones = settings.snapshot().pitchSemitones,
     )
     val stems = DesktopStemCoordinator(runtime, playback)
     private val nextTrackPrefetcher = NextTrackPrefetcher(runtime.applicationScope) { item, cacheAllowed ->

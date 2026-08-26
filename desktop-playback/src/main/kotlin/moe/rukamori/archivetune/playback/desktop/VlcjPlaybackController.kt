@@ -68,6 +68,7 @@ class VlcjPlaybackController(
     private val runtimeConfiguration: VlcRuntimeConfiguration = VlcRuntimeConfiguration(),
     private val onStreamHttpFailure: suspend (PlaybackItem, ResolvedPlaybackSource, Int) -> Boolean = { _, _, _ -> false },
     initialAudioOutputDeviceId: String? = null,
+    initialPitchSemitones: Float = 0f,
 ) : PlaybackController, DesktopAudioOutputControl, DesktopCrossfadeControl {
     private data class LoadRequest(
         val generation: Long,
@@ -128,6 +129,7 @@ class VlcjPlaybackController(
     private var pendingSeek: Pair<Long, Long>? = null
     private var suppressStoppedEvents = 0
     @Volatile private var externalAudioRendererActive = false
+    @Volatile private var pitchSemitones = initialPitchSemitones.takeIf(Float::isFinite)?.coerceIn(MIN_PITCH, MAX_PITCH) ?: 0f
 
     override val state = _state.asStateFlow()
     override val events = _events.asSharedFlow()
@@ -733,6 +735,21 @@ class VlcjPlaybackController(
         }
     }
 
+    override suspend fun setPitch(pitchSemitones: Float) {
+        checkOpen()
+        val safePitch = pitchSemitones.takeIf(Float::isFinite)?.coerceIn(MIN_PITCH, MAX_PITCH) ?: 0f
+        var reload: LoadRequest? = null
+        commandMutex.withLock {
+            if (kotlin.math.abs(this.pitchSemitones - safePitch) < 0.001f) return@withLock
+            this.pitchSemitones = safePitch
+            if (player != null) {
+                reload = prepareReloadLocked(TransitionReason.RETRY, _state.value.positionMs)
+                releasePlayerForPitchReconfigureLocked()
+            }
+        }
+        reload?.let(::enqueueLoad)
+    }
+
     override suspend fun retry() {
         checkOpen()
         val request = commandMutex.withLock {
@@ -944,7 +961,7 @@ class VlcjPlaybackController(
                         "vendor=${System.getProperty("java.vendor")} arch=${System.getProperty("os.arch")}",
                 )
                 VlcRuntimeLocator.prepareNative(layout)
-                val newFactory = MediaPlayerFactory(*layout.mediaPlayerFactoryOptions())
+                val newFactory = MediaPlayerFactory(*layout.mediaPlayerFactoryOptions(pitchSemitones))
                 var newNativeLog: NativeLog? = null
                 var newNativeLogListener: LogEventListener? = null
                 try {
@@ -1985,6 +2002,38 @@ class VlcjPlaybackController(
         runCatching { callbackMedia?.close() }
     }
 
+    private fun releasePlayerForPitchReconfigureLocked() = synchronized(nativeLifecycleLock) {
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        activeCrossfadeRunId = null
+        crossfadeSuppressFinishedRunId = null
+        releaseSecondaryCrossfadePlayerLocked()
+        cancelLoadWatchdog()
+        positionTicker?.cancel()
+        positionTicker = null
+        listener?.let { player?.events()?.removeMediaPlayerEventListener(it) }
+        nativeLogListener?.let { eventListener ->
+            runCatching { nativeLog?.removeLogListener(eventListener) }
+        }
+        runCatching { player?.controls()?.stop() }
+        runCatching { player?.media()?.reset() }
+        runCatching { activeCallbackMedia?.close() }
+        equalizerBackend?.let(vlcjAudioEffects::detach)
+        outputVolumeBackend?.let(outputGain::detach)
+        runCatching { player?.release() }
+        runCatching { nativeLog?.release() }
+        runCatching { factory?.release() }
+        listener = null
+        nativeLogListener = null
+        nativeLog = null
+        player = null
+        equalizerBackend = null
+        outputVolumeBackend = null
+        activeCallbackMedia = null
+        factory = null
+        audioOutputSelection.replaceBackend(null)
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         loadJobOwner.close()
@@ -2033,6 +2082,8 @@ class VlcjPlaybackController(
     private companion object {
         const val MIN_SPEED = 0.25f
         const val MAX_SPEED = 4f
+        const val MIN_PITCH = -12f
+        const val MAX_PITCH = 12f
         const val MIN_URL_LIFETIME_MS = 5_000L
         const val POSITION_POLL_INTERVAL_MS = 50L
         const val STEM_DECODE_TIMEOUT_SLACK_MS = 60_000L

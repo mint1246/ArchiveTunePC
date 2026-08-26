@@ -125,8 +125,12 @@ object VlcRuntimeLocator {
         System.getProperty("os.name").lowercase(Locale.ROOT).contains("win")
 }
 
-internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(): Array<String> =
-    arrayOf(
-        "--no-video",
-        "--quiet",
-    )
+internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(pitchSemitones: Float = 0f): Array<String> =
+    buildList {
+        add("--no-video")
+        add("--quiet")
+        if (pitchSemitones != 0f) {
+            add("--audio-filter=scaletempo_pitch")
+            add("--pitch-shift=$pitchSemitones")
+        }
+    }.toTypedArray()

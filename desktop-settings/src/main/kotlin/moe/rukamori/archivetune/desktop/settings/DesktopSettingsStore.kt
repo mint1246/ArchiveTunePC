@@ -108,6 +108,7 @@ data class DesktopSettings(
     val accentSeedArgb: Long? = null,
     val volume: Float = 1f,
     val speed: Float = 1f,
+    val pitchSemitones: Float = 0f,
     val loudnessNormalizationEnabled: Boolean = false,
     val crossfadeEnabled: Boolean = false,
     val crossfadeDurationSeconds: Float = 5f,
@@ -188,6 +189,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 accentSeedArgb = values.getProperty("appearance.accentArgb")?.toLongOrNull(),
                 volume = values.getProperty("playback.volume")?.toFloatOrNull() ?: 1f,
                 speed = values.getProperty("playback.speed")?.toFloatOrNull() ?: 1f,
+                pitchSemitones = values.getProperty("playback.pitchSemitones")?.toFloatOrNull() ?: 0f,
                 loudnessNormalizationEnabled = values.getProperty("playback.loudnessNormalization")?.toBooleanStrictOrNull() ?: false,
                 crossfadeEnabled = values.getProperty("playback.crossfade.enabled")?.toBooleanStrictOrNull() ?: false,
                 crossfadeDurationSeconds = values.getProperty("playback.crossfade.durationSeconds")?.toFloatOrNull() ?: 5f,
@@ -227,6 +229,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             settings.accentSeedArgb?.let { setProperty("appearance.accentArgb", it.toString()) }
             setProperty("playback.volume", settings.volume.toString())
             setProperty("playback.speed", settings.speed.toString())
+            setProperty("playback.pitchSemitones", settings.pitchSemitones.toString())
             setProperty("playback.loudnessNormalization", settings.loudnessNormalizationEnabled.toString())
             setProperty("playback.crossfade.enabled", settings.crossfadeEnabled.toString())
             setProperty("playback.crossfade.durationSeconds", settings.crossfadeDurationSeconds.toString())
@@ -274,6 +277,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         accentSeedArgb = accentSeedArgb?.takeIf { it in 0..ARGB_MAX },
         volume = volume.finiteOr(1f).coerceIn(0f, 1f),
         speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
+        pitchSemitones = pitchSemitones.finiteOr(0f).coerceIn(-12f, 12f),
         crossfadeDurationSeconds = crossfadeDurationSeconds.finiteOr(5f).coerceIn(0f, 10f),
         equalizer = equalizer.sanitized(),
         audioOutputDeviceId = audioOutputDeviceId?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH),

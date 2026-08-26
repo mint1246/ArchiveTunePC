@@ -49,6 +49,7 @@ interface PlaybackController : AutoCloseable {
     suspend fun setShuffleEnabled(enabled: Boolean)
     suspend fun setVolume(volume: Float)
     suspend fun setSpeed(speed: Float)
+    suspend fun setPitch(pitchSemitones: Float) = Unit
     suspend fun retry()
     suspend fun clearError()
 }

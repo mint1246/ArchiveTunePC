@@ -313,6 +313,23 @@ fun DesktopSettingsPanel(
                     settings = settingsStore.update { it.copy(speed = safe) }
                     scope.launch { playback?.setSpeed(safe) }
                 }, Modifier.fillMaxWidth(), enabled = playbackModesEnabled, valueRange = .25f..2f)
+                val pitchLabel = settings.pitchSemitones.let { pitch ->
+                    val sign = if (pitch > 0f) "+" else ""
+                    "$sign${"%.1f".format(pitch)} st"
+                }
+                SettingSlider("Pitch", pitchLabel, Icons.Rounded.GraphicEq)
+                Slider(
+                    value = settings.pitchSemitones,
+                    onValueChange = { value ->
+                        val safe = (value * 2f).roundToInt() / 2f
+                        settings = settingsStore.update { it.copy(pitchSemitones = safe) }
+                        scope.launch { playback?.setPitch(safe) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = playbackModesEnabled,
+                    valueRange = -12f..12f,
+                    steps = 47,
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Repeat", modifier = Modifier.weight(1f))
                     DesktopRepeatMode.entries.forEach { mode ->
