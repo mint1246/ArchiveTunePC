@@ -1,10 +1,22 @@
 package moe.rukamori.archivetune.desktop.ui
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DesktopMediaInteractionsTest {
+    @Test
+    fun `explicit song click wins over any unrelated queue selection`() {
+        assertEquals(2, requestedSongQueueIndex(listOf("a", "napoleon", "requested"), "requested"))
+    }
+
+    @Test
+    fun `missing requested song does not silently select another queue item`() {
+        assertNull(requestedSongQueueIndex(listOf("a", "napoleon"), "requested"))
+    }
+
     @Test
     fun `overflow affordance stays hidden while an actionable item is idle`() {
         assertFalse(

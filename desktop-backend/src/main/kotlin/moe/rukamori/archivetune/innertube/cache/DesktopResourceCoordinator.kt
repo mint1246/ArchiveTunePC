@@ -164,8 +164,9 @@ class DesktopResourceCoordinator(
                     backgroundPermits.withPermit { block() }
                 }
             deferred.complete(result as Result<Any>)
+            val failureDetails = result.exceptionOrNull()?.let { " ${safeFailureSummary(it)}" }.orEmpty()
             diagnostic(
-                "request event=completed priority=${priority.name.lowercase()} result=${if (result.isSuccess) "success" else "failure"} duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)}",
+                "request event=completed priority=${priority.name.lowercase()} result=${if (result.isSuccess) "success" else "failure"} duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)}$failureDetails",
             )
             return result
         } catch (cancellation: CancellationException) {
@@ -178,7 +179,7 @@ class DesktopResourceCoordinator(
             val result = Result.failure<T>(failure)
             deferred.complete(result as Result<Any>)
             diagnostic(
-                "request event=completed priority=${priority.name.lowercase()} result=failure duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)}",
+                "request event=completed priority=${priority.name.lowercase()} result=failure duration_ms=${elapsedMillis(startedAtNanos)} key=${safeDiagnosticKey(key)} ${safeFailureSummary(failure)}",
             )
             return result
         } finally {
@@ -197,6 +198,18 @@ class DesktopResourceCoordinator(
     private fun cacheFile(key: String): Path = cacheDirectory.resolve("${sha256(key)}.json")
 
     private fun safeDiagnosticKey(key: String): String = key.substringBefore(':').take(48)
+
+    private fun safeFailureSummary(failure: Throwable): String {
+        val type = failure::class.simpleName ?: "Throwable"
+        val message =
+            failure.message
+                ?.replace(Regex("https?://\\S+"), "<url>")
+                ?.replace(Regex("\\s+"), " ")
+                ?.trim()
+                ?.take(240)
+                .orEmpty()
+        return if (message.isEmpty()) "errorType=$type" else "errorType=$type error=$message"
+    }
 
     private fun elapsedMillis(startedAtNanos: Long): Long =
         (System.nanoTime() - startedAtNanos).coerceAtLeast(0L) / 1_000_000L

@@ -432,6 +432,21 @@ class ArchiveTuneJvmClient(
         YouTube.addToPlaylist(playlistId, videoId)
     }
 
+    /** Adds an ordered group of songs in one edit_playlist mutation. */
+    suspend fun addSongsToPlaylist(
+        playlistId: String,
+        videoIds: List<String>,
+    ): Result<Unit> = run {
+        prepareProvidedSession()
+        if (videoIds.isEmpty()) return Result.success(Unit)
+        YouTube.addSongsToPlaylist(
+            playlistId = playlistId,
+            videoIds = videoIds,
+            batchSize = videoIds.size,
+            fallbackToIndividual = false,
+        ).map { Unit }
+    }
+
     /** Removes the selected playlist entry, resolving its setVideoId if the page omitted it. */
     suspend fun removeSongFromPlaylist(
         playlistId: String,

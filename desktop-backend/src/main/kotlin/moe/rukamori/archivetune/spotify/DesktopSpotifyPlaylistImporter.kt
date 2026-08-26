@@ -36,8 +36,10 @@ private const val STRONG_ARTIST_SCORE = 0.72
 private const val VERY_STRONG_ARTIST_SCORE = 0.80
 private const val STRONG_ALBUM_SCORE = 0.65
 private const val POST_CREATE_SETTLE_MS = 1_000L
+private const val PLAYLIST_ADD_BATCH_SIZE = 3
+private const val PLAYLIST_ADD_BATCH_INTERVAL_MS = 1_000L
 private const val PLAYLIST_ADD_ATTEMPTS = 3
-private const val PLAYLIST_ADD_RETRY_MS = 250L
+private const val PLAYLIST_ADD_RETRY_MS = 400L
 private const val SPOTIFY_PAGE_SIZE = 100
 private const val MAX_COVER_BYTES = 8 * 1024 * 1024L
 private val VERSION_MARKERS =
@@ -119,31 +121,45 @@ class DesktopSpotifyPlaylistImporter(
             var failedAdditions = 0
             if (remainingSongIds.isNotEmpty()) {
                 delay(POST_CREATE_SETTLE_MS)
-                remainingSongIds.forEachIndexed { index, videoId ->
+                val addBatches = orderedPlaylistAddBatches(remainingSongIds)
+                var processedAdds = 0
+                var previousBatchStartedAtNanos: Long? = null
+                addBatches.forEachIndexed { batchIndex, batch ->
+                    previousBatchStartedAtNanos?.let { previousStart ->
+                        val elapsedMs = (System.nanoTime() - previousStart).coerceAtLeast(0L) / 1_000_000L
+                        val remainingDelayMs = (PLAYLIST_ADD_BATCH_INTERVAL_MS - elapsedMs).coerceAtLeast(0L)
+                        if (remainingDelayMs > 0) delay(remainingDelayMs)
+                    }
+                    previousBatchStartedAtNanos = System.nanoTime()
                     var added = false
                     var lastFailure: Throwable? = null
                     for (attempt in 1..PLAYLIST_ADD_ATTEMPTS) {
-                        val result = backend.addSongToPlaylist(youtubePlaylistId, videoId)
+                        val result = backend.addSongsToPlaylist(youtubePlaylistId, batch)
                         if (result.isSuccess) {
                             added = true
-                            addedSongs += 1
+                            addedSongs += batch.size
                             break
                         }
                         lastFailure = result.exceptionOrNull()
                         diagnostic(
-                            "spotify_import event=add_retry youtubePlaylistId=$youtubePlaylistId videoId=$videoId " +
+                            "spotify_import event=add_batch_retry youtubePlaylistId=$youtubePlaylistId " +
+                                "batch=${batchIndex + 1}/${addBatches.size} songs=${batch.size} " +
                                 "attempt=$attempt/$PLAYLIST_ADD_ATTEMPTS message=${lastFailure?.message.orEmpty().logSafe()}",
                         )
-                        if (attempt < PLAYLIST_ADD_ATTEMPTS) delay(PLAYLIST_ADD_RETRY_MS)
+                        if (attempt < PLAYLIST_ADD_ATTEMPTS) {
+                            delay(PLAYLIST_ADD_RETRY_MS * attempt)
+                        }
                     }
                     if (!added) {
-                        failedAdditions += 1
+                        failedAdditions += batch.size
                         diagnostic(
-                            "spotify_import event=add_failed youtubePlaylistId=$youtubePlaylistId videoId=$videoId " +
+                            "spotify_import event=add_batch_failed youtubePlaylistId=$youtubePlaylistId " +
+                                "batch=${batchIndex + 1}/${addBatches.size} songs=${batch.size} " +
                                 "message=${lastFailure?.message.orEmpty().logSafe()}",
                         )
                     }
-                    val processed = index + 2
+                    processedAdds += batch.size
+                    val processed = 1 + processedAdds
                     onProgress(
                         SpotifyPlaylistImportProgress(
                             message = "Adding songs… $processed/${matchedSongIds.size}",
@@ -424,6 +440,14 @@ class DesktopSpotifyPlaylistImporter(
             bytes
         }
     }
+}
+
+internal fun orderedPlaylistAddBatches(
+    videoIds: List<String>,
+    batchSize: Int = PLAYLIST_ADD_BATCH_SIZE,
+): List<List<String>> {
+    require(batchSize > 0) { "batchSize must be positive" }
+    return videoIds.chunked(batchSize)
 }
 
 private data class MatchCandidate(

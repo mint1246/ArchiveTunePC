@@ -373,6 +373,9 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                     .onSuccess { next ->
                         val songs = next.items
                         if (songs.isEmpty()) {
+                            logger.info(
+                                "up_next_selection event=empty requestedVideoId=${item.id} backendCurrentIndex=${next.currentIndex}",
+                            )
                             playTogether.playQueue(
                                 listOf(toPlaybackItem(item, services.albumIndex)),
                                 title = "Up next",
@@ -380,18 +383,41 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                             return@onSuccess
                         }
 
-                        val selectedIndex =
-                            next.currentIndex
-                                ?: songs.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }
-                                ?: 0
+                        // Search and artist-profile clicks are explicit requests for this exact
+                        // video. YouTube's `selected` flag/currentIndex can point at a different
+                        // queue entry for some account/region responses, so never let it override
+                        // the song the user actually clicked.
+                        val selectedIndex = requestedSongQueueIndex(songs.map(SongItem::id), item.id)
+                        val backendSelectedId = next.currentIndex?.let(songs::getOrNull)?.id
+                        logger.info(
+                            "up_next_selection event=resolved requestedVideoId=${item.id} " +
+                                "backendCurrentIndex=${next.currentIndex} backendSelectedVideoId=$backendSelectedId " +
+                                "matchedIndex=$selectedIndex queueSize=${songs.size}",
+                        )
+                        if (selectedIndex == null) {
+                            logger.warning(
+                                "up_next_selection event=requested_missing requestedVideoId=${item.id} " +
+                                    "backendCurrentIndex=${next.currentIndex} backendSelectedVideoId=$backendSelectedId " +
+                                    "queueVideoIds=${songs.take(12).joinToString(",") { it.id }}",
+                            )
+                            playTogether.playQueue(
+                                listOf(toPlaybackItem(item, services.albumIndex)),
+                                title = next.title ?: "Up next",
+                            )
+                            return@onSuccess
+                        }
                         playTogether.playQueue(
                             songs.map { toPlaybackItem(it, services.albumIndex) },
-                            selectedIndex.coerceIn(0, songs.lastIndex),
+                            selectedIndex,
                             title = next.title ?: "Up next",
                         )
                     }
-                    .onFailure {
-                        browse.failure = it.message ?: "Could not load Up next"
+                    .onFailure { failure ->
+                        logger.warning(
+                            "up_next_selection event=failure requestedVideoId=${item.id} " +
+                                "errorType=${failure::class.simpleName} error=${failure.message?.replace(Regex("\\s+"), " ")?.take(240)}",
+                        )
+                        browse.failure = failure.message ?: "Could not load Up next"
                         playTogether.playQueue(
                             listOf(toPlaybackItem(item, services.albumIndex)),
                             title = "Up next",
@@ -1076,6 +1102,11 @@ internal fun localSearchMatches(
         .take(maxResults)
         .toList()
 }
+
+internal fun requestedSongQueueIndex(
+    songIds: List<String>,
+    requestedVideoId: String,
+): Int? = songIds.indexOf(requestedVideoId).takeIf { it >= 0 }
 
 @Composable
 private fun SearchResults(
