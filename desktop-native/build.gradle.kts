@@ -124,11 +124,15 @@ val downloadStemOrtRuntime = tasks.register<Exec>("downloadStemOrtRuntime") {
     group = "distribution"
     description = "Downloads the redistributable ONNX Runtime DirectML package for the stem worker."
     val target = stemOrtPackage.get().asFile.absolutePath
+    val partial = "$target.part"
     outputs.file(target)
     commandLine(
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
         "New-Item -ItemType Directory -Force -Path (Split-Path -Parent '$target') | Out-Null; " +
-            "Invoke-WebRequest -UseBasicParsing -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.24.4/microsoft.ml.onnxruntime.directml.1.24.4.nupkg' -OutFile '$target'",
+            "curl.exe --fail --location --retry 6 --retry-all-errors --retry-delay 3 --continue-at - " +
+            "--output '$partial' 'https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.24.4/microsoft.ml.onnxruntime.directml.1.24.4.nupkg'; " +
+            "if (${'$'}LASTEXITCODE -ne 0) { exit ${'$'}LASTEXITCODE }; " +
+            "Move-Item -LiteralPath '$partial' -Destination '$target' -Force",
     )
 }
 
@@ -136,11 +140,15 @@ val downloadStemDirectMlRuntime = tasks.register<Exec>("downloadStemDirectMlRunt
     group = "distribution"
     description = "Downloads Microsoft's redistributable DirectML package for the stem worker."
     val target = stemDirectMlPackage.get().asFile.absolutePath
+    val partial = "$target.part"
     outputs.file(target)
     commandLine(
         "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
         "New-Item -ItemType Directory -Force -Path (Split-Path -Parent '$target') | Out-Null; " +
-            "Invoke-WebRequest -UseBasicParsing -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg' -OutFile '$target'",
+            "curl.exe --fail --location --retry 6 --retry-all-errors --retry-delay 3 --continue-at - " +
+            "--output '$partial' 'https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg'; " +
+            "if (${'$'}LASTEXITCODE -ne 0) { exit ${'$'}LASTEXITCODE }; " +
+            "Move-Item -LiteralPath '$partial' -Destination '$target' -Force",
     )
 }
 
