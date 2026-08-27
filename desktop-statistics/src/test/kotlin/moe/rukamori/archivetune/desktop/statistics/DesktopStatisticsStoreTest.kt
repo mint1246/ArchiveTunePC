@@ -122,24 +122,42 @@ class DesktopStatisticsStoreTest {
     }
 
     @Test
-    fun legacyHistoryImportsOnceAndPersistsMigrationMarker() {
+    fun legacyImportedDatabaseIsDiscardedOnce() {
         val file = Files.createTempDirectory("archivetune-statistics-legacy").resolve("statistics.json")
         val start = Instant.parse("2026-08-20T10:00:00Z").toEpochMilli()
-        val events = listOf(
-            LegacyStatisticsEvent(SONG_ONE, start, 45_000L),
-            LegacyStatisticsEvent(SONG_TWO, start + 60_000L, 12_000L),
-        )
 
         DesktopStatisticsStore(file, ZoneOffset.UTC, StatisticsWriteMode.Immediate).use { store ->
-            assertTrue(store.importLegacyHistory(events))
-            assertFalse(store.importLegacyHistory(events))
-            assertEquals(57_000L, store.totals().listeningTimeMs)
-            assertEquals(1L, store.totals().playCount)
+            store.recordAudible(SONG_ONE, start, 45_000L, start + 30_000L)
+            assertEquals(45_000L, store.totals().listeningTimeMs)
+        }
+
+        val migrated = JSONObject(Files.readString(file)).put("legacyImportVersion", 1)
+        Files.writeString(file, migrated.toString())
+
+        DesktopStatisticsStore(file, ZoneOffset.UTC, StatisticsWriteMode.Immediate).use { restored ->
+            assertTrue(restored.discardLegacyImportedData())
+            assertFalse(restored.discardLegacyImportedData())
+            assertEquals(0L, restored.totals().listeningTimeMs)
+            assertEquals(0L, restored.totals().playCount)
+        }
+
+        DesktopStatisticsStore(file, ZoneOffset.UTC, StatisticsWriteMode.Immediate).use { clean ->
+            assertFalse(clean.discardLegacyImportedData())
+            assertEquals(0L, clean.totals().listeningTimeMs)
+        }
+    }
+
+    @Test
+    fun cleanStatisticsDatabaseIsNotDiscarded() {
+        val file = Files.createTempDirectory("archivetune-statistics-clean").resolve("statistics.json")
+        val start = Instant.parse("2026-08-27T12:00:00Z").toEpochMilli()
+        DesktopStatisticsStore(file, ZoneOffset.UTC, StatisticsWriteMode.Immediate).use { store ->
+            store.recordAudible(SONG_ONE, start, 35_000L, start + 30_000L)
         }
 
         DesktopStatisticsStore(file, ZoneOffset.UTC, StatisticsWriteMode.Immediate).use { restored ->
-            assertFalse(restored.importLegacyHistory(events))
-            assertEquals(57_000L, restored.totals().listeningTimeMs)
+            assertFalse(restored.discardLegacyImportedData())
+            assertEquals(35_000L, restored.totals().listeningTimeMs)
             assertEquals(1L, restored.totals().playCount)
         }
     }

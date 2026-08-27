@@ -48,13 +48,6 @@ data class StatisticsAlbum(
     val title: String,
 )
 
-/** One pre-statistics desktop history row used for a one-time migration. */
-data class LegacyStatisticsEvent(
-    val song: StatisticsSongMetadata,
-    val playedAtEpochMs: Long,
-    val playTimeMs: Long,
-)
-
 /**
  * Epoch range used by every query. The lower bound is inclusive and the upper bound is exclusive.
  * Null bounds are open ended; [all] selects the persisted all-time aggregates directly.

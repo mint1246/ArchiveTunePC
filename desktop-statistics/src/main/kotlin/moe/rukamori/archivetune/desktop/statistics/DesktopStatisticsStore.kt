@@ -80,7 +80,7 @@ class DesktopStatisticsStore(
     private val songs = LinkedHashMap<String, StatisticsSongMetadata>()
     private val totals = LinkedHashMap<String, MutableMeasure>()
     private val hours = TreeMap<Long, MutableMap<String, MutableMeasure>>()
-    private var legacyImportVersion = 0
+    private var containsLegacyImportedData = false
     private val _revision = MutableStateFlow(0L)
     val revision: StateFlow<Long> = _revision.asStateFlow()
     private val writer: ScheduledExecutorService? =
@@ -123,33 +123,17 @@ class DesktopStatisticsStore(
     }
 
     /**
-     * Imports the old desktop Home play history exactly once. Old rows are approximate (they predate
-     * the monotonic audible tracker), so they seed historical statistics but never replace new data.
+     * The first statistics build imported Home's old wall-clock play history. That recorder could
+     * include paused/background time, and the imported rows were merged into the same aggregates as
+     * the new monotonic tracker. They cannot be separated reliably after the fact, so tagged stores
+     * are reset once and then continue only with the authoritative tracker.
      */
-    fun importLegacyHistory(
-        events: Iterable<LegacyStatisticsEvent>,
-        migrationVersion: Int = LEGACY_IMPORT_VERSION,
-    ): Boolean = lock.withLock {
-        require(migrationVersion > 0) { "Legacy statistics migration version must be positive" }
-        if (legacyImportVersion >= migrationVersion) return@withLock false
-
-        events.forEach { event ->
-            if (event.song.id.isBlank() || event.playedAtEpochMs <= 0L || event.playTimeMs <= 0L) return@forEach
-            val playTime = event.playTimeMs.coerceAtLeast(0L)
-            val playAt =
-                if (playTime >= DesktopListenTracker.DEFAULT_PLAY_THRESHOLD_MS) {
-                    safeAdd(event.playedAtEpochMs, DesktopListenTracker.DEFAULT_PLAY_THRESHOLD_MS)
-                } else {
-                    null
-                }
-            recordAudibleLocked(
-                song = event.song,
-                startEpochMs = event.playedAtEpochMs,
-                durationMs = playTime,
-                playAtEpochMs = playAt,
-            )
-        }
-        legacyImportVersion = migrationVersion
+    fun discardLegacyImportedData(): Boolean = lock.withLock {
+        if (!containsLegacyImportedData) return@withLock false
+        songs.clear()
+        totals.clear()
+        hours.clear()
+        containsLegacyImportedData = false
         markDirtyLocked()
         true
     }
@@ -364,7 +348,7 @@ class DesktopStatisticsStore(
             val root = JSONObject(Files.readString(file))
             val version = root.optInt(KEY_VERSION, 1)
             require(version == SCHEMA_VERSION) { "Unsupported statistics schema version $version" }
-            legacyImportVersion = root.optInt(KEY_LEGACY_IMPORT_VERSION, 0).coerceAtLeast(0)
+            containsLegacyImportedData = root.optInt(KEY_LEGACY_IMPORT_VERSION, 0) > 0
 
             root.optJSONObject(KEY_SONGS)?.let { json ->
                 json.keys().forEach { id ->
@@ -419,7 +403,7 @@ class DesktopStatisticsStore(
         Files.createDirectories(parent)
         val root = JSONObject()
             .put(KEY_VERSION, SCHEMA_VERSION)
-            .put(KEY_LEGACY_IMPORT_VERSION, legacyImportVersion)
+            .put(KEY_LEGACY_IMPORT_VERSION, 0)
             .put(
                 KEY_SONGS,
                 JSONObject().apply {
@@ -657,6 +641,5 @@ class DesktopStatisticsStore(
         const val KEY_SONGS = "songs"
         const val KEY_TOTALS = "totals"
         const val KEY_HOURS = "hours"
-        const val LEGACY_IMPORT_VERSION = 1
     }
 }

@@ -20,10 +20,6 @@ import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.desktop.statistics.DesktopListenTracker
 import moe.rukamori.archivetune.desktop.statistics.DesktopStatisticsStore
-import moe.rukamori.archivetune.desktop.statistics.LegacyStatisticsEvent
-import moe.rukamori.archivetune.desktop.statistics.StatisticsAlbum
-import moe.rukamori.archivetune.desktop.statistics.StatisticsArtist
-import moe.rukamori.archivetune.desktop.statistics.StatisticsSongMetadata
 import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
@@ -269,7 +265,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.applicationScope.launch {
             account.refreshRestoredSession()
         }
-        statistics.importLegacyHistory(homeStore.snapshot.value.playHistory.map(::legacyStatisticsEvent))
+        if (statistics.discardLegacyImportedData()) {
+            runtime.logger.info("statistics event=discarded_legacy_home_history")
+        }
         startPlayHistoryRecorder()
         startHomeSyncObserver()
         runtime.applicationScope.launch {
@@ -898,22 +896,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             thumbnail = item.metadata.artworkUri.orEmpty(),
             explicit = item.metadata.explicit,
         )
-
-    private fun legacyStatisticsEvent(event: DesktopPlayEvent): LegacyStatisticsEvent {
-        val song = event.song
-        return LegacyStatisticsEvent(
-            song = StatisticsSongMetadata(
-                id = song.id,
-                title = song.title,
-                artists = song.artists.map { StatisticsArtist(it.id, it.name) },
-                album = song.album?.let { StatisticsAlbum(it.id, it.name) },
-                artworkUri = song.thumbnail.takeIf(String::isNotBlank),
-                durationMs = song.duration?.toLong()?.times(1_000L),
-            ),
-            playedAtEpochMs = event.playedAtEpochMillis,
-            playTimeMs = event.playTimeMs,
-        )
-    }
 
     private companion object {
         const val MAX_RESOLVED_SOURCE_CACHE_ENTRIES = 128
