@@ -130,6 +130,7 @@ class VlcjPlaybackController(
     private var suppressStoppedEvents = 0
     @Volatile private var externalAudioRendererActive = false
     @Volatile private var pitchSemitones = initialPitchSemitones.takeIf(Float::isFinite)?.coerceIn(MIN_PITCH, MAX_PITCH) ?: 0f
+    @Volatile private var pitchNeedsApply = true
 
     override val state = _state.asStateFlow()
     override val events = _events.asSharedFlow()
@@ -738,16 +739,13 @@ class VlcjPlaybackController(
     override suspend fun setPitch(pitchSemitones: Float) {
         checkOpen()
         val safePitch = pitchSemitones.takeIf(Float::isFinite)?.coerceIn(MIN_PITCH, MAX_PITCH) ?: 0f
-        var reload: LoadRequest? = null
         commandMutex.withLock {
             if (kotlin.math.abs(this.pitchSemitones - safePitch) < 0.001f) return@withLock
             this.pitchSemitones = safePitch
-            if (player != null) {
-                reload = prepareReloadLocked(TransitionReason.RETRY, _state.value.positionMs)
-                releasePlayerForPitchReconfigureLocked()
-            }
+            val activeApplied = player?.let { VlcPitchBridge.applyToActiveAudioOutput(it, safePitch) } == true
+            secondaryCrossfadePlayer?.let { VlcPitchBridge.applyToActiveAudioOutput(it, safePitch) }
+            pitchNeedsApply = !activeApplied
         }
-        reload?.let(::enqueueLoad)
     }
 
     override suspend fun retry() {
@@ -961,7 +959,7 @@ class VlcjPlaybackController(
                         "vendor=${System.getProperty("java.vendor")} arch=${System.getProperty("os.arch")}",
                 )
                 VlcRuntimeLocator.prepareNative(layout)
-                val newFactory = MediaPlayerFactory(*layout.mediaPlayerFactoryOptions(pitchSemitones))
+                val newFactory = MediaPlayerFactory(*layout.mediaPlayerFactoryOptions())
                 var newNativeLog: NativeLog? = null
                 var newNativeLogListener: LogEventListener? = null
                 try {
@@ -984,6 +982,7 @@ class VlcjPlaybackController(
                     nativeLog = newNativeLog
                     nativeLogListener = newNativeLogListener
                     player = newPlayer
+                    pitchNeedsApply = true
                     equalizerBackend = newEqualizerBackend
                     outputVolumeBackend = newOutputVolumeBackend
                     listener = newListener
@@ -1084,6 +1083,9 @@ class VlcjPlaybackController(
 
             override fun playing(mediaPlayer: MediaPlayer) = dispatch {
                 withActivePlayerLocked {
+                    if (pitchNeedsApply && VlcPitchBridge.applyToActiveAudioOutput(mediaPlayer, pitchSemitones)) {
+                        pitchNeedsApply = false
+                    }
                     cancelLoadWatchdog()
                     pendingSeek?.takeIf { it.first == generation }?.second?.takeIf { it > 0L }?.let {
                         mediaPlayer.controls().setTime(it)
@@ -1316,6 +1318,7 @@ class VlcjPlaybackController(
             val ready = CompletableDeferred<Boolean>()
             val readinessListener = object : MediaPlayerEventAdapter() {
                 override fun playing(mediaPlayer: MediaPlayer) {
+                    VlcPitchBridge.applyToActiveAudioOutput(mediaPlayer, pitchSemitones)
                     ready.complete(true)
                 }
 
@@ -2012,9 +2015,7 @@ class VlcjPlaybackController(
         positionTicker?.cancel()
         positionTicker = null
         listener?.let { player?.events()?.removeMediaPlayerEventListener(it) }
-        nativeLogListener?.let { eventListener ->
-            runCatching { nativeLog?.removeLogListener(eventListener) }
-        }
+        nativeLogListener?.let { eventListener -> runCatching { nativeLog?.removeLogListener(eventListener) } }
         runCatching { player?.controls()?.stop() }
         runCatching { player?.media()?.reset() }
         runCatching { activeCallbackMedia?.close() }

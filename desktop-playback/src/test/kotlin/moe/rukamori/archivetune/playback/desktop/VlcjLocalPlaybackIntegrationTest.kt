@@ -10,6 +10,10 @@ package moe.rukamori.archivetune.playback.desktop
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import com.sun.jna.Pointer
 import javax.sound.sampled.AudioFileFormat
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
@@ -27,6 +31,9 @@ import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory
+import uk.co.caprica.vlcj.player.base.MediaPlayer
+import uk.co.caprica.vlcj.player.base.callback.AudioCallback
 
 /**
  * Exercises the real in-process backend when a local libVLC runtime is available.
@@ -36,6 +43,20 @@ import kotlin.test.assertTrue
  * %LOCALAPPDATA%/ArchiveTuneSpikes/runtime to run it locally.
  */
 class VlcjLocalPlaybackIntegrationTest {
+    @Test
+    fun `pitch bridge actually shifts decoded audio`() {
+        val runtime = VlcRuntimeLocator.find() ?: return
+        val wave = createWaveFile(durationSeconds = 2, channels = 1)
+        try {
+            val base = captureFrequency(runtime, wave, 0f)
+            val octaveUp = captureFrequency(runtime, wave, 12f)
+            assertTrue(base in 420.0..460.0, "expected ~440 Hz, got $base")
+            assertTrue(octaveUp in 840.0..920.0, "expected ~880 Hz after +12 st, got $octaveUp")
+        } finally {
+            Files.deleteIfExists(wave)
+        }
+    }
+
     @Test
     fun `restoring a paused queue does not start libVLC`() = runBlocking {
         val resolutionCalls = AtomicInteger()
@@ -276,5 +297,53 @@ class VlcjLocalPlaybackIntegrationTest {
             AudioSystem.write(input, AudioFileFormat.Type.WAVE, path.toFile())
         }
         return path
+    }
+
+    private fun captureFrequency(runtime: VlcRuntimeLayout, wave: Path, pitch: Float): Double {
+        VlcRuntimeLocator.prepareNative(runtime)
+        val factory = MediaPlayerFactory(*runtime.mediaPlayerFactoryOptions())
+        val player = factory.mediaPlayers().newMediaPlayer()
+        val captured = ArrayList<Short>(60_000)
+        val firstAudio = CountDownLatch(1)
+        val ready = CountDownLatch(1)
+        val collecting = AtomicBoolean(false)
+        val callback = object : AudioCallback {
+            override fun play(mediaPlayer: MediaPlayer, samples: Pointer, sampleCount: Int, pts: Long) {
+                firstAudio.countDown()
+                if (!collecting.get()) return
+                val block = samples.getShortArray(0, sampleCount)
+                synchronized(captured) {
+                    if (captured.size < 60_000) captured.addAll(block.asList())
+                    if (captured.size >= 50_000) ready.countDown()
+                }
+            }
+            override fun pause(mediaPlayer: MediaPlayer, pts: Long) = Unit
+            override fun resume(mediaPlayer: MediaPlayer, pts: Long) = Unit
+            override fun flush(mediaPlayer: MediaPlayer, pts: Long) = Unit
+            override fun drain(mediaPlayer: MediaPlayer) = Unit
+            override fun setVolume(volume: Float, mute: Boolean) = Unit
+        }
+        try {
+            player.audio().callback("S16N", 44_100, 1, callback, true)
+            assertTrue(player.media().play(wave.toUri().toASCIIString()))
+            assertTrue(firstAudio.await(8, TimeUnit.SECONDS), "timed out waiting for VLC audio output")
+            assertTrue(VlcPitchBridge.applyToActiveAudioOutput(player, pitch), "active VLC audio output unavailable")
+            player.controls().setTime(0)
+            synchronized(captured) { captured.clear() }
+            collecting.set(true)
+            assertTrue(ready.await(8, TimeUnit.SECONDS), "timed out capturing pitched PCM")
+            val samples = synchronized(captured) { captured.toShortArray() }
+            val from = 8_000.coerceAtMost(samples.size)
+            var crossings = 0
+            for (index in from + 1 until samples.size) {
+                if (samples[index - 1] <= 0 && samples[index] > 0) crossings++
+            }
+            val seconds = (samples.size - from) / 44_100.0
+            return crossings / seconds
+        } finally {
+            runCatching { player.controls().stop() }
+            runCatching { player.release() }
+            runCatching { factory.release() }
+        }
     }
 }

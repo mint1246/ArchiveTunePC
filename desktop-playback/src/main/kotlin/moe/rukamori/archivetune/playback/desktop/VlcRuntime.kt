@@ -7,6 +7,7 @@
 
 package moe.rukamori.archivetune.playback.desktop
 
+import com.sun.jna.Memory
 import com.sun.jna.NativeLibrary
 import java.nio.file.Files
 import java.nio.file.Path
@@ -125,12 +126,77 @@ object VlcRuntimeLocator {
         System.getProperty("os.name").lowercase(Locale.ROOT).contains("win")
 }
 
-internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(pitchSemitones: Float = 0f): Array<String> =
-    buildList {
-        add("--no-video")
-        add("--quiet")
-        if (pitchSemitones != 0f) {
-            add("--audio-filter=scaletempo_pitch")
-            add("--pitch-shift=$pitchSemitones")
+internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(): Array<String> =
+    arrayOf(
+        "--no-video",
+        "--quiet",
+    )
+
+internal object VlcPitchBridge {
+    private const val VLC_VAR_FLOAT = 0x0050
+    private const val VLC_VAR_DOINHERIT = 0x8000
+    private const val MEDIA_PLAYER_INPUT_RESOURCE_OFFSET = 0x68L
+    private val core by lazy { NativeLibrary.getInstance("libvlccore") }
+    private val inputResourceHoldAout by lazy { core.getFunction("input_resource_HoldAout") }
+    private val objectRelease by lazy { core.getFunction("vlc_object_release") }
+    private val varCreate by lazy { core.getFunction("var_Create") }
+    private val varGet by lazy { core.getFunction("var_Get") }
+    private val varSet by lazy { core.getFunction("var_Set") }
+    private val crtFree by lazy { NativeLibrary.getInstance("msvcrt").getFunction("free") }
+
+    /** Apply pitch to the *actual* active audio-output object used by VLC 3.0.21. */
+    fun applyToActiveAudioOutput(mediaPlayer: uk.co.caprica.vlcj.player.base.MediaPlayer, semitones: Float): Boolean {
+        val mediaPlayerPointer = mediaPlayer.mediaPlayerInstance().pointer
+        val inputResource = mediaPlayerPointer.getPointer(MEDIA_PLAYER_INPUT_RESOURCE_OFFSET) ?: return false
+        val aout = inputResourceHoldAout.invokePointer(arrayOf<Any?>(inputResource)) ?: return false
+        try {
+            val enabled = kotlin.math.abs(semitones) >= 0.001f
+            val currentFilters = getStringVariable(aout, "audio-filter")
+                .orEmpty()
+                .split(':')
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .toMutableList()
+            val hadPitchFilter = currentFilters.removeAll { it == "scaletempo_pitch" }
+            if (enabled) currentFilters.add("scaletempo_pitch")
+            if (hadPitchFilter != enabled) {
+                setStringVariable(aout, "audio-filter", currentFilters.distinct().joinToString(":"))
+            }
+            val pitchName = nativeString("pitch-shift")
+            varCreate.invokeInt(arrayOf<Any?>(aout, pitchName, VLC_VAR_FLOAT or VLC_VAR_DOINHERIT))
+            val pitchBits = java.lang.Float.floatToRawIntBits(semitones).toLong() and 0xffff_ffffL
+            varSet.invokeInt(arrayOf<Any?>(aout, pitchName, pitchBits))
+            return true
+        } finally {
+            objectRelease.invokeVoid(arrayOf<Any?>(aout))
         }
-    }.toTypedArray()
+    }
+
+    private fun getStringVariable(objectPointer: com.sun.jna.Pointer, name: String): String? {
+        val nativeName = nativeString(name)
+        val value = Memory(java.lang.Long.BYTES.toLong())
+        if (varGet.invokeInt(arrayOf<Any?>(objectPointer, nativeName, value)) != 0) return null
+        val stringPointer = value.getPointer(0) ?: return ""
+        return try {
+            stringPointer.getString(0, Charsets.UTF_8.name())
+        } finally {
+            crtFree.invokeVoid(arrayOf<Any?>(stringPointer))
+        }
+    }
+
+    private fun setStringVariable(objectPointer: com.sun.jna.Pointer, name: String, value: String) {
+        val nativeName = nativeString(name)
+        val nativeValue = nativeString(value)
+        // vlc_value_t is an 8-byte union on x64. For a string member its by-value bits are exactly
+        // the char* value, so passing the pointer directly avoids JNA Structure/Union reflection.
+        varSet.invokeInt(arrayOf<Any?>(objectPointer, nativeName, nativeValue))
+    }
+
+    private fun nativeString(value: String): Memory {
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        return Memory(bytes.size.toLong() + 1L).apply {
+            write(0, bytes, 0, bytes.size)
+            setByte(bytes.size.toLong(), 0)
+        }
+    }
+}
