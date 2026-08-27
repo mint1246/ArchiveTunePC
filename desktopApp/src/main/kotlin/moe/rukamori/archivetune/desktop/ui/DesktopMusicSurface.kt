@@ -333,6 +333,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     var createPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
     var playlistPickerSession by remember { mutableStateOf<AddToPlaylistPickerSession?>(null) }
     var downloadBatchNotice by remember { mutableStateOf<String?>(null) }
+    var statisticsRange by remember { mutableStateOf(DesktopStatisticsRange.DAYS_7) }
     suspend fun rescanLibrary() {
         if (libraryLoading) return
         libraryLoading = true
@@ -607,6 +608,34 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 isLiked = ::isLiked,
                 modifier = modifier,
             )
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.STATISTICS -> {
+                val statisticsRevision by services.statistics.revision.collectAsState()
+                val presentation = remember(statisticsRevision, statisticsRange) {
+                    services.statistics.presentation(statisticsRange)
+                }
+                fun playStatisticsSong(id: String) {
+                    val local = localTracks.firstOrNull { it.id == id }
+                    if (local != null) {
+                        playLocal(local)
+                    } else {
+                        presentation.songsById[id]?.toSongItem()?.let(::open)
+                    }
+                }
+                DesktopStatisticsSurface(
+                    model = presentation.model,
+                    selectedRange = statisticsRange,
+                    onRangeSelected = { statisticsRange = it },
+                    onPlaySong = ::playStatisticsSong,
+                    onOpenSong = ::playStatisticsSong,
+                    onOpenArtist = { id ->
+                        presentation.artistTargets[id]?.let { browse.openArtist(it, scope) }
+                    },
+                    onOpenAlbum = { id ->
+                        presentation.albumTargets[id]?.let { browse.openAlbum(it, scope) }
+                    },
+                    modifier = modifier,
+                )
+            }
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SETTINGS -> FoundationDestinationContent(
                 state,
                 paths,
@@ -630,6 +659,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onLibraryRescan = { scope.launch { rescanLibrary() } },
                 onKeybindsChanged = services::refreshKeybindings,
                 onKeybindCaptureChanged = services::setKeybindCaptureActive,
+                onStatisticsPreferenceChanged = services::refreshStatisticsEligibility,
                 keybindPressedKeys = services.keybindPressedKeys,
                 modifier = modifier,
             )

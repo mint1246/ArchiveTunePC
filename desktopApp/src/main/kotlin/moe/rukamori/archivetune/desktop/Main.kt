@@ -36,6 +36,7 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.memory.MemoryCache
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopPartyPlaybackPolicy
@@ -44,6 +45,7 @@ import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.DesktopUpdateCoordinator
 import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
+import moe.rukamori.archivetune.desktop.party.PartyMode
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneDesktopApp
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneWindowChrome
@@ -78,6 +80,12 @@ fun main() {
     musicServices.attachPartySkipHandlers(playTogether::skipNext, playTogether::skipPrevious)
     musicServices.attachPartySeekHandler(playTogether::seekTo)
     musicServices.attachCompletedDownloadLookup(downloadServices::completedFileFor)
+    runtime.applicationScope.launch {
+        playTogether.state
+            .map { state -> state.mode != PartyMode.NONE }
+            .distinctUntilChanged()
+            .collect(musicServices::setStatisticsPartyActive)
+    }
     updateCoordinator.start()
     val restored = runtime.settings.snapshot()
     var latestDestination = restored.lastDestination.asDesktopDestination()

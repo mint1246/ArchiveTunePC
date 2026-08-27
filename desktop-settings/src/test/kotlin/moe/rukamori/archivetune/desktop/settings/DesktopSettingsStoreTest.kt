@@ -19,7 +19,7 @@ class DesktopSettingsStoreTest {
                 accentSeedArgb = 0xFF33_6699L,
                 volume = 0.65f,
                 speed = 1.25f,
-                lastDestination = DesktopLastDestination.LIBRARY,
+                lastDestination = DesktopLastDestination.STATISTICS,
                 windowPlacement = DesktopWindowPlacement(1_440f, 900f, 40f, 50f, maximized = true),
                 libraryFolders = listOf(root.resolve("Music"), root.resolve("Archive")),
                 downloadLocation = root.resolve("Downloads"),
@@ -95,6 +95,7 @@ class DesktopSettingsStoreTest {
             downloadConcurrency = 7,
             partialCleanupPolicy = DesktopPartialCleanupPolicy.KEEP_ON_CANCEL,
             lyricsProviderIds = listOf("lrclib", "betterlyrics"),
+            countPartyListeningInStatistics = false,
             keybinds = listOf(
                 DesktopKeybind(DesktopKeybindAction.VOLUME_UP, listOf(0x11, 0x12, 0x26), repeatWhileHeld = true),
                 DesktopKeybind(DesktopKeybindAction.TOGGLE_LYRICS, listOf(0x11, 0x4C)),
@@ -110,6 +111,7 @@ class DesktopSettingsStoreTest {
         assertEquals("true", persisted.getProperty("playback.crossfade.enabled"))
         assertEquals("7.5", persisted.getProperty("playback.crossfade.durationSeconds"))
         assertEquals("false", persisted.getProperty("playback.crossfade.gaplessAlbumTransitions"))
+        assertEquals("false", persisted.getProperty("statistics.countPartyListening"))
         assertEquals("VOLUME_UP", persisted.getProperty("keybind.0.action"))
         assertEquals("17,18,38", persisted.getProperty("keybind.0.keys"))
         assertEquals("true", persisted.getProperty("keybind.0.repeat"))
@@ -175,6 +177,21 @@ class DesktopSettingsStoreTest {
 
         store.save(DesktopSettings(crossfadeDurationSeconds = Float.NaN))
         assertEquals(5f, store.snapshot().crossfadeDurationSeconds, 0.0001f)
+    }
+
+    @Test
+    fun partyListeningStatisticsDefaultsOnForOlderSettingsAndPersistsOptOut() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        Files.writeString(file, "playback.volume=0.5\n")
+
+        val store = DesktopSettingsStore(file)
+        assertEquals(true, store.snapshot().countPartyListeningInStatistics)
+
+        store.save(store.snapshot().copy(countPartyListeningInStatistics = false))
+
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertEquals("false", persisted.getProperty("statistics.countPartyListening"))
+        assertEquals(false, DesktopSettingsStore(file).snapshot().countPartyListeningInStatistics)
     }
 
     @Test

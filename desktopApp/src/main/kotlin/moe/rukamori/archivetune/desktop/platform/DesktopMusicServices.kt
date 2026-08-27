@@ -18,6 +18,12 @@ import moe.rukamori.archivetune.desktop.library.DesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktop.library.PropertiesDesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
+import moe.rukamori.archivetune.desktop.statistics.DesktopListenTracker
+import moe.rukamori.archivetune.desktop.statistics.DesktopStatisticsStore
+import moe.rukamori.archivetune.desktop.statistics.LegacyStatisticsEvent
+import moe.rukamori.archivetune.desktop.statistics.StatisticsAlbum
+import moe.rukamori.archivetune.desktop.statistics.StatisticsArtist
+import moe.rukamori.archivetune.desktop.statistics.StatisticsSongMetadata
 import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
@@ -166,6 +172,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.paths.data.resolve("home-store.json"),
         asyncPersistence = true,
     )
+    val statistics = DesktopStatisticsStore(runtime.paths.data.resolve("statistics.json"))
+    private val statisticsTracker = DesktopListenTracker(statistics)
+    @Volatile private var statisticsPartyActive = false
     /** Song→album knowledge for backfilling album links on tracks served without album metadata. */
     val albumIndex = DesktopAlbumIndex(runtime.paths.data.resolve("album-index.json"))
     private val _similarRecommendations = MutableStateFlow<List<DesktopSimilarRecommendation>>(emptyList())
@@ -239,6 +248,19 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private fun partyPlaybackPolicy(): DesktopPartyPlaybackPolicy =
         runCatching(partyPlaybackPolicyProvider).getOrDefault(DesktopPartyPlaybackPolicy())
 
+    fun setStatisticsPartyActive(active: Boolean) {
+        if (statisticsPartyActive == active) return
+        statisticsPartyActive = active
+        statisticsTracker.onSnapshot(playback.state.value, statisticsListeningEligible())
+    }
+
+    fun refreshStatisticsEligibility() {
+        statisticsTracker.onSnapshot(playback.state.value, statisticsListeningEligible())
+    }
+
+    private fun statisticsListeningEligible(): Boolean =
+        settings.snapshot().countPartyListeningInStatistics || !statisticsPartyActive
+
     init {
         backend.bindSessionProvider(account)
         // Restore the DPAPI session synchronously before the first UI-driven backend call can race
@@ -247,10 +269,22 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.applicationScope.launch {
             account.refreshRestoredSession()
         }
+        statistics.importLegacyHistory(homeStore.snapshot.value.playHistory.map(::legacyStatisticsEvent))
         startPlayHistoryRecorder()
         startHomeSyncObserver()
         runtime.applicationScope.launch {
             playback.state.collect(nextTrackPrefetcher::onSnapshot)
+        }
+        runtime.applicationScope.launch {
+            playback.state.collect { snapshot ->
+                statisticsTracker.onSnapshot(snapshot, statisticsListeningEligible())
+            }
+        }
+        runtime.applicationScope.launch {
+            while (true) {
+                delay(STATISTICS_FLUSH_INTERVAL_MS)
+                statisticsTracker.flush()
+            }
         }
         if (library.folders.isNotEmpty()) {
             runtime.applicationScope.launch(Dispatchers.IO) {
@@ -616,6 +650,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.applicationScope.launch {
             playback.events.collect { event ->
                 if (event !is PlaybackEvent.MediaTransition) return@collect
+                statisticsTracker.onMediaTransition()
+                statisticsTracker.onSnapshot(playback.state.value, statisticsListeningEligible())
                 val now = System.currentTimeMillis()
                 flushPlayHistoryCurrent(now)
                 playHistoryCurrent =
@@ -831,6 +867,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             lyricsScope.value.cancel()
         }
         nextTrackPrefetcher.close()
+        statisticsTracker.flush()
+        statistics.close()
         globalKeyBindings?.close()
         windowsMediaControls?.close()
         homeStore.close()
@@ -861,6 +899,22 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             explicit = item.metadata.explicit,
         )
 
+    private fun legacyStatisticsEvent(event: DesktopPlayEvent): LegacyStatisticsEvent {
+        val song = event.song
+        return LegacyStatisticsEvent(
+            song = StatisticsSongMetadata(
+                id = song.id,
+                title = song.title,
+                artists = song.artists.map { StatisticsArtist(it.id, it.name) },
+                album = song.album?.let { StatisticsAlbum(it.id, it.name) },
+                artworkUri = song.thumbnail.takeIf(String::isNotBlank),
+                durationMs = song.duration?.toLong()?.times(1_000L),
+            ),
+            playedAtEpochMs = event.playedAtEpochMillis,
+            playTimeMs = event.playTimeMs,
+        )
+    }
+
     private companion object {
         const val MAX_RESOLVED_SOURCE_CACHE_ENTRIES = 128
         const val STREAM_CACHE_EXPIRY_LEAD_MILLIS = 60_000L
@@ -870,6 +924,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         const val KEYBIND_VOLUME_STEP = 0.02f
         const val KEYBIND_SPEED_STEP = 0.05f
         const val KEYBIND_SEEK_STEP_MS = 5_000L
+        const val STATISTICS_FLUSH_INTERVAL_MS = 5_000L
         const val RESUME_AFTER_UPDATE_MARKER = "resume-after-update"
         val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     }

@@ -34,6 +34,7 @@ dependencies {
     implementation(project(":desktop-play-together"))
     implementation(project(":desktop-library"))
     implementation(project(":desktop-settings"))
+    implementation(project(":desktop-statistics"))
     implementation(project(":desktop-lyrics-ui"))
     implementation(project(":windows-media-integration"))
     implementation(project(":desktop-downloads"))

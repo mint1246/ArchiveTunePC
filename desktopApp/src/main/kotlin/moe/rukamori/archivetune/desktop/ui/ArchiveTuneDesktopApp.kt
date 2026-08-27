@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.BrightnessAuto
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Download
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -62,6 +64,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -146,6 +150,7 @@ private val DesktopDestination.icon: ImageVector
         DesktopDestination.SEARCH -> Icons.Rounded.Search
         DesktopDestination.LIBRARY -> Icons.Rounded.LibraryMusic
         DesktopDestination.DOWNLOADS -> Icons.Rounded.Download
+        DesktopDestination.STATISTICS -> Icons.Rounded.BarChart
         DesktopDestination.SETTINGS -> Icons.Rounded.Settings
     }
 
@@ -459,8 +464,24 @@ private fun DesktopRail(
 
 @Composable
 private fun CompactNavigation(state: DesktopContentState) {
+    var moreExpanded by remember { mutableStateOf(false) }
+    val primaryDestinations = remember {
+        listOf(
+            DesktopDestination.HOME,
+            DesktopDestination.EXPLORE,
+            DesktopDestination.SEARCH,
+            DesktopDestination.LIBRARY,
+        )
+    }
+    val secondaryDestinations = remember {
+        listOf(
+            DesktopDestination.DOWNLOADS,
+            DesktopDestination.STATISTICS,
+            DesktopDestination.SETTINGS,
+        )
+    }
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        DesktopDestination.entries.forEach { destination ->
+        primaryDestinations.forEach { destination ->
             NavigationBarItem(
                 selected = destination == state.destination,
                 onClick = { state.navigate(destination) },
@@ -468,6 +489,35 @@ private fun CompactNavigation(state: DesktopContentState) {
                 label = { Text(destination.title) },
             )
         }
+        NavigationBarItem(
+            selected = state.destination in secondaryDestinations,
+            onClick = { moreExpanded = true },
+            icon = {
+                Box {
+                    AnimatedDestinationIcon(
+                        Icons.Rounded.MoreHoriz,
+                        state.destination in secondaryDestinations,
+                        "More",
+                    )
+                    DropdownMenu(
+                        expanded = moreExpanded,
+                        onDismissRequest = { moreExpanded = false },
+                    ) {
+                        secondaryDestinations.forEach { destination ->
+                            DropdownMenuItem(
+                                text = { Text(destination.title) },
+                                leadingIcon = { Icon(destination.icon, contentDescription = null) },
+                                onClick = {
+                                    moreExpanded = false
+                                    state.navigate(destination)
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+            label = { Text("More") },
+        )
     }
 }
 
@@ -662,6 +712,7 @@ fun FoundationDestinationContent(
     onLibraryRescan: () -> Unit = {},
     onKeybindsChanged: () -> Unit = {},
     onKeybindCaptureChanged: (Boolean) -> Unit = {},
+    onStatisticsPreferenceChanged: () -> Unit = {},
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -687,6 +738,7 @@ fun FoundationDestinationContent(
             onLibraryRescan,
             onKeybindsChanged,
             onKeybindCaptureChanged,
+            onStatisticsPreferenceChanged,
             keybindPressedKeys,
             modifier,
         )
@@ -841,6 +893,7 @@ private fun FoundationSettings(
     onLibraryRescan: () -> Unit,
     onKeybindsChanged: () -> Unit,
     onKeybindCaptureChanged: (Boolean) -> Unit,
+    onStatisticsPreferenceChanged: () -> Unit,
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>?,
     modifier: Modifier = Modifier,
 ) {
@@ -867,6 +920,7 @@ private fun FoundationSettings(
         onLibraryRescan = onLibraryRescan,
         onKeybindsChanged = onKeybindsChanged,
         onKeybindCaptureChanged = onKeybindCaptureChanged,
+        onStatisticsPreferenceChanged = onStatisticsPreferenceChanged,
         keybindPressedKeys = keybindPressedKeys,
         account = account,
         accountContent = { if (account != null) DesktopAccountCard(account) else AnonymousAccountCard() },

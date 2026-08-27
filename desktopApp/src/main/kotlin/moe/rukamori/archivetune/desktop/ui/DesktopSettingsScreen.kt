@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BrightnessAuto
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Download
@@ -115,6 +116,7 @@ fun DesktopSettingsPanel(
     onLibraryRescan: () -> Unit,
     onKeybindsChanged: () -> Unit = {},
     onKeybindCaptureChanged: (Boolean) -> Unit = {},
+    onStatisticsPreferenceChanged: () -> Unit = {},
     keybindPressedKeys: StateFlow<List<Int>>? = null,
     account: DesktopSessionManager?,
     accountContent: @Composable () -> Unit,
@@ -539,6 +541,25 @@ fun DesktopSettingsPanel(
                         Text(provider.name)
                     }
                 }
+            }
+        }
+
+        Text("Statistics", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ToggleRow(
+                    "Count party listening",
+                    settings.countPartyListeningInStatistics,
+                    Icons.Rounded.BarChart,
+                ) { enabled ->
+                    update { it.copy(countPartyListeningInStatistics = enabled) }
+                    onStatisticsPreferenceChanged()
+                }
+                Text(
+                    "When disabled, listening while hosting or joining a party is excluded from statistics. Existing statistics are not deleted or changed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

@@ -34,6 +34,7 @@ enum class DesktopLastDestination {
     SEARCH,
     LIBRARY,
     DOWNLOADS,
+    STATISTICS,
     SETTINGS,
 }
 
@@ -126,6 +127,7 @@ data class DesktopSettings(
     val partialCleanupPolicy: DesktopPartialCleanupPolicy = DesktopPartialCleanupPolicy.DELETE_ON_CANCEL,
     /** Empty means all built-in lyrics providers, preserving the Android fallback behavior. */
     val lyricsProviderIds: List<String> = emptyList(),
+    val countPartyListeningInStatistics: Boolean = true,
     val keybinds: List<DesktopKeybind> = emptyList(),
 )
 
@@ -216,6 +218,9 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 downloadConcurrency = values.getProperty("downloads.concurrency")?.toIntOrNull() ?: 2,
                 partialCleanupPolicy = values.enumValue("downloads.partialCleanup", DesktopPartialCleanupPolicy.DELETE_ON_CANCEL),
                 lyricsProviderIds = readStrings(values, "lyrics.provider"),
+                countPartyListeningInStatistics = values.getProperty("statistics.countPartyListening")
+                    ?.toBooleanStrictOrNull()
+                    ?: true,
                 keybinds = readKeybinds(values),
             ).sanitized()
         }.getOrDefault(DesktopSettings())
@@ -254,6 +259,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             setProperty("downloads.concurrency", settings.downloadConcurrency.toString())
             setProperty("downloads.partialCleanup", settings.partialCleanupPolicy.name)
             settings.lyricsProviderIds.forEachIndexed { index, id -> setProperty("lyrics.provider.$index", id) }
+            setProperty("statistics.countPartyListening", settings.countPartyListeningInStatistics.toString())
             settings.keybinds.forEachIndexed { index, binding ->
                 setProperty("keybind.$index.action", binding.action.name)
                 setProperty("keybind.$index.keys", binding.virtualKeys.joinToString(","))
