@@ -98,6 +98,30 @@ class DesktopListenTrackerTest {
         assertEquals(2L, fixture.store.totals().playCount)
     }
 
+    @Test
+    fun shortTrackCountsAfterHalfItsDuration() = withFixture { fixture ->
+        fixture.tracker.onSnapshot(fixture.snapshot(durationMs = 20_000L))
+        fixture.advance(9_999L)
+        fixture.tracker.onSnapshot(fixture.snapshot(positionMs = 9_999L, durationMs = 20_000L))
+        assertEquals(0L, fixture.store.totals().playCount)
+
+        fixture.advance(1L)
+        fixture.tracker.onSnapshot(fixture.snapshot(positionMs = 10_000L, durationMs = 20_000L))
+        assertEquals(1L, fixture.store.totals().playCount)
+    }
+
+    @Test
+    fun longTrackStillUsesThirtySecondMaximumThreshold() = withFixture { fixture ->
+        fixture.tracker.onSnapshot(fixture.snapshot(durationMs = 180_000L))
+        fixture.advance(29_999L)
+        fixture.tracker.onSnapshot(fixture.snapshot(positionMs = 29_999L, durationMs = 180_000L))
+        assertEquals(0L, fixture.store.totals().playCount)
+
+        fixture.advance(1L)
+        fixture.tracker.onSnapshot(fixture.snapshot(positionMs = 30_000L, durationMs = 180_000L))
+        assertEquals(1L, fixture.store.totals().playCount)
+    }
+
     private fun withFixture(block: (Fixture) -> Unit) {
         val file = Files.createTempDirectory("archivetune-statistics-tracker").resolve("statistics.json")
         val clock = FakeClock(
@@ -125,6 +149,7 @@ class DesktopListenTrackerTest {
             playWhenReady: Boolean = true,
             status: PlaybackStatus = PlaybackStatus.READY,
             speed: Float = 1f,
+            durationMs: Long = 360_000L,
         ): PlaybackSnapshot =
             PlaybackSnapshot(
                 queue = listOf(SONG),
@@ -132,7 +157,7 @@ class DesktopListenTrackerTest {
                 playWhenReady = playWhenReady,
                 status = status,
                 positionMs = positionMs,
-                durationMs = 360_000L,
+                durationMs = durationMs,
                 speed = speed,
             )
     }

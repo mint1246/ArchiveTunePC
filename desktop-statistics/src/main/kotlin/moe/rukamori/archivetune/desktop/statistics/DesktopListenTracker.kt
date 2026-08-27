@@ -70,7 +70,7 @@ class DesktopListenTracker(
         val nowWall = clock.wallTimeEpochMs()
         accumulatePreviousLocked(nowElapsed, nowWall)
 
-        val current = snapshot.currentItem?.toStatisticsMetadata()
+        val current = snapshot.currentItem?.toStatisticsMetadata(snapshot.durationMs)
         val currentSession = session
         if (
             forceNewSession ||
@@ -92,7 +92,7 @@ class DesktopListenTracker(
 
     /**
      * Marks a real media transition, including repeat-one of the same id. Call this from the desktop
-     * playback event stream when available so each repeated track gets its own 30-second play gate.
+     * playback event stream when available so each repeated track gets its own play gate.
      * Time since the previous snapshot is flushed first using the previous authoritative state.
      */
     fun onMediaTransition() = lock.withLock {
@@ -128,10 +128,11 @@ class DesktopListenTracker(
         val after = safeAdd(before, delta)
         currentSession.eligibleAudibleMs = after
 
+        val effectiveThresholdMs = song.playThresholdMs()
         var playAt: Long? = null
-        if (!currentSession.playCounted && before < playThresholdMs && after >= playThresholdMs) {
+        if (!currentSession.playCounted && before < effectiveThresholdMs && after >= effectiveThresholdMs) {
             currentSession.playCounted = true
-            val thresholdOffset = playThresholdMs - before
+            val thresholdOffset = effectiveThresholdMs - before
             val intervalStartWall = safeSubtract(nowWall, delta)
             playAt = safeAdd(intervalStartWall, thresholdOffset)
         }
@@ -147,8 +148,20 @@ class DesktopListenTracker(
     private fun PlaybackSnapshot.isStatisticsAudible(): Boolean =
         playWhenReady && status == PlaybackStatus.READY && currentItem != null
 
-    private fun PlaybackItem.toStatisticsMetadata(): StatisticsSongMetadata =
-        StatisticsSongMetadata.fromPlayback(metadata)
+    private fun PlaybackItem.toStatisticsMetadata(snapshotDurationMs: Long): StatisticsSongMetadata {
+        val converted = StatisticsSongMetadata.fromPlayback(metadata)
+        return if (converted.durationMs != null || snapshotDurationMs <= 0L) {
+            converted
+        } else {
+            converted.copy(durationMs = snapshotDurationMs)
+        }
+    }
+
+    private fun StatisticsSongMetadata.playThresholdMs(): Long {
+        val duration = durationMs?.takeIf { it > 0L } ?: return playThresholdMs
+        val halfDuration = (duration / 2L).coerceAtLeast(1L)
+        return minOf(playThresholdMs, halfDuration)
+    }
 
     private fun safeAdd(left: Long, right: Long): Long =
         if (right > 0L && left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
