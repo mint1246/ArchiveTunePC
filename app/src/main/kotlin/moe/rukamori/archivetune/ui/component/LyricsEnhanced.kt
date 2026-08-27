@@ -126,6 +126,7 @@ import moe.rukamori.archivetune.lyrics.LyricsEntry
 import moe.rukamori.archivetune.lyrics.LyricsInterludeMotion
 import moe.rukamori.archivetune.lyrics.LyricsRomanizationPreferences
 import moe.rukamori.archivetune.lyrics.LyricsUtils.effectiveLyricsEntryEndMs
+import moe.rukamori.archivetune.lyrics.LyricsUtils.hasWordSyncedLyrics
 import moe.rukamori.archivetune.lyrics.LyricsUtils.insertInstrumentalBreaks
 import moe.rukamori.archivetune.lyrics.LyricsUtils.isLineSyncedLrc
 import moe.rukamori.archivetune.lyrics.LyricsUtils.isTtml
@@ -150,7 +151,7 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 private const val LRC_LEAD_MS = 300L
-private const val TTML_LEAD_MS = 0L
+private const val WORD_SYNC_LEAD_MS = 0L
 private const val LYRIC_VISUAL_TUNING_OFFSET_MS = 150L
 private const val MANUAL_SCROLL_TIMEOUT_MS = 3000L
 private const val MANUAL_SCROLL_DEBOUNCE_MS = 50L
@@ -244,7 +245,7 @@ fun LyricsEnhanced(
         }
 
     val isSynced = remember(lyrics) { lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)) }
-    val isTtmlFormat = remember(lyrics) { lyrics != null && isTtml(lyrics!!) }
+    val isWordSyncedFormat = remember(lyrics) { lyrics != null && hasWordSyncedLyrics(lyrics!!) }
 
     val songDurationMs =
         mediaMetadata
@@ -275,15 +276,15 @@ fun LyricsEnhanced(
             }
         }
 
-    var syncedLyrics by remember(lyricsEntries, isTtmlFormat) {
-        mutableStateOf(buildSyncedLyrics(lyricsEntries, isTtmlFormat, emptyMap()))
+    var syncedLyrics by remember(lyricsEntries, isWordSyncedFormat) {
+        mutableStateOf(buildSyncedLyrics(lyricsEntries, isWordSyncedFormat, emptyMap()))
     }
-    var syncedLyricsRenderVersion by remember(lyricsEntries, isTtmlFormat) {
+    var syncedLyricsRenderVersion by remember(lyricsEntries, isWordSyncedFormat) {
         mutableIntStateOf(0)
     }
 
-    LaunchedEffect(lyricsEntries, romanizationPreferences) {
-        syncedLyrics = buildSyncedLyrics(lyricsEntries, isTtmlFormat, emptyMap())
+    LaunchedEffect(lyricsEntries, isWordSyncedFormat, romanizationPreferences) {
+        syncedLyrics = buildSyncedLyrics(lyricsEntries, isWordSyncedFormat, emptyMap())
         syncedLyricsRenderVersion += 1
         if (!romanizationPreferences.isEnabled) return@LaunchedEffect
 
@@ -304,7 +305,7 @@ fun LyricsEnhanced(
                 async {
                     val romanized: List<String?> =
                         try {
-                            if (isTtmlFormat && entry.words != null) {
+                            if (isWordSyncedFormat && entry.words != null) {
                                 val mainWordCount = entry.words!!.count { !it.isBackground }
                                 providedRomanizedWordsForEntry(entry, mainWordCount, romanizationPreferences)
                                     ?: entry.words!!.filter { !it.isBackground }.map { word ->
@@ -320,7 +321,7 @@ fun LyricsEnhanced(
                             throw e
                         } catch (e: Exception) {
                             reportException(e)
-                            if (isTtmlFormat && entry.words != null) {
+                            if (isWordSyncedFormat && entry.words != null) {
                                 List(entry.words!!.count { !it.isBackground }) { null }
                             } else {
                                 listOf(null)
@@ -333,11 +334,11 @@ fun LyricsEnhanced(
         jobs.awaitAll().forEach { (index, romanized) ->
             tempMap[index] = romanized
         }
-        syncedLyrics = buildSyncedLyrics(lyricsEntries, isTtmlFormat, tempMap)
+        syncedLyrics = buildSyncedLyrics(lyricsEntries, isWordSyncedFormat, tempMap)
         syncedLyricsRenderVersion += 1
     }
 
-    val leadMs = if (isTtmlFormat) TTML_LEAD_MS else LRC_LEAD_MS
+    val leadMs = if (isWordSyncedFormat) WORD_SYNC_LEAD_MS else LRC_LEAD_MS
 
     val latestSliderPositionProvider = rememberUpdatedState(sliderPositionProvider)
     val latestLyricsSyncOffset = rememberUpdatedState(lyricsSyncOffset)
@@ -506,7 +507,7 @@ fun LyricsEnhanced(
                     index = index,
                     animateToNearbyItem = !forceNextScroll,
                     force = forceNextScroll,
-                    alignByItemCenter = isTtmlFormat,
+                    alignByItemCenter = isWordSyncedFormat,
                 )
                 forceNextScroll = false
             }
@@ -1322,7 +1323,7 @@ private fun Double.toMilliseconds(): Int = (this * 1000.0).roundToInt().coerceAt
 
 private fun buildSyncedLyrics(
     entries: List<LyricsEntry>,
-    isTtml: Boolean,
+    isWordSynced: Boolean,
     romanizationMap: Map<Int, List<String?>>,
 ): SyncedLyrics {
     if (entries.isEmpty()) return SyncedLyrics(emptyList())
@@ -1333,7 +1334,7 @@ private fun buildSyncedLyrics(
         if (entry.isInstrumental) return@forEachIndexed
         if (entry.text.isBlank() && entry.words.isNullOrEmpty()) return@forEachIndexed
 
-        if (isTtml && entry.words != null) {
+        if (isWordSynced && entry.words != null) {
             val translation = providedTranslationTextForEntry(entry)
             val mainWords = entry.words!!.filter { !it.isBackground }
             val bgWords = entry.words!!.filter { it.isBackground }
