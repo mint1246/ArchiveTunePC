@@ -138,6 +138,57 @@ class VlcjLocalPlaybackIntegrationTest {
     }
 
     @Test
+    fun `pitch is reapplied when playback advances to the next queue item`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val firstWave = createWaveFile(durationSeconds = 2)
+        val secondWave = createWaveFile(durationSeconds = 2)
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+        val pitchNeedsApply = controller.javaClass.getDeclaredField("pitchNeedsApply").apply {
+            isAccessible = true
+        }
+
+        fun pitchPending(): Boolean = pitchNeedsApply.getBoolean(controller)
+
+        try {
+            val first = PlaybackItem(
+                metadata = PlaybackMetadata(id = "pitch-first", title = "Pitch first"),
+                source = PlaybackSource.LocalFile(firstWave.toString()),
+            )
+            val second = PlaybackItem(
+                metadata = PlaybackMetadata(id = "pitch-second", title = "Pitch second"),
+                source = PlaybackSource.LocalFile(secondWave.toString()),
+            )
+            controller.replaceQueue(listOf(first, second))
+            awaitState(controller, "first pitched playback") {
+                it.currentItem?.metadata?.id == first.metadata.id && it.status == PlaybackStatus.READY
+            }
+            controller.setPitch(5f)
+            pitchNeedsApply.setBoolean(controller, false)
+
+            controller.skipNext()
+            withTimeout(10_000L) {
+                while (!pitchPending()) delay(10L)
+            }
+            assertTrue(pitchPending(), "new media must reapply the persisted pitch")
+            awaitState(controller, "second playback") {
+                it.currentItem?.metadata?.id == second.metadata.id && it.status == PlaybackStatus.READY
+            }
+            withTimeout(10_000L) {
+                while (pitchPending()) delay(10L)
+            }
+            assertTrue(!pitchPending(), "persisted pitch must finish applying to the next item's audio output")
+            controller.stop()
+        } finally {
+            controller.close()
+            Files.deleteIfExists(firstWave)
+            Files.deleteIfExists(secondWave)
+        }
+    }
+
+    @Test
     fun `decodes local media to stereo 44k stem input wav`() = runBlocking {
         val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
         val source = createWaveFile()

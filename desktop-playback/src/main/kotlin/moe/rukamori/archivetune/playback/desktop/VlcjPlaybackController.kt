@@ -872,6 +872,10 @@ class VlcjPlaybackController(
                 stopActiveFileLocked()
                 activeGeneration = request.generation
                 activeResolvedSource = resolved
+                // A new media item can recreate libVLC's audio-output object. Re-apply the
+                // persisted pitch when its playing callback fires, even when the previous item
+                // already applied the same value.
+                pitchNeedsApply = true
                 outputGain.setSource(resolved)
                 httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
                 pendingSeek = pendingSeek?.takeIf { it.first == request.generation }
@@ -1201,7 +1205,24 @@ class VlcjPlaybackController(
             }
 
             override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
-                if (!closed.get()) latestPositionMs.set(newTime.coerceAtLeast(0L))
+                if (!closed.get()) {
+                    latestPositionMs.set(newTime.coerceAtLeast(0L))
+                    // The first `playing` callback can arrive a little before VLC exposes the new
+                    // track's aout. Keep the pitch armed and retry on the next time tick instead of
+                    // silently leaving every later queue item at its original pitch.
+                    if (pitchNeedsApply) {
+                        dispatch {
+                            withActivePlayerLocked {
+                                if (
+                                    pitchNeedsApply &&
+                                    VlcPitchBridge.applyToActiveAudioOutput(mediaPlayer, pitchSemitones)
+                                ) {
+                                    pitchNeedsApply = false
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) = dispatch {
