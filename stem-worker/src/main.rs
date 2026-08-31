@@ -5,12 +5,14 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
-use ort::{ep, inputs, session::Session, value::Tensor};
+use ort::{inputs, session::Session, value::Tensor};
 use realfft::{num_complex::Complex32, RealFftPlanner};
 use serde_json::json;
 
+mod chords;
+mod model_runtime;
 mod playback;
 
 const SAMPLE_RATE: usize = 44_100;
@@ -33,49 +35,48 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("play")) {
-        return playback::run(std::env::args_os().skip(2));
+    let mut args = std::env::args_os();
+    let _exe = args.next();
+    let first = args.next();
+    match first.as_deref().and_then(|arg| arg.to_str()) {
+        Some("play") => playback::run(args),
+        Some("chords") => chords::run(args),
+        Some("stems") => run_separation(args),
+        Some("--help") | Some("-h") => {
+            println!("archivetune-model-runner <stems|chords|play> [options]");
+            Ok(())
+        }
+        // Compatibility with older desktop builds that launched the helper without a subcommand.
+        Some(_) => run_separation(std::env::args_os().skip(1)),
+        None => bail!("missing command (stems, chords, or play)"),
     }
-    run_separation()
 }
 
-fn run_separation() -> Result<()> {
-    let args = Args::parse()?;
-    fs::create_dir_all(&args.output).with_context(|| format!("create {}", args.output.display()))?;
+fn run_separation(args: impl Iterator<Item = std::ffi::OsString>) -> Result<()> {
+    let args = Args::parse(args)?;
+    fs::create_dir_all(&args.output)
+        .with_context(|| format!("create {}", args.output.display()))?;
 
-    let ort_dll = std::env::var_os("ARCHIVETUNE_ONNXRUNTIME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|path| path.parent().map(Path::to_path_buf))
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("onnxruntime.dll")
-        });
-    ort::init_from(&ort_dll)
-        .with_context(|| format!("load ONNX Runtime from {}", ort_dll.display()))?
-        .commit();
+    model_runtime::init_onnx_runtime()?;
 
     emit(json!({ "type": "loading", "backend": "directml" }));
     let load_started = Instant::now();
-    let mut session = Session::builder()?
-        .with_execution_providers([
-            ep::DirectML::default()
-                .with_device_id(0)
-                .build(),
-        ])
-        .map_err(|error| anyhow!(error.to_string()))?
-        .commit_from_file(&args.model)
-        .with_context(|| format!("load model {}", args.model.display()))?;
+    let mut session = model_runtime::load_directml_session(&args.model)?;
     emit(json!({ "type": "loaded", "milliseconds": load_started.elapsed().as_millis() }));
 
-    let audio = read_stereo_wav(&args.input)?;
-    let duration_seconds = audio[0].len() as f64 / SAMPLE_RATE as f64;
-    emit(json!({ "type": "audio", "samples": audio[0].len(), "duration_seconds": duration_seconds }));
+    let (original_len, outer_mean, outer_std) = stereo_wav_normalization(&args.input)?;
+    let duration_seconds = original_len as f64 / SAMPLE_RATE as f64;
+    emit(json!({ "type": "audio", "samples": original_len, "duration_seconds": duration_seconds }));
 
     let started = Instant::now();
-    let stems = separate(&mut session, audio)?;
-    write_stems(&args.output, &stems)?;
+    separate_to_wavs(
+        &mut session,
+        StereoWavInput::open(&args.input)?,
+        original_len,
+        outer_mean,
+        outer_std,
+        &args.output,
+    )?;
     emit(json!({
         "type": "done",
         "milliseconds": started.elapsed().as_millis(),
@@ -92,18 +93,18 @@ struct Args {
 }
 
 impl Args {
-    fn parse() -> Result<Self> {
+    fn parse(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Self> {
         let mut model = None;
         let mut input = None;
         let mut output = None;
-        let mut args = std::env::args_os().skip(1);
+        let mut args = args;
         while let Some(arg) = args.next() {
             match arg.to_string_lossy().as_ref() {
                 "--model" => model = args.next().map(PathBuf::from),
                 "--input" => input = args.next().map(PathBuf::from),
                 "--output" => output = args.next().map(PathBuf::from),
                 "--help" | "-h" => {
-                    println!("archivetune-stems --model <htdemucs.onnx> --input <44.1k-stereo.wav> --output <dir>");
+                    println!("archivetune-model-runner stems --model <htdemucs.onnx> --input <44.1k-stereo.wav> --output <dir>");
                     std::process::exit(0);
                 }
                 other => bail!("unknown argument {other}"),
@@ -122,7 +123,82 @@ fn emit(value: serde_json::Value) {
     let _ = io::stdout().flush();
 }
 
-fn read_stereo_wav(path: &Path) -> Result<[Vec<f32>; CHANNELS]> {
+struct StereoWavInput {
+    reader: WavReader<std::io::BufReader<fs::File>>,
+    spec: WavSpec,
+}
+
+impl StereoWavInput {
+    fn open(path: &Path) -> Result<Self> {
+        let reader = WavReader::open(path).with_context(|| format!("open {}", path.display()))?;
+        let spec = reader.spec();
+        if spec.sample_rate as usize != SAMPLE_RATE || spec.channels as usize != CHANNELS {
+            bail!(
+                "worker input must be 44.1 kHz stereo; got {} Hz / {} channels",
+                spec.sample_rate,
+                spec.channels
+            );
+        }
+        Ok(Self { reader, spec })
+    }
+
+    fn frames(&self) -> usize {
+        self.reader.duration() as usize
+    }
+
+    fn fill_normalized(
+        &mut self,
+        start_frame: usize,
+        end_frame: usize,
+        mean: f32,
+        std: f32,
+        destination: &mut [Vec<f32>; CHANNELS],
+        destination_start: usize,
+    ) -> Result<()> {
+        self.reader.seek(start_frame as u32)?;
+        let frame_count = end_frame - start_frame;
+        match self.spec.sample_format {
+            SampleFormat::Float => {
+                for (index, sample) in self
+                    .reader
+                    .samples::<f32>()
+                    .take(frame_count * CHANNELS)
+                    .enumerate()
+                {
+                    destination[index & 1][destination_start + index / CHANNELS] =
+                        (sample.context("read float wav sample")? - mean) / std;
+                }
+            }
+            SampleFormat::Int if self.spec.bits_per_sample <= 16 => {
+                let scale = (1_u64 << (self.spec.bits_per_sample.saturating_sub(1) as u32)) as f32;
+                for (index, sample) in self
+                    .reader
+                    .samples::<i16>()
+                    .take(frame_count * CHANNELS)
+                    .enumerate()
+                {
+                    destination[index & 1][destination_start + index / CHANNELS] =
+                        (sample.context("read pcm16 wav sample")? as f32 / scale - mean) / std;
+                }
+            }
+            SampleFormat::Int => {
+                let scale = (1_u64 << (self.spec.bits_per_sample.saturating_sub(1) as u32)) as f32;
+                for (index, sample) in self
+                    .reader
+                    .samples::<i32>()
+                    .take(frame_count * CHANNELS)
+                    .enumerate()
+                {
+                    destination[index & 1][destination_start + index / CHANNELS] =
+                        (sample.context("read pcm wav sample")? as f32 / scale - mean) / std;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn stereo_wav_normalization(path: &Path) -> Result<(usize, f32, f32)> {
     let mut reader = WavReader::open(path).with_context(|| format!("open {}", path.display()))?;
     let spec = reader.spec();
     if spec.sample_rate as usize != SAMPLE_RATE || spec.channels as usize != CHANNELS {
@@ -132,68 +208,111 @@ fn read_stereo_wav(path: &Path) -> Result<[Vec<f32>; CHANNELS]> {
             spec.channels
         );
     }
-    let mut left = Vec::with_capacity(reader.duration() as usize / 2);
-    let mut right = Vec::with_capacity(reader.duration() as usize / 2);
+    let frames = reader.duration() as usize;
+    if frames == 0 {
+        bail!("invalid stereo wav sample count");
+    }
+    let mut mean = 0.0_f64;
     match spec.sample_format {
         SampleFormat::Float => {
-            for (index, sample) in reader.samples::<f32>().enumerate() {
-                let sample = sample.context("read float wav sample")?;
-                if index & 1 == 0 { left.push(sample) } else { right.push(sample) }
+            let mut samples = reader.samples::<f32>();
+            for _ in 0..frames {
+                mean += ((samples.next().context("missing left sample")??
+                    + samples.next().context("missing right sample")??)
+                    * 0.5) as f64;
             }
         }
         SampleFormat::Int => {
             let scale = (1_u64 << (spec.bits_per_sample.saturating_sub(1) as u32)) as f32;
             if spec.bits_per_sample <= 16 {
-                for (index, sample) in reader.samples::<i16>().enumerate() {
-                    let sample = sample.context("read pcm16 wav sample")? as f32 / scale;
-                    if index & 1 == 0 { left.push(sample) } else { right.push(sample) }
+                let mut samples = reader.samples::<i16>();
+                for _ in 0..frames {
+                    mean += ((samples.next().context("missing left sample")?? as f32 / scale
+                        + samples.next().context("missing right sample")?? as f32 / scale)
+                        * 0.5) as f64;
                 }
             } else {
-                for (index, sample) in reader.samples::<i32>().enumerate() {
-                    let sample = sample.context("read pcm wav sample")? as f32 / scale;
-                    if index & 1 == 0 { left.push(sample) } else { right.push(sample) }
+                let mut samples = reader.samples::<i32>();
+                for _ in 0..frames {
+                    mean += ((samples.next().context("missing left sample")?? as f32 / scale
+                        + samples.next().context("missing right sample")?? as f32 / scale)
+                        * 0.5) as f64;
                 }
             }
         }
     }
-    if left.len() != right.len() || left.is_empty() {
-        bail!("invalid stereo wav sample count");
-    }
-    Ok([left, right])
-}
+    mean /= frames as f64;
 
-fn separate(session: &mut Session, mut audio: [Vec<f32>; CHANNELS]) -> Result<Vec<Vec<Vec<f32>>>> {
-    let original_len = audio[0].len();
-    let (outer_mean, outer_std) = outer_normalization(&audio);
-    for channel in &mut audio {
-        for sample in channel.iter_mut() {
-            *sample = (*sample - outer_mean) / outer_std;
+    let mut reader = StereoWavInput::open(path)?;
+    let mut variance = 0.0_f64;
+    match reader.spec.sample_format {
+        SampleFormat::Float => {
+            let mut samples = reader.reader.samples::<f32>();
+            for _ in 0..frames {
+                let mono = (samples.next().context("missing left sample")??
+                    + samples.next().context("missing right sample")??)
+                    * 0.5;
+                variance += (mono as f64 - mean).powi(2);
+            }
+        }
+        SampleFormat::Int if reader.spec.bits_per_sample <= 16 => {
+            let scale = (1_u64 << (reader.spec.bits_per_sample.saturating_sub(1) as u32)) as f32;
+            let mut samples = reader.reader.samples::<i16>();
+            for _ in 0..frames {
+                let mono = (samples.next().context("missing left sample")?? as f32 / scale
+                    + samples.next().context("missing right sample")?? as f32 / scale)
+                    * 0.5;
+                variance += (mono as f64 - mean).powi(2);
+            }
+        }
+        SampleFormat::Int => {
+            let scale = (1_u64 << (reader.spec.bits_per_sample.saturating_sub(1) as u32)) as f32;
+            let mut samples = reader.reader.samples::<i32>();
+            for _ in 0..frames {
+                let mono = (samples.next().context("missing left sample")?? as f32 / scale
+                    + samples.next().context("missing right sample")?? as f32 / scale)
+                    * 0.5;
+                variance += (mono as f64 - mean).powi(2);
+            }
         }
     }
+    let std = (variance / frames.saturating_sub(1).max(1) as f64)
+        .sqrt()
+        .max(1e-12);
+    Ok((frames, mean as f32, std as f32))
+}
 
-    // Demucs' shifts=1 path amounts to one shifted, zero-padded prediction. Keep a fixed
-    // quarter-second offset so cached stems are deterministic across runs.
+/// Separates one track without retaining a second full-song copy of every stem.
+///
+/// A three-minute song previously held both an expanded shifted output and a cropped output
+/// (24 full-length float channels in total) before the WAV writer could begin. That alone is
+/// more than 700 MiB for a three-minute song. The overlap between adjacent one-second segments is only 100 ms, so a
+/// one-segment ring is sufficient: samples are flushed as soon as no later segment can touch
+/// them.
+fn separate_to_wavs(
+    session: &mut Session,
+    mut audio: StereoWavInput,
+    original_len: usize,
+    outer_mean: f32,
+    outer_std: f32,
+    directory: &Path,
+) -> Result<()> {
+    // Demucs' shifts=1 path amounts to one shifted, zero-padded prediction. Keep the shift
+    // virtual instead of allocating another full-song stereo buffer.
     let shifted_len = original_len + SHIFT_CONTEXT * 2;
-    let mut shifted = [vec![0.0_f32; shifted_len], vec![0.0_f32; shifted_len]];
-    for channel in 0..CHANNELS {
-        shifted[channel][SHIFT_CONTEXT..SHIFT_CONTEXT + original_len].copy_from_slice(&audio[channel]);
-    }
-
-    let mut output = vec![vec![vec![0.0_f32; shifted_len]; CHANNELS]; SOURCES];
-    let mut weight_sum = vec![0.0_f32; shifted_len];
     let weight = triangular_weight();
-    let offsets: Vec<usize> = (0..shifted_len).step_by(STRIDE).collect();
-    let total = offsets.len();
+    let total = shifted_len.div_ceil(STRIDE);
     let mut dsp = DemucsDsp::new();
+    let mut writer = RollingStemWavWriter::new(directory, original_len, outer_mean, outer_std)?;
 
-    for (chunk_index, offset) in offsets.into_iter().enumerate() {
+    for chunk_index in 0..total {
+        let offset = chunk_index * STRIDE;
         let chunk_len = SEGMENT.min(shifted_len - offset);
         let mut chunk = [vec![0.0_f32; SEGMENT], vec![0.0_f32; SEGMENT]];
         let pad_left = (SEGMENT - chunk_len) / 2;
-        for channel in 0..CHANNELS {
-            chunk[channel][pad_left..pad_left + chunk_len]
-                .copy_from_slice(&shifted[channel][offset..offset + chunk_len]);
-        }
+        copy_virtual_shifted_chunk(
+            &mut audio, offset, chunk_len, pad_left, outer_mean, outer_std, &mut chunk,
+        )?;
 
         let mag = dsp.stft_mag(&chunk)?;
         let mix = interleaved_model_mix(&chunk);
@@ -204,67 +323,143 @@ fn separate(session: &mut Session, mut audio: [Vec<f32>; CHANNELS]) -> Result<Ve
         let (_, time) = outputs["time_stems"].try_extract_tensor::<f32>()?;
         let chunk_stems = dsp.reconstruct(freq, time)?;
 
-        let trim_start = pad_left;
-        for source in 0..SOURCES {
-            for channel in 0..CHANNELS {
-                for local in 0..chunk_len {
-                    output[source][channel][offset + local] +=
-                        chunk_stems[source][channel][trim_start + local] * weight[local];
-                }
-            }
-        }
-        for local in 0..chunk_len {
-            weight_sum[offset + local] += weight[local];
-        }
+        writer.add_chunk(offset, chunk_len, pad_left, &chunk_stems, &weight)?;
+        writer.flush_until((offset + STRIDE).min(shifted_len))?;
         emit(json!({ "type": "progress", "value": (chunk_index + 1) as f64 / total as f64 }));
     }
+    writer.flush_until(shifted_len)?;
+    writer.finish()
+}
 
-    for index in 0..shifted_len {
-        let divisor = weight_sum[index];
-        if divisor > 0.0 {
+fn copy_virtual_shifted_chunk(
+    audio: &mut StereoWavInput,
+    offset: usize,
+    chunk_len: usize,
+    pad_left: usize,
+    mean: f32,
+    std: f32,
+    chunk: &mut [Vec<f32>; CHANNELS],
+) -> Result<()> {
+    let shifted_end = offset + chunk_len;
+    let original_start = offset.saturating_sub(SHIFT_CONTEXT);
+    let original_end = shifted_end
+        .saturating_sub(SHIFT_CONTEXT)
+        .min(audio.frames());
+    if original_start >= original_end {
+        return Ok(());
+    }
+    let destination_start = pad_left + original_start + SHIFT_CONTEXT - offset;
+    audio.fill_normalized(
+        original_start,
+        original_end,
+        mean,
+        std,
+        chunk,
+        destination_start,
+    )
+}
+
+struct RollingStemWavWriter {
+    writers: Vec<WavWriter<std::io::BufWriter<fs::File>>>,
+    sums: Vec<Vec<f32>>,
+    weights: Vec<f32>,
+    cursor: usize,
+    original_len: usize,
+    outer_mean: f32,
+    outer_std: f32,
+}
+
+impl RollingStemWavWriter {
+    fn new(directory: &Path, original_len: usize, outer_mean: f32, outer_std: f32) -> Result<Self> {
+        let spec = WavSpec {
+            channels: CHANNELS as u16,
+            sample_rate: SAMPLE_RATE as u32,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        };
+        let names = ["drums", "bass", "other", "vocals", "guitar", "piano"];
+        let writers = names
+            .into_iter()
+            .map(|name| {
+                let path = directory.join(format!("{name}.wav"));
+                WavWriter::create(&path, spec).with_context(|| format!("create {}", path.display()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            writers,
+            sums: (0..SOURCES * CHANNELS)
+                .map(|_| vec![0.0; SEGMENT])
+                .collect(),
+            weights: vec![0.0; SEGMENT],
+            cursor: 0,
+            original_len,
+            outer_mean,
+            outer_std,
+        })
+    }
+
+    fn add_chunk(
+        &mut self,
+        offset: usize,
+        chunk_len: usize,
+        trim_start: usize,
+        stems: &[Vec<Vec<f32>>],
+        blend: &[f32],
+    ) -> Result<()> {
+        for local in 0..chunk_len {
+            let slot = (offset + local) % SEGMENT;
+            let weight = blend[local];
+            self.weights[slot] += weight;
             for source in 0..SOURCES {
                 for channel in 0..CHANNELS {
-                    output[source][channel][index] /= divisor;
+                    self.sums[source * CHANNELS + channel][slot] +=
+                        stems[source][channel][trim_start + local] * weight;
                 }
             }
         }
+        Ok(())
     }
 
-    let mut cropped = vec![vec![vec![0.0_f32; original_len]; CHANNELS]; SOURCES];
-    for source in 0..SOURCES {
-        for channel in 0..CHANNELS {
-            for i in 0..original_len {
-                cropped[source][channel][i] =
-                    output[source][channel][SHIFT_CONTEXT + i] * outer_std + outer_mean;
+    fn flush_until(&mut self, end: usize) -> Result<()> {
+        while self.cursor < end {
+            let slot = self.cursor % SEGMENT;
+            let divisor = self.weights[slot];
+            if (SHIFT_CONTEXT..SHIFT_CONTEXT + self.original_len).contains(&self.cursor) {
+                for source in 0..SOURCES {
+                    let left = self.sums[source * CHANNELS][slot] / divisor * self.outer_std
+                        + self.outer_mean;
+                    let right = self.sums[source * CHANNELS + 1][slot] / divisor * self.outer_std
+                        + self.outer_mean;
+                    self.writers[source].write_sample(left)?;
+                    self.writers[source].write_sample(right)?;
+                }
             }
+            self.weights[slot] = 0.0;
+            for sum in &mut self.sums {
+                sum[slot] = 0.0;
+            }
+            self.cursor += 1;
         }
+        Ok(())
     }
-    Ok(cropped)
-}
 
-fn outer_normalization(audio: &[Vec<f32>; CHANNELS]) -> (f32, f32) {
-    let len = audio[0].len();
-    let mut mean = 0.0_f64;
-    for i in 0..len {
-        mean += ((audio[0][i] + audio[1][i]) * 0.5) as f64;
+    fn finish(self) -> Result<()> {
+        for writer in self.writers {
+            writer.finalize()?;
+        }
+        Ok(())
     }
-    mean /= len as f64;
-    let mut variance = 0.0_f64;
-    for i in 0..len {
-        let mono = ((audio[0][i] + audio[1][i]) * 0.5) as f64;
-        let delta = mono - mean;
-        variance += delta * delta;
-    }
-    // torch.std defaults to Bessel correction (N-1).
-    let std = (variance / (len.saturating_sub(1).max(1) as f64)).sqrt().max(1e-12);
-    (mean as f32, std as f32)
 }
 
 fn triangular_weight() -> Vec<f32> {
     let half = SEGMENT / 2;
     let mut weight = Vec::with_capacity(SEGMENT);
-    for value in 1..=half { weight.push(value as f32 / half as f32); }
-    for value in (1..=half).rev() { weight.push(value as f32 / half as f32); }
+    for value in 1..=half {
+        weight.push(value as f32 / half as f32);
+    }
+    for value in (1..=half).rev() {
+        weight.push(value as f32 / half as f32);
+    }
     weight
 }
 
@@ -289,7 +484,11 @@ impl DemucsDsp {
         let hann = (0..NFFT)
             .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / NFFT as f32).cos())
             .collect();
-        Self { forward, inverse, hann }
+        Self {
+            forward,
+            inverse,
+            hann,
+        }
     }
 
     fn stft_mag(&mut self, mix: &[Vec<f32>; CHANNELS]) -> Result<Vec<f32>> {
@@ -328,7 +527,11 @@ impl DemucsDsp {
         let expected_freq = SOURCES * 4 * FREQ_BINS * FRAMES;
         let expected_time = SOURCES * CHANNELS * SEGMENT;
         if freq.len() != expected_freq || time.len() != expected_time {
-            bail!("unexpected model output sizes: freq={} time={}", freq.len(), time.len());
+            bail!(
+                "unexpected model output sizes: freq={} time={}",
+                freq.len(),
+                time.len()
+            );
         }
         let padded_length = HOP * FRAMES + 2 * (HOP / 2 * 3); // 48,128
         let centered_length = padded_length + NFFT; // 52,224
@@ -346,8 +549,12 @@ impl DemucsDsp {
                         let frame = frame48 - 2;
                         let complex_channel = channel * 2;
                         for f in 0..FREQ_BINS {
-                            let re = freq[(((source * 4 + complex_channel) * FREQ_BINS + f) * FRAMES) + frame];
-                            let im = freq[(((source * 4 + complex_channel + 1) * FREQ_BINS + f) * FRAMES) + frame];
+                            let re = freq[(((source * 4 + complex_channel) * FREQ_BINS + f)
+                                * FRAMES)
+                                + frame];
+                            let im = freq[(((source * 4 + complex_channel + 1) * FREQ_BINS + f)
+                                * FRAMES)
+                                + frame];
                             spectrum[f] = Complex32::new(re, im);
                         }
                         // A real-valued signal cannot have an imaginary DC component. PyTorch's
@@ -394,33 +601,14 @@ fn reflect_pad(input: &[f32], left: usize, right: usize) -> Vec<f32> {
 fn reflected_sample(input: &[f32], mut index: isize) -> f32 {
     let len = input.len() as isize;
     while index < 0 || index >= len {
-        if index < 0 { index = -index; }
-        if index >= len { index = 2 * len - 2 - index; }
+        if index < 0 {
+            index = -index;
+        }
+        if index >= len {
+            index = 2 * len - 2 - index;
+        }
     }
     input[index as usize]
-}
-
-fn write_stems(directory: &Path, stems: &[Vec<Vec<f32>>]) -> Result<()> {
-    // Raw model source order is drums, bass, other, vocals, guitar, piano. Keep each stem stereo on disk; an
-    // 8-channel audio container would assign surround-speaker semantics (including an LFE channel)
-    // and can therefore alter arbitrary stem channels during encode/decode.
-    let names = ["drums", "bass", "other", "vocals", "guitar", "piano"];
-    for (source, name) in names.into_iter().enumerate() {
-        let path = directory.join(format!("{name}.wav"));
-        let spec = WavSpec {
-            channels: CHANNELS as u16,
-            sample_rate: SAMPLE_RATE as u32,
-            bits_per_sample: 32,
-            sample_format: SampleFormat::Float,
-        };
-        let mut writer = WavWriter::create(&path, spec).with_context(|| format!("create {}", path.display()))?;
-        for i in 0..stems[source][0].len() {
-            writer.write_sample(stems[source][0][i])?;
-            writer.write_sample(stems[source][1][i])?;
-        }
-        writer.finalize()?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -443,5 +631,82 @@ mod tests {
         assert_eq!(weight[SEGMENT / 2 - 1], 1.0);
         assert_eq!(weight[SEGMENT / 2], 1.0);
         assert!((weight[0] - weight[SEGMENT - 1]).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn rolling_writer_flushes_each_stem_without_full_song_buffers() -> Result<()> {
+        let directory = std::env::temp_dir().join(format!(
+            "archivetune-stem-worker-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory)?;
+
+        let result = (|| -> Result<()> {
+            let mut writer = RollingStemWavWriter::new(&directory, 3, 0.0, 1.0)?;
+            let mut stems = vec![vec![vec![0.0; SEGMENT]; CHANNELS]; SOURCES];
+            for source in 0..SOURCES {
+                for channel in 0..CHANNELS {
+                    for sample in 0..3 {
+                        stems[source][channel][sample] =
+                            (source * 10 + channel * 3 + sample) as f32;
+                    }
+                }
+            }
+            writer.add_chunk(SHIFT_CONTEXT, 3, 0, &stems, &vec![1.0; SEGMENT])?;
+            writer.flush_until(SHIFT_CONTEXT + 3)?;
+            writer.finish()?;
+
+            let mut reader = WavReader::open(directory.join("vocals.wav"))?;
+            let samples = reader.samples::<f32>().collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(samples.len(), 6);
+            assert_eq!(samples, vec![30.0, 33.0, 31.0, 34.0, 32.0, 35.0]);
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(&directory);
+        result
+    }
+
+    #[test]
+    fn wav_input_seeks_and_normalizes_only_the_requested_segment() -> Result<()> {
+        let directory = std::env::temp_dir().join(format!(
+            "archivetune-stem-input-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory)?;
+        let input = directory.join("input.wav");
+        let result = (|| -> Result<()> {
+            let spec = WavSpec {
+                channels: CHANNELS as u16,
+                sample_rate: SAMPLE_RATE as u32,
+                bits_per_sample: 16,
+                sample_format: SampleFormat::Int,
+            };
+            let mut writer = WavWriter::create(&input, spec)?;
+            for (left, right) in [
+                (0_i16, 0_i16),
+                (1_000, -1_000),
+                (2_000, -2_000),
+                (3_000, -3_000),
+            ] {
+                writer.write_sample(left)?;
+                writer.write_sample(right)?;
+            }
+            writer.finalize()?;
+
+            let (frames, mean, std) = stereo_wav_normalization(&input)?;
+            assert_eq!(frames, 4);
+            assert_eq!(mean, 0.0);
+            let mut reader = StereoWavInput::open(&input)?;
+            let mut destination = [vec![0.0; 5], vec![0.0; 5]];
+            reader.fill_normalized(1, 3, mean, std, &mut destination, 2)?;
+            assert!((destination[0][2] - (1_000.0 / 32_768.0 / std)).abs() < 1e-6);
+            assert!((destination[1][3] - (-2_000.0 / 32_768.0 / std)).abs() < 1e-6);
+            assert_eq!(destination[0][0], 0.0);
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(&directory);
+        result
     }
 }

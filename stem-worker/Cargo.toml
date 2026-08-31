@@ -1,5 +1,5 @@
 [package]
-name = "archivetune-stems"
+name = "archivetune-model-runner"
 version = "0.1.0"
 edition = "2024"
 

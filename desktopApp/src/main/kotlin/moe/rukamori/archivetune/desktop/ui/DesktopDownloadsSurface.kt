@@ -61,6 +61,7 @@ fun DesktopDownloadsSurface(
     modifier: Modifier = Modifier,
 ) {
     val downloads by services.downloads.collectAsState()
+    val resolutionQueue by services.resolutionQueue.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var message by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     val listState = rememberPersistedLazyListState("downloads")
@@ -72,6 +73,32 @@ fun DesktopDownloadsSurface(
             }
         }
         notice?.let { value -> item { Text(value, color = MaterialTheme.colorScheme.error) } }
+        if (resolutionQueue.active || resolutionQueue.prepared > 0 || resolutionQueue.failed > 0) {
+            item {
+                val waiting = resolutionQueue.pending + resolutionQueue.resolving
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (resolutionQueue.active) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(
+                            buildString {
+                                append("Preparing download queue · ").append(waiting).append(" waiting")
+                                resolutionQueue.currentTitle?.let { append(" · Resolving ").append(it) }
+                                append(" · ").append(resolutionQueue.prepared).append(" ready")
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (resolutionQueue.failed > 0) {
+                        Text(
+                            "${resolutionQueue.failed} could not be prepared${resolutionQueue.lastError?.let { ": $it" }.orEmpty()}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        }
         message?.let { value -> item { Text(value, color = MaterialTheme.colorScheme.error) } }
         if (downloads.isEmpty()) {
             item { EmptyDownloads() }

@@ -7,6 +7,9 @@
 
 package moe.rukamori.archivetune.playback.desktop
 
+import com.sun.net.httpserver.HttpServer
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
@@ -30,9 +33,11 @@ import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
+import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 import uk.co.caprica.vlcj.player.base.callback.AudioCallback
 
 /**
@@ -49,13 +54,19 @@ class VlcjLocalPlaybackIntegrationTest {
         val wave = createWaveFile(durationSeconds = 2, channels = 1)
         try {
             val base = captureFrequency(runtime, wave, 0f)
-            val octaveUp = captureFrequency(runtime, wave, 12f)
-            assertTrue(base in 420.0..460.0, "expected ~440 Hz, got $base")
-            assertTrue(octaveUp in 840.0..920.0, "expected ~880 Hz after +12 st, got $octaveUp")
+            assertTrue(base in 438.0..442.0, "expected ~440 Hz, got $base")
+            listOf(-7f, -1f, 1f, 5f, 7f, 12f).forEach { semitones ->
+                val measured = captureFrequency(runtime, wave, semitones)
+                val expected = 440.0 * Math.pow(2.0, semitones / 12.0)
+                val cents = 1200.0 * (kotlin.math.ln(measured / expected) / kotlin.math.ln(2.0))
+                println("pitch $semitones st: measured=$measured expected=$expected errorCents=$cents")
+                assertTrue(kotlin.math.abs(cents) < 8.0, "pitch $semitones st is ${cents} cents off: measured=$measured expected=$expected")
+            }
         } finally {
             Files.deleteIfExists(wave)
         }
     }
+
 
     @Test
     fun `restoring a paused queue does not start libVLC`() = runBlocking {
@@ -138,6 +149,244 @@ class VlcjLocalPlaybackIntegrationTest {
     }
 
     @Test
+    fun `crossfade still overlaps when next source resolves slowly`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val secondResolutionCalls = AtomicInteger()
+        val firstWave = createWaveFile(durationSeconds = 6)
+        val secondWave = createWaveFile(durationSeconds = 6)
+        val first = PlaybackItem(
+            metadata = PlaybackMetadata(id = "crossfade-slow-first", title = "Crossfade slow first", durationHintMs = 6_000L),
+            source = PlaybackSource.LocalFile(firstWave.toString()),
+        )
+        val second = PlaybackItem(
+            metadata = PlaybackMetadata(id = "crossfade-slow-second", title = "Crossfade slow second", durationHintMs = 6_000L),
+            source = PlaybackSource.LocalFile(secondWave.toString()),
+        )
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver { item ->
+                if (item === second) {
+                    secondResolutionCalls.incrementAndGet()
+                    delay(2_500L)
+                }
+                DesktopConcretePlaybackSourceResolver.resolve(item)
+            },
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+        try {
+            controller.setCrossfadeConfiguration(DesktopCrossfadeConfiguration(enabled = true, durationMs = 1_000L, preserveGaplessAlbumTransitions = false))
+            controller.replaceQueue(listOf(first, second))
+            awaitState(controller, "slow crossfade first playback") { it.currentItem?.metadata?.id == first.metadata.id && it.isPlaying }
+            val factoryField = controller.javaClass.getDeclaredField("factory").apply { isAccessible = true }
+            val initialFactory = factoryField.get(controller)
+            val secondaryField = controller.javaClass.getDeclaredField("secondaryCrossfadePlayer").apply { isAccessible = true }
+            val retiredField = controller.javaClass.getDeclaredField("retiredCrossfadePlayers").apply { isAccessible = true }
+            var overlapObserved = false
+            withTimeout(15_000L) {
+                while (controller.state.value.currentItem?.metadata?.id != second.metadata.id) {
+                    val secondaryPlayer = secondaryField.get(controller) as? MediaPlayer
+                    overlapObserved = overlapObserved || secondaryPlayer != null
+                    delay(20L)
+                }
+            }
+            assertTrue(overlapObserved, "crossfade should prepare a slow next source before the fade window")
+            assertTrue(factoryField.get(controller) === initialFactory, "crossfade should reuse the existing libVLC instance")
+            assertEquals(1, secondResolutionCalls.get(), "promoting the prepared player must not reload the incoming source")
+            assertTrue(
+                retiredField.get(controller).let { it is Collection<*> && it.isNotEmpty() },
+                "crossfade promotion should defer outgoing player teardown",
+            )
+            val retired = (retiredField.get(controller) as Collection<*>).first()!!
+            val retiredPlayer = retired.javaClass
+                .getDeclaredField("player")
+                .apply { isAccessible = true }
+                .get(retired) as MediaPlayer
+            assertFalse(
+                retiredPlayer.status().isPlaying(),
+                "muted outgoing player must be paused before its natural EOF",
+            )
+            delay(300L)
+            assertTrue(controller.state.value.isPlaying, "promoted player should remain audible after handoff")
+            delay(900L)
+            assertTrue(
+                controller.state.value.isPlaying,
+                "promoted player must keep playing after the outgoing VLC player is retired",
+            )
+            val activePlayer = controller.javaClass
+                .getDeclaredField("player")
+                .apply { isAccessible = true }
+                .get(controller) as MediaPlayer
+            assertTrue(
+                activePlayer.status().isPlaying(),
+                "promoted libVLC MediaPlayer itself must still be playing after outgoing retirement",
+            )
+            withTimeout(2_000L) {
+                while (retiredField.get(controller).let { it is Collection<*> && it.isNotEmpty() }) {
+                    delay(20L)
+                }
+            }
+        } finally {
+            controller.close()
+            delay(250L)
+            Files.deleteIfExists(firstWave)
+            Files.deleteIfExists(secondWave)
+        }
+    }
+
+    @Test
+    fun `crossfade keeps advancing through the queue`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val firstWave = createWaveFile(durationSeconds = 4)
+        val secondWave = createWaveFile(durationSeconds = 4)
+        val thirdWave = createWaveFile(durationSeconds = 4)
+        val first = PlaybackItem(
+            metadata = PlaybackMetadata(id = "crossfade-chain-first", title = "Crossfade chain first", durationHintMs = 4_000L),
+            source = PlaybackSource.LocalFile(firstWave.toString()),
+        )
+        val second = PlaybackItem(
+            metadata = PlaybackMetadata(id = "crossfade-chain-second", title = "Crossfade chain second", durationHintMs = 4_000L),
+            source = PlaybackSource.LocalFile(secondWave.toString()),
+        )
+        val third = PlaybackItem(
+            metadata = PlaybackMetadata(id = "crossfade-chain-third", title = "Crossfade chain third", durationHintMs = 4_000L),
+            source = PlaybackSource.LocalFile(thirdWave.toString()),
+        )
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+        try {
+            controller.setCrossfadeConfiguration(
+                DesktopCrossfadeConfiguration(
+                    enabled = true,
+                    durationMs = 750L,
+                    preserveGaplessAlbumTransitions = false,
+                ),
+            )
+            controller.replaceQueue(listOf(first, second, third))
+            awaitState(controller, "first crossfade-chain track") {
+                it.currentItem?.metadata?.id == first.metadata.id && it.isPlaying
+            }
+            awaitState(controller, "second crossfade-chain track") {
+                it.currentItem?.metadata?.id == second.metadata.id && it.isPlaying
+            }
+            awaitState(controller, "third crossfade-chain track") {
+                it.currentItem?.metadata?.id == third.metadata.id && it.isPlaying
+            }
+        } finally {
+            controller.close()
+            listOf(firstWave, secondWave, thirdWave).forEach { path ->
+                repeat(20) {
+                    if (runCatching { Files.deleteIfExists(path) }.isSuccess) return@forEach
+                    delay(50L)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `stopped after deferred crossfade eof does not disable autoplay`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val wave = createWaveFile(durationSeconds = 3)
+        val item = PlaybackItem(
+            metadata = PlaybackMetadata(id = "deferred-eof-stop", title = "Deferred EOF stop", durationHintMs = 3_000L),
+            source = PlaybackSource.LocalFile(wave.toString()),
+        )
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        )
+        try {
+            controller.replaceQueue(listOf(item))
+            awaitState(controller, "deferred EOF source playback") { it.isPlaying }
+
+            val player = controller.javaClass.getDeclaredField("player").apply { isAccessible = true }
+                .get(controller) as MediaPlayer
+            val listener = controller.javaClass.getDeclaredField("listener").apply { isAccessible = true }
+                .get(controller) as MediaPlayerEventAdapter
+            controller.javaClass.getDeclaredField("crossfadeSuppressFinishedRunId").apply { isAccessible = true }
+                .set(controller, 77L)
+            controller.javaClass.getDeclaredField("deferredFinishedRunId").apply { isAccessible = true }
+                .set(controller, 77L)
+
+            listener.stopped(player)
+            delay(100L)
+
+            assertTrue(
+                controller.state.value.playWhenReady,
+                "the stopped event paired with a deferred crossfade EOF must not pause the next auto-advanced track",
+            )
+        } finally {
+            controller.close()
+            delay(250L)
+            Files.deleteIfExists(wave)
+        }
+    }
+
+    @Test
+    fun `crossfade keeps streamed callback media playing after promotion`() = runBlocking {
+        val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
+        val firstWave = createWaveFile(durationSeconds = 5)
+        val secondWave = createWaveFile(durationSeconds = 5)
+        val thirdWave = createWaveFile(durationSeconds = 5)
+        val files = listOf(firstWave, secondWave, thirdWave)
+        val server = startRangeServer(files)
+        val port = server.address.port
+        val items = files.mapIndexed { index, _ ->
+            PlaybackItem(
+                metadata = PlaybackMetadata(
+                    id = "callback-crossfade-$index",
+                    title = "Callback crossfade $index",
+                    durationHintMs = 5_000L,
+                ),
+                source = PlaybackSource.Remote(
+                    url = "http://127.0.0.1:$port/$index.wav",
+                    mimeType = "audio/wav",
+                ),
+            )
+        }
+        val controller = VlcjPlaybackController(
+            sourceResolver = PlaybackSourceResolver(DesktopConcretePlaybackSourceResolver::resolve),
+            runtimeConfiguration = VlcRuntimeConfiguration(directory = runtime.root),
+        ).apply {
+            applicationHttpTransportPredicate = { true }
+        }
+        try {
+            controller.setCrossfadeConfiguration(
+                DesktopCrossfadeConfiguration(
+                    enabled = true,
+                    durationMs = 1_000L,
+                    preserveGaplessAlbumTransitions = false,
+                ),
+            )
+            controller.replaceQueue(items)
+            awaitState(controller, "first callback crossfade track") {
+                it.currentItem?.metadata?.id == items[0].metadata.id && it.isPlaying
+            }
+            awaitState(controller, "second callback crossfade track") {
+                it.currentItem?.metadata?.id == items[1].metadata.id && it.isPlaying
+            }
+            delay(1_500L)
+            val promoted = controller.javaClass
+                .getDeclaredField("player")
+                .apply { isAccessible = true }
+                .get(controller) as MediaPlayer
+            assertTrue(promoted.status().isPlaying(), "promoted callback-media player stopped after crossfade handoff")
+            awaitState(controller, "third callback crossfade track") {
+                it.currentItem?.metadata?.id == items[2].metadata.id && it.isPlaying
+            }
+        } finally {
+            controller.close()
+            server.stop(0)
+            files.forEach { path ->
+                repeat(20) {
+                    if (runCatching { Files.deleteIfExists(path) }.isSuccess) return@forEach
+                    delay(50L)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `pitch is reapplied when playback advances to the next queue item`() = runBlocking {
         val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
         val firstWave = createWaveFile(durationSeconds = 2)
@@ -162,10 +411,10 @@ class VlcjLocalPlaybackIntegrationTest {
                 source = PlaybackSource.LocalFile(secondWave.toString()),
             )
             controller.replaceQueue(listOf(first, second))
-            awaitState(controller, "first pitched playback") {
-                it.currentItem?.metadata?.id == first.metadata.id && it.status == PlaybackStatus.READY
-            }
+            awaitState(controller, "first pitched playback") { it.currentItem?.metadata?.id == first.metadata.id && it.status == PlaybackStatus.READY }
             controller.setPitch(5f)
+            // Model the normal steady state after the first item's playing callback has applied
+            // the pitch. The regression is the next load forgetting to arm this flag again.
             pitchNeedsApply.setBoolean(controller, false)
 
             controller.skipNext()
@@ -173,13 +422,11 @@ class VlcjLocalPlaybackIntegrationTest {
                 while (!pitchPending()) delay(10L)
             }
             assertTrue(pitchPending(), "new media must reapply the persisted pitch")
-            awaitState(controller, "second playback") {
-                it.currentItem?.metadata?.id == second.metadata.id && it.status == PlaybackStatus.READY
-            }
+            awaitState(controller, "second playback") { it.currentItem?.metadata?.id == second.metadata.id && it.status == PlaybackStatus.READY }
             withTimeout(10_000L) {
                 while (pitchPending()) delay(10L)
             }
-            assertTrue(!pitchPending(), "persisted pitch must finish applying to the next item's audio output")
+            assertFalse(pitchPending(), "persisted pitch must finish applying to the next item's audio output")
             controller.stop()
         } finally {
             controller.close()
@@ -349,6 +596,37 @@ class VlcjLocalPlaybackIntegrationTest {
         }
         return path
     }
+
+    private fun startRangeServer(files: List<Path>): HttpServer =
+        HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0).apply {
+            files.forEachIndexed { index, path ->
+                createContext("/$index.wav") { exchange ->
+                    val bytes = Files.readAllBytes(path)
+                    val range = exchange.requestHeaders.getFirst("Range")
+                    val match = Regex("""bytes=(\\d+)-(\\d*)""").matchEntire(range.orEmpty())
+                    val start = match?.groupValues?.get(1)?.toLongOrNull()?.coerceIn(0L, bytes.size.toLong()) ?: 0L
+                    val requestedEnd = match?.groupValues?.get(2)?.toLongOrNull()
+                    val end = (requestedEnd ?: (bytes.size - 1L)).coerceIn(start, bytes.size - 1L)
+                    val length = (end - start + 1L).coerceAtLeast(0L)
+                    exchange.responseHeaders.add("Accept-Ranges", "bytes")
+                    exchange.responseHeaders.add("Content-Type", "audio/wav")
+                    if (match != null) {
+                        exchange.responseHeaders.add("Content-Range", "bytes $start-$end/" + bytes.size)
+                        exchange.sendResponseHeaders(206, length)
+                    } else {
+                        exchange.sendResponseHeaders(200, bytes.size.toLong())
+                    }
+                    exchange.responseBody.use { output ->
+                        if (match != null) {
+                            output.write(bytes, start.toInt(), length.toInt())
+                        } else {
+                            output.write(bytes)
+                        }
+                    }
+                }
+            }
+            start()
+        }
 
     private fun captureFrequency(runtime: VlcRuntimeLayout, wave: Path, pitch: Float): Double {
         VlcRuntimeLocator.prepareNative(runtime)

@@ -66,8 +66,16 @@ class AddToPlaylistPickerStateTest {
         assertNull(session.finishAdd(Result.success(Unit)))
     }
 
-    private fun song() = SongItem(
-        id = "song-1",
+    @Test
+    fun `album session keeps every song in album order`() {
+        val songs = listOf(song("song-1"), song("song-2"), song("song-3"))
+        val session = AddToPlaylistPickerSession(songs.first(), songs)
+
+        assertEquals(listOf("song-1", "song-2", "song-3"), session.songs.map(SongItem::id))
+    }
+
+    private fun song(id: String = "song-1") = SongItem(
+        id = id,
         title = "Song",
         artists = listOf(Artist(name = "Artist", id = "artist-1")),
         thumbnail = "https://images.invalid/song.jpg",

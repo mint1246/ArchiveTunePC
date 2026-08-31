@@ -6,8 +6,10 @@ package moe.rukamori.archivetune.desktop.platform
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -101,10 +103,17 @@ class DesktopDownloadServices(
     private var downloadsJob: Job = observe(manager)
     private val enqueueMutex = Mutex()
     private val operationLock = Any()
+    private val batchLock = Any()
+    private val batchQueue = ArrayDeque<SongItem>()
+    private val batchQueuedIds = linkedSetOf<String>()
+    private var batchJob: Job? = null
+    @Volatile private var activeResolutionMediaId: String? = null
+    private val mutableResolutionQueue = MutableStateFlow(DownloadResolutionQueueState())
     private var inFlightEnqueues = 0
 
     /** Stable across manager reconfiguration so existing UI collectors never become stale. */
     val downloads: StateFlow<List<DownloadSnapshot>> = mutableDownloads.asStateFlow()
+    val resolutionQueue: StateFlow<DownloadResolutionQueueState> = mutableResolutionQueue.asStateFlow()
     val downloadDirectory: Path get() = directory
 
     /** A completed local file, if this media id has already been downloaded. */
@@ -191,17 +200,98 @@ class DesktopDownloadServices(
         contains("?$name=") || contains("&$name=")
 
     /**
-     * Queue every distinct song in a playlist. Resolution is deliberately sequential so a
-     * large playlist does not overwhelm the authenticated backend; actual file transfers remain
-     * concurrent inside [DesktopDownloadManager].
+     * Queue every distinct song immediately. Signed stream resolution happens in the background,
+     * one at a time, while [DesktopDownloadManager] independently runs the bounded transfer queue.
+     * This keeps large album/playlist actions responsive without hammering the authenticated backend.
      */
     suspend fun enqueueAll(songs: List<SongItem>): DownloadBatchResult {
-        val queued = mutableListOf<String>()
-        val failures = mutableListOf<String>()
-        songs.distinctBy(SongItem::id).forEach { song ->
-            enqueue(song).onSuccess(queued::add).onFailure { failures += "${song.title}: ${it.message ?: "Could not resolve a stream"}" }
+        val unique = songs.distinctBy(SongItem::id)
+        var accepted = 0
+        unique.forEach { song ->
+            if (scheduleResolution(song)) accepted++
         }
-        return DownloadBatchResult(songs.distinctBy(SongItem::id).size, queued, failures)
+        return DownloadBatchResult(
+            requested = unique.size,
+            queuedIds = emptyList(),
+            failures = emptyList(),
+            scheduledCount = accepted,
+        )
+    }
+
+    private fun scheduleResolution(song: SongItem): Boolean = synchronized(batchLock) {
+        val alreadyQueued = song.id in batchQueuedIds || activeResolutionMediaId == song.id
+        val alreadyManaged = manager.downloads.value.any {
+            it.mediaId == song.id && it.status in setOf(DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING, DownloadStatus.COMPLETED)
+        }
+        if (alreadyQueued || alreadyManaged) return@synchronized true
+
+        if (batchJob?.isActive != true && batchQueue.isEmpty() && activeResolutionMediaId == null) {
+            mutableResolutionQueue.value = DownloadResolutionQueueState()
+        }
+        batchQueue.addLast(song)
+        batchQueuedIds += song.id
+        publishResolutionQueue()
+        if (batchJob?.isActive != true) {
+            val worker = serviceScope.launch(start = CoroutineStart.LAZY) {
+                runResolutionQueue()
+            }
+            batchJob = worker
+            worker.start()
+        }
+        true
+    }
+
+    private suspend fun runResolutionQueue() {
+        while (true) {
+            val song = synchronized(batchLock) {
+                val next = batchQueue.pollFirst()
+                if (next == null) {
+                    activeResolutionMediaId = null
+                    batchJob = null
+                    publishResolutionQueue(currentTitle = null)
+                    return
+                }
+                batchQueuedIds -= next.id
+                activeResolutionMediaId = next.id
+                publishResolutionQueue(currentTitle = next.title)
+                next
+            }
+
+            val result = enqueue(song)
+            synchronized(batchLock) {
+                activeResolutionMediaId = null
+                val previous = mutableResolutionQueue.value
+                mutableResolutionQueue.value = if (result.isSuccess) {
+                    previous.copy(
+                        pending = batchQueue.size,
+                        resolving = 0,
+                        currentTitle = null,
+                        prepared = previous.prepared + 1,
+                    )
+                } else {
+                    previous.copy(
+                        pending = batchQueue.size,
+                        resolving = 0,
+                        currentTitle = null,
+                        failed = previous.failed + 1,
+                        lastError = "${song.title}: ${result.exceptionOrNull()?.message ?: "Could not resolve a stream"}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun publishResolutionQueue(currentTitle: String? = mutableResolutionQueue.value.currentTitle) {
+        val previous = mutableResolutionQueue.value
+        mutableResolutionQueue.value = previous.copy(
+            pending = batchQueue.size,
+            resolving = if (activeResolutionMediaId != null) 1 else 0,
+            currentTitle = currentTitle,
+        )
+    }
+
+    private fun hasPendingResolutions(): Boolean = synchronized(batchLock) {
+        batchQueue.isNotEmpty() || activeResolutionMediaId != null || batchJob?.isActive == true
     }
 
     /** Retry only within this process; every retry resolves a new signed stream first. */
@@ -222,6 +312,7 @@ class DesktopDownloadServices(
     /** Folder changes are immediate when no work is active, avoiding split partial downloads. */
     fun changeDirectory(newDirectory: Path): Result<Unit> = runCatching {
         synchronized(operationLock) {
+            check(!hasPendingResolutions()) { "Wait for queued downloads to finish preparing before changing the download folder." }
             check(inFlightEnqueues == 0) { "Wait for stream resolution to finish before changing the download folder." }
             check(!manager.hasActiveWork()) { "Cancel or finish active downloads before changing the download folder." }
             val normalized = newDirectory.toAbsolutePath().normalize()
@@ -241,6 +332,7 @@ class DesktopDownloadServices(
     /** Applies download limits without interrupting active work. */
     fun configure(maxConcurrentDownloads: Int, cleanupPolicy: DesktopPartialCleanupPolicy): Result<Unit> = runCatching {
         synchronized(operationLock) {
+            check(!hasPendingResolutions()) { "Wait for queued downloads to finish preparing before changing download behavior." }
             check(inFlightEnqueues == 0) { "Wait for stream resolution to finish before changing download behavior." }
             check(!manager.hasActiveWork()) { "Cancel or finish active downloads before changing download behavior." }
             val desiredSettings = runtime.settings.snapshot().copy(
@@ -291,6 +383,13 @@ class DesktopDownloadServices(
     }
 
     override fun close() = synchronized(operationLock) {
+        synchronized(batchLock) {
+            batchJob?.cancel()
+            batchJob = null
+            batchQueue.clear()
+            batchQueuedIds.clear()
+            activeResolutionMediaId = null
+        }
         downloadsJob.cancel()
         manager.close()
         serviceScope.cancel()
@@ -308,6 +407,18 @@ data class DownloadBatchResult(
     val requested: Int,
     val queuedIds: List<String>,
     val failures: List<String>,
+    val scheduledCount: Int = 0,
 ) {
-    val succeeded: Int get() = queuedIds.size
+    val succeeded: Int get() = queuedIds.size + scheduledCount
+}
+
+data class DownloadResolutionQueueState(
+    val pending: Int = 0,
+    val resolving: Int = 0,
+    val currentTitle: String? = null,
+    val prepared: Int = 0,
+    val failed: Int = 0,
+    val lastError: String? = null,
+) {
+    val active: Boolean get() = pending > 0 || resolving > 0
 }

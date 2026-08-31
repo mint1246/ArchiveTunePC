@@ -19,6 +19,9 @@ import moe.rukamori.archivetune.lyrics.LyricsDocument
 import moe.rukamori.archivetune.lyrics.LyricsFormat
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchResult
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
+import moe.rukamori.archivetune.chords.ChordEvent
+import moe.rukamori.archivetune.chords.ChordTrack
+import moe.rukamori.archivetune.chords.ChordTrackSource
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -229,6 +232,44 @@ class DesktopLyricsPresenterTest {
         presenter.seekToLine(0)
         advanceUntilIdle()
         assertEquals(3_000L, playback.lastSeekMs)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `local model action bypasses Songsterr and publishes neural chords`() = runTest {
+        var modelCalls = 0
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider { "Lyrics" })))
+        val presenter = DesktopLyricsPresenter(
+            playback = playback,
+            lyricsClient = client,
+            scope = this,
+            localChordAnalyzer = { _, request ->
+                modelCalls++
+                Result.success(
+                    ChordTrack(
+                        songsterrSongId = 0,
+                        title = request.title,
+                        artist = request.artist,
+                        guitarTrackName = null,
+                        source = ChordTrackSource.LOCAL_NEURAL,
+                        events = listOf(ChordEvent(0, 1_000, "C")),
+                        tabDurationMs = 1_000,
+                    ),
+                )
+            },
+        )
+        val item = PlaybackItem(PlaybackMetadata(id = "id", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0, durationMs = 180_000)
+        advanceUntilIdle()
+
+        presenter.loadChordsFromLocalModel()
+        advanceUntilIdle()
+
+        assertEquals(1, modelCalls)
+        val ready = presenter.chordState.value as DesktopChordState.Ready
+        assertEquals(ChordTrackSource.LOCAL_NEURAL, ready.track.source)
+        assertEquals("C", ready.track.events.single().name)
         presenter.close()
     }
 }

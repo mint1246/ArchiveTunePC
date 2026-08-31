@@ -135,6 +135,7 @@ data class PlaybackSnapshot(
     val hasNextItem: Boolean = false,
     val volume: Float = 1f,
     val speed: Float = 1f,
+    val pitchSemitones: Float = 0f,
     val error: PlaybackFailure? = null,
 ) {
     val currentItem: PlaybackItem?

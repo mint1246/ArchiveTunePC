@@ -130,6 +130,11 @@ internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(): Array<String> =
     arrayOf(
         "--no-video",
         "--quiet",
+        // VLC 3's default Windows mmdevice output controls ISimpleAudioVolume, so two players in
+        // the same process share one session volume and fight each other during a crossfade.
+        // DirectSound gives each VLC player its own secondary sound buffer; DirectSound performs
+        // the actual mix and per-buffer volume changes do not modulate the other player.
+        "--aout=directsound",
     )
 
 internal object VlcPitchBridge {
@@ -151,6 +156,14 @@ internal object VlcPitchBridge {
         val aout = inputResourceHoldAout.invokePointer(arrayOf<Any?>(inputResource)) ?: return false
         try {
             val enabled = kotlin.math.abs(semitones) >= 0.001f
+            // Seed the inherited pitch value before constructing scaletempo_pitch. VLC's filter
+            // reads this during OpenPitch(); setting it only after adding the filter can leave a
+            // newly-created filter briefly initialized from the old/default tuning.
+            val pitchName = nativeString("pitch-shift")
+            varCreate.invokeInt(arrayOf<Any?>(aout, pitchName, VLC_VAR_FLOAT or VLC_VAR_DOINHERIT))
+            val pitchBits = java.lang.Float.floatToRawIntBits(semitones).toLong() and 0xffff_ffffL
+            varSet.invokeInt(arrayOf<Any?>(aout, pitchName, pitchBits))
+
             val currentFilters = getStringVariable(aout, "audio-filter")
                 .orEmpty()
                 .split(':')
@@ -161,11 +174,10 @@ internal object VlcPitchBridge {
             if (enabled) currentFilters.add("scaletempo_pitch")
             if (hadPitchFilter != enabled) {
                 setStringVariable(aout, "audio-filter", currentFilters.distinct().joinToString(":"))
+                // Reassert after the pipeline rebuild too. This also covers VLC versions where
+                // the first inherited read races the dynamic audio-filter reconfiguration.
+                if (enabled) varSet.invokeInt(arrayOf<Any?>(aout, pitchName, pitchBits))
             }
-            val pitchName = nativeString("pitch-shift")
-            varCreate.invokeInt(arrayOf<Any?>(aout, pitchName, VLC_VAR_FLOAT or VLC_VAR_DOINHERIT))
-            val pitchBits = java.lang.Float.floatToRawIntBits(semitones).toLong() and 0xffff_ffffL
-            varSet.invokeInt(arrayOf<Any?>(aout, pitchName, pitchBits))
             return true
         } finally {
             objectRelease.invokeVoid(arrayOf<Any?>(aout))

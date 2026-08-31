@@ -14,12 +14,12 @@ import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 
 /**
- * Resolves only the next deferred queue occurrence shortly before transition time. It never prepares
- * VLC media; the normal playback resolver consumes the same cache populated by [resolve].
+ * Resolves exactly one deferred queue occurrence ahead as soon as playback has a next item. It never
+ * prepares a second VLC audio pipeline; the normal playback/crossfade resolver consumes the same
+ * signed-source cache populated by [resolve].
  */
 internal class NextTrackPrefetcher(
     private val scope: CoroutineScope,
-    private val leadTimeMs: Long = DEFAULT_LEAD_TIME_MS,
     private val resolve: suspend (PlaybackItem, cacheAllowed: () -> Boolean) -> Result<ResolvedPlaybackSource>,
 ) : AutoCloseable {
     private data class Candidate(
@@ -35,10 +35,6 @@ internal class NextTrackPrefetcher(
     private var attempted = false
     private var job: Job? = null
 
-    init {
-        require(leadTimeMs > 0L) { "Prefetch lead time must be positive" }
-    }
-
     /** Called from the playback-state collector; position-only ticks are intentionally cheap. */
     fun onSnapshot(snapshot: PlaybackSnapshot) {
         if (closed.get()) return
@@ -51,17 +47,7 @@ internal class NextTrackPrefetcher(
             activeCandidate = candidate
         }
 
-        val remainingMs = snapshot.durationMs - snapshot.positionMs
-        val eligible =
-            candidate != null &&
-                snapshot.isPlaying &&
-                snapshot.durationMs > 0L &&
-                remainingMs in 0L..leadTimeMs
-
-        if (!eligible) {
-            if (attempted || job?.isActive == true) invalidateAttempt(keepCandidate = true)
-            return
-        }
+        if (candidate == null || !snapshot.isPlaying) return
         if (attempted) return
 
         attempted = true
@@ -118,7 +104,4 @@ internal class NextTrackPrefetcher(
         return Candidate(current.id, next.id, next.item)
     }
 
-    private companion object {
-        const val DEFAULT_LEAD_TIME_MS = 15_000L
-    }
 }

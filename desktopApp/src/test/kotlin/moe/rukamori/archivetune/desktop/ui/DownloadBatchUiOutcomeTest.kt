@@ -45,4 +45,17 @@ class DownloadBatchUiOutcomeTest {
         assertTrue(outcome.navigateToDownloads)
         assertNull(outcome.message)
     }
+
+    @Test
+    fun `background scheduled batch counts as successfully queued`() {
+        val outcome = DownloadBatchResult(
+            requested = 12,
+            queuedIds = emptyList(),
+            failures = emptyList(),
+            scheduledCount = 12,
+        ).toUiOutcome()
+
+        assertTrue(outcome.navigateToDownloads)
+        assertNull(outcome.message)
+    }
 }

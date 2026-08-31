@@ -117,6 +117,7 @@ fun DesktopSettingsPanel(
     onKeybindsChanged: () -> Unit = {},
     onKeybindCaptureChanged: (Boolean) -> Unit = {},
     onStatisticsPreferenceChanged: () -> Unit = {},
+    onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> },
     keybindPressedKeys: StateFlow<List<Int>>? = null,
     account: DesktopSessionManager?,
     accountContent: @Composable () -> Unit,
@@ -241,6 +242,38 @@ fun DesktopSettingsPanel(
                 }
                 HorizontalDivider()
                 AccentChoices(state)
+                HorizontalDivider()
+                ToggleRow(
+                    "Beat-synced visuals",
+                    settings.beatSyncedVisualsEnabled,
+                    Icons.Rounded.GraphicEq,
+                ) { enabled ->
+                    update { it.copy(beatSyncedVisualsEnabled = enabled) }
+                    onBeatVisualPreferencesChanged(enabled, settings.beatSyncedVisualsIntensity)
+                }
+                Text(
+                    "Subtly pulses now-playing artwork and the dynamic player glow using the song's analyzed beat grid.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (settings.beatSyncedVisualsEnabled) {
+                    SettingSlider(
+                        "Beat visual intensity",
+                        "${(settings.beatSyncedVisualsIntensity * 100f).roundToInt()}%",
+                        Icons.Rounded.GraphicEq,
+                    )
+                    Slider(
+                        value = settings.beatSyncedVisualsIntensity,
+                        onValueChange = { value ->
+                            val snapped = (value * 20f).roundToInt() / 20f
+                            update { it.copy(beatSyncedVisualsIntensity = snapped) }
+                            onBeatVisualPreferencesChanged(true, settings.beatSyncedVisualsIntensity)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        valueRange = 0f..1f,
+                        steps = 19,
+                    )
+                }
             }
         }
 

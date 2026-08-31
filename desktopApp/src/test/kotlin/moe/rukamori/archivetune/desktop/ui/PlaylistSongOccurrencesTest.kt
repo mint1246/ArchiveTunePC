@@ -81,17 +81,56 @@ class PlaylistSongOccurrencesTest {
         assertEquals(listOf(0, 1, 2), occurrences.map { it.originalIndex })
     }
 
+    @Test
+    fun `playlist sorting keeps duplicate occurrences stable`() {
+        val songs = listOf(
+            song(id = "same", title = "Zulu", artist = "B"),
+            song(id = "middle", title = "Alpha", artist = "C"),
+            song(id = "same", title = "Alpha", artist = "A"),
+        )
+        val occurrences = playlistSongOccurrences(songs, "")
+
+        assertEquals(
+            listOf("middle:1", "same:2", "same:0"),
+            sortPlaylistSongOccurrences(occurrences, DesktopSongSort.TITLE).map { it.stableKey },
+        )
+        assertEquals(
+            listOf("same:2", "same:0", "middle:1"),
+            sortPlaylistSongOccurrences(occurrences, DesktopSongSort.ARTIST).map { it.stableKey },
+        )
+        assertEquals(
+            listOf("same:0", "middle:1", "same:2"),
+            sortPlaylistSongOccurrences(occurrences, DesktopSongSort.ORIGINAL).map { it.stableKey },
+        )
+    }
+
+    @Test
+    fun `song duration sorting puts unknown duration last`() {
+        val songs = listOf(
+            song(id = "unknown", title = "Unknown"),
+            song(id = "long", title = "Long", duration = 240),
+            song(id = "short", title = "Short", duration = 90),
+        )
+
+        assertEquals(
+            listOf("short", "long", "unknown"),
+            sortSongs(songs, DesktopSongSort.DURATION).map { it.id },
+        )
+    }
+
     private fun song(
         id: String,
         title: String,
         artist: String = "Artist",
         album: String? = null,
+        duration: Int? = null,
     ): SongItem =
         SongItem(
             id = id,
             title = title,
             artists = listOf(Artist(artist, "artist-$artist")),
             album = album?.let { Album(it, "album-$it") },
+            duration = duration,
             thumbnail = "",
         )
 }

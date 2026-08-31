@@ -4,6 +4,7 @@ import moe.rukamori.archivetune.innertube.models.SongItem
 
 internal data class AddToPlaylistPickerSession(
     val song: SongItem,
+    val songs: List<SongItem> = listOf(song),
     val adding: Boolean = false,
     val addError: String? = null,
 ) {

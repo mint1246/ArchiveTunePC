@@ -27,6 +27,14 @@ jobs:
           distribution: 'temurin'
           architecture: 'x64'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust stem worker
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: stem-worker -> target
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
@@ -50,7 +58,7 @@ jobs:
             throw 'Visual Studio C++ build tools were not found on the Windows runner.'
           }
           $devCmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-          & cmd.exe /d /s /c "`"$devCmd`" -arch=amd64 -host_arch=amd64 && call gradlew.bat msiNative --stacktrace"
+          & cmd.exe /d /s /c "`"$devCmd`" -arch=amd64 -host_arch=amd64 && call gradlew.bat msiNative --stacktrace -PnativeQuickBuild=true"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }

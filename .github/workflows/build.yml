@@ -42,6 +42,14 @@ jobs:
           distribution: 'temurin'
           architecture: 'x64'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust stem worker
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: stem-worker -> target
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
@@ -120,6 +128,7 @@ jobs:
           $version = $versionLine.Matches[0].Groups[1].Value
           .\scripts\publish-r2-update.ps1 `
             -MsiPath '${{ steps.msi.outputs.path }}' `
+            -ExecutablePath 'desktopApp\build\compose\binaries\main-native\app\ArchiveTune\ArchiveTune.exe' `
             -Version $version `
             -Bucket $env:R2_BUCKET `
             -Endpoint $env:R2_ENDPOINT `

@@ -9,35 +9,8 @@ package moe.rukamori.archivetune.playback.desktop
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 class CrossfadeHandoffPolicyTest {
-    @Test
-    fun `corrective seek is skipped while drift stays within tolerance`() {
-        assertFalse(
-            needsCorrectiveCrossfadeSeek(
-                primaryPositionMs = 10_040L,
-                secondaryPositionMs = 10_000L,
-                maximumDriftMs = 75L,
-            ),
-        )
-        assertFalse(needsCorrectiveCrossfadeSeek(10_075L, 10_000L, maximumDriftMs = 75L))
-    }
-
-    @Test
-    fun `corrective seek is required when drift exceeds tolerance`() {
-        assertTrue(needsCorrectiveCrossfadeSeek(9_900L, 10_000L, maximumDriftMs = 75L))
-        assertTrue(needsCorrectiveCrossfadeSeek(10_100L, 10_000L, maximumDriftMs = 75L))
-    }
-
-    @Test
-    fun `playback position must move forward after a seek`() {
-        assertFalse(hasPlaybackPositionAdvanced(positionAfterSeekMs = 10_000L, currentPositionMs = 10_000L))
-        assertFalse(hasPlaybackPositionAdvanced(positionAfterSeekMs = 10_000L, currentPositionMs = 9_999L))
-        assertTrue(hasPlaybackPositionAdvanced(positionAfterSeekMs = 10_000L, currentPositionMs = 10_001L))
-    }
-
     @Test
     fun `equal power gains preserve power across the fade`() {
         val start = equalPowerGains(0f)

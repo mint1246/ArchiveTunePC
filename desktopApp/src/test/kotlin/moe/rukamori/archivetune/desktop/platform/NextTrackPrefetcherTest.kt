@@ -22,14 +22,14 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class NextTrackPrefetcherTest {
     @Test
-    fun `approaching end resolves next exactly once across position ticks`() = runTest {
+    fun `playing queue resolves next exactly once across position ticks`() = runTest {
         val resolver = FakeCachingResolver(nowMs = 1_000_000L)
         resolver.enqueueSuccess(freshSource("next", resolver.nowMs))
-        val prefetcher = NextTrackPrefetcher(this, leadTimeMs = 15_000L, resolve = resolver::prefetch)
-        val base = snapshot(positionMs = 86_000L, durationMs = 100_000L)
+        val prefetcher = NextTrackPrefetcher(this, resolve = resolver::prefetch)
+        val base = snapshot(positionMs = 10_000L, durationMs = 100_000L)
 
         repeat(200) { tick ->
-            prefetcher.onSnapshot(base.copy(positionMs = 86_000L + tick * 50L))
+            prefetcher.onSnapshot(base.copy(positionMs = 10_000L + tick * 50L))
             runCurrent()
         }
 
@@ -38,19 +38,64 @@ class NextTrackPrefetcherTest {
     }
 
     @Test
-    fun `far from end does not prefetch but crossing lead window does`() = runTest {
+    fun `next song is prefetched immediately instead of waiting for end of track`() = runTest {
         val resolver = FakeCachingResolver(nowMs = 2_000_000L)
         resolver.enqueueSuccess(freshSource("next", resolver.nowMs))
-        val prefetcher = NextTrackPrefetcher(this, leadTimeMs = 15_000L, resolve = resolver::prefetch)
+        val prefetcher = NextTrackPrefetcher(this, resolve = resolver::prefetch)
         val far = snapshot(positionMs = 50_000L, durationMs = 100_000L)
 
         prefetcher.onSnapshot(far)
         runCurrent()
+        assertEquals(1, resolver.backendCalls)
+        prefetcher.close()
+    }
+
+    @Test
+    fun `paused queue waits until playback starts before prefetching`() = runTest {
+        val resolver = FakeCachingResolver(nowMs = 2_500_000L)
+        resolver.enqueueSuccess(freshSource("next", resolver.nowMs))
+        val prefetcher = NextTrackPrefetcher(this, resolve = resolver::prefetch)
+        val paused = snapshot(positionMs = 20_000L, durationMs = 100_000L).copy(playWhenReady = false)
+
+        prefetcher.onSnapshot(paused)
+        runCurrent()
         assertEquals(0, resolver.backendCalls)
 
-        prefetcher.onSnapshot(far.copy(positionMs = 85_001L))
+        prefetcher.onSnapshot(paused.copy(playWhenReady = true))
         runCurrent()
         assertEquals(1, resolver.backendCalls)
+        prefetcher.close()
+    }
+
+    @Test
+    fun `only the immediate next occurrence is prefetched`() = runTest {
+        val resolver = FakeCachingResolver(nowMs = 2_750_000L)
+        resolver.enqueueSuccess(freshSource("next", resolver.nowMs))
+        val prefetcher = NextTrackPrefetcher(this, resolve = resolver::prefetch)
+        val current = deferredItem("current")
+        val next = deferredItem("next")
+        val later = deferredItem("later")
+        val snapshot = PlaybackSnapshot(
+            queue = listOf(current, next, later),
+            queueEntries = listOf(
+                PlaybackQueueEntry(id = 1L, item = current, logicalIndex = 0, isCurrent = true),
+                PlaybackQueueEntry(id = 2L, item = next, logicalIndex = 1, isCurrent = false),
+                PlaybackQueueEntry(id = 3L, item = later, logicalIndex = 2, isCurrent = false),
+            ),
+            currentIndex = 0,
+            status = PlaybackStatus.READY,
+            playWhenReady = true,
+            positionMs = 1_000L,
+            durationMs = 100_000L,
+            hasNextItem = true,
+        )
+
+        prefetcher.onSnapshot(snapshot)
+        runCurrent()
+
+        assertEquals(1, resolver.backendCalls)
+        assertTrue("next" in resolver.cachedKeys())
+        assertFalse("later" in resolver.cachedKeys())
         prefetcher.close()
     }
 
@@ -231,5 +276,7 @@ class NextTrackPrefetcherTest {
 
         private fun isFresh(source: ResolvedPlaybackSource): Boolean =
             source.expiresAtEpochMs?.let { it > nowMs + expiryLeadMs } == true
+
+        fun cachedKeys(): Set<String> = cache.keys.toSet()
     }
 }

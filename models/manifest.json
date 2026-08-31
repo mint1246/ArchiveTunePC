@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 2,
+  "version": "htdemucs-6s-1s-dml-v1",
+  "file": "htdemucs-6s-core-1s-dml.onnx",
+  "size": 110858418,
+  "sha256": "30ef61623d5d3a768f12dd87faadfdaaca26c5b8ef6a1c73f26b8c949b6e047c",
+  "stems": ["drums", "bass", "other", "vocals", "guitar", "piano"],
+  "sampleRate": 44100,
+  "segmentSeconds": 1,
+  "overlap": 0.1,
+  "backend": "directml",
+  "format": "onnx",
+  "models": {
+    "stems": {
+      "version": "htdemucs-6s-1s-dml-v1",
+      "file": "htdemucs-6s-core-1s-dml.onnx",
+      "size": 110858418,
+      "sha256": "30ef61623d5d3a768f12dd87faadfdaaca26c5b8ef6a1c73f26b8c949b6e047c",
+      "backend": "directml",
+      "format": "onnx",
+      "sampleRate": 44100,
+      "stems": ["drums", "bass", "other", "vocals", "guitar", "piano"]
+    },
+    "chords": {
+      "version": "chordmini-2e1d-v1",
+      "file": "chordmini-2e1d-v1.onnx",
+      "size": 9604664,
+      "sha256": "9a6570bf611cdc3f2c36286307af46fb94927fe7f6a2bc22a87c0ebf5f6c082e",
+      "backend": "directml",
+      "format": "onnx",
+      "sampleRate": 22050,
+      "modelType": "chordmini-chordnet-2e1d",
+      "license": "MIT",
+      "source": "https://huggingface.co/musetric/chordmini-onnx",
+      "upstream": "https://github.com/ptnghia-j/ChordMini",
+      "sequenceLength": 108,
+      "inputBins": 144,
+      "chordClasses": 170,
+      "assets": {
+        "config": {
+          "file": "chordmini-2e1d-v1.config.json",
+          "size": 3009,
+          "sha256": "1f26c11ebea51ec08f12e813eb213a729fa0ecc407ac7632dfdc7bad67e65aa4"
+        },
+        "cqtPlan": {
+          "file": "chordmini-2e1d-v1.cqt-plan.bin",
+          "size": 23896,
+          "sha256": "c31f0a6fd2d582d753be6628b5daecdee58acba53cba93b2bc2b5c75dee2ba48"
+        },
+        "notice": {
+          "file": "chordmini-2e1d-v1.NOTICE.md",
+          "size": 1397,
+          "sha256": "4b5c88848ec1bc339b3948fd145c34087d35be896978fc507a5784a2fd8716fe"
+        }
+      }
+    }
+  }
+}

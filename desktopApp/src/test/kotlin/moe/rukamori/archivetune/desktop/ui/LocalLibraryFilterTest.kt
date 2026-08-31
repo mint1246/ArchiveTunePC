@@ -83,6 +83,20 @@ class LocalLibraryFilterTest {
         assertTrue(result.tracks.isEmpty())
     }
 
+    @Test
+    fun `local track sorting supports title artist album and duration`() {
+        val tracks = listOf(
+            track("z", "Zulu", artist = "Beta", album = "Gamma", durationMs = 200_000),
+            track("a", "Alpha", artist = "Zulu", album = "Beta", durationMs = null),
+            track("m", "Middle", artist = "Alpha", album = "Alpha", durationMs = 90_000),
+        )
+
+        assertEquals(listOf("a", "m", "z"), sortLocalTracks(tracks, DesktopSongSort.TITLE).map { it.id })
+        assertEquals(listOf("m", "z", "a"), sortLocalTracks(tracks, DesktopSongSort.ARTIST).map { it.id })
+        assertEquals(listOf("m", "a", "z"), sortLocalTracks(tracks, DesktopSongSort.ALBUM).map { it.id })
+        assertEquals(listOf("m", "z", "a"), sortLocalTracks(tracks, DesktopSongSort.DURATION).map { it.id })
+    }
+
     private fun playlist(id: String, title: String, author: String? = null): PlaylistItem =
         PlaylistItem(
             id = id,
@@ -100,6 +114,7 @@ class LocalLibraryFilterTest {
         title: String,
         artist: String = "Artist",
         album: String? = null,
+        durationMs: Long? = null,
     ): LocalTrack =
         LocalTrack(
             id = id,
@@ -109,5 +124,6 @@ class LocalLibraryFilterTest {
             title = title,
             artist = artist,
             album = album,
+            durationMs = durationMs,
         )
 }

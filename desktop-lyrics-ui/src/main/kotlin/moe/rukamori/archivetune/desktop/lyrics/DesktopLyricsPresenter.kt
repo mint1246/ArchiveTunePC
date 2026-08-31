@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.chords.ChordRequest
+import moe.rukamori.archivetune.chords.ChordTrack
+import moe.rukamori.archivetune.chords.ChordUnavailableException
+import moe.rukamori.archivetune.chords.SongsterrChordClient
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.LyricsDocument
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchResult
@@ -36,6 +40,14 @@ sealed interface DesktopLyricsState {
     data class Error(val itemId: String, val message: String) : DesktopLyricsState
 }
 
+sealed interface DesktopChordState {
+    data object Idle : DesktopChordState
+    data class Loading(val itemId: String) : DesktopChordState
+    data class Ready(val itemId: String, val track: ChordTrack) : DesktopChordState
+    data class Empty(val itemId: String, val message: String = "No chords found for this track") : DesktopChordState
+    data class Error(val itemId: String, val message: String = "Chords could not be loaded") : DesktopChordState
+}
+
 data class DesktopLyricsSearchState(
     val itemId: String? = null,
     val request: LyricsRequest? = null,
@@ -54,6 +66,8 @@ class DesktopLyricsPresenter(
     private val scope: CoroutineScope,
     cacheSize: Int = 24,
     initiallyActive: Boolean = true,
+    private val chordClient: SongsterrChordClient = SongsterrChordClient(),
+    private val localChordAnalyzer: (suspend (PlaybackItem, ChordRequest) -> Result<ChordTrack>)? = null,
 ) : AutoCloseable {
     private val cache = object : LinkedHashMap<String, LyricsDocument>(cacheSize, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LyricsDocument>?) = size > cacheSize
@@ -62,13 +76,20 @@ class DesktopLyricsPresenter(
     val state: StateFlow<DesktopLyricsState> = _state.asStateFlow()
     private val _searchState = MutableStateFlow(DesktopLyricsSearchState())
     val searchState: StateFlow<DesktopLyricsSearchState> = _searchState.asStateFlow()
+    private val chordCache = object : LinkedHashMap<String, ChordTrack>(cacheSize, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ChordTrack>?) = size > cacheSize
+    }
+    private val _chordState = MutableStateFlow<DesktopChordState>(DesktopChordState.Idle)
+    val chordState: StateFlow<DesktopChordState> = _chordState.asStateFlow()
     /** Exposed for the desktop surface to render artwork and playback-aware chrome. */
     val playbackState: StateFlow<PlaybackSnapshot> = playback.state
     private val _positionMs = MutableStateFlow(0L)
     /** Hot position stream for the SpicyLyrics-style animator (per-frame consumer). */
     val positionMsFlow: StateFlow<Long> = _positionMs.asStateFlow()
     private var searchJob: Job? = null
+    private var chordJob: Job? = null
     private val loadGeneration = AtomicLong()
+    private val chordGeneration = AtomicLong()
     private val active = MutableStateFlow(initiallyActive)
     private val itemJob: Job = scope.launch {
         active.combine(
@@ -78,14 +99,24 @@ class DesktopLyricsPresenter(
                 if (!isActive) {
                     loadGeneration.incrementAndGet()
                     searchJob?.cancel()
+                    chordJob?.cancel()
                     return@collectLatest
                 }
                 if (item == null) {
                     loadGeneration.incrementAndGet()
+                    chordGeneration.incrementAndGet()
                     searchJob?.cancel()
+                    chordJob?.cancel()
                     _state.value = DesktopLyricsState.Idle
                     _searchState.value = DesktopLyricsSearchState()
+                    _chordState.value = DesktopChordState.Idle
                     return@collectLatest
+                }
+                val previousItemId = _searchState.value.itemId
+                if (previousItemId != item.metadata.id) {
+                    chordGeneration.incrementAndGet()
+                    chordJob?.cancel()
+                    _chordState.value = DesktopChordState.Idle
                 }
                 searchJob?.cancel()
                 _searchState.value = DesktopLyricsSearchState(item.metadata.id, item.toLyricsRequestOrNull())
@@ -166,6 +197,91 @@ class DesktopLyricsPresenter(
         scope.launch { load(item, playback.state.value.positionMs, generation) }
     }
 
+    /**
+     * Chords are intentionally lazy: opening lyrics does not touch Songsterr. The first chord-button
+     * press resolves the current track, then the result is cached for the presenter lifetime.
+     */
+    fun loadChords() {
+        if (!active.value) return
+        val snapshot = playback.state.value
+        val item = snapshot.currentItem ?: return
+        val itemId = item.metadata.id
+        synchronized(chordCache) { chordCache[itemId] }?.let { cached ->
+            _chordState.value = DesktopChordState.Ready(itemId, cached)
+            return
+        }
+        if ((_chordState.value as? DesktopChordState.Loading)?.itemId == itemId) return
+        val request = item.toChordRequestOrNull(snapshot.durationMs)
+        if (request == null) {
+            _chordState.value = DesktopChordState.Empty(itemId, "Chords need a song title and artist metadata")
+            return
+        }
+        val generation = chordGeneration.incrementAndGet()
+        chordJob?.cancel()
+        _chordState.value = DesktopChordState.Loading(itemId)
+        chordJob = scope.launch {
+            // Human-authored Songsterr labels remain the best source. If they are absent, prefer
+            // the local whole-mix neural recognizer before the older per-tab-note heuristic.
+            val authored = chordClient.getChords(request, allowDerived = false)
+            if (generation != chordGeneration.get() || playback.state.value.currentItem?.metadata?.id != itemId) return@launch
+            val result =
+                authored.getOrNull()?.let(Result.Companion::success)
+                    ?: localChordAnalyzer
+                        ?.invoke(item, request)
+                        ?.takeIf { it.isSuccess }
+                    ?: chordClient.getChords(request, allowDerived = true)
+            if (generation != chordGeneration.get() || playback.state.value.currentItem?.metadata?.id != itemId) return@launch
+            result.fold(
+                onSuccess = { track ->
+                    synchronized(chordCache) { chordCache[itemId] = track }
+                    _chordState.value = DesktopChordState.Ready(itemId, track)
+                },
+                onFailure = { failure ->
+                    _chordState.value =
+                        if (failure is ChordUnavailableException) {
+                            DesktopChordState.Empty(itemId, failure.message ?: "No usable Songsterr chords were found")
+                        } else {
+                            DesktopChordState.Error(itemId, "Songsterr could not be reached")
+                        }
+                },
+            )
+        }
+    }
+
+    /** Replaces the current chord result with ArchiveTune's local neural analysis on demand. */
+    fun loadChordsFromLocalModel() {
+        if (!active.value) return
+        val analyzer = localChordAnalyzer ?: return
+        val snapshot = playback.state.value
+        val item = snapshot.currentItem ?: return
+        val itemId = item.metadata.id
+        val request = item.toChordRequestOrNull(snapshot.durationMs)
+        if (request == null) {
+            _chordState.value = DesktopChordState.Empty(itemId, "Chords need a song title and artist metadata")
+            return
+        }
+
+        val generation = chordGeneration.incrementAndGet()
+        chordJob?.cancel()
+        _chordState.value = DesktopChordState.Loading(itemId)
+        chordJob = scope.launch {
+            val result = analyzer(item, request)
+            if (generation != chordGeneration.get() || playback.state.value.currentItem?.metadata?.id != itemId) return@launch
+            result.fold(
+                onSuccess = { track ->
+                    synchronized(chordCache) { chordCache[itemId] = track }
+                    _chordState.value = DesktopChordState.Ready(itemId, track)
+                },
+                onFailure = { failure ->
+                    _chordState.value = DesktopChordState.Error(
+                        itemId,
+                        failure.message?.takeIf(String::isNotBlank) ?: "Local chord model could not analyze this track",
+                    )
+                },
+            )
+        }
+    }
+
     fun search(request: LyricsRequest) {
         if (!active.value) return
         val item = playback.state.value.currentItem ?: return
@@ -242,6 +358,7 @@ class DesktopLyricsPresenter(
 
     override fun close() {
         searchJob?.cancel()
+        chordJob?.cancel()
         itemJob.cancel()
         positionJob.cancel()
     }
@@ -264,4 +381,22 @@ private fun PlaybackItem.toLyricsRequestOrNull(): LyricsRequest? {
     durationSeconds = metadata.durationHintMs?.div(1_000L)?.toInt() ?: -1,
     videoId = metadata.extras["videoId"] ?: metadata.id,
 )
+}
+
+private fun PlaybackItem.toChordRequestOrNull(playbackDurationMs: Long): ChordRequest? {
+    val title = metadata.title.trim().ifEmpty { metadata.extras["searchTitle"].orEmpty().trim() }
+    val artist =
+        sequenceOf(
+            metadata.artistText,
+            metadata.extras["searchArtist"].orEmpty(),
+            metadata.extras["albumArtist"].orEmpty(),
+            metadata.extras["artist"].orEmpty(),
+        ).map(String::trim).firstOrNull(String::isNotEmpty).orEmpty()
+    if (title.isEmpty() || artist.isEmpty()) return null
+    return ChordRequest(
+        title = title,
+        artist = artist,
+        durationMs = playbackDurationMs.takeIf { it > 0L } ?: metadata.durationHintMs,
+        videoId = metadata.extras["videoId"] ?: metadata.id,
+    )
 }

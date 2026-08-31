@@ -74,6 +74,10 @@ internal class VlcjAudioEffects(
         attached.apply(desiredProfile.get())
     }
 
+    fun adopt(attached: EqualizerBackend) {
+        backend.set(attached)
+    }
+
     fun detach(detached: EqualizerBackend) {
         backend.compareAndSet(detached, null)
     }

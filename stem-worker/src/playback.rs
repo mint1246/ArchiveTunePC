@@ -52,7 +52,7 @@ impl Args {
                         .context("invalid --start-ms")?;
                 }
                 "--help" | "-h" => {
-                    println!("archivetune-stems play --input <stem-cache-directory> [--start-ms <milliseconds>]");
+                    println!("archivetune-model-runner play --input <stem-cache-directory> [--start-ms <milliseconds>]");
                     std::process::exit(0);
                 }
                 other => bail!("unknown play argument {other}"),
@@ -115,7 +115,10 @@ struct OpusHeader {
 pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let args = Args::parse(args)?;
     if !args.input.is_dir() {
-        bail!("stem cache input must be a directory: {}", args.input.display());
+        bail!(
+            "stem cache input must be a directory: {}",
+            args.input.display()
+        );
     }
     let headers: Vec<OpusHeader> = STEM_NAMES
         .iter()
@@ -123,7 +126,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         .collect::<Result<_>>()?;
     for (index, header) in headers.iter().enumerate() {
         if header.mapping.len() != OUTPUT_CHANNELS {
-            bail!("{} stem cache must be stereo; got {} channels", STEM_NAMES[index], header.mapping.len());
+            bail!(
+                "{} stem cache must be stereo; got {} channels",
+                STEM_NAMES[index],
+                header.mapping.len()
+            );
         }
     }
     let codec_gains: [f32; STEM_COUNT] = std::array::from_fn(|index| headers[index].gain);
@@ -185,20 +192,25 @@ fn command_loop(controls: Arc<Controls>) {
             break;
         }
         let Ok(line) = line else { break };
-        let Ok(command) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(command) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         match command.get("type").and_then(Value::as_str) {
             Some("gains") => {
                 if let Some(values) = command.get("values").and_then(Value::as_array) {
                     for (index, value) in values.iter().take(STEM_COUNT).enumerate() {
                         if let Some(value) = value.as_f64() {
-                            controls.gains[index].store((value as f32).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+                            controls.gains[index]
+                                .store((value as f32).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
                         }
                     }
                 }
             }
             Some("master") => {
                 if let Some(value) = command.get("value").and_then(Value::as_f64) {
-                    controls.master.store((value as f32).clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
+                    controls
+                        .master
+                        .store((value as f32).clamp(0.0, 1.5).to_bits(), Ordering::Relaxed);
                 }
             }
             Some("pause") => {
@@ -208,7 +220,9 @@ fn command_loop(controls: Arc<Controls>) {
             }
             Some("seek") => {
                 if let Some(value) = command.get("position_ms").and_then(Value::as_u64) {
-                    controls.seek_ms.store(value.min(i64::MAX as u64) as i64, Ordering::Release);
+                    controls
+                        .seek_ms
+                        .store(value.min(i64::MAX as u64) as i64, Ordering::Release);
                     controls.generation.fetch_add(1, Ordering::AcqRel);
                 }
             }
@@ -221,7 +235,11 @@ fn command_loop(controls: Arc<Controls>) {
     }
 }
 
-fn decode_loop(input: PathBuf, controls: Arc<Controls>, sender: SyncSender<AudioChunk>) -> Result<()> {
+fn decode_loop(
+    input: PathBuf,
+    controls: Arc<Controls>,
+    sender: SyncSender<AudioChunk>,
+) -> Result<()> {
     loop {
         if controls.stop.load(Ordering::Acquire) {
             return Ok(());
@@ -255,7 +273,9 @@ fn decode_from_position(
         if controls.stop.load(Ordering::Acquire) {
             return Ok(false);
         }
-        if controls.generation.load(Ordering::Acquire) != generation || controls.seek_ms.load(Ordering::Acquire) >= 0 {
+        if controls.generation.load(Ordering::Acquire) != generation
+            || controls.seek_ms.load(Ordering::Acquire) >= 0
+        {
             return Ok(false);
         }
         let mut ranges = Vec::with_capacity(STEM_COUNT);
@@ -283,7 +303,10 @@ fn decode_from_position(
             bail!("stem cache streams ended at different positions");
         }
         let output_frames = ranges[0].1 - ranges[0].0;
-        if ranges.iter().any(|(start, end)| end - start != output_frames) {
+        if ranges
+            .iter()
+            .any(|(start, end)| end - start != output_frames)
+        {
             bail!("stem cache streams produced mismatched Opus frame sizes");
         }
         if output_frames == 0 {
@@ -300,7 +323,10 @@ fn decode_from_position(
             }
         }
 
-        let mut chunk = AudioChunk { generation, samples: raw };
+        let mut chunk = AudioChunk {
+            generation,
+            samples: raw,
+        };
         loop {
             if controls.stop.load(Ordering::Acquire)
                 || controls.generation.load(Ordering::Acquire) != generation
@@ -334,10 +360,21 @@ impl StemDecoder {
         }
         let file = File::open(&path).with_context(|| format!("open {}", path.display()))?;
         let mut reader = PacketReader::new(file);
-        reader.read_packet().context("read OpusHead")?.context("empty Ogg stream")?;
-        reader.read_packet().context("read OpusTags")?.context("missing OpusTags")?;
-        let decoder = MSDecoder::new(OPUS_RATE, header.streams, header.coupled_streams, &header.mapping)
-            .map_err(|error| anyhow!(error.to_string()))?;
+        reader
+            .read_packet()
+            .context("read OpusHead")?
+            .context("empty Ogg stream")?;
+        reader
+            .read_packet()
+            .context("read OpusTags")?
+            .context("missing OpusTags")?;
+        let decoder = MSDecoder::new(
+            OPUS_RATE,
+            header.streams,
+            header.coupled_streams,
+            &header.mapping,
+        )
+        .map_err(|error| anyhow!(error.to_string()))?;
         let seek_frames = ((start_ms as u128 * OPUS_RATE as u128) / 1_000) as usize;
         Ok(Self {
             reader,
@@ -386,7 +423,9 @@ fn build_output(
     output_drained: Arc<AtomicBool>,
 ) -> Result<Stream> {
     let host = cpal::default_host();
-    let device = host.default_output_device().context("no default audio output device")?;
+    let device = host
+        .default_output_device()
+        .context("no default audio output device")?;
     let supported = device
         .supported_output_configs()
         .context("query output formats")?
@@ -416,10 +455,42 @@ fn build_output(
     }));
 
     match sample_format {
-        SampleFormat::F32 => build_typed_output::<f32>(&device, &config, device_channels, receiver, controls, codec_gains, output_drained),
-        SampleFormat::I16 => build_typed_output::<i16>(&device, &config, device_channels, receiver, controls, codec_gains, output_drained),
-        SampleFormat::I32 => build_typed_output::<i32>(&device, &config, device_channels, receiver, controls, codec_gains, output_drained),
-        SampleFormat::U16 => build_typed_output::<u16>(&device, &config, device_channels, receiver, controls, codec_gains, output_drained),
+        SampleFormat::F32 => build_typed_output::<f32>(
+            &device,
+            &config,
+            device_channels,
+            receiver,
+            controls,
+            codec_gains,
+            output_drained,
+        ),
+        SampleFormat::I16 => build_typed_output::<i16>(
+            &device,
+            &config,
+            device_channels,
+            receiver,
+            controls,
+            codec_gains,
+            output_drained,
+        ),
+        SampleFormat::I32 => build_typed_output::<i32>(
+            &device,
+            &config,
+            device_channels,
+            receiver,
+            controls,
+            codec_gains,
+            output_drained,
+        ),
+        SampleFormat::U16 => build_typed_output::<u16>(
+            &device,
+            &config,
+            device_channels,
+            receiver,
+            controls,
+            codec_gains,
+            output_drained,
+        ),
         other => bail!("unsupported output sample format {other:?}"),
     }
 }
@@ -448,12 +519,8 @@ where
                 output.fill(T::from_sample(0.0));
                 return;
             }
-            let gains = [
-                controls.gain(0) * codec_gains[0],
-                controls.gain(1) * codec_gains[1],
-                controls.gain(2) * codec_gains[2],
-                controls.gain(3) * codec_gains[3],
-            ];
+            let gains: [f32; STEM_COUNT] =
+                std::array::from_fn(|index| controls.gain(index) * codec_gains[index]);
             let master = controls.master();
             loop {
                 match receiver.try_recv() {
@@ -468,13 +535,17 @@ where
             for frame in output.chunks_mut(device_channels) {
                 frame.fill(T::from_sample(0.0));
                 loop {
-                    let invalid = current.as_ref().is_some_and(|chunk| chunk.generation != generation || cursor >= chunk.samples.len());
+                    let invalid = current.as_ref().is_some_and(|chunk| {
+                        chunk.generation != generation || cursor >= chunk.samples.len()
+                    });
                     if invalid {
                         current = None;
                         cursor = 0;
                     }
                     if current.is_none() {
-                        current = queued.pop_front().filter(|chunk| chunk.generation == generation);
+                        current = queued
+                            .pop_front()
+                            .filter(|chunk| chunk.generation == generation);
                         cursor = 0;
                     }
                     if current.is_some() || queued.is_empty() {
@@ -487,18 +558,7 @@ where
                         // multichannel audio may be buffered ahead, but a fader/mute/solo command
                         // therefore takes effect on the very next hardware buffer instead of after
                         // that queue drains.
-                        let left = (
-                            chunk.samples[cursor] * gains[0]
-                                + chunk.samples[cursor + 2] * gains[1]
-                                + chunk.samples[cursor + 4] * gains[2]
-                                + chunk.samples[cursor + 6] * gains[3]
-                        ) * master;
-                        let right = (
-                            chunk.samples[cursor + 1] * gains[0]
-                                + chunk.samples[cursor + 3] * gains[1]
-                                + chunk.samples[cursor + 5] * gains[2]
-                                + chunk.samples[cursor + 7] * gains[3]
-                        ) * master;
+                        let (left, right) = mix_stem_frame(&chunk.samples, cursor, &gains, master);
                         frame[0] = T::from_sample(left.clamp(-1.0, 1.0));
                         frame[1] = T::from_sample(right.clamp(-1.0, 1.0));
                         cursor += STEM_CHANNELS;
@@ -516,10 +576,29 @@ where
     Ok(stream)
 }
 
+fn mix_stem_frame(
+    samples: &[f32],
+    cursor: usize,
+    gains: &[f32; STEM_COUNT],
+    master: f32,
+) -> (f32, f32) {
+    let mut left = 0.0f32;
+    let mut right = 0.0f32;
+    for source in 0..STEM_COUNT {
+        let base = cursor + source * OUTPUT_CHANNELS;
+        left += samples[base] * gains[source];
+        right += samples[base + 1] * gains[source];
+    }
+    (left * master, right * master)
+}
+
 fn read_header(input: &PathBuf) -> Result<OpusHeader> {
     let file = File::open(input).with_context(|| format!("open {}", input.display()))?;
     let mut reader = PacketReader::new(file);
-    let packet = reader.read_packet().context("read OpusHead")?.context("empty Ogg stream")?;
+    let packet = reader
+        .read_packet()
+        .context("read OpusHead")?
+        .context("empty Ogg stream")?;
     let data = &packet.data;
     if data.len() < 19 || &data[..8] != b"OpusHead" {
         bail!("stem cache is not an Ogg Opus stream");
@@ -532,7 +611,11 @@ fn read_header(input: &PathBuf) -> Result<OpusHeader> {
         if channels > 2 {
             bail!("Opus mapping family 0 cannot carry {channels} channels");
         }
-        (1, if channels == 2 { 1 } else { 0 }, (0..channels as u8).collect())
+        (
+            1,
+            if channels == 2 { 1 } else { 0 },
+            (0..channels as u8).collect(),
+        )
     } else {
         if data.len() < 21 + channels {
             bail!("truncated Opus multistream header");
@@ -550,4 +633,25 @@ fn read_header(input: &PathBuf) -> Result<OpusHeader> {
 
 fn emit(value: Value) {
     println!("{value}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guitar_and_piano_are_included_in_output_mix() {
+        let mut frame = [0.0f32; STEM_CHANNELS];
+        // Guitar is source 4, piano is source 5 in model/cache order.
+        frame[8] = 0.25;
+        frame[9] = -0.25;
+        frame[10] = 0.5;
+        frame[11] = -0.5;
+        let gains = [1.0f32; STEM_COUNT];
+
+        let (left, right) = mix_stem_frame(&frame, 0, &gains, 1.0);
+
+        assert!((left - 0.75).abs() < f32::EPSILON);
+        assert!((right + 0.75).abs() < f32::EPSILON);
+    }
 }

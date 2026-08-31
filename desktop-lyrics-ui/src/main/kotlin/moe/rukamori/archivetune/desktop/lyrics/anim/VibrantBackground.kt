@@ -65,6 +65,7 @@ uniform shader content;
 uniform float time;
 uniform float2 resolution;
 uniform float saturation;
+uniform float beatPulse;
 
 float mod289(float x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 float2 mod289(float2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -119,7 +120,9 @@ float4 main(float2 coord) {
     // Saturation then brightness (matches shader saturation x CSS saturate/brightness)
     float gray = dot(color.rgb, float3(0.299, 0.587, 0.114));
     color.rgb = mix(float3(gray), color.rgb, saturation);
-    color.rgb *= 0.65;
+    // Keep the beat response concentrated around the center so it reads as a soft glow rather
+    // than a full-screen flash. The supplied pulse is already scaled by the user's intensity.
+    color.rgb *= 0.65 * (1.0 + beatPulse * 0.16 * centerWeight);
 
     return color;
 }
@@ -197,6 +200,7 @@ fun VibrantLyricsBackground(
     artworkUri: String?,
     modifier: Modifier = Modifier,
     isPlaying: Boolean = true,
+    beatPulse: () -> Float = { 0f },
 ) {
     var effect by remember { mutableStateOf<RuntimeEffect?>(null) }
     var childShader by remember { mutableStateOf<Shader?>(null) }
@@ -270,6 +274,7 @@ fun VibrantLyricsBackground(
                         builder.uniform("time", time)
                         builder.uniform("resolution", size.width.toFloat(), size.height.toFloat())
                         builder.uniform("saturation", 3.75f)
+                        builder.uniform("beatPulse", beatPulse().coerceIn(0f, 1f))
                         builder.child("content", child)
                         builder.makeShader(null).use { skiaShader ->
                             drawRect(brush = ShaderBrush(skiaShader.asComposeShader()))

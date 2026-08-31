@@ -38,17 +38,32 @@ import coil3.memory.MemoryCache
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopPartyPlaybackPolicy
+import moe.rukamori.archivetune.desktop.platform.DesktopAudioAnalysisRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.DesktopUpdateCoordinator
 import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.party.PartyMode
+import moe.rukamori.archivetune.desktop.party.PartyPhase
+import moe.rukamori.archivetune.desktop.social.DesktopSocialApi
+import moe.rukamori.archivetune.desktop.social.DesktopSocialManager
+import moe.rukamori.archivetune.desktop.social.DesktopSocialSessionStore
+import moe.rukamori.archivetune.desktop.social.SocialAccountState
+import moe.rukamori.archivetune.desktop.social.SocialPresence
+import moe.rukamori.archivetune.desktop.social.SocialRealtimeEvent
+import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneDesktopApp
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneWindowChrome
+import moe.rukamori.archivetune.desktop.ui.DesktopBeatSyncController
+import moe.rukamori.archivetune.desktop.ui.DesktopBeatSyncHost
+import moe.rukamori.archivetune.desktop.ui.DesktopNotificationCenter
+import moe.rukamori.archivetune.desktop.ui.DesktopNotificationKind
+import moe.rukamori.archivetune.desktop.ui.socialSnapshot
 import moe.rukamori.archivetune.desktop.settings.DesktopLastDestination
 import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.desktop.settings.DesktopThemeMode
@@ -68,6 +83,16 @@ fun main() {
     val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
     val updateCoordinator = DesktopUpdateCoordinator(runtime, musicServices.playback)
     val playTogether = runtime.own(PlayTogetherManager(musicServices.playback, runtime.paths.cache, runtime.logger))
+    val social = runtime.own(
+        DesktopSocialManager(
+            scope = runtime.applicationScope,
+            api = DesktopSocialApi(),
+            sessionStore = DesktopSocialSessionStore(
+                DpapiFileSessionStore(runtime.paths.data.resolve("social-session.dpapi")),
+            ),
+        ),
+    )
+    val notificationCenter = DesktopNotificationCenter(runtime.applicationScope)
     musicServices.attachPartyPlaybackPolicyProvider {
         val party = playTogether.state.value
         DesktopPartyPlaybackPolicy(
@@ -86,8 +111,94 @@ fun main() {
             .distinctUntilChanged()
             .collect(musicServices::setStatisticsPartyActive)
     }
+    runtime.applicationScope.launch {
+        social.restore()
+    }
+    runtime.applicationScope.launch {
+        social.events.collect { event ->
+            when (event) {
+                is SocialRealtimeEvent.FriendRequest -> notificationCenter.post(
+                    title = "Friend request",
+                    message = "${event.user.name} (@${event.user.username}) sent you a friend request",
+                    kind = DesktopNotificationKind.FRIEND,
+                    destination = DesktopDestination.FRIENDS,
+                )
+                is SocialRealtimeEvent.FriendAccepted -> notificationCenter.post(
+                    title = "Friend request accepted",
+                    message = "${event.user.name} is now your friend on ArchiveTune",
+                    kind = DesktopNotificationKind.SUCCESS,
+                    destination = DesktopDestination.FRIENDS,
+                )
+                is SocialRealtimeEvent.PartyInvite -> notificationCenter.post(
+                    title = "Listening party invite",
+                    message = "${event.invite.sender.name} invited you to listen together",
+                    kind = DesktopNotificationKind.PARTY,
+                    destination = DesktopDestination.FRIENDS,
+                    durationMs = 9_000L,
+                )
+                is SocialRealtimeEvent.ChatMessage -> {
+                    val friend = social.state.value.friends.firstOrNull { it.id == event.message.senderId }
+                    val sender = friend?.name ?: "Friend"
+                    val preview = when (event.message.kind) {
+                        moe.rukamori.archivetune.desktop.social.SocialChatMessageKind.TEXT ->
+                            event.message.text.orEmpty().take(120)
+                        moe.rukamori.archivetune.desktop.social.SocialChatMessageKind.SONG -> "Sent you a song"
+                        moe.rukamori.archivetune.desktop.social.SocialChatMessageKind.QUEUE -> "Sent you a queue"
+                        moe.rukamori.archivetune.desktop.social.SocialChatMessageKind.PLAYLIST -> "Sent you a playlist"
+                    }
+                    notificationCenter.post(
+                        title = "Message from " + sender,
+                        message = preview,
+                        kind = DesktopNotificationKind.MESSAGE,
+                        destination = DesktopDestination.FRIENDS,
+                    )
+                }
+            }
+        }
+    }
+    runtime.applicationScope.launch {
+        val listeningPresence = musicServices.playback.state
+            .map { snapshot ->
+                snapshot.currentItem?.metadata?.let { metadata ->
+                    SocialPresence(
+                        songId = metadata.id,
+                        title = metadata.title,
+                        artist = metadata.artistText,
+                        artworkUrl = metadata.artworkUri,
+                    )
+                } ?: SocialPresence()
+            }
+            .distinctUntilChanged()
+        val partyJoinable = playTogether.state
+            .map { state ->
+                state.mode == PartyMode.HOST &&
+                    state.phase == PartyPhase.CONNECTED &&
+                    !state.invite.isNullOrBlank()
+            }
+            .distinctUntilChanged()
+        combine(listeningPresence, partyJoinable) { presence, joinable ->
+            presence.copy(partyJoinable = joinable)
+        }.collect(social::publishPresence)
+    }
+    runtime.applicationScope.launch {
+        combine(
+            social.state.map { it.account is SocialAccountState.SignedIn },
+            musicServices.statistics.revision,
+        ) { signedIn, revision -> signedIn to revision }
+            .distinctUntilChanged()
+            .collect { (signedIn, _) ->
+                if (signedIn) {
+                    social.uploadStatistics(musicServices.statistics.socialSnapshot())
+                }
+            }
+    }
     updateCoordinator.start()
     val restored = runtime.settings.snapshot()
+    val beatAnalysisRepository = DesktopAudioAnalysisRepository(runtime.paths, musicServices.playback, runtime.logger)
+    val beatSync = DesktopBeatSyncController(
+        enabled = restored.beatSyncedVisualsEnabled,
+        intensity = restored.beatSyncedVisualsIntensity,
+    )
     var latestDestination = restored.lastDestination.asDesktopDestination()
     var latestTheme = restored.themeMode.asDesktopThemePreference()
     var latestAccentSeedArgb = restored.accentSeedArgb
@@ -133,6 +244,21 @@ fun main() {
                 var showStems by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }
                 var hasEnteredLyrics by remember { mutableStateOf(false) }
+                var openChatFriendId by remember { mutableStateOf<String?>(null) }
+                val notifications by notificationCenter.notifications.collectAsState()
+                val socialState by social.state.collectAsState()
+                val remoteLibrary by musicServices.libraryRepository.state.collectAsState()
+                val openChatFriend = openChatFriendId?.let { friendId ->
+                    socialState.friends.firstOrNull { it.id == friendId }
+                }
+                val beatPulseProvider = remember(beatSync) { { beatSync.visualPulse } }
+
+                DesktopBeatSyncHost(
+                    playback = musicServices.playback,
+                    repository = beatAnalysisRepository,
+                    controller = beatSync,
+                    active = !windowState.isMinimized,
+                )
 
                 // Keep the event-driven trims, and also periodically ask Windows to evict cold pages.
                 LaunchedEffect(Unit) {
@@ -191,6 +317,7 @@ fun main() {
                             services = musicServices,
                             playTogether = playTogether,
                             browse = browse,
+                            beatSync = beatSync,
                             onBrowseOpened = { showLyrics = false },
                             modifier = modifier,
                             useShellDynamicBackdrop = useShellDynamicBackdrop,
@@ -230,6 +357,7 @@ fun main() {
                         initialThemePreference = latestTheme,
                         initialAccentSeedArgb = latestAccentSeedArgb,
                         dynamicArtworkUri = dynamicArtworkUri,
+                        beatPulse = beatPulseProvider,
                         windowDragModifier = windowDragModifier,
                         windowControls = windowControls,
                         immersiveContent = when {
@@ -247,6 +375,24 @@ fun main() {
                         onDismissQueue = { showQueue = false },
                         contentCanNavigateBack = browse.detail != null,
                         onContentNavigateBack = browse::goBack,
+                        notifications = notifications,
+                        onDismissNotification = notificationCenter::dismiss,
+                        chatContent = openChatFriend?.let { friend ->
+                            { modifier ->
+                                moe.rukamori.archivetune.desktop.ui.DesktopChatDock(
+                                    friend = friend,
+                                    ownUserId = (socialState.account as? SocialAccountState.SignedIn)?.user?.id.orEmpty(),
+                                    messages = socialState.chats[friend.id].orEmpty(),
+                                    loading = friend.id in socialState.loadingChats,
+                                    services = musicServices,
+                                    playTogether = playTogether,
+                                    playlists = remoteLibrary.playlists,
+                                    social = social,
+                                    onClose = { openChatFriendId = null },
+                                    modifier = modifier,
+                                )
+                            }
+                        },
                         onShellStateChanged = { destination, theme, accentSeedArgb ->
                             latestDestination = destination
                             latestTheme = theme
@@ -263,13 +409,26 @@ fun main() {
                             }
                         },
                         content = { contentState, modifier ->
-                            moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(contentState, musicServices, downloadServices, runtime.paths, runtime.logger, browse, playTogether, modifier)
+                            moe.rukamori.archivetune.desktop.ui.DesktopMusicContent(
+                                contentState,
+                                musicServices,
+                                downloadServices,
+                                runtime.paths,
+                                runtime.logger,
+                                browse,
+                                playTogether,
+                                social,
+                                onOpenChat = { friend -> openChatFriendId = friend.id },
+                                onBeatVisualPreferencesChanged = beatSync::setVisualPreferences,
+                                modifier = modifier,
+                            )
                         },
                         playerContent = { modifier ->
                             moe.rukamori.archivetune.desktop.ui.DesktopMiniPlayer(
                                 services = musicServices,
                                 playTogether = playTogether,
                                 browse = browse,
+                                beatSync = beatSync,
                                 onShowLyrics = {
                                     showStems = false
                                     showLyrics = true

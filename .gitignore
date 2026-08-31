@@ -32,6 +32,10 @@ proguard/
 
 # Log Files
 *.log
+*.dmp
+*.trc
+javacore.*.txt
+/androguard.db
 
 # Android Studio Navigation editor temp files
 .navigation/

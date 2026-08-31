@@ -10,7 +10,9 @@ plugins {
 
 group = "moe.rukamori.archivetune"
 val desktopAppProject = evaluationDependsOn(":desktopApp")
+val desktopAudioAnalysisProject = evaluationDependsOn(":desktop-audio-analysis")
 version = desktopAppProject.version
+val nativeQuickBuild = providers.gradleProperty("nativeQuickBuild").map(String::toBoolean).getOrElse(false)
 val windowsPackageVersion = version.toString().let { value ->
     if (value.count { it == '.' } == 1) "$value.0" else value
 }
@@ -50,7 +52,13 @@ nucleus.application {
         isEnabled.set(true)
         imageName.set("ArchiveTune")
         maxHeapSize.set("128m")
-        optimization.set(NativeImageOptimization.SIZE)
+        optimization.set(
+            if (nativeQuickBuild) NativeImageOptimization.QUICK_BUILD else NativeImageOptimization.SIZE,
+        )
+        // The native-image compiler spends a meaningful share of CI time in GC with its
+        // default collector (85s across 3564 collections in the 14.12 release build).
+        // Parallel GC trades a little peak RSS for substantially less builder overhead.
+        buildArgs.add("-J-XX:+UseParallelGC")
         // Keep the native image's Serial GC from holding on to a large reserve of completely
         // free heap after a collection. This biases the app toward the compact steady-state
         // working set we see after it has been running for a while, without forcing System.gc()
@@ -81,10 +89,11 @@ val nativeReleaseDir = desktopAppProject.layout.buildDirectory.dir("compose/bina
 val nativeMsiOutputDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/msi")
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val stemWorkerProjectDir = rootProject.layout.projectDirectory.dir("stem-worker")
-val stemWorkerExe = stemWorkerProjectDir.file("target/release/archivetune-stems.exe")
+val stemWorkerExe = stemWorkerProjectDir.file("target/release/archivetune-model-runner.exe")
 val stemRuntimeBuildDir = rootProject.layout.buildDirectory.dir("stem-runtime/windows-x64")
 val stemOrtPackage = rootProject.layout.buildDirectory.file("stem-runtime/packages/onnxruntime-directml-1.24.4.nupkg")
 val stemDirectMlPackage = rootProject.layout.buildDirectory.file("stem-runtime/packages/directml-1.15.4.nupkg")
+val audioAnalysisDll = desktopAudioAnalysisProject.layout.buildDirectory.file("native/windows-x64/archivetune-audio-analysis.dll")
 
 tasks.matching { it.name == "generateGraalvmWindowsResources" }.configureEach {
     dependsOn(desktopAppProject.tasks.named("generateWindowsIcon"))
@@ -109,9 +118,18 @@ val stageNativeVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNat
     mustRunAfter("packageGraalvmNative")
 }
 
+val stageNativeAudioAnalysis = tasks.register<Copy>("stageNativeAudioAnalysis") {
+    group = "distribution"
+    description = "Stages the Essentia beat-analysis DLL beside the GraalVM native executable."
+    dependsOn(desktopAudioAnalysisProject.tasks.named("buildNativeWindows"))
+    from(audioAnalysisDll)
+    into(nativeOutputDir.map { it.dir("native/windows-x64/audio-analysis") })
+    mustRunAfter("packageGraalvmNative")
+}
+
 val buildStemWorker = tasks.register<Exec>("buildStemWorker") {
     group = "distribution"
-    description = "Builds ArchiveTune's native DirectML stem-separation sidecar."
+    description = "Builds ArchiveTune's native DirectML model-inference sidecar."
     workingDir(stemWorkerProjectDir)
     commandLine("cargo", "build", "--release", "--locked")
     inputs.file(stemWorkerProjectDir.file("Cargo.toml"))
@@ -172,7 +190,7 @@ val prepareStemRuntime = tasks.register<Sync>("prepareStemRuntime") {
 
 val stageNativeStemRuntime = tasks.register<Copy>("stageNativeStemRuntime") {
     group = "distribution"
-    description = "Stages ArchiveTune's stem worker and DirectML runtime beside the native executable."
+    description = "Stages ArchiveTune's model runner and DirectML runtime beside the native executable."
     dependsOn(buildStemWorker, prepareStemRuntime)
     from(stemWorkerExe)
     from(stemRuntimeBuildDir)
@@ -181,13 +199,13 @@ val stageNativeStemRuntime = tasks.register<Copy>("stageNativeStemRuntime") {
 }
 
 tasks.matching { it.name == "packageGraalvmNative" }.configureEach {
-    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime)
+    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis)
 }
 
 val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     group = "distribution"
     description = "Stages the production GraalVM distribution under desktopApp/build/compose/binaries/main-native."
-    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime)
+    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis)
     from(nativeOutputDir) {
         exclude("native/windows-x64/vlc/**")
     }

@@ -51,6 +51,9 @@ class DesktopUpdateCoordinator(
 
     @Volatile
     private var staged: DesktopUpdateState.Ready? = null
+    private val runningExecutableSha256: String? by lazy {
+        currentExecutable()?.takeIf { Files.isRegularFile(it) }?.let(::sha256)
+    }
 
     fun start() {
         val baseUrl = DesktopBuildInfo.UPDATE_BASE_URL.trim().trimEnd('/')
@@ -118,7 +121,20 @@ class DesktopUpdateCoordinator(
         val manifestUri = URI.create("$baseUrl/latest.json")
         val manifest = fetchJson(manifestUri)
         val version = manifest.getString("version").trim()
-        if (compareVersions(version, DesktopBuildInfo.VERSION) <= 0) {
+        val expectedExecutableSha256 = manifest.optString("exeSha256")
+            .trim()
+            .lowercase()
+            .takeIf(String::isNotBlank)
+        val currentExecutableSha256 = expectedExecutableSha256?.let {
+            runningExecutableSha256 ?: error("Could not hash the running ArchiveTune executable")
+        }
+        if (!shouldStageDesktopUpdate(
+                manifestVersion = version,
+                currentVersion = DesktopBuildInfo.VERSION,
+                expectedExecutableSha256 = expectedExecutableSha256,
+                currentExecutableSha256 = currentExecutableSha256,
+            )
+        ) {
             _state.value = DesktopUpdateState.UpToDate
             return
         }
@@ -248,6 +264,23 @@ internal fun compareVersions(left: String, right: String): Int {
         if (a != b) return a.compareTo(b)
     }
     return 0
+}
+
+internal fun shouldStageDesktopUpdate(
+    manifestVersion: String,
+    currentVersion: String,
+    expectedExecutableSha256: String?,
+    currentExecutableSha256: String?,
+): Boolean {
+    val expected = expectedExecutableSha256?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+    if (expected != null) {
+        require(expected.matches(Regex("[0-9a-f]{64}"))) { "latest.json contains an invalid exeSha256" }
+        val current = currentExecutableSha256?.trim()?.lowercase()
+            ?: error("Current executable SHA-256 is unavailable")
+        require(current.matches(Regex("[0-9a-f]{64}"))) { "Current executable SHA-256 is invalid" }
+        return current != expected
+    }
+    return compareVersions(manifestVersion, currentVersion) > 0
 }
 
 private fun normalizedVersionParts(version: String): List<Int> =

@@ -8,6 +8,7 @@ package moe.rukamori.archivetune.desktop.lyrics
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -63,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.desktop.lyrics.anim.VibrantLyricsBackground
+import moe.rukamori.archivetune.chords.ChordTrackSource
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchResult
 import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus
 import moe.rukamori.archivetune.lyrics.LyricsRequest
@@ -86,8 +89,11 @@ fun DesktopLyricsPane(
 
     val state by presenter.state.collectAsState()
     val searchState by presenter.searchState.collectAsState()
+    val chordState by presenter.chordState.collectAsState()
     val playback by presenter.playbackState.collectAsState()
     var showSearch by remember(searchState.itemId) { mutableStateOf(false) }
+    var showChords by remember(searchState.itemId) { mutableStateOf(false) }
+    var openChordsWhenReady by remember(searchState.itemId) { mutableStateOf(false) }
     var title by remember(searchState.itemId) { mutableStateOf(searchState.request?.title.orEmpty()) }
     var artist by remember(searchState.itemId) { mutableStateOf(searchState.request?.artist.orEmpty()) }
     var album by remember(searchState.itemId) { mutableStateOf(searchState.request?.album.orEmpty()) }
@@ -96,6 +102,16 @@ fun DesktopLyricsPane(
 
     LaunchedEffect(state) {
         if (state is DesktopLyricsState.Empty || state is DesktopLyricsState.Error) showSearch = true
+    }
+    LaunchedEffect(chordState) {
+        when (chordState) {
+            is DesktopChordState.Ready -> {
+                if (openChordsWhenReady) showChords = true
+                openChordsWhenReady = false
+            }
+            is DesktopChordState.Empty, is DesktopChordState.Error -> openChordsWhenReady = false
+            else -> Unit
+        }
     }
 
     Box(modifier.fillMaxSize()) {
@@ -110,6 +126,20 @@ fun DesktopLyricsPane(
                 onToggleSearch = { showSearch = !showSearch },
                 showSearchToggle = searchState.request != null,
                 showSearch = showSearch,
+                chordState = chordState,
+                showChords = showChords,
+                showChordToggle = playback.currentItem != null,
+                onToggleChords = {
+                    if (showChords) {
+                        showChords = false
+                    } else if (chordState is DesktopChordState.Ready) {
+                        showChords = true
+                    } else {
+                        openChordsWhenReady = true
+                        presenter.loadChords()
+                    }
+                },
+                onUseLocalChordModel = presenter::loadChordsFromLocalModel,
             )
             if (showSearch && searchState.request != null) {
                 SearchPanel(
@@ -135,28 +165,31 @@ fun DesktopLyricsPane(
                     onSelect = { if (presenter.select(it)) showSearch = false },
                 )
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (val current = state) {
-                    is DesktopLyricsState.Ready -> {
-                        if (current.timeline.synchronized) {
-                            val built = remember(current.itemId, current.timeline) {
-                                CharTimelineBuilder.build(current.timeline)
-                            }
-                            SpicyLyricsView(
-                                lyrics = built,
-                                positionMsState = presenter.positionMsFlow,
-                                modifier = Modifier.fillMaxSize(),
-                                onSeek = {
-                                    if (seekEnabled) {
-                                        if (onSeek != null) onSeek(it) else presenter.seekToMs(it)
-                                    }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val chordReady = chordState as? DesktopChordState.Ready
+                val chordVisible = showChords && chordReady != null
+                val splitProgress by animateFloatAsState(
+                    targetValue = if (chordVisible) 1f else 0f,
+                    animationSpec = tween(360, easing = FastOutSlowInEasing),
+                    label = "lyrics-chord-split",
+                )
+                val chordWidth = (maxWidth * 0.42f).coerceIn(300.dp, 520.dp) * splitProgress
+                val slideDistancePx = with(LocalDensity.current) { 36.dp.toPx() }
+                Row(Modifier.fillMaxSize()) {
+                    if (splitProgress > 0.001f && chordReady != null) {
+                        Box(
+                            Modifier.width(chordWidth).fillMaxHeight()
+                                .graphicsLayer {
+                                    alpha = splitProgress
+                                    translationX = -slideDistancePx * (1f - splitProgress)
                                 },
-                                isPlaying = playback.isPlaying,
-                            )
-                        } else {
-                            SimpleLyricsView(
-                                timeline = current.timeline,
+                        ) {
+                            DesktopChordPanel(
+                                track = chordReady.track,
+                                positionMsState = presenter.positionMsFlow,
+                                pitchSemitones = playback.pitchSemitones,
                                 modifier = Modifier.fillMaxSize(),
+                                seekEnabled = seekEnabled,
                                 onSeek = {
                                     if (seekEnabled) {
                                         if (onSeek != null) onSeek(it) else presenter.seekToMs(it)
@@ -165,18 +198,50 @@ fun DesktopLyricsPane(
                             )
                         }
                     }
-                    DesktopLyricsState.Idle -> LyricsMessage("Select a song to see lyrics", Modifier)
-                    is DesktopLyricsState.Loading -> LyricsMessage("Finding lyrics…", Modifier, busy = true)
-                    is DesktopLyricsState.Empty -> LyricsMessage(
-                        message = if (searchState.results.any { it.document != null }) "Choose a provider result above" else current.message,
-                        modifier = Modifier,
-                        retry = if (searchState.results.any { it.document != null }) null else presenter::retry,
-                    )
-                    is DesktopLyricsState.Error -> LyricsMessage(
-                        message = current.message,
-                        modifier = Modifier,
-                        retry = presenter::retry,
-                    )
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        when (val current = state) {
+                            is DesktopLyricsState.Ready -> {
+                                if (current.timeline.synchronized) {
+                                    val built = remember(current.itemId, current.timeline) {
+                                        CharTimelineBuilder.build(current.timeline)
+                                    }
+                                    SpicyLyricsView(
+                                        lyrics = built,
+                                        positionMsState = presenter.positionMsFlow,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onSeek = {
+                                            if (seekEnabled) {
+                                                if (onSeek != null) onSeek(it) else presenter.seekToMs(it)
+                                            }
+                                        },
+                                        isPlaying = playback.isPlaying,
+                                    )
+                                } else {
+                                    SimpleLyricsView(
+                                        timeline = current.timeline,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onSeek = {
+                                            if (seekEnabled) {
+                                                if (onSeek != null) onSeek(it) else presenter.seekToMs(it)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                            DesktopLyricsState.Idle -> LyricsMessage("Select a song to see lyrics", Modifier)
+                            is DesktopLyricsState.Loading -> LyricsMessage("Finding lyrics…", Modifier, busy = true)
+                            is DesktopLyricsState.Empty -> LyricsMessage(
+                                message = if (searchState.results.any { it.document != null }) "Choose a provider result above" else current.message,
+                                modifier = Modifier,
+                                retry = if (searchState.results.any { it.document != null }) null else presenter::retry,
+                            )
+                            is DesktopLyricsState.Error -> LyricsMessage(
+                                message = current.message,
+                                modifier = Modifier,
+                                retry = presenter::retry,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -191,6 +256,11 @@ private fun HeaderRow(
     onToggleSearch: () -> Unit,
     showSearchToggle: Boolean,
     showSearch: Boolean,
+    chordState: DesktopChordState,
+    showChords: Boolean,
+    showChordToggle: Boolean,
+    onToggleChords: () -> Unit,
+    onUseLocalChordModel: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 14.dp),
@@ -213,6 +283,40 @@ private fun HeaderRow(
         if (showSearchToggle) {
             TextButton(onClick = onToggleSearch) {
                 Text(if (showSearch) "Hide search" else "Find another version")
+            }
+        }
+        if (showChordToggle) when (chordState) {
+            is DesktopChordState.Loading -> {
+                Row(
+                    Modifier.padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                    Text("Finding chords…", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            is DesktopChordState.Empty -> {
+                TextButton(onClick = {}, enabled = false) { Text("No chords") }
+            }
+            else -> {
+                if (
+                    chordState is DesktopChordState.Ready &&
+                    chordState.track.source != ChordTrackSource.LOCAL_NEURAL
+                ) {
+                    TextButton(onClick = onUseLocalChordModel) {
+                        Text("Use ML model")
+                    }
+                }
+                TextButton(onClick = onToggleChords) {
+                    Text(
+                        when {
+                            showChords -> "Hide chords"
+                            chordState is DesktopChordState.Error -> "Retry chords"
+                            else -> "Chords"
+                        },
+                    )
+                }
             }
         }
     }

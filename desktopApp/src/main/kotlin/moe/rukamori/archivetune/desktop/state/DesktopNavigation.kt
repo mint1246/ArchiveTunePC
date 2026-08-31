@@ -21,6 +21,7 @@ enum class DesktopDestination(
     EXPLORE("explore", "Explore", "New releases, charts, moods and genres"),
     SEARCH("search", "Search", "Search YouTube Music and your local library"),
     LIBRARY("library", "Library", "Songs, albums, artists and playlists"),
+    FRIENDS("friends", "Friends", "Discord friends, listening presence and party invites"),
     DOWNLOADS("downloads", "Downloads", "Offline music stored on this computer"),
     STATISTICS("statistics", "Statistics", "Your listening habits and most played music"),
     SETTINGS("settings", "Settings", "Appearance, playback, accounts and integrations"),

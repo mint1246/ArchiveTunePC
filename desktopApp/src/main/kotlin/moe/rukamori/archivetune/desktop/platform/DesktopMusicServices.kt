@@ -150,8 +150,15 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     }
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    private val neuralChordAnalyzer = DesktopNeuralChordAnalyzer(runtime, playback)
     private val lyricsPresenter = lazy {
-        DesktopLyricsPresenter(playback, configuredLyricsClient(), lyricsScope.value, initiallyActive = false)
+        DesktopLyricsPresenter(
+            playback,
+            configuredLyricsClient(),
+            lyricsScope.value,
+            initiallyActive = false,
+            localChordAnalyzer = neuralChordAnalyzer::analyze,
+        )
     }
     val lyrics: DesktopLyricsPresenter
         get() = lyricsPresenter.value

@@ -69,6 +69,10 @@ internal class DesktopAudioOutputSelection(initialDeviceId: String? = null) {
         }
     }
 
+    internal fun adoptBackend(next: DesktopAudioOutputBackend) = synchronized(lock) {
+        backend = next
+    }
+
     fun refresh(): DesktopAudioOutputState = synchronized(lock) {
         val activeBackend = backend ?: return@synchronized _state.value
         refreshLocked(activeBackend)

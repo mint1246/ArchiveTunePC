@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -66,6 +67,49 @@ import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 
 /** Shared, self-contained media primitives used by the desktop Home and Explore surfaces. */
+
+internal data class DesktopSongAvailability(
+    val downloadedIds: Set<String> = emptySet(),
+    val stemReadyIds: Set<String> = emptySet(),
+)
+
+internal val LocalDesktopSongAvailability = staticCompositionLocalOf { DesktopSongAvailability() }
+
+@Composable
+internal fun DesktopSongStatusBadges(
+    songId: String,
+    modifier: Modifier = Modifier,
+) {
+    val availability = LocalDesktopSongAvailability.current
+    val downloaded = songId in availability.downloadedIds
+    val stemsReady = songId in availability.stemReadyIds
+    if (!downloaded && !stemsReady) return
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (downloaded) SongStatusBadge("downloaded")
+        if (stemsReady) SongStatusBadge("stems ready")
+    }
+}
+
+@Composable
+private fun SongStatusBadge(label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            maxLines = 1,
+        )
+    }
+}
 
 @Composable
 fun DesktopMediaArtwork(
@@ -218,6 +262,12 @@ fun DesktopMediaGridCard(
                     }
                 }
             }
+            if (item is SongItem) {
+                DesktopSongStatusBadges(
+                    songId = item.id,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -308,6 +358,7 @@ fun DesktopMediaListRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            DesktopSongStatusBadges(song.id, Modifier.padding(top = 3.dp))
         }
         song.duration?.let { duration ->
             Text(

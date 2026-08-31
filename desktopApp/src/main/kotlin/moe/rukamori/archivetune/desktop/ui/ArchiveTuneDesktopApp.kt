@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.MusicNote
@@ -110,6 +111,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import moe.rukamori.archivetune.desktop.platform.AppPaths
+import moe.rukamori.archivetune.desktop.platform.DesktopBuildInfo
 import moe.rukamori.archivetune.desktop.platform.DesktopPlatform
 import moe.rukamori.archivetune.desktopauth.CookieJsonSessionImportResult
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
@@ -149,6 +151,7 @@ private val DesktopDestination.icon: ImageVector
         DesktopDestination.EXPLORE -> Icons.Rounded.Explore
         DesktopDestination.SEARCH -> Icons.Rounded.Search
         DesktopDestination.LIBRARY -> Icons.Rounded.LibraryMusic
+        DesktopDestination.FRIENDS -> Icons.Rounded.Group
         DesktopDestination.DOWNLOADS -> Icons.Rounded.Download
         DesktopDestination.STATISTICS -> Icons.Rounded.BarChart
         DesktopDestination.SETTINGS -> Icons.Rounded.Settings
@@ -162,6 +165,7 @@ fun ArchiveTuneDesktopApp(
     initialThemePreference: DesktopThemePreference,
     initialAccentSeedArgb: Long? = null,
     dynamicArtworkUri: String? = null,
+    beatPulse: () -> Float = { 0f },
     onShellStateChanged: (DesktopDestination, DesktopThemePreference, Long?) -> Unit,
     windowDragModifier: Modifier = Modifier,
     windowControls: (@Composable () -> Unit)? = null,
@@ -176,6 +180,9 @@ fun ArchiveTuneDesktopApp(
     content: (@Composable (DesktopContentState, Modifier) -> Unit)? = null,
     playerContent: (@Composable (Modifier) -> Unit)? = null,
     queueContent: (@Composable (Modifier, Dp) -> Unit)? = null,
+    chatContent: (@Composable (Modifier) -> Unit)? = null,
+    notifications: List<DesktopAppNotification> = emptyList(),
+    onDismissNotification: (Long) -> Unit = {},
 ) {
     val navigator = remember { DesktopNavigator(initialDestination) }
     val searchFocusRequester = remember { FocusRequester() }
@@ -194,6 +201,7 @@ fun ArchiveTuneDesktopApp(
             if (dynamicActive) {
                 DynamicAppBackdrop(
                     artworkUri = dynamicArtworkUri,
+                    beatPulse = beatPulse,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -373,6 +381,31 @@ fun ArchiveTuneDesktopApp(
                 }
             }
             }
+            if (chatContent != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 22.dp, bottom = 112.dp),
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                    chatContent(Modifier)
+                }
+            }
+            DesktopNotificationHost(
+                notifications = notifications,
+                onOpen = { notification ->
+                    notification.destination?.let(navigator::navigate)
+                    onDismissNotification(notification.id)
+                },
+                onDismiss = onDismissNotification,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        top = 22.dp,
+                        end = if (chatContent != null) 480.dp else 22.dp,
+                        bottom = 22.dp,
+                    ),
+            )
         }
     }
 }
@@ -383,6 +416,7 @@ private enum class DesktopNavigationLayout { EXPANDED, RAIL, COMPACT }
 @Composable
 private fun DynamicAppBackdrop(
     artworkUri: String?,
+    beatPulse: () -> Float = { 0f },
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -398,6 +432,7 @@ private fun DynamicAppBackdrop(
             VibrantLyricsBackground(
                 artworkUri = artwork,
                 modifier = Modifier.fillMaxSize(),
+                beatPulse = beatPulse,
             )
         }
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.22f)))
@@ -430,7 +465,7 @@ private fun ExpandedSidebar(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
             Text(
-                "14.14 • Windows x64",
+                "${DesktopBuildInfo.VERSION} • Windows x64",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
@@ -475,6 +510,7 @@ private fun CompactNavigation(state: DesktopContentState) {
     }
     val secondaryDestinations = remember {
         listOf(
+            DesktopDestination.FRIENDS,
             DesktopDestination.DOWNLOADS,
             DesktopDestination.STATISTICS,
             DesktopDestination.SETTINGS,
@@ -713,6 +749,7 @@ fun FoundationDestinationContent(
     onKeybindsChanged: () -> Unit = {},
     onKeybindCaptureChanged: (Boolean) -> Unit = {},
     onStatisticsPreferenceChanged: () -> Unit = {},
+    onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> },
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -739,6 +776,7 @@ fun FoundationDestinationContent(
             onKeybindsChanged,
             onKeybindCaptureChanged,
             onStatisticsPreferenceChanged,
+            onBeatVisualPreferencesChanged,
             keybindPressedKeys,
             modifier,
         )
@@ -894,6 +932,7 @@ private fun FoundationSettings(
     onKeybindsChanged: () -> Unit,
     onKeybindCaptureChanged: (Boolean) -> Unit,
     onStatisticsPreferenceChanged: () -> Unit,
+    onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit,
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>?,
     modifier: Modifier = Modifier,
 ) {
@@ -921,6 +960,7 @@ private fun FoundationSettings(
         onKeybindsChanged = onKeybindsChanged,
         onKeybindCaptureChanged = onKeybindCaptureChanged,
         onStatisticsPreferenceChanged = onStatisticsPreferenceChanged,
+        onBeatVisualPreferencesChanged = onBeatVisualPreferencesChanged,
         keybindPressedKeys = keybindPressedKeys,
         account = account,
         accountContent = { if (account != null) DesktopAccountCard(account) else AnonymousAccountCard() },

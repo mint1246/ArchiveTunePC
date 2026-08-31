@@ -33,6 +33,7 @@ enum class DesktopLastDestination {
     EXPLORE,
     SEARCH,
     LIBRARY,
+    FRIENDS,
     DOWNLOADS,
     STATISTICS,
     SETTINGS,
@@ -107,6 +108,8 @@ data class DesktopSettings(
     val themeMode: DesktopThemeMode = DesktopThemeMode.SYSTEM,
     /** Optional unsigned ARGB color value, stored as a Long to avoid UI toolkit dependencies. */
     val accentSeedArgb: Long? = null,
+    val beatSyncedVisualsEnabled: Boolean = true,
+    val beatSyncedVisualsIntensity: Float = 0.75f,
     val volume: Float = 1f,
     val speed: Float = 1f,
     val pitchSemitones: Float = 0f,
@@ -189,6 +192,12 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             DesktopSettings(
                 themeMode = values.enumValue("appearance.theme", DesktopThemeMode.SYSTEM),
                 accentSeedArgb = values.getProperty("appearance.accentArgb")?.toLongOrNull(),
+                beatSyncedVisualsEnabled = values.getProperty("appearance.beatSyncedVisuals.enabled")
+                    ?.toBooleanStrictOrNull()
+                    ?: true,
+                beatSyncedVisualsIntensity = values.getProperty("appearance.beatSyncedVisuals.intensity")
+                    ?.toFloatOrNull()
+                    ?: 0.75f,
                 volume = values.getProperty("playback.volume")?.toFloatOrNull() ?: 1f,
                 speed = values.getProperty("playback.speed")?.toFloatOrNull() ?: 1f,
                 pitchSemitones = values.getProperty("playback.pitchSemitones")?.toFloatOrNull() ?: 0f,
@@ -232,6 +241,8 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         val values = Properties().apply {
             setProperty("appearance.theme", settings.themeMode.name)
             settings.accentSeedArgb?.let { setProperty("appearance.accentArgb", it.toString()) }
+            setProperty("appearance.beatSyncedVisuals.enabled", settings.beatSyncedVisualsEnabled.toString())
+            setProperty("appearance.beatSyncedVisuals.intensity", settings.beatSyncedVisualsIntensity.toString())
             setProperty("playback.volume", settings.volume.toString())
             setProperty("playback.speed", settings.speed.toString())
             setProperty("playback.pitchSemitones", settings.pitchSemitones.toString())
@@ -281,6 +292,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
 
     private fun DesktopSettings.sanitized(): DesktopSettings = copy(
         accentSeedArgb = accentSeedArgb?.takeIf { it in 0..ARGB_MAX },
+        beatSyncedVisualsIntensity = beatSyncedVisualsIntensity.finiteOr(0.75f).coerceIn(0f, 1f),
         volume = volume.finiteOr(1f).coerceIn(0f, 1f),
         speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
         pitchSemitones = pitchSemitones.finiteOr(0f).coerceIn(-12f, 12f),

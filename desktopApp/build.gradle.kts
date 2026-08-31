@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "moe.rukamori.archivetune"
-version = "14.14"
+version = "14.16"
 val windowsPackageVersion = version.toString().let { value ->
     if (value.count { it == '.' } == 1) "$value.0" else value
 }
@@ -30,11 +30,13 @@ kotlin {
 dependencies {
     implementation(project(":desktop-backend"))
     implementation(project(":desktop-auth"))
+    implementation(project(":desktop-social"))
     implementation(project(":desktop-playback"))
     implementation(project(":desktop-play-together"))
     implementation(project(":desktop-library"))
     implementation(project(":desktop-settings"))
     implementation(project(":desktop-statistics"))
+    implementation(project(":desktop-audio-analysis"))
     implementation(project(":desktop-lyrics-ui"))
     implementation(project(":windows-media-integration"))
     implementation(project(":desktop-downloads"))
@@ -134,6 +136,8 @@ compose.desktop {
 val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/ArchiveTune")
 val releaseAppImageDir = layout.buildDirectory.dir("compose/binaries/main-release/app/ArchiveTune")
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
+val audioAnalysisProject = evaluationDependsOn(":desktop-audio-analysis")
+val audioAnalysisDll = audioAnalysisProject.layout.buildDirectory.file("native/windows-x64/archivetune-audio-analysis.dll")
 val stageBundledVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageBundledVlcRuntime") {
     group = "distribution"
     description = "Stages the verified libVLC runtime into the desktop app image."
@@ -145,6 +149,22 @@ val stageBundledVlcRuntimeRelease = tasks.register<StageBundledVlcRuntimeTask>("
     description = "Stages the verified libVLC runtime into the optimized desktop app image."
     sourceDirectory.set(bundledVlcSourceDir)
     destinationDirectory.set(releaseAppImageDir.map { it.dir("app/resources/native/windows-x64/vlc") })
+}
+val stageBundledAudioAnalysis = tasks.register<Copy>("stageBundledAudioAnalysis") {
+    group = "distribution"
+    description = "Stages the Essentia audio-analysis DLL into the desktop app image."
+    dependsOn(audioAnalysisProject.tasks.named("buildNativeWindows"))
+    from(audioAnalysisDll)
+    into(appImageDir.map { it.dir("app/resources/native/windows-x64/audio-analysis") })
+    mustRunAfter("createDistributable")
+}
+val stageBundledAudioAnalysisRelease = tasks.register<Copy>("stageBundledAudioAnalysisRelease") {
+    group = "distribution"
+    description = "Stages the Essentia audio-analysis DLL into the optimized desktop app image."
+    dependsOn(audioAnalysisProject.tasks.named("buildNativeWindows"))
+    from(audioAnalysisDll)
+    into(releaseAppImageDir.map { it.dir("app/resources/native/windows-x64/audio-analysis") })
+    mustRunAfter("createReleaseDistributable")
 }
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/windows")
@@ -263,7 +283,7 @@ fun installerJpackageArgs(
 val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
     group = "package"
     description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", stageBundledVlcRuntime, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(
         listOf(jpackageExecutable) +
@@ -274,7 +294,7 @@ val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
 val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
     group = "package"
     description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", stageBundledVlcRuntime, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(
         listOf(jpackageExecutable) +
@@ -355,9 +375,9 @@ tasks.matching {
 }
 
 tasks.matching { it.name == "createDistributable" }.configureEach {
-    finalizedBy(stageBundledVlcRuntime)
+    finalizedBy(stageBundledVlcRuntime, stageBundledAudioAnalysis)
 }
 
 tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
-    finalizedBy(stageBundledVlcRuntimeRelease)
+    finalizedBy(stageBundledVlcRuntimeRelease, stageBundledAudioAnalysisRelease)
 }

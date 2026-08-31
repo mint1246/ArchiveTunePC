@@ -205,6 +205,19 @@ class PlaybackQueueTest {
     }
 
     @Test
+    fun `moving a queued item preserves current identity and updates its logical index`() {
+        val queue = PlaybackQueue(Random(22))
+        queue.replace(items("a", "b", "c", "d"), startIndex = 2)
+
+        queue.moveVisual(fromVisual = 0, toVisual = 3)
+
+        assertEquals(listOf("b", "c", "d", "a"), queue.items.map { it.metadata.id })
+        assertEquals("c", queue.current?.metadata?.id)
+        assertEquals(1, queue.currentIndex)
+        assertEquals(1, queue.entries().indexOfFirst { it.isCurrent })
+    }
+
+    @Test
     fun `moveToNext places item after current in linear mode`() {
         val queue = PlaybackQueue(Random(15))
         queue.replace(items("a", "b", "c", "d", "e"), startIndex = 2)

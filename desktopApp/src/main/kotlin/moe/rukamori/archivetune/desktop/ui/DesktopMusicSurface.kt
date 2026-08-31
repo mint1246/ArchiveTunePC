@@ -67,6 +67,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +77,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -101,10 +105,12 @@ import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopAlbumIndex
 import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRoute
+import moe.rukamori.archivetune.desktop.platform.DesktopStemQueueState
 import moe.rukamori.archivetune.desktop.party.PartyMode
 import moe.rukamori.archivetune.desktop.party.PartyPhase
 import moe.rukamori.archivetune.desktop.party.PartyTransport
 import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
+import moe.rukamori.archivetune.desktop.social.DesktopSocialManager
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPane
 import moe.rukamori.archivetune.desktop.state.DesktopBrowseHistory
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
@@ -315,7 +321,7 @@ internal class DesktopBrowseController(
 }
 
 @Composable
-internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, playTogether: PlayTogetherManager, modifier: Modifier = Modifier) {
+internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, playTogether: PlayTogetherManager, social: DesktopSocialManager, onOpenChat: (moe.rukamori.archivetune.desktop.social.SocialUser) -> Unit = {}, onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> }, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val partyState by playTogether.state.collectAsState()
     val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
@@ -325,12 +331,30 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     val remoteLibraryState by services.libraryRepository.state.collectAsState()
     val searchState by services.searchRepository.state.collectAsState()
     val localTracks by services.library.tracksFlow.collectAsState()
+    val stemQueueState by services.stems.queueState.collectAsState()
+    val stemReadyTrackIds by services.stems.readyTrackIds.collectAsState()
+    val downloadSnapshots by downloadServices.downloads.collectAsState()
+    val downloadedTrackIds = remember(downloadSnapshots) {
+        downloadSnapshots.asSequence()
+            .filter { snapshot ->
+                snapshot.status == moe.rukamori.archivetune.downloads.DownloadStatus.COMPLETED &&
+                    snapshot.mediaId?.let(downloadServices::completedFileFor) != null
+            }
+            .mapNotNull { it.mediaId }
+            .toSet()
+    }
+    val songAvailability = remember(downloadedTrackIds, stemReadyTrackIds) {
+        DesktopSongAvailability(
+            downloadedIds = downloadedTrackIds,
+            stemReadyIds = stemReadyTrackIds,
+        )
+    }
     val onlinePlaylists = remoteLibraryState.playlists
     var libraryLoading by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     var showSpotifyImport by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
-    var createPlaylistSong by remember { mutableStateOf<SongItem?>(null) }
+    var createPlaylistSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var playlistPickerSession by remember { mutableStateOf<AddToPlaylistPickerSession?>(null) }
     var downloadBatchNotice by remember { mutableStateOf<String?>(null) }
     var statisticsRange by remember { mutableStateOf(DesktopStatisticsRange.DAYS_7) }
@@ -519,24 +543,38 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             services.libraryRepository.refresh()
         }
     }
+    fun createStems(songs: List<SongItem>) {
+        services.stems.enqueueAll(songs.map { toPlaybackItem(it, services.albumIndex) })
+    }
+    fun choosePlaylist(songs: List<SongItem>) {
+        val first = songs.firstOrNull() ?: return
+        playlistPickerSession = AddToPlaylistPickerSession(first, songs)
+        scope.launch { services.libraryRepository.refresh() }
+    }
     fun createPlaylist(song: SongItem? = null) {
         playlistPickerSession = null
-        createPlaylistSong = song
+        createPlaylistSongs = song?.let(::listOf).orEmpty()
         showCreatePlaylist = true
     }
-    AnimatedContent(
-        targetState = browse.detail,
-        transitionSpec = {
-            val enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
-                slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 18 }
-            val exit = fadeOut(tween(160, easing = FastOutSlowInEasing)) +
-                slideOutHorizontally(tween(160, easing = FastOutSlowInEasing)) { -it / 24 }
-            (enter togetherWith exit).using(SizeTransform(clip = false))
-        },
-        label = "detail-page-transition",
-        modifier = modifier.fillMaxSize(),
-    ) { page ->
-        when (page) {
+    fun createPlaylist(songs: List<SongItem>) {
+        playlistPickerSession = null
+        createPlaylistSongs = songs
+        showCreatePlaylist = true
+    }
+    CompositionLocalProvider(LocalDesktopSongAvailability provides songAvailability) {
+        AnimatedContent(
+            targetState = browse.detail,
+            transitionSpec = {
+                val enter = fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+                    slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 18 }
+                val exit = fadeOut(tween(160, easing = FastOutSlowInEasing)) +
+                    slideOutHorizontally(tween(160, easing = FastOutSlowInEasing)) { -it / 24 }
+                (enter togetherWith exit).using(SizeTransform(clip = false))
+            },
+            label = "detail-page-transition",
+            modifier = modifier.fillMaxSize(),
+        ) { page ->
+            when (page) {
         null -> when (state.destination) {
             moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH -> SearchResults(
                 query = state.searchQuery,
@@ -568,6 +606,12 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.playNext(listOf(toPlaybackItem(item, path, services.albumIndex))) } },
                 { path, item -> if (partyState.mode == PartyMode.NONE) scope.launch { services.playback.enqueue(listOf(toPlaybackItem(item, path, services.albumIndex))) } },
                 notice = downloadBatchNotice,
+                modifier = modifier,
+            )
+            moe.rukamori.archivetune.desktop.state.DesktopDestination.FRIENDS -> DesktopFriendsSurface(
+                social = social,
+                playTogether = playTogether,
+                onOpenChat = onOpenChat,
                 modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
@@ -660,6 +704,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onKeybindsChanged = services::refreshKeybindings,
                 onKeybindCaptureChanged = services::setKeybindCaptureActive,
                 onStatisticsPreferenceChanged = services::refreshStatisticsEligibility,
+                onBeatVisualPreferencesChanged = onBeatVisualPreferencesChanged,
                 keybindPressedKeys = services.keybindPressedKeys,
                 modifier = modifier,
             )
@@ -670,6 +715,8 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onPlay = { songs, index, title -> playQueue(songs, index, title) },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
+            onCreateStems = ::createStems,
+            stemQueueState = stemQueueState,
             onPlayNext = ::playNextSong,
             onAddToQueue = ::enqueueSong,
             onAddToPlaylist = ::choosePlaylist,
@@ -734,9 +781,12 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onPlay = { songs, title, index -> playQueue(songs, index, title) },
             onDownload = ::downloadSong,
             onDownloadAll = ::downloadSongs,
+            onCreateStems = ::createStems,
+            stemQueueState = stemQueueState,
             onPlayNext = ::playNextSong,
             onAddToQueue = ::enqueueSong,
             onAddToPlaylist = ::choosePlaylist,
+            onAddAlbumToPlaylist = { songs -> choosePlaylist(songs) },
             onSetLiked = ::setLiked,
             isLiked = ::isLiked,
             isArtistSubscribed = { artist -> homeSnapshot.subscribedArtists.any { it.id == artist.id || (it.channelId != null && it.channelId == artist.channelId) } },
@@ -751,6 +801,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             modifier = modifier,
         )
         }
+    }
     }
 
     if (showSpotifyImport) {
@@ -773,7 +824,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     playlistPickerSession?.let { session ->
         val editablePlaylists = onlinePlaylists.filter { it.isEditable }
         AddToPlaylistDialog(
-            song = session.song,
+            songs = session.songs,
             playlists = editablePlaylists,
             refreshing = remoteLibraryState.isInitialLoading || remoteLibraryState.isRefreshing,
             refreshError = remoteLibraryState.error,
@@ -781,12 +832,12 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             addError = session.addError,
             onDismiss = { playlistPickerSession = null },
             onRetry = { scope.launch { services.libraryRepository.refresh() } },
-            onCreate = { createPlaylist(session.song) },
+            onCreate = { createPlaylist(session.songs) },
             onAdd = { playlist ->
                 browse.failure = null
                 playlistPickerSession = session.beginAdd()
                 scope.launch {
-                    val result = services.backend.addSongToPlaylist(playlist.id, session.song.id)
+                    val result = services.backend.addSongsToPlaylist(playlist.id, session.songs.map(SongItem::id))
                     val current = playlistPickerSession
                     if (current?.song?.id != session.song.id || !current.adding) return@launch
                     if (result.isSuccess) {
@@ -799,7 +850,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                         }
                     } else {
                         playlistPickerSession = current.finishAdd(result)
-                        result.onFailure { browse.failure = it.message ?: "Could not add song to playlist" }
+                        result.onFailure { browse.failure = it.message ?: "Could not add songs to playlist" }
                     }
                 }
             },
@@ -808,14 +859,14 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
 
     if (showCreatePlaylist) {
         CreatePlaylistDialog(
-            song = createPlaylistSong,
-            onDismiss = { showCreatePlaylist = false; createPlaylistSong = null },
+            songs = createPlaylistSongs,
+            onDismiss = { showCreatePlaylist = false; createPlaylistSongs = emptyList() },
             onCreate = { name ->
-                val song = createPlaylistSong
+                val songs = createPlaylistSongs
                 showCreatePlaylist = false
-                createPlaylistSong = null
+                createPlaylistSongs = emptyList()
                 scope.launch {
-                    services.backend.createPlaylist(name, song?.let { listOf(it.id) }.orEmpty())
+                    services.backend.createPlaylist(name, songs.map(SongItem::id))
                         .onSuccess { playlistId -> services.libraryRepository.addCached(playlistId, name) }
                         .onFailure { browse.failure = it.message ?: "Could not create playlist" }
                 }
@@ -852,9 +903,11 @@ internal fun filterLocalLibrary(
 @Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
     val listState = rememberPersistedLazyListState("library")
     var filterQuery by remember { mutableStateOf("") }
+    var songSort by remember { mutableStateOf(DesktopSongSort.ORIGINAL) }
     val filtered = remember(onlinePlaylists, tracks, filterQuery) {
         filterLocalLibrary(onlinePlaylists, tracks, filterQuery)
     }
+    val sortedTracks = remember(filtered.tracks, songSort) { sortLocalTracks(filtered.tracks, songSort) }
     val filtering = filterQuery.isNotBlank()
     LazyColumn(
         state = listState,
@@ -917,6 +970,8 @@ internal fun filterLocalLibrary(
                 androidx.compose.material3.Button(onClick = onAddFolder, enabled = !loading) { Text("Add folder") }
                 Spacer(Modifier.width(8.dp))
                 androidx.compose.material3.OutlinedButton(onClick = onRescan, enabled = folders.isNotEmpty() && !loading) { Text("Rescan") }
+                Spacer(Modifier.width(8.dp))
+                SongSortMenu(songSort, { songSort = it })
             }
         }
         item {
@@ -931,8 +986,55 @@ internal fun filterLocalLibrary(
         if (tracks.isNotEmpty() && filtered.tracks.isEmpty() && filtering) {
             item { Text("No local tracks match this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        items(filtered.tracks, key = { it.id }) { track ->
+        items(sortedTracks, key = { it.id }) { track ->
             LocalTrackCard(track, { onPlay(track) }, { onPlayNext(track) }, { onAddToQueue(track) })
+        }
+    }
+}
+
+@Composable
+private fun SongSortMenu(
+    selected: DesktopSongSort,
+    onSelected: (DesktopSongSort) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { open = true }) { Text("Sort: ${selected.label}") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DesktopSongSort.entries.forEach { sort ->
+                DropdownMenuItem(
+                    text = { Text(sort.label) },
+                    onClick = {
+                        open = false
+                        onSelected(sort)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StemQueueSummary(state: DesktopStemQueueState) {
+    val activeCount = state.pending + if (state.activeTrackId != null) 1 else 0
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (state.active) {
+            Text(
+                buildString {
+                    append("Stem queue · ").append(activeCount).append(" remaining")
+                    state.activeTitle?.let { append(" · Creating ").append(it) }
+                    if (state.completed > 0) append(" · ").append(state.completed).append(" ready")
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (state.failed > 0) {
+            Text(
+                "${state.failed} stem job${if (state.failed == 1) "" else "s"} failed${state.lastError?.let { ": $it" }.orEmpty()}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -959,6 +1061,7 @@ private fun LocalTrackCard(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                DesktopSongStatusBadges(track.id, Modifier.padding(top = 3.dp))
             }
             SongQueueMenu(onPlayNext = onPlayNext, onAddToQueue = onAddToQueue)
             Icon(Icons.Rounded.PlayArrow, "Play ${track.title}")
@@ -968,7 +1071,7 @@ private fun LocalTrackCard(
 
 @Composable
 private fun AddToPlaylistDialog(
-    song: SongItem,
+    songs: List<SongItem>,
     playlists: List<PlaylistItem>,
     refreshing: Boolean,
     refreshError: String?,
@@ -985,7 +1088,10 @@ private fun AddToPlaylistDialog(
         title = { Text("Add to playlist") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(song.title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (songs.size == 1) songs.first().title else "${songs.size} songs",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 if (presentation.showInitialLoading) Loading()
                 presentation.refreshError?.let { message ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1019,11 +1125,11 @@ private fun AddToPlaylistDialog(
 
 @Composable
 private fun CreatePlaylistDialog(
-    song: SongItem?,
+    songs: List<SongItem>,
     onDismiss: () -> Unit,
     onCreate: (String) -> Unit,
 ) {
-    var name by remember(song?.id) { mutableStateOf("") }
+    var name by remember(songs.firstOrNull()?.id, songs.size) { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Create playlist") },
@@ -1036,7 +1142,13 @@ private fun CreatePlaylistDialog(
                     label = { Text("Playlist name") },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                song?.let { Text("${it.title} will be added to the new playlist.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (songs.isNotEmpty()) {
+                    Text(
+                        if (songs.size == 1) "${songs.first().title} will be added to the new playlist."
+                        else "${songs.size} songs will be added to the new playlist.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -1132,6 +1244,30 @@ internal fun localSearchMatches(
         }
         .take(maxResults)
         .toList()
+}
+
+internal enum class DesktopSongSort(val label: String) {
+    ORIGINAL("Original order"),
+    TITLE("Title"),
+    ARTIST("Artist"),
+    ALBUM("Album"),
+    DURATION("Duration"),
+}
+
+internal fun sortSongs(songs: List<SongItem>, sort: DesktopSongSort): List<SongItem> = when (sort) {
+    DesktopSongSort.ORIGINAL -> songs
+    DesktopSongSort.TITLE -> songs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SongItem::title))
+    DesktopSongSort.ARTIST -> songs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artists.firstOrNull()?.name.orEmpty() })
+    DesktopSongSort.ALBUM -> songs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.album?.name.orEmpty() })
+    DesktopSongSort.DURATION -> songs.sortedBy { it.duration?.toLong() ?: Long.MAX_VALUE }
+}
+
+internal fun sortLocalTracks(tracks: List<LocalTrack>, sort: DesktopSongSort): List<LocalTrack> = when (sort) {
+    DesktopSongSort.ORIGINAL -> tracks
+    DesktopSongSort.TITLE -> tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, LocalTrack::title))
+    DesktopSongSort.ARTIST -> tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, LocalTrack::artist))
+    DesktopSongSort.ALBUM -> tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.album.orEmpty() })
+    DesktopSongSort.DURATION -> tracks.sortedBy { it.durationMs ?: Long.MAX_VALUE }
 }
 
 internal fun requestedSongQueueIndex(
@@ -1248,11 +1384,19 @@ private fun SearchResults(
     }
 }
 
-@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, isArtistSubscribed: (ArtistItem) -> Boolean, onSetArtistSubscribed: (ArtistItem, Boolean) -> Unit, modifier: Modifier) {
+@Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onCreateStems: (List<SongItem>) -> Unit, stemQueueState: DesktopStemQueueState, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onAddAlbumToPlaylist: (List<SongItem>) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, isArtistSubscribed: (ArtistItem) -> Boolean, onSetArtistSubscribed: (ArtistItem, Boolean) -> Unit, modifier: Modifier) {
     val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title; is Detail.ArtistItems -> page.page.title }
     val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail }
     val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist" }
     val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist, is Detail.ArtistItems -> emptyList() }
+    val detailKey = when (page) {
+        is Detail.Album -> "album:${page.page.album.browseId}"
+        is Detail.Playlist -> "playlist:${page.page.playlist.id}"
+        is Detail.Artist -> "artist:${page.page.artist.id}"
+        is Detail.ArtistItems -> "artist-items:${page.parent.artist.id}:${page.page.title}"
+    }
+    var songSort by remember(detailKey) { mutableStateOf(DesktopSongSort.ORIGINAL) }
+    val sortedTracks = remember(tracks, songSort) { sortSongs(tracks, songSort) }
     val listState = rememberPersistedLazyListState(
         when (page) {
             is Detail.Album -> "detail:album:${page.page.album.browseId}"
@@ -1277,9 +1421,18 @@ private fun SearchResults(
                     if (tracks.isNotEmpty()) Text("${tracks.size} songs")
                 }
                 if (tracks.isNotEmpty()) {
-                    FilledIconButton(onClick = { onPlay(tracks, title, 0) }) { Icon(Icons.Rounded.PlayArrow, "Play all") }
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { onDownloadAll(tracks) }) { Icon(Icons.Rounded.Download, "Download all"); Spacer(Modifier.width(6.dp)); Text("Download all") }
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FilledIconButton(onClick = { onPlay(sortedTracks, title, 0) }) { Icon(Icons.Rounded.PlayArrow, "Play all") }
+                            OutlinedButton(onClick = { onDownloadAll(tracks) }) { Icon(Icons.Rounded.Download, "Download all"); Spacer(Modifier.width(6.dp)); Text("Download all") }
+                        }
+                        if (page is Detail.Album) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedButton(onClick = { onCreateStems(tracks) }) { Icon(Icons.Rounded.GraphicEq, null); Spacer(Modifier.width(6.dp)); Text("Create stems") }
+                                OutlinedButton(onClick = { onAddAlbumToPlaylist(tracks) }) { Text("Add to playlist") }
+                            }
+                        }
+                    }
                 }
                 if (page is Detail.Artist) {
                     val subscribed = isArtistSubscribed(page.page.artist)
@@ -1299,6 +1452,17 @@ private fun SearchResults(
             ) { Loading() }
         }
         error?.let { message -> item { Error(message) } }
+        if (tracks.isNotEmpty()) {
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tracks", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    SongSortMenu(songSort, { songSort = it })
+                }
+            }
+            if (stemQueueState.active || stemQueueState.failed > 0) {
+                item { StemQueueSummary(stemQueueState) }
+            }
+        }
         if (page is Detail.Artist) {
             page.page.sections.forEach { section ->
                 val sectionItems = section.items.distinctBy { it.id }
@@ -1350,8 +1514,8 @@ private fun SearchResults(
                 }
             }
         } else {
-            itemsIndexed(tracks, key = { index, song -> "${song.id}:$index" }) { index, song ->
-                ResultCard(song, { onPlay(tracks, title, index) }, { onDownload(song) }, { onPlayNext(song) }, { onAddToQueue(song) }, { onAddToPlaylist(song) }, { onSetLiked(song, it) }, isLiked(song))
+            itemsIndexed(sortedTracks, key = { index, song -> "${song.id}:$index" }) { index, song ->
+                ResultCard(song, { onPlay(sortedTracks, title, index) }, { onDownload(song) }, { onPlayNext(song) }, { onAddToQueue(song) }, { onAddToPlaylist(song) }, { onSetLiked(song, it) }, isLiked(song))
             }
         }
     }
@@ -1460,6 +1624,29 @@ internal fun playlistSongOccurrences(
         }
     }
 
+internal fun sortPlaylistSongOccurrences(
+    songs: List<PlaylistSongOccurrence>,
+    sort: DesktopSongSort,
+): List<PlaylistSongOccurrence> = when (sort) {
+    DesktopSongSort.ORIGINAL -> songs.sortedBy(PlaylistSongOccurrence::originalIndex)
+    DesktopSongSort.TITLE -> songs.sortedWith(
+        compareBy<PlaylistSongOccurrence, String>(String.CASE_INSENSITIVE_ORDER) { it.song.title }
+            .thenBy(PlaylistSongOccurrence::originalIndex),
+    )
+    DesktopSongSort.ARTIST -> songs.sortedWith(
+        compareBy<PlaylistSongOccurrence, String>(String.CASE_INSENSITIVE_ORDER) { it.song.artists.firstOrNull()?.name.orEmpty() }
+            .thenBy(PlaylistSongOccurrence::originalIndex),
+    )
+    DesktopSongSort.ALBUM -> songs.sortedWith(
+        compareBy<PlaylistSongOccurrence, String>(String.CASE_INSENSITIVE_ORDER) { it.song.album?.name.orEmpty() }
+            .thenBy(PlaylistSongOccurrence::originalIndex),
+    )
+    DesktopSongSort.DURATION -> songs.sortedWith(
+        compareBy<PlaylistSongOccurrence> { it.song.duration?.toLong() ?: Long.MAX_VALUE }
+            .thenBy(PlaylistSongOccurrence::originalIndex),
+    )
+}
+
 @Composable
 private fun PlaylistDetailPage(
     page: PlaylistPage,
@@ -1467,6 +1654,8 @@ private fun PlaylistDetailPage(
     onPlay: (List<SongItem>, Int, String) -> Unit,
     onDownload: (SongItem) -> Unit,
     onDownloadAll: (List<SongItem>) -> Unit,
+    onCreateStems: (List<SongItem>) -> Unit,
+    stemQueueState: DesktopStemQueueState,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
     onAddToPlaylist: (SongItem) -> Unit,
@@ -1480,8 +1669,12 @@ private fun PlaylistDetailPage(
     var query by remember(page.playlist.id) { mutableStateOf("") }
     var showRename by remember(page.playlist.id) { mutableStateOf(false) }
     var showDeleteConfirm by remember(page.playlist.id) { mutableStateOf(false) }
-    val filtered = remember(page.songs, query) {
-        playlistSongOccurrences(page.songs, query)
+    var songSort by remember(page.playlist.id) { mutableStateOf(DesktopSongSort.ORIGINAL) }
+    val sortedAll = remember(page.songs, songSort) {
+        sortPlaylistSongOccurrences(playlistSongOccurrences(page.songs, ""), songSort)
+    }
+    val filtered = remember(page.songs, query, songSort) {
+        sortPlaylistSongOccurrences(playlistSongOccurrences(page.songs, query), songSort)
     }
     val subtitle = listOfNotNull(
         page.playlist.author?.name,
@@ -1509,13 +1702,13 @@ private fun PlaylistDetailPage(
                     if (narrow) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Artwork(page.playlist.thumbnail, Modifier.size(140.dp))
-                            PlaylistHeroDetails(page, subtitle, onPlay, onDownloadAll, onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
+                            PlaylistHeroDetails(page, subtitle, sortedAll.map { it.song }, onPlay, onDownloadAll, onCreateStems, onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
                         }
                     } else {
                         Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                             Artwork(page.playlist.thumbnail, Modifier.size(180.dp))
                             Spacer(Modifier.width(24.dp))
-                            PlaylistHeroDetails(page, subtitle, onPlay, onDownloadAll, Modifier.weight(1f), onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
+                            PlaylistHeroDetails(page, subtitle, sortedAll.map { it.song }, onPlay, onDownloadAll, onCreateStems, Modifier.weight(1f), onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
                         }
                     }
                 }
@@ -1525,6 +1718,8 @@ private fun PlaylistDetailPage(
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Tracks", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                SongSortMenu(songSort, { songSort = it })
+                Spacer(Modifier.width(10.dp))
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -1535,6 +1730,9 @@ private fun PlaylistDetailPage(
                 )
             }
         }
+        if (stemQueueState.active || stemQueueState.failed > 0) {
+            item { StemQueueSummary(stemQueueState) }
+        }
         if (page.songs.isEmpty()) {
             item { Text("This playlist has no available tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else if (filtered.isEmpty()) {
@@ -1542,9 +1740,10 @@ private fun PlaylistDetailPage(
         }
         itemsIndexed(filtered, key = { _, occurrence -> occurrence.stableKey }) { _, occurrence ->
             val song = occurrence.song
+            val sortedIndex = sortedAll.indexOfFirst { it.stableKey == occurrence.stableKey }.coerceAtLeast(0)
             ResultCard(
                 song,
-                { onPlay(page.songs, occurrence.originalIndex, page.playlist.title) },
+                { onPlay(sortedAll.map { it.song }, sortedIndex, page.playlist.title) },
                 { onDownload(song) },
                 { onPlayNext(song) },
                 { onAddToQueue(song) },
@@ -1594,8 +1793,10 @@ private fun PlaylistDetailPage(
 private fun PlaylistHeroDetails(
     page: PlaylistPage,
     subtitle: String,
+    songs: List<SongItem>,
     onPlay: (List<SongItem>, Int, String) -> Unit,
     onDownloadAll: (List<SongItem>) -> Unit,
+    onCreateStems: (List<SongItem>) -> Unit,
     modifier: Modifier = Modifier,
     onRename: () -> Unit = {},
     onDelete: () -> Unit = {},
@@ -1607,31 +1808,39 @@ private fun PlaylistHeroDetails(
         page.playlist.description?.takeIf(String::isNotBlank)?.let {
             Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.material3.Button(
-                onClick = { if (page.songs.isNotEmpty()) onPlay(page.songs, 0, page.playlist.title) },
-                enabled = page.songs.isNotEmpty(),
-            ) { Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
-            OutlinedButton(
-                onClick = {
-                    if (page.songs.isNotEmpty()) {
-                        val shuffled = page.songs.shuffled()
-                        onPlay(shuffled, 0, page.playlist.title)
-                    }
-                },
-                enabled = page.songs.isNotEmpty(),
-            ) { Icon(Icons.Rounded.Shuffle, null); Spacer(Modifier.width(8.dp)); Text("Shuffle") }
-            OutlinedButton(
-                onClick = { onDownloadAll(page.songs) },
-                enabled = page.songs.isNotEmpty(),
-            ) { Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(8.dp)); Text("Download all") }
-            if (page.playlist.isEditable) {
-                var menuOpen by remember(page.playlist.id) { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, "Playlist actions") }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("Rename playlist") }, onClick = { menuOpen = false; onRename() })
-                        DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { menuOpen = false; onDelete() })
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Button(
+                    onClick = { if (songs.isNotEmpty()) onPlay(songs, 0, page.playlist.title) },
+                    enabled = songs.isNotEmpty(),
+                ) { Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
+                OutlinedButton(
+                    onClick = {
+                        if (songs.isNotEmpty()) {
+                            val shuffled = songs.shuffled()
+                            onPlay(shuffled, 0, page.playlist.title)
+                        }
+                    },
+                    enabled = songs.isNotEmpty(),
+                ) { Icon(Icons.Rounded.Shuffle, null); Spacer(Modifier.width(8.dp)); Text("Shuffle") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { onDownloadAll(page.songs) },
+                    enabled = page.songs.isNotEmpty(),
+                ) { Icon(Icons.Rounded.Download, null); Spacer(Modifier.width(8.dp)); Text("Download all") }
+                OutlinedButton(
+                    onClick = { onCreateStems(page.songs) },
+                    enabled = page.songs.isNotEmpty(),
+                ) { Icon(Icons.Rounded.GraphicEq, null); Spacer(Modifier.width(8.dp)); Text("Create stems") }
+                if (page.playlist.isEditable) {
+                    var menuOpen by remember(page.playlist.id) { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, "Playlist actions") }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Rename playlist") }, onClick = { menuOpen = false; onRename() })
+                            DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { menuOpen = false; onDelete() })
+                        }
                     }
                 }
             }
@@ -1640,7 +1849,20 @@ private fun PlaylistHeroDetails(
 }
 
 @Composable private fun ResultCard(item: YTItem, open: () -> Unit, download: (() -> Unit)? = null, onPlayNext: (() -> Unit)? = null, onAddToQueue: (() -> Unit)? = null, onAddToPlaylist: (() -> Unit)? = null, onSetLiked: ((Boolean) -> Unit)? = null, isLiked: Boolean = false, onRemoveFromPlaylist: (() -> Unit)? = null) {
-    Card(Modifier.fillMaxWidth().animateContentSize(tween(180, easing = FastOutSlowInEasing)).clickable(onClick = open)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Artwork(item.thumbnail, Modifier.size(58.dp)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium); Text(itemSubtitle(item), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant) }; if (download != null) IconButton(onClick = download) { Icon(Icons.Rounded.Download, "Download") }; if (item is SongItem) SongQueueMenu(onPlayNext = onPlayNext, onAddToQueue = onAddToQueue, onAddToPlaylist = onAddToPlaylist, onSetLiked = onSetLiked, isLiked = isLiked, onRemoveFromPlaylist = onRemoveFromPlaylist); Icon(if (item is SongItem) Icons.Rounded.PlayArrow else Icons.Rounded.MusicNote, null) } }
+    Card(Modifier.fillMaxWidth().animateContentSize(tween(180, easing = FastOutSlowInEasing)).clickable(onClick = open)) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Artwork(item.thumbnail, Modifier.size(58.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                Text(itemSubtitle(item), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (item is SongItem) DesktopSongStatusBadges(item.id, Modifier.padding(top = 3.dp))
+            }
+            if (download != null) IconButton(onClick = download) { Icon(Icons.Rounded.Download, "Download") }
+            if (item is SongItem) SongQueueMenu(onPlayNext = onPlayNext, onAddToQueue = onAddToQueue, onAddToPlaylist = onAddToPlaylist, onSetLiked = onSetLiked, isLiked = isLiked, onRemoveFromPlaylist = onRemoveFromPlaylist)
+            Icon(if (item is SongItem) Icons.Rounded.PlayArrow else Icons.Rounded.MusicNote, null)
+        }
+    }
 }
 
 @Composable
@@ -1758,6 +1980,7 @@ private fun NowPlayingSubtitle(
     services: DesktopMusicServices,
     playTogether: PlayTogetherManager,
     browse: DesktopBrowseController,
+    beatSync: DesktopBeatSyncController,
     onShowLyrics: () -> Unit,
     onShowStems: () -> Unit,
     onShowQueue: () -> Unit = {},
@@ -1900,15 +2123,28 @@ private fun NowPlayingSubtitle(
         )
     }
 
+    val beatTint = MaterialTheme.colorScheme.primary
     Surface(
-        modifier.padding(horizontal = 12.dp, vertical = 8.dp).animateContentSize(tween(220, easing = FastOutSlowInEasing)),
+        modifier
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .animateContentSize(tween(220, easing = FastOutSlowInEasing))
+            .drawWithContent {
+                drawContent()
+                val pulse = beatSync.visualPulse
+                if (pulse > 0.001f) {
+                    drawRoundRect(
+                        color = beatTint.copy(alpha = 0.10f * pulse),
+                        cornerRadius = CornerRadius(12.dp.toPx()),
+                    )
+                }
+            },
         color = dynamicGlassColor(MaterialTheme.colorScheme.surfaceContainerHigh, alpha = 0.62f),
         shape = MaterialTheme.shapes.large,
         border = dynamicGlassBorder(alpha = 0.14f),
     ) { Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
         val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Artwork(item?.metadata?.artworkUri, Modifier.size(46.dp))
+            BeatSyncedArtwork(item?.metadata?.artworkUri, Modifier.size(46.dp), beatSync)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) })
@@ -1948,6 +2184,7 @@ internal fun DesktopLyricsView(
     services: DesktopMusicServices,
     playTogether: PlayTogetherManager,
     browse: DesktopBrowseController,
+    beatSync: DesktopBeatSyncController,
     onBrowseOpened: () -> Unit = {},
     modifier: Modifier = Modifier,
     useShellDynamicBackdrop: Boolean = false,
@@ -1966,7 +2203,7 @@ internal fun DesktopLyricsView(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Artwork(item?.metadata?.artworkUri, Modifier.size(42.dp))
+                    BeatSyncedArtwork(item?.metadata?.artworkUri, Modifier.size(42.dp), beatSync)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope, onOpened = onBrowseOpened) }, Modifier.fillMaxWidth())
@@ -2001,6 +2238,22 @@ AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(twee
                 )
             }
     }
+}
+
+@Composable
+private fun BeatSyncedArtwork(
+    url: String?,
+    modifier: Modifier,
+    beatSync: DesktopBeatSyncController,
+) {
+    Artwork(
+        url = url,
+        modifier = modifier.graphicsLayer {
+            val scale = 1f + 0.030f * beatSync.visualPulse
+            scaleX = scale
+            scaleY = scale
+        },
+    )
 }
 private fun toPlaybackItem(song: SongItem, albumIndex: DesktopAlbumIndex) = PlaybackItem(
     PlaybackMetadata(

@@ -180,6 +180,26 @@ class DesktopSettingsStoreTest {
     }
 
     @Test
+    fun beatSyncedVisualsPersistAndIntensityIsSanitized() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+
+        store.save(
+            DesktopSettings(
+                beatSyncedVisualsEnabled = false,
+                beatSyncedVisualsIntensity = 4f,
+            ),
+        )
+
+        val restored = DesktopSettingsStore(file).snapshot()
+        assertFalse(restored.beatSyncedVisualsEnabled)
+        assertEquals(1f, restored.beatSyncedVisualsIntensity, 0.0001f)
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertEquals("false", persisted.getProperty("appearance.beatSyncedVisuals.enabled"))
+        assertEquals("1.0", persisted.getProperty("appearance.beatSyncedVisuals.intensity"))
+    }
+
+    @Test
     fun partyListeningStatisticsDefaultsOnForOlderSettingsAndPersistsOptOut() {
         val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
         Files.writeString(file, "playback.volume=0.5\n")

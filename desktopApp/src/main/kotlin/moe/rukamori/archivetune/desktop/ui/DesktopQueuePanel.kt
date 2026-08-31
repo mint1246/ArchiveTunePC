@@ -11,7 +11,7 @@ import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -36,6 +36,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -101,6 +103,7 @@ fun DesktopQueuePanel(
     val playback = services.playback
     val entries = snapshot.queueEntries
     val guestInParty = partyState.isConnectedGuest
+    var reorderLocked by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier,
@@ -115,6 +118,8 @@ fun DesktopQueuePanel(
                 playback,
                 controlsEnabled = !guestInParty,
                 shuffleEnabled = partyState.mode == PartyMode.NONE,
+                reorderLocked = reorderLocked,
+                onToggleReorderLock = { reorderLocked = !reorderLocked },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
             if (entries.isEmpty()) {
@@ -128,6 +133,7 @@ fun DesktopQueuePanel(
                     guestInParty = guestInParty,
                     guestCanEditQueue = partyState.canEditQueue,
                     guestCanChangeSong = partyState.canChangeSong,
+                    reorderLocked = reorderLocked,
                     scope = scope,
                 )
             }
@@ -143,6 +149,8 @@ private fun QueueHeader(
     playback: moe.rukamori.archivetune.playback.api.PlaybackController,
     controlsEnabled: Boolean,
     shuffleEnabled: Boolean,
+    reorderLocked: Boolean,
+    onToggleReorderLock: () -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val totalDuration = remember(entries) { entries.sumOf { it.item.metadata.durationHintMs ?: 0L } }
@@ -173,6 +181,15 @@ private fun QueueHeader(
                     )
                 }
             })
+            DesktopTooltip(if (reorderLocked) "Unlock queue reordering" else "Lock queue reordering") {
+                IconButton(onClick = onToggleReorderLock, enabled = controlsEnabled) {
+                    Icon(
+                        if (reorderLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                        contentDescription = if (reorderLocked) "Unlock queue reordering" else "Lock queue reordering",
+                        tint = if (reorderLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             IconButton(onClick = { scope.launch { playback.clearQueue() } }, enabled = controlsEnabled && entries.isNotEmpty()) {
                 Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear queue")
             }
@@ -228,6 +245,7 @@ private fun QueueList(
     guestInParty: Boolean,
     guestCanEditQueue: Boolean,
     guestCanChangeSong: Boolean,
+    reorderLocked: Boolean,
     scope: CoroutineScope,
 ) {
     val order = remember { mutableStateListOf<PlaybackQueueEntry>() }
@@ -258,7 +276,7 @@ private fun QueueList(
                 playNowEnabled = !guestInParty || guestCanChangeSong,
                 playNextEnabled = !guestInParty,
                 removeEnabled = !guestInParty || (guestCanEditQueue && !entry.isCurrent),
-                dragHandleEnabled = !guestInParty && !entry.isCurrent,
+                dragHandleEnabled = !reorderLocked && !guestInParty && !entry.isCurrent,
                 onRowClick = {
                     scope.launch {
                         if (guestInParty) playTogether.selectQueueItem(entry.logicalIndex)
@@ -503,7 +521,7 @@ private fun QueueRow(
                 modifier = Modifier
                     .size(QueueDragHandleSize)
                     .pointerInput(entry.id) {
-                        detectDragGesturesAfterLongPress(
+                        detectDragGestures(
                             onDragStart = { offset -> onDragStart(offset) },
                             onDragEnd = { onDragEnd() },
                             onDragCancel = { onDragCancel() },

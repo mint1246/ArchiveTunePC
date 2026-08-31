@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$MsiPath,
+    [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$Bucket,
     [Parameter(Mandatory = $true)][string]$Endpoint,
@@ -14,20 +15,23 @@ if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY) {
 }
 
 $resolvedMsi = (Resolve-Path -LiteralPath $MsiPath).Path
+$resolvedExecutable = (Resolve-Path -LiteralPath $ExecutablePath).Path
 $fileName = [IO.Path]::GetFileName($resolvedMsi)
 $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedMsi).Hash.ToLowerInvariant()
+$exeSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedExecutable).Hash.ToLowerInvariant()
 $objectKey = "releases/$fileName"
 $publicBase = $PublicBaseUrl.TrimEnd('/')
 
-aws s3 cp $resolvedMsi "s3://$Bucket/$objectKey" --endpoint-url $Endpoint --region auto --content-type "application/x-msi"
+aws s3 cp $resolvedMsi "s3://$Bucket/$objectKey" --endpoint-url $Endpoint --region auto --content-type "application/x-msi" --cache-control "no-cache"
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to upload MSI to R2 (aws exit code $LASTEXITCODE)."
 }
 
 $manifest = [ordered]@{
     version = $Version
-    url = "$publicBase/$objectKey"
+    url = "$publicBase/$objectKey?sha256=$sha256"
     sha256 = $sha256
+    exeSha256 = $exeSha256
 } | ConvertTo-Json
 
 $manifestPath = Join-Path $env:TEMP "archivetune-latest-$Version.json"

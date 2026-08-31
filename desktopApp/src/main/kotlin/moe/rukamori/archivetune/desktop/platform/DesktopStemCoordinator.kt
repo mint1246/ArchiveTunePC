@@ -10,11 +10,20 @@ import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
+import java.time.Duration
 import java.util.Properties
+import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -25,12 +34,17 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -38,8 +52,14 @@ import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import org.json.JSONObject
 
+private const val STEM_MODEL_VERSION = "htdemucs-6s-1s-dml-v1"
+private const val STEM_MODEL_NAME = "htdemucs-6s-core-1s-dml.onnx"
+private const val STEM_MODEL_SIZE_BYTES = 110_858_418L
+private const val STEM_MODEL_SHA256 = "30ef61623d5d3a768f12dd87faadfdaaca26c5b8ef6a1c73f26b8c949b6e047c"
+
 enum class DesktopStemPhase {
     IDLE,
+    DOWNLOADING_MODEL,
     PREPARING,
     SEPARATING,
     COMPRESSING,
@@ -58,10 +78,24 @@ data class DesktopStemState(
     val rendererMessage: String? = null,
 ) {
     val busy: Boolean
-        get() = phase == DesktopStemPhase.PREPARING || phase == DesktopStemPhase.SEPARATING || phase == DesktopStemPhase.COMPRESSING
+        get() = phase == DesktopStemPhase.DOWNLOADING_MODEL ||
+            phase == DesktopStemPhase.PREPARING ||
+            phase == DesktopStemPhase.SEPARATING ||
+            phase == DesktopStemPhase.COMPRESSING
 
     val ready: Boolean
         get() = phase == DesktopStemPhase.READY && cacheDirectory != null
+}
+
+data class DesktopStemQueueState(
+    val pending: Int = 0,
+    val activeTrackId: String? = null,
+    val activeTitle: String? = null,
+    val completed: Int = 0,
+    val failed: Int = 0,
+    val lastError: String? = null,
+) {
+    val active: Boolean get() = pending > 0 || activeTrackId != null
 }
 
 data class DesktopStemMix(
@@ -145,8 +179,24 @@ class DesktopStemCoordinator(
     private var rendererJob: Job? = null
     @Volatile private var rendererTrackId: String? = null
     private val controlsByTrackId = ConcurrentHashMap<String, DesktopStemControls>()
+    private val modelDownloadMutex = Mutex()
+    // DirectML creates a large fixed execution allocation for this graph. Serialize only this
+    // GPU-bound step; decode and cache compression from another queued song may proceed.
+    private val separatorMutex = Mutex()
+    private val batchLock = Any()
+    private val batchQueue = ArrayDeque<PlaybackItem>()
+    private val _queueState = MutableStateFlow(DesktopStemQueueState())
+    val queueState = _queueState.asStateFlow()
+    private val _readyTrackIds = MutableStateFlow<Set<String>>(emptySet())
+    val readyTrackIds = _readyTrackIds.asStateFlow()
+    private var batchJob: Job? = null
+    private val activeGenerationTrackIds = ConcurrentHashMap.newKeySet<String>()
+    private val activeWorkerTrackId = AtomicReference<String?>(null)
 
     init {
+        runtime.applicationScope.launch(Dispatchers.IO + CoroutineName("ArchiveTuneStemCacheIndex")) {
+            _readyTrackIds.value = _readyTrackIds.value + scanReadyTrackIds()
+        }
         runtime.applicationScope.launch(CoroutineName("ArchiveTuneStemMixFollow")) {
             var previousTrackId: String? = null
             playback.state.collect { snapshot ->
@@ -201,22 +251,122 @@ class DesktopStemCoordinator(
         }
         val cache = trackDirectory(item)
         if (isUsableCache(cache)) {
+            markReady(item.metadata.id)
             inspect(item)
             return
         }
         val existing = generationJob
         if (existing?.isActive == true && _state.value.trackId == item.metadata.id) return
         generationJob = runtime.applicationScope.launch(Dispatchers.IO + CoroutineName("ArchiveTuneStemGeneration")) {
-            generate(item)
+            runGeneration(item, publishState = true)
         }
     }
 
     fun retry(item: PlaybackItem?) {
         if (item == null) return
         generationJob?.cancel()
-        activeProcess.getAndSet(null)?.let(::terminateProcess)
+        if (activeWorkerTrackId.get() == item.metadata.id) {
+            activeProcess.getAndSet(null)?.let(::terminateProcess)
+        }
         generationJob = runtime.applicationScope.launch(Dispatchers.IO + CoroutineName("ArchiveTuneStemRetry")) {
-            generate(item)
+            runGeneration(item, publishState = true)
+        }
+    }
+
+    /** Queues album/playlist stem work without running multiple DirectML jobs at once. */
+    fun enqueueAll(items: List<PlaybackItem>): Int = synchronized(batchLock) {
+        val existingIds = buildSet {
+            addAll(activeGenerationTrackIds)
+            batchQueue.forEach { add(it.metadata.id) }
+        }
+        val accepted = items
+            .distinctBy { it.metadata.id }
+            .filterNot { item ->
+                val ready = isUsableCache(trackDirectory(item))
+                if (ready) markReady(item.metadata.id)
+                item.metadata.id in existingIds || ready
+            }
+        if (accepted.isEmpty()) return@synchronized 0
+
+        if (batchJob?.isActive != true && batchQueue.isEmpty()) {
+            _queueState.value = DesktopStemQueueState()
+        }
+        accepted.forEach(batchQueue::addLast)
+        publishQueueState()
+        if (batchJob?.isActive != true) {
+            batchJob = runtime.applicationScope.launch(Dispatchers.IO + CoroutineName("ArchiveTuneStemBatchQueue")) {
+                runBatchQueue()
+            }
+        }
+        accepted.size
+    }
+
+    private suspend fun runBatchQueue() = coroutineScope {
+        val inFlight = ArrayDeque<kotlinx.coroutines.Deferred<Unit>>()
+        while (true) {
+            while (inFlight.size < STEM_PIPELINE_PARALLELISM) {
+                val item = synchronized(batchLock) {
+                    val next = batchQueue.pollFirst()
+                    if (next != null) publishQueueState(activeItem = next)
+                    next
+                }
+                if (item == null) break
+                inFlight.addLast(async { completeBatchItem(item) })
+            }
+
+            if (inFlight.isNotEmpty()) {
+                inFlight.removeFirst().await()
+                continue
+            }
+
+            synchronized(batchLock) {
+                // Clear the job while holding the queue lock so a concurrently enqueued item
+                // starts its own consumer instead of being left behind an exiting one.
+                if (batchQueue.isEmpty()) {
+                    batchJob = null
+                    publishQueueState(activeItem = null)
+                    return@coroutineScope
+                }
+            }
+        }
+    }
+
+    private suspend fun completeBatchItem(item: PlaybackItem) {
+        val error = try {
+            runGeneration(item, publishState = false)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            failure.message ?: "Stem generation failed"
+        }
+        synchronized(batchLock) {
+            val previous = _queueState.value
+            _queueState.value = previous.copy(
+                pending = batchQueue.size,
+                activeTrackId = null,
+                activeTitle = null,
+                completed = previous.completed + if (error == null) 1 else 0,
+                failed = previous.failed + if (error != null) 1 else 0,
+                lastError = error ?: previous.lastError,
+            )
+        }
+    }
+
+    private fun publishQueueState(activeItem: PlaybackItem? = null) {
+        val previous = _queueState.value
+        _queueState.value = previous.copy(
+            pending = batchQueue.size,
+            activeTrackId = activeItem?.metadata?.id ?: previous.activeTrackId,
+            activeTitle = activeItem?.metadata?.title ?: previous.activeTitle,
+        )
+    }
+
+    private suspend fun runGeneration(item: PlaybackItem, publishState: Boolean): String? {
+        activeGenerationTrackIds.add(item.metadata.id)
+        try {
+            return generate(item, publishState)
+        } finally {
+            activeGenerationTrackIds.remove(item.metadata.id)
         }
     }
 
@@ -278,31 +428,34 @@ class DesktopStemCoordinator(
         }
     }
 
-    private suspend fun generate(item: PlaybackItem) {
+    private suspend fun generate(item: PlaybackItem, publishState: Boolean): String? {
         val trackId = item.metadata.id
         val targetDirectory = trackDirectory(item)
         if (isUsableCache(targetDirectory)) {
-            inspect(item)
-            return
+            markReady(trackId)
+            if (publishState || playback.state.value.currentItem?.metadata?.id == trackId) inspect(item)
+            return null
         }
 
-        val worker = DesktopStemRuntime.findWorker()
+        val worker = DesktopModelRuntime.findRunner()
         if (worker == null) {
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.UNAVAILABLE,
-                message = "Stem engine is not installed in this build.",
-            )
-            return
+            val message = "Stem engine is not installed in this build."
+            if (publishState) {
+                _state.value = DesktopStemState(trackId = trackId, phase = DesktopStemPhase.UNAVAILABLE, message = message)
+            }
+            return message
         }
-        val model = DesktopStemRuntime.findModel(runtime.paths)
-        if (model == null) {
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.UNAVAILABLE,
-                message = "HTDemucs model is not installed yet.",
-            )
-            return
+        val model = try {
+            ensureModel(trackId, publishState)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            runtime.logger.log(Level.WARNING, "Stem model download failed", error)
+            val message = "Could not download HTDemucs model: ${error.message ?: "unknown error"}"
+            if (publishState) {
+                _state.value = DesktopStemState(trackId = trackId, phase = DesktopStemPhase.ERROR, message = message)
+            }
+            return message
         }
 
         Files.createDirectories(targetDirectory)
@@ -314,48 +467,53 @@ class DesktopStemCoordinator(
                 Files.deleteIfExists(targetDirectory.resolve(".$name.opus.part"))
             }
 
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.PREPARING,
-                progress = 0.02f,
-                message = "Preparing audio…",
-            )
+            if (publishState) {
+                _state.value = DesktopStemState(
+                    trackId = trackId,
+                    phase = DesktopStemPhase.PREPARING,
+                    progress = 0.02f,
+                    message = "Preparing audio…",
+                )
+            }
             playback.decodeStemInput(item, input)
 
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.SEPARATING,
-                progress = 0.06f,
-                message = "Separating stems…",
-            )
-            runWorker(worker, model, input, targetDirectory, trackId)
+            if (publishState) {
+                _state.value = DesktopStemState(
+                    trackId = trackId,
+                    phase = DesktopStemPhase.SEPARATING,
+                    progress = 0.06f,
+                    message = "Separating stems…",
+                )
+            }
+            separatorMutex.withLock {
+                runWorker(worker, model, input, targetDirectory, trackId, publishState)
+            }
 
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.COMPRESSING,
-                progress = 0.96f,
-                message = "Compressing stem cache…",
-            )
+            if (publishState) {
+                _state.value = DesktopStemState(
+                    trackId = trackId,
+                    phase = DesktopStemPhase.COMPRESSING,
+                    progress = 0.96f,
+                    message = "Compressing stem cache…",
+                )
+            }
             playback.compressGeneratedStemSetForCache(targetDirectory)
             writeManifest(targetDirectory, item)
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.READY,
-                progress = 1f,
-                message = "Stems ready",
-                cacheDirectory = targetDirectory,
-            )
-            if (!controlsFor(item).effectiveMix().isNeutral()) activateRenderer(item)
+            markReady(trackId)
+            if (publishState || playback.state.value.currentItem?.metadata?.id == trackId) {
+                inspect(item)
+                if (!controlsFor(item).effectiveMix().isNeutral()) activateRenderer(item)
+            }
+            return null
         } catch (cancelled: CancellationException) {
-            activeProcess.getAndSet(null)?.let(::terminateProcess)
             throw cancelled
         } catch (error: Throwable) {
             runtime.logger.log(Level.WARNING, "Stem generation failed for ${item.metadata.id}", error)
-            _state.value = DesktopStemState(
-                trackId = trackId,
-                phase = DesktopStemPhase.ERROR,
-                message = error.message?.takeIf(String::isNotBlank) ?: "Stem generation failed",
-            )
+            val message = error.message?.takeIf(String::isNotBlank) ?: "Stem generation failed"
+            if (publishState) {
+                _state.value = DesktopStemState(trackId = trackId, phase = DesktopStemPhase.ERROR, message = message)
+            }
+            return message
         } finally {
             runCatching { Files.deleteIfExists(input) }
             STEM_CACHE_NAMES.forEach { name ->
@@ -365,31 +523,67 @@ class DesktopStemCoordinator(
         }
     }
 
+    private suspend fun ensureModel(trackId: String, publishState: Boolean): Path = modelDownloadMutex.withLock {
+        DesktopModelRuntime.findModel(runtime.paths, DesktopModels.STEMS)?.let { return@withLock it.model }
+        if (publishState) {
+            _state.value = DesktopStemState(
+                trackId = trackId,
+                phase = DesktopStemPhase.DOWNLOADING_MODEL,
+                progress = 0f,
+                message = "Downloading HTDemucs model…",
+            )
+        }
+        DesktopModelRuntime.ensureModel(runtime.paths, DesktopModels.STEMS) { downloaded, total ->
+            if (publishState && _state.value.trackId == trackId) {
+                val progress = if (total > 0L) downloaded.toFloat() / total.toFloat() else 0f
+                _state.value = DesktopStemState(
+                    trackId = trackId,
+                    phase = DesktopStemPhase.DOWNLOADING_MODEL,
+                    progress = progress.coerceIn(0f, 1f),
+                    message = "Downloading HTDemucs model… ${formatModelBytes(downloaded)} / ${formatModelBytes(total)}",
+                )
+            }
+        }.model
+    }
+
     private suspend fun runWorker(
         worker: Path,
         model: Path,
         input: Path,
         output: Path,
         trackId: String,
+        publishState: Boolean,
     ) = withContext(Dispatchers.IO) {
-        val processBuilder = ProcessBuilder(
-            worker.toString(),
-            "--model", model.toString(),
-            "--input", input.toString(),
-            "--output", output.toString(),
-        )
+        val command =
+            buildList {
+                add(worker.toString())
+                // New builds use an explicit task subcommand. Keep a narrow compatibility path for
+                // an ARCHIVETUNE_STEM_WORKER override that still points at the pre-generalization helper.
+                if (!worker.fileName.toString().equals("archivetune-stems.exe", ignoreCase = true)) {
+                    add("stems")
+                }
+                addAll(
+                    listOf(
+                        "--model", model.toString(),
+                        "--input", input.toString(),
+                        "--output", output.toString(),
+                    ),
+                )
+            }
+        val processBuilder = ProcessBuilder(command)
             .directory(worker.parent?.toFile())
             .redirectErrorStream(true)
-        DesktopStemRuntime.configureWorkerEnvironment(processBuilder, worker)
+        DesktopModelRuntime.configureRunnerEnvironment(processBuilder, worker)
         val process = processBuilder.start()
         activeProcess.set(process)
+        activeWorkerTrackId.set(trackId)
         var workerError: String? = null
         try {
             BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8)).useLines { lines ->
                 lines.forEach { line ->
                     val event = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
                     when (event.optString("type")) {
-                        "progress" -> {
+                        "progress" -> if (publishState) {
                             val workerProgress = event.optDouble("value", 0.0).toFloat().coerceIn(0f, 1f)
                             _state.value = DesktopStemState(
                                 trackId = trackId,
@@ -399,14 +593,14 @@ class DesktopStemCoordinator(
                             )
                         }
 
-                        "loading" -> _state.value = DesktopStemState(
+                        "loading" -> if (publishState) _state.value = DesktopStemState(
                             trackId = trackId,
                             phase = DesktopStemPhase.SEPARATING,
                             progress = 0.06f,
                             message = "Loading stem model…",
                         )
 
-                        "loaded" -> _state.value = DesktopStemState(
+                        "loaded" -> if (publishState) _state.value = DesktopStemState(
                             trackId = trackId,
                             phase = DesktopStemPhase.SEPARATING,
                             progress = 0.08f,
@@ -421,14 +615,18 @@ class DesktopStemCoordinator(
             if (exit != 0) {
                 throw IllegalStateException(workerError ?: "Stem worker exited with code $exit")
             }
+        } catch (cancelled: CancellationException) {
+            terminateProcess(process)
+            throw cancelled
         } finally {
             activeProcess.compareAndSet(process, null)
+            activeWorkerTrackId.compareAndSet(trackId, null)
         }
     }
 
     private suspend fun runRenderer(item: PlaybackItem, cache: Path, epoch: Long) {
         val trackId = item.metadata.id
-        val worker = DesktopStemRuntime.findWorker()
+        val worker = DesktopModelRuntime.findRunner()
         if (worker == null) {
             if (rendererEpoch.get() == epoch) {
                 _state.value = _state.value.copy(rendererActive = false, rendererMessage = "Stem audio helper is unavailable.")
@@ -641,6 +839,34 @@ class DesktopStemCoordinator(
     private fun trackDirectory(item: PlaybackItem): Path =
         DesktopStemStorage.stemsDirectory(runtime.paths).resolve(cacheKey(item))
 
+    private fun markReady(trackId: String) {
+        if (trackId.isBlank() || trackId in _readyTrackIds.value) return
+        _readyTrackIds.value = _readyTrackIds.value + trackId
+    }
+
+    private fun scanReadyTrackIds(): Set<String> {
+        val root = DesktopStemStorage.stemsDirectory(runtime.paths)
+        if (!Files.isDirectory(root)) return emptySet()
+        val ready = linkedSetOf<String>()
+        runCatching {
+            Files.list(root).use { directories ->
+                directories.filter(Files::isDirectory).forEach { directory ->
+                    if (!isUsableCache(directory)) return@forEach
+                    val manifestPath = directory.resolve("manifest.properties")
+                    if (!Files.isRegularFile(manifestPath)) return@forEach
+                    val manifest = Properties().also { properties ->
+                        Files.newInputStream(manifestPath).use(properties::load)
+                    }
+                    if (manifest.getProperty("model") != MODEL_CACHE_VERSION) return@forEach
+                    manifest.getProperty("trackId")?.trim()?.takeIf(String::isNotBlank)?.let(ready::add)
+                }
+            }
+        }.onFailure { error ->
+            runtime.logger.log(Level.FINE, "Could not index existing stem cache", error)
+        }
+        return ready
+    }
+
     private fun cacheKey(item: PlaybackItem): String {
         val identity = buildString {
             append(MODEL_CACHE_VERSION).append('\u0000')
@@ -679,13 +905,17 @@ class DesktopStemCoordinator(
         val job = generationJob
         generationJob = null
         job?.cancel()
+        batchJob?.cancel()
+        batchJob = null
+        synchronized(batchLock) { batchQueue.clear() }
         activeProcess.getAndSet(null)?.let(::terminateProcess)
     }
 
     private companion object {
-        const val MODEL_CACHE_VERSION = "htdemucs-6s-1s-dml-v1"
+        const val MODEL_CACHE_VERSION = STEM_MODEL_VERSION
         const val RENDERER_READY_TIMEOUT_MS = 8_000L
         const val TRANSPORT_SEEK_RESYNC_THRESHOLD_MS = 650.0
+        const val STEM_PIPELINE_PARALLELISM = 2
         val STEM_CACHE_NAMES = listOf("drums", "bass", "other", "vocals", "guitar", "piano")
 
         fun isUsableCache(directory: Path): Boolean =
@@ -709,113 +939,40 @@ private fun DesktopStemMix.isNeutral(): Boolean = workerGains().all { gain -> ab
 
 private fun Float.isStemPlaybackRateSupported(): Boolean = isFinite() && abs(this - 1f) <= 0.001f
 
-private object DesktopStemRuntime {
-    private const val WORKER_NAME = "archivetune-stems.exe"
-    private const val MODEL_NAME = "htdemucs-6s-core-1s-dml.onnx"
-    private val LEGACY_MODEL_NAMES = listOf("htdemucs-core-1s-dml.onnx")
-
-    fun findWorker(): Path? {
-        val explicit = System.getenv("ARCHIVETUNE_STEM_WORKER")
-            ?.takeIf(String::isNotBlank)
-            ?.let(Path::of)
-            ?.toAbsolutePath()
-            ?.normalize()
-        if (explicit != null && Files.isRegularFile(explicit)) return explicit
-
-        val appDir = System.getProperty("archivetune.app.dir")
-            ?.takeIf(String::isNotBlank)
-            ?.let(Path::of)
-            ?.toAbsolutePath()
-            ?.normalize()
-        val installed = appDir?.resolve("stem-worker")?.resolve(WORKER_NAME)
-        if (installed != null && Files.isRegularFile(installed)) return installed
-
-        // Native Image sets archivetune.app.dir explicitly from the running executable. Never
-        // fall back to JVM/classpath heuristics in that mode: an installed build has exactly one
-        // supported helper location beside ArchiveTune.exe.
-        if (appDir != null) return null
-
-        return developmentRoots()
-            .flatMap { root ->
-                sequenceOf(
-                    root.resolve("stem-worker/target/release/$WORKER_NAME"),
-                    root.resolve("stem-worker/target/debug/$WORKER_NAME"),
-                )
-            }
-            .firstOrNull(Files::isRegularFile)
+private fun formatModelBytes(bytes: Long): String =
+    if (bytes >= 1024L * 1024L) {
+        "%.1f MiB".format(java.util.Locale.ROOT, bytes.toDouble() / (1024.0 * 1024.0))
+    } else {
+        "${bytes.coerceAtLeast(0L) / 1024L} KiB"
     }
 
-    fun findModel(paths: AppPaths): Path? {
-        val explicit = System.getenv("ARCHIVETUNE_STEM_MODEL")
-            ?.takeIf(String::isNotBlank)
-            ?.let(Path::of)
-            ?.toAbsolutePath()
-            ?.normalize()
-        if (explicit != null && Files.isRegularFile(explicit)) return explicit
+internal data class DesktopStemModelManifest(
+    val version: String,
+    val file: String,
+    val size: Long,
+    val sha256: String,
+)
 
-        val modelsDirectory = DesktopStemStorage.modelsDirectory(paths)
-        val cached = modelsDirectory.resolve(MODEL_NAME)
-        if (!Files.isRegularFile(cached)) return null
-        LEGACY_MODEL_NAMES.forEach { legacyName ->
-            runCatching { Files.deleteIfExists(modelsDirectory.resolve(legacyName)) }
-        }
-        return cached
+internal fun parseDesktopStemModelManifest(json: JSONObject): DesktopStemModelManifest =
+    DesktopStemModelManifest(
+        version = json.getString("version").trim(),
+        file = json.getString("file").trim(),
+        size = json.getLong("size"),
+        sha256 = json.getString("sha256").trim().lowercase(),
+    )
+
+internal fun validateDesktopStemModelManifest(manifest: DesktopStemModelManifest): DesktopStemModelManifest {
+    check(manifest.version == STEM_MODEL_VERSION) {
+        "Model manifest version ${manifest.version} does not match $STEM_MODEL_VERSION"
     }
-
-    fun configureWorkerEnvironment(builder: ProcessBuilder, worker: Path) {
-        val runtimeDirectory = findRuntimeDirectory(worker) ?: return
-        val onnxRuntime = runtimeDirectory.resolve("onnxruntime.dll")
-        builder.environment()["ARCHIVETUNE_ONNXRUNTIME"] = onnxRuntime.toString()
-        val existingPath = builder.environment()["PATH"].orEmpty()
-        builder.environment()["PATH"] = buildString {
-            append(runtimeDirectory)
-            if (existingPath.isNotBlank()) append(';').append(existingPath)
-        }
+    check(manifest.file == STEM_MODEL_NAME) {
+        "Model manifest file ${manifest.file} does not match $STEM_MODEL_NAME"
     }
-
-    private fun findRuntimeDirectory(worker: Path): Path? {
-        val explicit = System.getenv("ARCHIVETUNE_STEM_RUNTIME")
-            ?.takeIf(String::isNotBlank)
-            ?.let(Path::of)
-            ?.toAbsolutePath()
-            ?.normalize()
-        if (explicit != null && hasRuntime(explicit)) return explicit
-
-        val installed = worker.parent?.toAbsolutePath()?.normalize()
-        if (installed != null && hasRuntime(installed)) return installed
-
-        if (!System.getProperty("archivetune.app.dir").isNullOrBlank()) return null
-
-        return developmentRoots()
-            .map { it.resolve("build/stem-runtime/windows-x64") }
-            .firstOrNull(::hasRuntime)
+    check(manifest.size == STEM_MODEL_SIZE_BYTES) {
+        "Model manifest size ${manifest.size} does not match $STEM_MODEL_SIZE_BYTES"
     }
-
-    /**
-     * Development-only fallback. Production/native builds resolve from archivetune.app.dir, which
-     * NativeMain derives from the actual ArchiveTune.exe path. Do not use java.class.path here:
-     * Graal Native Image has no JVM classpath to discover and its java/jvm DLLs are only shims.
-     */
-    private fun developmentRoots(): Sequence<Path> {
-        val starts = buildList {
-            System.getenv("ARCHIVETUNE_PROJECT_ROOT")
-                ?.takeIf(String::isNotBlank)
-                ?.let { runCatching { Path.of(it).toAbsolutePath().normalize() }.getOrNull() }
-                ?.let(::add)
-
-            runCatching {
-                Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize()
-            }.getOrNull()?.let(::add)
-        }
-
-        return starts
-            .asSequence()
-            .flatMap { start -> generateSequence(start) { it.parent }.take(8) }
-            .distinct()
+    check(manifest.sha256 == STEM_MODEL_SHA256) {
+        "Model manifest SHA-256 does not match the pinned ArchiveTune model"
     }
-
-    private fun hasRuntime(directory: Path): Boolean =
-        Files.isRegularFile(directory.resolve("onnxruntime.dll")) &&
-            Files.isRegularFile(directory.resolve("DirectML.dll")) &&
-            Files.isRegularFile(directory.resolve("onnxruntime_providers_shared.dll"))
+    return manifest
 }
