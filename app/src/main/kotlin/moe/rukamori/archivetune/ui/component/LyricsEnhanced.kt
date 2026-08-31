@@ -236,7 +236,7 @@ fun LyricsEnhanced(
         }
     val showTranslations =
         remember(currentLyrics?.source) {
-            currentLyrics?.source == LyricsEntity.Source.AI_TRANSLATION.value
+            currentLyrics?.hasTranslationSource() == true
         }
     val lyricsSessionKey =
         remember(mediaMetadata?.id, lyrics) {
