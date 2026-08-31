@@ -49,7 +49,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          location: C:\msys64
+          location: C:\
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
