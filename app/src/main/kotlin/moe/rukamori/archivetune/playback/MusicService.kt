@@ -244,6 +244,7 @@ import moe.rukamori.archivetune.playback.queues.filterExplicit
 import moe.rukamori.archivetune.playback.queues.filterVideo
 import moe.rukamori.archivetune.playback.queues.hasBlockedArtist
 import moe.rukamori.archivetune.scrobbling.LastFmServiceConfig
+import moe.rukamori.archivetune.sponsorblock.SponsorBlockPlaybackController
 import moe.rukamori.archivetune.storage.StorageFolderKind
 import moe.rukamori.archivetune.storage.StorageLocationRepository
 import moe.rukamori.archivetune.stems.AndroidStemCache
@@ -325,6 +326,8 @@ class MusicService :
     @Inject
     lateinit var equalizerPlaybackController: EqualizerPlaybackController
 
+    @Inject
+    lateinit var sponsorBlockPlaybackController: SponsorBlockPlaybackController
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var lastAudioFocusState = AudioManager.AUDIOFOCUS_NONE
@@ -1254,6 +1257,7 @@ class MusicService :
                 (castState as? CastScreenState.Success)?.uiState?.isConnected == true,
             )
         }
+        sponsorBlockPlaybackController.attach(player, scope)
         playerInitialized.value = true
         database
             .blockedArtistIds()
@@ -8921,6 +8925,7 @@ class MusicService :
         if (::beatAnalysis.isInitialized) {
             runCatching { beatAnalysis.close() }
         }
+        sponsorBlockPlaybackController.detach()
         discordServiceStopping = true
         requestDiscordSync(
             reason = "service_destroy",
