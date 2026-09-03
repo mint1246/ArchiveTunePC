@@ -38,6 +38,7 @@ import moe.rukamori.archivetune.db.entities.EventWithSong
 import moe.rukamori.archivetune.db.entities.FormatEntity
 import moe.rukamori.archivetune.db.entities.LibraryTopMixEntity
 import moe.rukamori.archivetune.db.entities.LibraryTopMixSongMap
+import moe.rukamori.archivetune.db.entities.LikedSongDate
 import moe.rukamori.archivetune.db.entities.ListeningBySlot
 import moe.rukamori.archivetune.db.entities.ListeningTotals
 import moe.rukamori.archivetune.db.entities.LyricsEntity
@@ -205,6 +206,9 @@ interface DatabaseDao {
     @Transaction
     @Query("SELECT * FROM song WHERE liked ORDER BY totalPlayTime")
     fun likedSongsByPlayTimeAsc(): Flow<List<Song>>
+
+    @Query("SELECT id, likedDate FROM song WHERE liked AND likedDate IS NOT NULL AND id IN (:songIds)")
+    suspend fun likedSongDates(songIds: List<String>): List<LikedSongDate>
 
     fun likedSongs(
         sortType: SongSortType,
