@@ -419,7 +419,7 @@ fun <T> ListPreference(
 }
 
 @Composable
-fun <T> MultiSelectListPreference(
+fun <T : Any> MultiSelectListPreference(
     modifier: Modifier = Modifier,
     title: @Composable () -> Unit,
     description: String? = null,
@@ -486,7 +486,7 @@ fun <T> MultiSelectListPreference(
 }
 
 @Composable
-private fun <T> MultiSelectPreferenceBottomSheet(
+private fun <T : Any> MultiSelectPreferenceBottomSheet(
     title: @Composable () -> Unit,
     values: ImmutableList<T>,
     checkedValues: ImmutableList<T>,
