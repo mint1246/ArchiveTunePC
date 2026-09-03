@@ -108,7 +108,7 @@ class SponsorBlockRepository
             }
         }
 
-        suspend fun fetchSegments(
+        internal suspend fun fetchSegments(
             videoId: String,
             categories: List<SponsorBlockCategory>,
             apiUrl: String,
