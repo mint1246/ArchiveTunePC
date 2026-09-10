@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +25,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -34,8 +37,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Shell-wide artwork backdrop used by the dynamic theme. Desktop uses a Skia domain-warp
- * shader; Android keeps the same slow colour-field motion and beat response with a heavily
- * blurred, oversized artwork layer so it remains cheap and works below Android 13 too.
+ * shader. Android keeps the same shell-wide visual intent with a lightly blurred, saturated cover
+ * field on every API level; normal Material surfaces are made translucent by ArchiveTuneTheme.
  */
 @Composable
 fun DynamicAppBackdrop(
@@ -79,7 +82,14 @@ fun DynamicAppBackdrop(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize().background(Color(0xFF0A0712))) {
+        val portrait = maxHeight > maxWidth
+        val saturationFilter =
+            remember {
+                ColorFilter.colorMatrix(
+                    ColorMatrix().apply { setToSaturation(1.65f) },
+                )
+            }
         AnimatedContent(
             targetState = artworkUrl,
             transitionSpec = { fadeIn(tween(650)) togetherWith fadeOut(tween(650)) },
@@ -90,19 +100,24 @@ fun DynamicAppBackdrop(
                     model = url,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    colorFilter = saturationFilter,
                     modifier =
                         Modifier
                             .fillMaxSize()
                             .graphicsLayer {
                                 val pulse = beatPulse.coerceIn(0f, 1f)
-                                val scale = 1.24f + breathe.value * 0.025f + pulse * 0.025f
+                                // A square album cover already crops aggressively on a portrait
+                                // phone. Desktop's warped colour field doesn't need a 24% zoom, so
+                                // keep Android only slightly oversized to hide blur edges.
+                                val baseScale = if (portrait) 1.06f else 1.04f
+                                val scale = baseScale + breathe.value * 0.012f + pulse * 0.014f
                                 scaleX = scale
                                 scaleY = scale
-                                translationX = driftX.value
-                                translationY = driftY.value
+                                translationX = driftX.value * if (portrait) 0.42f else 0.62f
+                                translationY = driftY.value * if (portrait) 0.62f else 0.42f
                             }
-                            .blur(64.dp)
-                            .alpha(0.62f),
+                            .blur(16.dp)
+                            .alpha(0.96f),
                 )
             }
         }
@@ -121,6 +136,9 @@ fun DynamicAppBackdrop(
                         ),
                     ),
         )
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.22f)))
+        // Desktop applies a 22% overlay after a bright, saturation-heavy shader. The Android
+        // source is already a real cover image, so a lighter veil reaches the same perceived
+        // luminance instead of crushing it twice.
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.06f)))
     }
 }

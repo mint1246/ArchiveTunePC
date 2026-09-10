@@ -14,20 +14,27 @@ import org.junit.Test
 
 class TogetherQuickTunnelInviteTest {
     @Test
+    fun generatedTokenMatchesDesktopUrlSafeShape() {
+        val token = TogetherQuickTunnelInvite.randomSessionKey()
+
+        assertEquals(32, token.length)
+        assertTrue(token.matches(Regex("[A-Za-z0-9_-]{32}")))
+    }
+
+    @Test
     fun encodeProducesCanonicalCloudflarePartyUrlAndRoundTrips() {
         val invite =
             TogetherQuickTunnelInvite.encode(
                 publicBaseUrl = "https://small-cloud-name.trycloudflare.com",
-                sessionId = "session-123",
                 sessionKey = "0123456789abcdef",
             )
 
-        assertTrue(invite.startsWith("https://small-cloud-name.trycloudflare.com/party?"))
+        assertEquals("https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef", invite)
         val decoded = TogetherQuickTunnelInvite.decode(invite)!!
-        assertEquals("session-123", decoded.sessionId)
+        assertEquals(TogetherQuickTunnelInvite.sessionIdForKey("0123456789abcdef"), decoded.sessionId)
         assertEquals("0123456789abcdef", decoded.sessionKey)
         assertEquals(
-            "wss://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef&sid=session-123",
+            "wss://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef",
             decoded.wsUrl,
         )
     }
@@ -36,7 +43,7 @@ class TogetherQuickTunnelInviteTest {
     fun decoderRejectsOldOnlineCodesAndNonQuickTunnelUrls() {
         assertNull(TogetherQuickTunnelInvite.decode("archivetune://together?code=AB_cd-12"))
         assertNull(TogetherQuickTunnelInvite.decode("https://example.com/party?token=0123456789abcdef&sid=session"))
-        assertNull(TogetherQuickTunnelInvite.decode("https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef"))
+        assertNull(TogetherQuickTunnelInvite.decode("https://api.trycloudflare.com/party?token=0123456789abcdef"))
         assertNull(TogetherQuickTunnelInvite.decode("http://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef&sid=session"))
     }
 
@@ -48,7 +55,21 @@ class TogetherQuickTunnelInviteTest {
             )!!
 
         assertEquals(
-            "https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef&sid=session",
+            "https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef",
+            decoded.inviteUrl,
+        )
+    }
+
+    @Test
+    fun oldSidInviteStillDecodesButCanonicalizesToDesktopShape() {
+        val decoded =
+            TogetherQuickTunnelInvite.decode(
+                "https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef&sid=session",
+            )!!
+
+        assertEquals("session", decoded.sessionId)
+        assertEquals(
+            "https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef",
             decoded.inviteUrl,
         )
     }

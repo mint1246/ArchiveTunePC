@@ -11,6 +11,9 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
 
 data class TogetherQuickTunnelJoinInfo(
     val inviteUrl: String,
@@ -20,20 +23,26 @@ data class TogetherQuickTunnelJoinInfo(
 )
 
 object TogetherQuickTunnelInvite {
+    private val secureRandom = SecureRandom()
+
+    /** Same 24-byte URL-safe token shape used by desktop Play Together. */
+    fun randomSessionKey(): String {
+        val bytes = ByteArray(24)
+        secureRandom.nextBytes(bytes)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    }
+
     fun encode(
         publicBaseUrl: String,
-        sessionId: String,
         sessionKey: String,
     ): String {
-        require(sessionId.isNotBlank()) { "Together session ID is blank" }
         require(sessionKey.length > 10) { "Together session key is invalid" }
         val base = URI(publicBaseUrl.trim())
         require(base.scheme.equals("https", ignoreCase = true)) { "Quick Tunnel must use HTTPS" }
         require(isQuickTunnelHost(base.host)) { "Invalid Cloudflare Quick Tunnel host" }
 
         val charset = StandardCharsets.UTF_8.name()
-        val query =
-            "token=${URLEncoder.encode(sessionKey, charset)}&sid=${URLEncoder.encode(sessionId, charset)}"
+        val query = "token=${URLEncoder.encode(sessionKey, charset)}"
         return URI("https", null, base.host, normalizedPort(base.port), "/party", query, null).toASCIIString()
     }
 
@@ -45,12 +54,13 @@ object TogetherQuickTunnelInvite {
 
         val query = parseQuery(uri.rawQuery)
         val key = query["token"]?.trim().orEmpty()
-        val sessionId = query["sid"]?.trim().orEmpty()
-        if (key.length <= 10 || sessionId.isBlank()) return null
+        if (key.length <= 10) return null
+        val sessionId = query["sid"]?.trim()?.takeIf(String::isNotBlank) ?: sessionIdForKey(key)
 
         val port = normalizedPort(uri.port)
-        val ws = URI("wss", null, uri.host, port, "/party", uri.rawQuery, null).toASCIIString()
-        val https = URI("https", null, uri.host, port, "/party", uri.rawQuery, null).toASCIIString()
+        val canonicalQuery = "token=${URLEncoder.encode(key, StandardCharsets.UTF_8.name())}"
+        val ws = URI("wss", null, uri.host, port, "/party", canonicalQuery, null).toASCIIString()
+        val https = URI("https", null, uri.host, port, "/party", canonicalQuery, null).toASCIIString()
         return TogetherQuickTunnelJoinInfo(
             inviteUrl = https,
             wsUrl = ws,
@@ -61,7 +71,14 @@ object TogetherQuickTunnelInvite {
 
     private fun isQuickTunnelHost(host: String?): Boolean {
         val normalized = host?.trim()?.lowercase().orEmpty()
-        return normalized.isNotBlank() && normalized.endsWith(".trycloudflare.com")
+        return normalized.isNotBlank() &&
+            normalized.endsWith(".trycloudflare.com") &&
+            normalized != "api.trycloudflare.com"
+    }
+
+    internal fun sessionIdForKey(sessionKey: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(sessionKey.toByteArray(StandardCharsets.UTF_8))
+        return digest.take(16).joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     private fun normalizedPort(port: Int): Int = if (port == 443) -1 else port

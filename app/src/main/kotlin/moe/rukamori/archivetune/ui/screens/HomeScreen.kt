@@ -31,6 +31,10 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +64,7 @@ import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.QuickPicks
 import moe.rukamori.archivetune.home.HomeAction
+import moe.rukamori.archivetune.home.HomeRecommendationFeedbackNotice
 import moe.rukamori.archivetune.home.HomeScreenState
 import moe.rukamori.archivetune.home.HomeUiState
 import moe.rukamori.archivetune.models.MediaMetadata
@@ -85,12 +90,16 @@ fun HomeScreen(
     val haptic = LocalHapticFeedback.current
 
     val screenState by viewModel.screenState.collectAsStateWithLifecycle()
+    val recommendationFeedbackNotice by viewModel.recommendationFeedbackNotice.collectAsStateWithLifecycle()
     val isPlaying by playerConnection.isPlaying.collectAsStateWithLifecycle()
     val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
 
     val lazyListState = rememberLazyListState()
     val forgottenFavoritesGridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val feedbackFailedMessage = stringResource(R.string.home_not_interested_failed)
+    val retryLabel = stringResource(R.string.retry)
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scrollToTop =
         backStackEntry
@@ -125,6 +134,21 @@ fun HomeScreen(
     LaunchedEffect(uiState?.forgottenFavorites) {
         if (uiState != null) {
             forgottenFavoritesGridState.scrollToItem(0)
+        }
+    }
+
+    LaunchedEffect(recommendationFeedbackNotice) {
+        if (recommendationFeedbackNotice !is HomeRecommendationFeedbackNotice.RemoteFailure) return@LaunchedEffect
+        when (
+            snackbarHostState.showSnackbar(
+                message = feedbackFailedMessage,
+                actionLabel = retryLabel,
+                withDismissAction = true,
+                duration = SnackbarDuration.Indefinite,
+            )
+        ) {
+            SnackbarResult.ActionPerformed -> viewModel.retryRemoteRecommendationDismissal()
+            SnackbarResult.Dismissed -> viewModel.clearRecommendationFeedbackNotice()
         }
     }
 
@@ -195,9 +219,23 @@ fun HomeScreen(
                     lazyListState = lazyListState,
                     forgottenFavoritesGridState = forgottenFavoritesGridState,
                     onAction = viewModel::onAction,
+                    onNotInterested = viewModel::dismissRemoteRecommendation,
                 )
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(
+                        bottom =
+                            LocalPlayerAwareWindowInsets.current
+                                .asPaddingValues()
+                                .calculateBottomPadding() + 12.dp,
+                    ),
+        )
     }
 }
 
@@ -269,6 +307,7 @@ private fun HomeContent(
     lazyListState: androidx.compose.foundation.lazy.LazyListState,
     forgottenFavoritesGridState: LazyGridState,
     onAction: (HomeAction) -> Unit,
+    onNotInterested: (moe.rukamori.archivetune.innertube.models.YTItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val remoteQuickPicks =
@@ -361,6 +400,7 @@ private fun HomeContent(
                                 menuState = menuState,
                                 haptic = haptic,
                                 scope = scope,
+                                onNotInterested = onNotInterested,
                                 modifier = Modifier.animateItem(),
                             )
                         }
@@ -563,6 +603,7 @@ private fun HomeContent(
                                 menuState = menuState,
                                 haptic = haptic,
                                 scope = scope,
+                                onNotInterested = onNotInterested,
                                 modifier = Modifier.animateItem(),
                             )
                         }

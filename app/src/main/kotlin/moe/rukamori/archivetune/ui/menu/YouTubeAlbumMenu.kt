@@ -104,6 +104,7 @@ fun YouTubeAlbumMenu(
     albumItem: AlbumItem,
     navController: NavController,
     onDismiss: () -> Unit,
+    onNotInterested: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val database = LocalDatabase.current
@@ -419,6 +420,20 @@ fun YouTubeAlbumMenu(
 
         item {
             Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        if (onNotInterested != null) {
+            item {
+                MenuSurfaceSection(modifier = Modifier.padding(vertical = 6.dp)) {
+                    NotInterestedMenuItem {
+                        onDismiss()
+                        onNotInterested()
+                    }
+                }
+            }
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
         }
 
         item {

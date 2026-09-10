@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsIntensityKey
+import moe.rukamori.archivetune.playback.PlayerConnection
 import moe.rukamori.archivetune.utils.rememberPreference
 import kotlin.math.sqrt
 
@@ -183,8 +184,9 @@ fun rememberAndroidBeatPulse(
 fun rememberPlayerBeatPulse(
     isPlaying: Boolean,
     enabledOverride: Boolean = true,
+    playerConnectionOverride: PlayerConnection? = null,
 ): Float {
-    val playerConnection = LocalPlayerConnection.current ?: return 0f
+    val playerConnection = playerConnectionOverride ?: LocalPlayerConnection.current ?: return 0f
     val enabled by rememberPreference(BeatSyncedVisualsEnabledKey, true)
     val intensity by rememberPreference(BeatSyncedVisualsIntensityKey, 0.75f)
     val effectiveEnabled = enabled && enabledOverride

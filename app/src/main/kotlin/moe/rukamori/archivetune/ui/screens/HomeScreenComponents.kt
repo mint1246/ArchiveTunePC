@@ -1143,6 +1143,7 @@ fun HomePageSectionContent(
     menuState: MenuState,
     haptic: HapticFeedback,
     scope: CoroutineScope,
+    onNotInterested: ((YTItem) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     LazyRow(
@@ -1166,6 +1167,7 @@ fun HomePageSectionContent(
                 menuState = menuState,
                 haptic = haptic,
                 scope = scope,
+                onNotInterested = onNotInterested,
             )
         }
     }
@@ -1187,6 +1189,7 @@ private fun YouTubeGridItemWrapper(
     menuState: MenuState,
     haptic: HapticFeedback,
     scope: CoroutineScope,
+    onNotInterested: ((YTItem) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     YouTubeGridItem(
@@ -1231,6 +1234,8 @@ private fun YouTubeGridItemWrapper(
                                         song = item,
                                         navController = navController,
                                         onDismiss = menuState::dismiss,
+                                        onNotInterested =
+                                            homeNotInterestedCallback(item, onNotInterested),
                                     )
                                 }
 
@@ -1239,6 +1244,8 @@ private fun YouTubeGridItemWrapper(
                                         albumItem = item,
                                         navController = navController,
                                         onDismiss = menuState::dismiss,
+                                        onNotInterested =
+                                            homeNotInterestedCallback(item, onNotInterested),
                                     )
                                 }
 
@@ -1246,6 +1253,8 @@ private fun YouTubeGridItemWrapper(
                                     YouTubeArtistMenu(
                                         artist = item,
                                         onDismiss = menuState::dismiss,
+                                        onNotInterested =
+                                            homeNotInterestedCallback(item, onNotInterested),
                                     )
                                 }
 
@@ -1254,6 +1263,8 @@ private fun YouTubeGridItemWrapper(
                                         playlist = item,
                                         coroutineScope = scope,
                                         onDismiss = menuState::dismiss,
+                                        onNotInterested =
+                                            homeNotInterestedCallback(item, onNotInterested),
                                     )
                                 }
                             }
@@ -1262,6 +1273,16 @@ private fun YouTubeGridItemWrapper(
                 ),
     )
 }
+
+private fun homeNotInterestedCallback(
+    item: YTItem,
+    callback: ((YTItem) -> Unit)?,
+): (() -> Unit)? =
+    if (callback != null && !item.feedbackToken.isNullOrBlank()) {
+        { callback(item) }
+    } else {
+        null
+    }
 
 /**
  * Local item grid item for songs, albums, artists

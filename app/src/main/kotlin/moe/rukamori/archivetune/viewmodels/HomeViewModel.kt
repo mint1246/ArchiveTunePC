@@ -43,9 +43,12 @@ import moe.rukamori.archivetune.extensions.filterBlockedArtists
 import moe.rukamori.archivetune.extensions.toEnum
 import moe.rukamori.archivetune.home.HomeAction
 import moe.rukamori.archivetune.home.HomePresentationPreferences
+import moe.rukamori.archivetune.home.HomeRecommendationFeedback
+import moe.rukamori.archivetune.home.HomeRecommendationFeedbackNotice
 import moe.rukamori.archivetune.home.HomeScreenState
 import moe.rukamori.archivetune.home.HomeUiState
 import moe.rukamori.archivetune.home.ObserveHomePresentationPreferencesUseCase
+import moe.rukamori.archivetune.home.homeRecommendationKey
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.AccountChannel
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
@@ -211,6 +214,21 @@ class HomeViewModel
         private val selectedChip = MutableStateFlow<HomePage.Chip?>(null)
         private val previousHomePage = MutableStateFlow<HomePage?>(null)
         private val previousRemoteQuickPicks = MutableStateFlow<HomePage.Section?>(null)
+        private val hiddenRemoteRecommendationKeys = MutableStateFlow<Set<String>>(emptySet())
+
+        private val recommendationFeedback =
+            HomeRecommendationFeedback(
+                sendRemoteFeedback = { item ->
+                    val token = item.feedbackToken?.takeIf(String::isNotBlank)
+                    if (token == null) {
+                        Result.failure(IllegalArgumentException("This recommendation has no feedback token"))
+                    } else {
+                        YouTube.sendFeedback(token).map { Unit }
+                    }
+                },
+                hideRemoteItem = ::hideRemoteRecommendation,
+            )
+        val recommendationFeedbackNotice: StateFlow<HomeRecommendationFeedbackNotice?> = recommendationFeedback.notice
 
         private val _allLocalItems = MutableStateFlow<List<LocalItem>>(emptyList())
         val allLocalItems: StateFlow<List<LocalItem>> = _allLocalItems.asStateFlow()
@@ -545,7 +563,8 @@ class HomeViewModel
                                                 )
                                             },
                                     )
-                                val (pageWithoutQuickPicks, quickPicksSection) = filteredPage.extractQuickPicks()
+                                val (pageWithoutQuickPicks, quickPicksSection) =
+                                    filteredPage.withoutHiddenRemoteRecommendations().extractQuickPicks()
                                 remoteQuickPicks.value = quickPicksSection
                                 homePage.value = pageWithoutQuickPicks
                             }.onFailure {
@@ -777,7 +796,8 @@ class HomeViewModel
                                     )
                                 },
                         )
-                    val (pageWithoutQuickPicks, quickPicksSection) = mergedPage.extractQuickPicks()
+                    val (pageWithoutQuickPicks, quickPicksSection) =
+                        mergedPage.withoutHiddenRemoteRecommendations().extractQuickPicks()
                     quickPicksSection?.let { remoteQuickPicks.value = it }
                     homePage.value = pageWithoutQuickPicks
                 } finally {
@@ -826,7 +846,8 @@ class HomeViewModel
                                     )
                                 },
                         )
-                    val (pageWithoutQuickPicks, quickPicksSection) = filteredPage.extractQuickPicks()
+                    val (pageWithoutQuickPicks, quickPicksSection) =
+                        filteredPage.withoutHiddenRemoteRecommendations().extractQuickPicks()
                     remoteQuickPicks.value = quickPicksSection
                     homePage.value = pageWithoutQuickPicks
                     selectedChip.value = chip
@@ -839,6 +860,49 @@ class HomeViewModel
                 is HomeAction.SelectChip -> toggleChip(action.chip)
                 is HomeAction.LoadMore -> loadMoreYouTubeItems(action.continuation)
             }
+        }
+
+        fun dismissRemoteRecommendation(item: YTItem) {
+            viewModelScope.launch(Dispatchers.IO) {
+                recommendationFeedback.dismissRemote(item)
+            }
+        }
+
+        fun retryRemoteRecommendationDismissal() {
+            viewModelScope.launch(Dispatchers.IO) {
+                recommendationFeedback.retryRemoteFailure()
+            }
+        }
+
+        fun clearRecommendationFeedbackNotice() {
+            recommendationFeedback.clearNotice()
+        }
+
+        private fun hideRemoteRecommendation(item: YTItem) {
+            val key = homeRecommendationKey(item)
+            hiddenRemoteRecommendationKeys.update { it + key }
+            remoteQuickPicks.update { section ->
+                section?.copy(items = section.items.filterNot { homeRecommendationKey(it) == key })
+            }
+            homePage.update { it?.withoutHiddenRemoteRecommendations() }
+            previousRemoteQuickPicks.update { section ->
+                section?.copy(items = section.items.filterNot { homeRecommendationKey(it) == key })
+            }
+            previousHomePage.update { it?.withoutHiddenRemoteRecommendations() }
+            _allYtItems.update { items -> items.filterNot { homeRecommendationKey(it) == key } }
+        }
+
+        private fun HomePage.withoutHiddenRemoteRecommendations(): HomePage {
+            val hidden = hiddenRemoteRecommendationKeys.value
+            if (hidden.isEmpty()) return this
+            return copy(
+                sections =
+                    sections.map { section ->
+                        section.copy(
+                            items = section.items.filterNot { homeRecommendationKey(it) in hidden },
+                        )
+                    },
+            )
         }
 
         private fun refresh() {

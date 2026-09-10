@@ -525,6 +525,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         socialManager = AndroidSocialManager.create(this, lifecycleScope)
+        val socialNotifications = moe.rukamori.archivetune.social.AndroidSocialNotificationManager(this)
+        lifecycleScope.launch {
+            socialManager.events.collect { event ->
+                socialNotifications.notify(event, socialManager.state.value)
+            }
+        }
         lifecycleScope.launch { socialManager.restore() }
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_LTR
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -906,16 +912,23 @@ class MainActivity : ComponentActivity() {
                     rememberPlayerBeatPulse(
                         isPlaying = dynamicBackdropIsPlaying,
                         enabledOverride = enableDynamicTheme && !pureBlack && beatSyncedVisualsEnabled,
+                        playerConnectionOverride = playerConnection,
                     )
                 } else {
                     0f
                 }
+
+            val dynamicBackdropActive =
+                enableDynamicTheme &&
+                    !pureBlack &&
+                    !dynamicArtworkUrl.isNullOrBlank()
 
             ArchiveTuneTheme(
                 darkTheme = useDarkTheme,
                 pureBlack = pureBlack,
                 themeColor = themeColor,
                 seedPalette = if (!enableDynamicTheme) customThemeSeedPalette else null,
+                dynamicBackdropActive = dynamicBackdropActive,
                 disableAnimations = disableAnimations,
                 fontPreference = fontPreference,
                 customFontUri = customFontUri,
@@ -935,10 +948,7 @@ class MainActivity : ComponentActivity() {
                     return@ArchiveTuneTheme
                 }
 
-                val showDynamicAppBackdrop =
-                    enableDynamicTheme &&
-                        !pureBlack &&
-                        !dynamicArtworkUrl.isNullOrBlank()
+                val showDynamicAppBackdrop = dynamicBackdropActive
                 BoxWithConstraints(
                     modifier =
                         Modifier

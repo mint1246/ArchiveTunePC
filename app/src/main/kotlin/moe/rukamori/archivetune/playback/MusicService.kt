@@ -4842,8 +4842,9 @@ class MusicService :
                     allowGuestsToControlPlayback = true,
                 )
             val hostName = displayName.trim().ifBlank { getString(R.string.app_name) }
-            val sessionId = java.util.UUID.randomUUID().toString()
-            val sessionKey = java.util.UUID.randomUUID().toString()
+            val sessionKey = moe.rukamori.archivetune.together.TogetherQuickTunnelInvite.randomSessionKey()
+            val sessionId =
+                moe.rukamori.archivetune.together.TogetherQuickTunnelInvite.sessionIdForKey(sessionKey)
             val originPort =
                 runCatching {
                     java.net.ServerSocket(0, 0, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
@@ -4906,7 +4907,6 @@ class MusicService :
                 val inviteUrl =
                     moe.rukamori.archivetune.together.TogetherQuickTunnelInvite.encode(
                         publicBaseUrl = tunnel.publicBaseUrl,
-                        sessionId = sessionId,
                         sessionKey = sessionKey,
                     )
                 scheduleTogetherHostInactivityTimeout(sessionId)

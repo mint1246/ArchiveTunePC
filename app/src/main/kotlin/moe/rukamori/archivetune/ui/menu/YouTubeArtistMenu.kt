@@ -65,6 +65,7 @@ import moe.rukamori.archivetune.utils.toggleSpeedDialPin
 fun YouTubeArtistMenu(
     artist: ArtistItem,
     onDismiss: () -> Unit,
+    onNotInterested: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val database = LocalDatabase.current
@@ -278,6 +279,20 @@ fun YouTubeArtistMenu(
                             },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
+                }
+            }
+        }
+
+        if (onNotInterested != null) {
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            item {
+                MenuSurfaceSection(modifier = Modifier.padding(vertical = 6.dp)) {
+                    NotInterestedMenuItem {
+                        onDismiss()
+                        onNotInterested()
+                    }
                 }
             }
         }

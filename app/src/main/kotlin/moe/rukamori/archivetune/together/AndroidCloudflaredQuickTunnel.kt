@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import java.io.File
+import java.net.URI
 
 class AndroidCloudflaredQuickTunnel private constructor(
     val publicBaseUrl: String,
@@ -64,7 +65,7 @@ class AndroidCloudflaredQuickTunnel private constructor(
                         process.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach { line ->
                                 Timber.tag("TogetherCloudflared").d("cloudflared: %s", line)
-                                QuickTunnelUrl.find(line)?.value?.let { url ->
+                                publishedQuickTunnelUrl(line)?.let { url ->
                                     if (!publishedUrl.isCompleted) publishedUrl.complete(url)
                                 }
                             }
@@ -89,5 +90,17 @@ class AndroidCloudflaredQuickTunnel private constructor(
                 throw t
             }
         }
+
+        /** Ignore cloudflared's bootstrap API URL and wait for the generated public hostname. */
+        internal fun publishedQuickTunnelUrl(line: String): String? =
+            QuickTunnelUrl
+                .findAll(line)
+                .map(MatchResult::value)
+                .firstOrNull { candidate ->
+                    val host = runCatching { URI(candidate).host?.lowercase() }.getOrNull()
+                    host != null &&
+                        host.endsWith(".trycloudflare.com") &&
+                        host != "api.trycloudflare.com"
+                }
     }
 }

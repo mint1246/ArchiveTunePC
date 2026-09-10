@@ -75,6 +75,7 @@ fun ArchiveTuneTheme(
     pureBlack: Boolean = false,
     themeColor: Color = DefaultThemeColor,
     seedPalette: ThemeSeedPalette? = null,
+    dynamicBackdropActive: Boolean = false,
     disableAnimations: Boolean = false,
     fontPreference: AppFontPreference = AppFontPreference.DEFAULT,
     customFontUri: String = "",
@@ -147,8 +148,12 @@ fun ArchiveTuneTheme(
         }
 
     val colorScheme =
-        remember(baseColorScheme, pureBlack, darkTheme) {
-            if (darkTheme && pureBlack) baseColorScheme.pureBlack(true) else baseColorScheme
+        remember(baseColorScheme, pureBlack, darkTheme, dynamicBackdropActive) {
+            when {
+                darkTheme && pureBlack -> baseColorScheme.pureBlack(true)
+                dynamicBackdropActive -> baseColorScheme.dynamicBackdropGlass()
+                else -> baseColorScheme
+            }
         }
 
     val animatedColorScheme =
@@ -195,6 +200,30 @@ fun ArchiveTuneTheme(
         )
     }
 }
+
+/**
+ * Desktop dynamic theme keeps the app background transparent and frosts normal Material surfaces
+ * over the artwork field.  Doing this at the ColorScheme layer means every screen using standard
+ * Material colors participates automatically instead of needing per-screen backdrop hacks.
+ */
+private fun ColorScheme.dynamicBackdropGlass(): ColorScheme =
+    copy(
+        background = Color.Transparent,
+        surface = surface.copy(alpha = 0.88f),
+        surfaceDim = surfaceDim.copy(alpha = 0.94f),
+        surfaceBright = surfaceBright.copy(alpha = 0.80f),
+        surfaceContainerLowest = surfaceContainerLowest.copy(alpha = 0.58f),
+        surfaceContainerLow = surfaceContainerLow.copy(alpha = 0.60f),
+        surfaceContainer = surfaceContainer.copy(alpha = 0.64f),
+        surfaceContainerHigh = surfaceContainerHigh.copy(alpha = 0.68f),
+        surfaceContainerHighest = surfaceContainerHighest.copy(alpha = 0.74f),
+        surfaceVariant = surfaceVariant.copy(alpha = 0.72f),
+        primaryContainer = primaryContainer.copy(alpha = 0.88f),
+        secondaryContainer = secondaryContainer.copy(alpha = 0.88f),
+        tertiaryContainer = tertiaryContainer.copy(alpha = 0.88f),
+        outline = outline.copy(alpha = 0.74f),
+        outlineVariant = outlineVariant.copy(alpha = 0.16f),
+    )
 
 @Composable
 private fun animateColorScheme(
