@@ -45,6 +45,13 @@ class CrossfadeHandoffPolicyTest {
     }
 
     @Test
+    fun crossfadeSecondary_reusesValidPrimaryAudioSession_forContinuousEffects() {
+        assertEquals(42, sharedCrossfadeAudioSessionId(42))
+        assertEquals(null, sharedCrossfadeAudioSessionId(0))
+        assertEquals(null, sharedCrossfadeAudioSessionId(-1))
+    }
+
+    @Test
     fun equalPowerHandoff_preservesPowerAtEndpointsAndMidpoint() {
         val start = equalPowerGains(0f)
         val midpoint = equalPowerGains(0.5f)

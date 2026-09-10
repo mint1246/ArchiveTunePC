@@ -23,6 +23,8 @@ val DarkModeKey = stringPreferencesKey("darkMode")
 val PureBlackKey = booleanPreferencesKey("pureBlack")
 val DisableAnimationsKey = booleanPreferencesKey("disableAnimations")
 val ForceHighRefreshRateKey = booleanPreferencesKey("forceHighRefreshRate")
+val BeatSyncedVisualsEnabledKey = booleanPreferencesKey("beatSyncedVisualsEnabled")
+val BeatSyncedVisualsIntensityKey = floatPreferencesKey("beatSyncedVisualsIntensity")
 val EnableHapticFeedbackKey = booleanPreferencesKey("enableHapticFeedback")
 val UseSystemFontKey = booleanPreferencesKey("useSystemFont")
 val FontPreferenceKey = stringPreferencesKey("fontPreference")
@@ -231,6 +233,7 @@ val TogetherAllowGuestsToControlPlaybackKey = booleanPreferencesKey("together_al
 val TogetherRequireHostApprovalToJoinKey = booleanPreferencesKey("together_require_host_approval_to_join")
 val TogetherLastJoinLinkKey = stringPreferencesKey("together_last_join_link")
 val TogetherWelcomeShownKey = booleanPreferencesKey("together_welcome_shown")
+val CountPartyListeningInStatisticsKey = booleanPreferencesKey("statistics_count_party_listening")
 
 // ListenBrainz scrobbling
 val ListenBrainzEnabledKey = booleanPreferencesKey("listenbrainz_enabled")

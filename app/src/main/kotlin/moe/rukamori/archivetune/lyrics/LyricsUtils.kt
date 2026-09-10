@@ -436,6 +436,10 @@ object LyricsUtils {
                     text = line.text,
                     words = words,
                     agent = line.agent,
+                    durationMs =
+                        ((line.endTime - line.startTime) * scale * 1000.0)
+                            .toLong()
+                            .coerceAtLeast(0L),
                     providerRomanizedText = line.providerRomanizedText,
                     providerRomanizedWords = line.providerRomanizedWords,
                     providerRomanizedLanguage = line.providerRomanizedLanguage,
@@ -560,16 +564,37 @@ object LyricsUtils {
         songDurationMs: Long = 0L,
     ): List<LyricsEntry> {
         if (entries.isEmpty()) return entries
+        val sortedEntries = entries.sorted()
         val result = mutableListOf<LyricsEntry>()
-        insertIntroInstrumentalIfNeeded(entries, result)
-        result.addAll(entries)
-        insertOutroInstrumentalIfNeeded(entries, songDurationMs, result)
+        insertIntroInstrumentalIfNeeded(sortedEntries, result)
+
+        var coveredUntilMs = Long.MIN_VALUE
+        sortedEntries.forEachIndexed { index, entry ->
+            if (entry.time >= 0L && hasVocalContent(entry)) {
+                if (coveredUntilMs != Long.MIN_VALUE) {
+                    val gapMs = entry.time - coveredUntilMs
+                    if (gapMs >= INSTRUMENTAL_GAP_THRESHOLD_MS) {
+                        result.add(
+                            LyricsEntry(
+                                time = coveredUntilMs,
+                                text = "",
+                                isInstrumental = true,
+                                durationMs = gapMs,
+                            ),
+                        )
+                    }
+                }
+                coveredUntilMs = maxOf(coveredUntilMs, effectiveLyricsEntryEndMs(sortedEntries, index, songDurationMs))
+            }
+            result.add(entry)
+        }
+
+        insertOutroInstrumentalIfNeeded(songDurationMs, result, coveredUntilMs)
         return result
     }
 
-    private const val INSTRUMENTAL_GAP_THRESHOLD_MS = 5000L
-    private const val INSTRUMENTAL_INTRO_START_MS = 1000L
-    private const val INSTRUMENTAL_OUTRO_VOCAL_TAIL_MS = 2500L
+    private const val INSTRUMENTAL_GAP_THRESHOLD_MS = 3000L
+    private const val INSTRUMENTAL_INTRO_START_MS = 0L
 
     private fun insertIntroInstrumentalIfNeeded(
         entries: List<LyricsEntry>,
@@ -590,13 +615,13 @@ object LyricsUtils {
     }
 
     private fun insertOutroInstrumentalIfNeeded(
-        entries: List<LyricsEntry>,
         songDurationMs: Long,
         result: MutableList<LyricsEntry>,
+        coveredUntilMs: Long,
     ) {
         if (songDurationMs <= 0L) return
-        val lastVocalEntry = entries.lastOrNull { it.text.isNotBlank() } ?: return
-        val outroStartMs = lastVocalEntry.time + INSTRUMENTAL_OUTRO_VOCAL_TAIL_MS
+        if (coveredUntilMs == Long.MIN_VALUE) return
+        val outroStartMs = coveredUntilMs.coerceAtMost(songDurationMs)
         val outroDurationMs = songDurationMs - outroStartMs
         if (outroDurationMs < INSTRUMENTAL_GAP_THRESHOLD_MS) return
 
@@ -609,6 +634,56 @@ object LyricsUtils {
             ),
         )
     }
+
+    /**
+     * Returns the provider-backed vocal interval end for one lyric entry. Word/line duration
+     * wins when available. Plain line-sync lyrics have no explicit provider end, so mirror the
+     * desktop timeline by keeping them alive up to the next vocal start instead of inventing an
+     * interlude from the timestamp gap alone.
+     */
+    fun effectiveLyricsEntryEndMs(
+        entries: List<LyricsEntry>,
+        index: Int,
+        songDurationMs: Long = 0L,
+    ): Long {
+        val entry = entries.getOrNull(index) ?: return 0L
+        if (entry.time < 0L) return entry.time
+        if (entry.isInstrumental) return entry.time + entry.durationMs.coerceAtLeast(0L)
+
+        if (entry.durationMs > 0L) return entry.time + entry.durationMs
+
+        val wordEndMs =
+            entry.words
+                ?.maxOfOrNull { word -> (word.endTime * 1000.0).toLong() }
+                ?.takeIf { it > entry.time }
+        if (wordEndMs != null) return wordEndMs
+
+        val nextVocalStart =
+            entries
+                .asSequence()
+                .drop(index + 1)
+                .firstOrNull { next -> next.time > entry.time && hasVocalContent(next) }
+                ?.time
+        if (nextVocalStart != null) return nextVocalStart
+
+        return songDurationMs.takeIf { it > entry.time } ?: Long.MAX_VALUE
+    }
+
+    /** A timed vocal remains active for its full provider interval, including overlaps. */
+    fun isLyricsEntryActiveAt(
+        entries: List<LyricsEntry>,
+        index: Int,
+        positionMs: Long,
+        songDurationMs: Long = 0L,
+    ): Boolean {
+        val entry = entries.getOrNull(index) ?: return false
+        if (!hasVocalContent(entry) || entry.time < 0L) return false
+        val endMs = effectiveLyricsEntryEndMs(entries, index, songDurationMs)
+        return positionMs >= entry.time && positionMs < endMs
+    }
+
+    private fun hasVocalContent(entry: LyricsEntry): Boolean =
+        !entry.isInstrumental && (entry.text.isNotBlank() || !entry.words.isNullOrEmpty())
 
     private fun parseLineSyncedLrcLine(line: String): List<LyricsEntry>? {
         if (line.isEmpty()) {

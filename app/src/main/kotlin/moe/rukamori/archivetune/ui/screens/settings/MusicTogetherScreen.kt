@@ -723,18 +723,6 @@ private fun HostControlsCard(
             )
         }
         ToggleRow(
-            iconResId = R.drawable.playlist_add,
-            titleResId = R.string.together_allow_guests_add,
-            checked = host.allowGuestsToAddTracks,
-            onCheckedChange = viewModel::setAllowGuestsToAddTracks,
-        )
-        ToggleRow(
-            iconResId = R.drawable.play,
-            titleResId = R.string.together_allow_guests_control,
-            checked = host.allowGuestsToControlPlayback,
-            onCheckedChange = viewModel::setAllowGuestsToControlPlayback,
-        )
-        ToggleRow(
             iconResId = R.drawable.lock,
             titleResId = R.string.together_require_approval,
             checked = host.requireHostApprovalToJoin,
@@ -916,18 +904,42 @@ private fun ParticipantRow(
             )
         },
         supportingContent = {
-            Text(
-                text =
-                    stringResource(
-                        when {
-                            participant.host -> R.string.together_role_host
-                            participant.pending -> R.string.together_pending_approval
-                            else -> R.string.together_role_guest
-                        },
-                    ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(MusicTogetherSpacing.xxs)) {
+                Text(
+                    text =
+                        stringResource(
+                            when {
+                                participant.host -> R.string.together_role_host
+                                participant.pending -> R.string.together_pending_approval
+                                else -> R.string.together_role_guest
+                            },
+                        ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (participant.showPermissionControls) {
+                    ParticipantPermissionToggle(
+                        labelResId = R.string.together_permission_edit_queue,
+                        checked = participant.permissions.canEditQueue,
+                        onCheckedChange = { viewModel.setParticipantQueueEditing(participant.id, it) },
+                    )
+                    ParticipantPermissionToggle(
+                        labelResId = R.string.together_permission_play_pause,
+                        checked = participant.permissions.canControlPlayback,
+                        onCheckedChange = { viewModel.setParticipantPlaybackControl(participant.id, it) },
+                    )
+                    ParticipantPermissionToggle(
+                        labelResId = R.string.together_permission_change_song,
+                        checked = participant.permissions.canChangeSong,
+                        onCheckedChange = { viewModel.setParticipantSongChanging(participant.id, it) },
+                    )
+                    ParticipantPermissionToggle(
+                        labelResId = R.string.together_permission_seek,
+                        checked = participant.permissions.canSeek,
+                        onCheckedChange = { viewModel.setParticipantSeeking(participant.id, it) },
+                    )
+                }
+            }
         },
         leadingContent = {
             AccentIcon(
@@ -980,6 +992,38 @@ private fun ParticipantRow(
             androidx.compose.material3.ListItemDefaults
                 .colors(containerColor = Color.Transparent),
     )
+}
+
+@Composable
+private fun ParticipantPermissionToggle(
+    @StringRes labelResId: Int,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.small)
+                .toggleable(
+                    value = checked,
+                    role = Role.Switch,
+                    onValueChange = onCheckedChange,
+                ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(MusicTogetherSpacing.xs),
+    ) {
+        Text(
+            text = stringResource(labelResId),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            modifier = Modifier.size(width = 42.dp, height = 28.dp),
+        )
+    }
 }
 
 @Composable

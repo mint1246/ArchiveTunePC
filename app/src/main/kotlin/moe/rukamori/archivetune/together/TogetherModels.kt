@@ -28,7 +28,35 @@ data class TogetherParticipant(
     val isHost: Boolean = false,
     val isPending: Boolean = false,
     val isConnected: Boolean = true,
+    val permissions: TogetherGuestPermissions? = null,
 )
+
+@Serializable
+@Immutable
+data class TogetherGuestPermissions(
+    val canEditQueue: Boolean = true,
+    val canControlPlayback: Boolean = true,
+    val canChangeSong: Boolean = false,
+    val canSeek: Boolean = false,
+) {
+    companion object {
+        val Full =
+            TogetherGuestPermissions(
+                canEditQueue = true,
+                canControlPlayback = true,
+                canChangeSong = true,
+                canSeek = true,
+            )
+
+        fun fromLegacy(settings: TogetherRoomSettings): TogetherGuestPermissions =
+            TogetherGuestPermissions(
+                canEditQueue = settings.allowGuestsToAddTracks,
+                canControlPlayback = settings.allowGuestsToControlPlayback,
+                canChangeSong = settings.allowGuestsToControlPlayback,
+                canSeek = settings.allowGuestsToControlPlayback,
+            )
+    }
+}
 
 @Serializable
 @Immutable
@@ -54,6 +82,17 @@ data class TogetherRoomState(
     val shuffleEnabled: Boolean = false,
     val sentAtElapsedRealtimeMs: Long = 0L,
 )
+
+fun TogetherRoomState.permissionsFor(participantId: String): TogetherGuestPermissions {
+    return permissionsForKnownParticipant(participantId) ?: TogetherGuestPermissions.fromLegacy(settings)
+}
+
+fun TogetherRoomState.permissionsForKnownParticipant(participantId: String): TogetherGuestPermissions? {
+    if (participantId == hostId) return TogetherGuestPermissions.Full
+    val participant = participants.firstOrNull { it.id == participantId } ?: return null
+    if (participant.isHost) return TogetherGuestPermissions.Full
+    return participant.permissions ?: TogetherGuestPermissions.fromLegacy(settings)
+}
 
 @Immutable
 sealed class TogetherRole {

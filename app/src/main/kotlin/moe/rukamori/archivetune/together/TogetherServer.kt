@@ -85,6 +85,7 @@ class TogetherServer(
         val name: String,
         val session: WebSocketSession,
         var pending: Boolean,
+        var permissions: TogetherGuestPermissions = TogetherGuestPermissions(),
     )
 
     private val clients = ConcurrentHashMap<String, Client>()
@@ -130,6 +131,14 @@ class TogetherServer(
         mutex.withLock {
             settings = newSettings
         }
+    }
+
+    suspend fun updateParticipantPermissions(
+        participantId: String,
+        permissions: TogetherGuestPermissions,
+    ) {
+        val client = clients[participantId] ?: return
+        client.permissions = permissions
     }
 
     suspend fun transferHostOwnership(participantId: String) {
@@ -181,6 +190,7 @@ class TogetherServer(
                     isHost = false,
                     isPending = false,
                     isConnected = true,
+                    permissions = client.permissions,
                 ),
             ),
         )
@@ -215,6 +225,7 @@ class TogetherServer(
                                 isHost = it.participantId == activeHostId,
                                 isPending = it.pending,
                                 isConnected = true,
+                                permissions = it.permissions,
                             )
                         },
                 )
@@ -345,6 +356,7 @@ class TogetherServer(
                 role = ServerRole.GUEST,
                 isPending = isPending,
                 settings = mutex.withLock { settings },
+                permissions = client.permissions,
             )
 
         send(TogetherJson.json.encodeToString(TogetherMessage.serializer(), welcome))
@@ -356,6 +368,7 @@ class TogetherServer(
                 isHost = false,
                 isPending = isPending,
                 isConnected = true,
+                permissions = client.permissions,
             )
 
         onEvent?.invoke(
@@ -397,7 +410,11 @@ class TogetherServer(
                     }
 
                     is ControlRequest -> {
-                        if (!client.pending) {
+                        if (!client.pending &&
+                            message.sessionId == sessionId &&
+                            message.participantId == participantId &&
+                            client.permissions.allows(message.action)
+                        ) {
                             if (!sendToAuthority(message)) {
                                 onEvent?.invoke(TogetherServerEvent.ControlRequested(message))
                             }
@@ -405,7 +422,11 @@ class TogetherServer(
                     }
 
                     is AddTrackRequest -> {
-                        if (!client.pending) {
+                        if (!client.pending &&
+                            message.sessionId == sessionId &&
+                            message.participantId == participantId &&
+                            client.permissions.allows(message)
+                        ) {
                             if (!sendToAuthority(message)) {
                                 onEvent?.invoke(TogetherServerEvent.AddTrackRequested(message))
                             }

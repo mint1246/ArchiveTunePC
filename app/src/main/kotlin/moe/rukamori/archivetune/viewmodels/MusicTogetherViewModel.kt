@@ -37,6 +37,7 @@ import moe.rukamori.archivetune.together.MusicTogetherPreferences
 import moe.rukamori.archivetune.together.MusicTogetherSessionActionsUseCase
 import moe.rukamori.archivetune.together.MusicTogetherSnapshot
 import moe.rukamori.archivetune.together.ObserveMusicTogetherStateUseCase
+import moe.rukamori.archivetune.together.TogetherGuestPermissions
 import moe.rukamori.archivetune.together.TogetherLink
 import moe.rukamori.archivetune.together.TogetherRole
 import moe.rukamori.archivetune.together.TogetherRoomSettings
@@ -185,6 +186,8 @@ data class MusicTogetherParticipantUiModel(
     val showApproveActions: Boolean,
     val showModerationActions: Boolean,
     val showTransferHostAction: Boolean,
+    val showPermissionControls: Boolean,
+    val permissions: TogetherGuestPermissions,
 )
 
 @Immutable
@@ -441,8 +444,8 @@ class MusicTogetherViewModel
                 port = model.host.port,
                 settings =
                     TogetherRoomSettings(
-                        allowGuestsToAddTracks = model.host.allowGuestsToAddTracks,
-                        allowGuestsToControlPlayback = model.host.allowGuestsToControlPlayback,
+                        allowGuestsToAddTracks = true,
+                        allowGuestsToControlPlayback = true,
                         requireHostApprovalToJoin = model.host.requireHostApprovalToJoin,
                     ),
             )
@@ -476,6 +479,27 @@ class MusicTogetherViewModel
 
         fun rejectParticipant(participantId: String) {
             sessionActions.approveParticipant(participantId, approved = false)
+        }
+
+        fun setParticipantQueueEditing(participantId: String, enabled: Boolean) =
+            updateParticipantPermissions(participantId) { it.copy(canEditQueue = enabled) }
+
+        fun setParticipantPlaybackControl(participantId: String, enabled: Boolean) =
+            updateParticipantPermissions(participantId) { it.copy(canControlPlayback = enabled) }
+
+        fun setParticipantSongChanging(participantId: String, enabled: Boolean) =
+            updateParticipantPermissions(participantId) { it.copy(canChangeSong = enabled) }
+
+        fun setParticipantSeeking(participantId: String, enabled: Boolean) =
+            updateParticipantPermissions(participantId) { it.copy(canSeek = enabled) }
+
+        private fun updateParticipantPermissions(
+            participantId: String,
+            transform: (TogetherGuestPermissions) -> TogetherGuestPermissions,
+        ) {
+            val participant = successModel()?.participants?.find(participantId) ?: return
+            if (!participant.showPermissionControls) return
+            sessionActions.updateParticipantPermissions(participantId, transform(participant.permissions))
         }
 
         fun requestTransferHost(participantId: String) {
@@ -519,8 +543,8 @@ class MusicTogetherViewModel
             if (!model.status.active || !model.host.visible) return
             sessionActions.updateSettings(
                 TogetherRoomSettings(
-                    allowGuestsToAddTracks = addTracks ?: model.host.allowGuestsToAddTracks,
-                    allowGuestsToControlPlayback = controlPlayback ?: model.host.allowGuestsToControlPlayback,
+                    allowGuestsToAddTracks = true,
+                    allowGuestsToControlPlayback = true,
                     requireHostApprovalToJoin = approval ?: model.host.requireHostApprovalToJoin,
                 ),
             )
@@ -671,6 +695,10 @@ class MusicTogetherViewModel
                                         roomState?.settings?.requireHostApprovalToJoin == true,
                                 showModerationActions = isHostRole && showModerationActions && !participant.isHost,
                                 showTransferHostAction = isHostRole && !participant.isHost && !participant.isPending,
+                                showPermissionControls = isHostRole && !participant.isHost && !participant.isPending,
+                                permissions =
+                                    participant.permissions
+                                        ?: TogetherGuestPermissions.fromLegacy(roomState?.settings ?: TogetherRoomSettings()),
                             )
                         },
                 )

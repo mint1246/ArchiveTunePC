@@ -37,6 +37,7 @@ import moe.rukamori.archivetune.ui.component.PreferenceGroup
 import moe.rukamori.archivetune.ui.component.SwitchPreference
 import moe.rukamori.archivetune.ui.component.TextFieldDialog
 import moe.rukamori.archivetune.ui.utils.backToMain
+import moe.rukamori.archivetune.ui.screens.social.SocialFriendsRoute
 import moe.rukamori.archivetune.utils.rememberPreference
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,6 +76,14 @@ fun IntegrationScreen(navController: NavController) {
                 .padding(bottom = SettingsDimensions.ScreenBottomPadding),
         ) {
             PreferenceGroup(title = stringResource(R.string.general)) {
+                item {
+                    PreferenceEntry(
+                        title = { Text("ArchiveTune friends") },
+                        icon = { Icon(painterResource(R.drawable.multi_user), null) },
+                        onClick = { navController.navigate(SocialFriendsRoute) },
+                    )
+                }
+
                 item {
                     PreferenceEntry(
                         title = { Text(stringResource(R.string.discord_integration)) },

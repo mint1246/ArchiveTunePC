@@ -24,6 +24,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import moe.rukamori.archivetune.BuildConfig
+import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.constants.UpdateChannel
 import moe.rukamori.archivetune.defaultUpdateChannel
 import moe.rukamori.archivetune.musicrecognition.MusicRecognitionRoute
@@ -76,6 +77,12 @@ import moe.rukamori.archivetune.ui.screens.settings.SettingsScreen
 import moe.rukamori.archivetune.ui.screens.settings.StorageSettings
 import moe.rukamori.archivetune.ui.screens.settings.ThemeCreatorScreen
 import moe.rukamori.archivetune.ui.screens.settings.UpdateScreen
+import moe.rukamori.archivetune.innertube.models.WatchEndpoint
+import moe.rukamori.archivetune.playback.queues.YouTubeQueue
+import moe.rukamori.archivetune.ui.screens.social.androidSocialNavigation
+import moe.rukamori.archivetune.social.AndroidSocialManager
+import moe.rukamori.archivetune.playback.PlayerConnection
+import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.viewmodels.OnlineSearchSort
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,12 +90,21 @@ fun NavGraphBuilder.navigationBuilder(
     navController: NavHostController,
     scrollBehavior: TopAppBarScrollBehavior,
     latestVersionName: () -> String,
+    social: AndroidSocialManager,
+    playerConnection: () -> PlayerConnection?,
+    database: MusicDatabase,
     disableAnimations: Boolean = false,
     onClearUpdateBadge: () -> Unit = {},
     homeScrollConnection: NestedScrollConnection? = null,
     searchScrollConnection: NestedScrollConnection? = null,
     onlineSearchSort: OnlineSearchSort = OnlineSearchSort.DEFAULT,
 ) {
+    androidSocialNavigation(
+        navController = navController,
+        social = social,
+        playerConnection = playerConnection,
+        database = database,
+    )
     composable(Screens.Home.route) {
         HomeScreen(navController, headerScrollConnection = homeScrollConnection)
     }
@@ -116,6 +132,19 @@ fun NavGraphBuilder.navigationBuilder(
     }
     composable("stats") {
         StatsScreen(navController)
+    }
+    composable("stats/authoritative") {
+        val playerConnection = LocalPlayerConnection.current
+        AndroidStatisticsRoute(
+            onOpenSong = { songId ->
+                playerConnection?.playQueue(YouTubeQueue(endpoint = WatchEndpoint(videoId = songId)))
+            },
+            onOpenArtist = { artistId -> navController.navigate("artist/$artistId") },
+            onOpenAlbum = { albumId -> navController.navigate("album/$albumId") },
+        )
+    }
+    composable("stems") {
+        AndroidStemMixerScreen(navController)
     }
     composable("news") {
         NewsScreen(navController)

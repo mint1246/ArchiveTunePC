@@ -48,6 +48,9 @@
 # @Serializable and @Polymorphic are used at runtime for polymorphic serialization.
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault
 
+## ONNX Runtime Java/JNI entry points are looked up from native code.
+-keep class ai.onnxruntime.** { *; }
+
 ## Markwon — optional GIF support (android-gif-drawable) not bundled
 -dontwarn pl.droidsonroids.gif.**
 

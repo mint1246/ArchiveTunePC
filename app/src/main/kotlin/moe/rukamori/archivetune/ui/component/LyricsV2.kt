@@ -76,8 +76,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -122,7 +120,9 @@ import moe.rukamori.archivetune.constants.PlayerBackgroundStyleKey
 import moe.rukamori.archivetune.db.entities.LyricsEntity
 import moe.rukamori.archivetune.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import moe.rukamori.archivetune.lyrics.LyricsEntry
+import moe.rukamori.archivetune.lyrics.LyricsInterludeMotion
 import moe.rukamori.archivetune.lyrics.LyricsRomanizationPreferences
+import moe.rukamori.archivetune.lyrics.LyricsUtils.effectiveLyricsEntryEndMs
 import moe.rukamori.archivetune.lyrics.LyricsUtils.findCurrentLineIndex
 import moe.rukamori.archivetune.lyrics.LyricsUtils.insertInstrumentalBreaks
 import moe.rukamori.archivetune.lyrics.LyricsUtils.isLineSyncedLrc
@@ -266,19 +266,19 @@ fun LyricsV2(
     // ── Parse lyrics into entries ──
     val isSynced = remember(lyrics) { lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)) }
     val isTtmlFormat = remember(lyrics) { lyrics != null && isTtml(lyrics!!) }
+    val lyricsDurationMs = player.duration.takeIf { it > 0L } ?: 0L
 
     val lyricsEntries: List<LyricsEntry> =
-        remember(lyrics) {
+        remember(lyrics, lyricsDurationMs) {
             if (lyrics == null || lyrics == LYRICS_NOT_FOUND) return@remember emptyList()
             val parsed =
                 when {
                     isTtml(lyrics!!) -> {
-                        parseTtml(lyrics!!)
+                        insertInstrumentalBreaks(parseTtml(lyrics!!), lyricsDurationMs)
                     }
 
                     isLineSyncedLrc(lyrics!!) -> {
-                        val dur = player.duration.takeIf { it > 0L } ?: 0L
-                        insertInstrumentalBreaks(parseLyrics(lyrics!!), dur)
+                        insertInstrumentalBreaks(parseLyrics(lyrics!!), lyricsDurationMs)
                     }
 
                     else -> {
@@ -298,6 +298,12 @@ fun LyricsV2(
         }
 
     val entriesWithWords: List<LyricsEntry> = lyricsEntries
+    val entryEndTimes =
+        remember(entriesWithWords, lyricsDurationMs) {
+            entriesWithWords.indices.map { index ->
+                effectiveLyricsEntryEndMs(entriesWithWords, index, lyricsDurationMs)
+            }
+        }
 
     // ── Romanization ──
     LaunchedEffect(entriesWithWords, romanizationPreferences) {
@@ -627,7 +633,6 @@ fun LyricsV2(
                             currentPositionMs = playbackPositionMs,
                             startTimeMs = startTimeMs,
                             textColor = textColor,
-                            inactiveAlpha = inactiveAlpha,
                         )
                     }
                     return@itemsIndexed
@@ -648,9 +653,15 @@ fun LyricsV2(
                         else -> Alignment.CenterHorizontally
                     }
 
-                val isActive = isSynced && index == currentLineIndex
-                val isPast = isSynced && index < currentLineIndex
-                val isFuture = isSynced && index > currentLineIndex
+                val entryEndMs = entryEndTimes.getOrElse(index) { item.time }
+                val isActive =
+                    isSynced &&
+                        !item.isInstrumental &&
+                        item.time >= 0L &&
+                        currentPositionMs >= item.time &&
+                        currentPositionMs < entryEndMs
+                val isPast = isSynced && !item.isInstrumental && item.time >= 0L && currentPositionMs >= entryEndMs
+                val isFuture = isSynced && !item.isInstrumental && item.time > currentPositionMs
                 val isSelected = selectedIndices.contains(index)
 
                 // Distance-based alpha for non-active lines
@@ -1594,74 +1605,51 @@ private fun InstrumentalBreakItem(
     currentPositionMs: Long,
     startTimeMs: Long,
     textColor: Color,
-    inactiveAlpha: Float,
 ) {
-    val musicNotePath =
-        remember {
-            androidx.compose.ui.graphics.vector
-                .PathParser()
-                .parsePathString(
-                    "M10 21q-1.65 0-2.825-1.175T6 17t1.175-2.825T10 13q.575 0 1.063.138t.937.412V4" +
-                        "q0-.425.288-.712T13 3h4q.425 0 .713.288T18 4v2q0 .425-.288.713T17 7h-3v10" +
-                        "q0 1.65-1.175 2.825T10 21",
-                ).toPath()
-        }
+    val frame = remember(startTimeMs, durationMs, currentPositionMs) {
+        LyricsInterludeMotion.frame(startTimeMs, durationMs, currentPositionMs)
+    }
 
-    val targetFillFraction =
-        when {
-            durationMs <= 0L -> {
-                0f
+    androidx.compose.foundation.Canvas(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .height(64.dp),
+    ) {
+        val baseRadius = 7.5.dp.toPx()
+        val gap = 9.dp.toPx()
+        val step = baseRadius * 2f + gap
+        val groupScale = frame.groupScale.coerceIn(0f, 1f)
+        val yUnit = 48.dp.toPx()
+
+        frame.dots.forEachIndexed { index, dot ->
+            val scale = dot.scale.coerceAtLeast(0f) * groupScale
+            val opacity = dot.opacity.coerceIn(0f, 1f) * groupScale
+            val glow = dot.glow.coerceIn(0f, 1.15f) * groupScale
+            val radius = baseRadius * scale
+            if (radius <= 0.1f || opacity <= 0.001f) return@forEachIndexed
+            val center =
+                Offset(
+                    x = size.width / 2f + (index - 1) * step,
+                    y = size.height / 2f + dot.yOffsetFraction * yUnit,
+                )
+            if (glow > 0.01f) {
+                drawCircle(
+                    color = textColor.copy(alpha = (0.08f * glow * opacity).coerceIn(0f, 0.16f)),
+                    radius = radius * 2.6f,
+                    center = center,
+                )
+                drawCircle(
+                    color = textColor.copy(alpha = (0.16f * glow * opacity).coerceIn(0f, 0.28f)),
+                    radius = radius * 1.75f,
+                    center = center,
+                )
             }
-
-            currentPositionMs <= startTimeMs -> {
-                0f
-            }
-
-            currentPositionMs >= startTimeMs + durationMs -> {
-                1f
-            }
-
-            else -> {
-                ((currentPositionMs - startTimeMs).toDouble() / durationMs.toDouble())
-                    .toFloat()
-                    .coerceIn(0f, 1f)
-            }
-        }
-    val fillFraction by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = targetFillFraction,
-        animationSpec =
-            spring(
-                stiffness = Spring.StiffnessHigh,
-                dampingRatio = Spring.DampingRatioNoBouncy,
-            ),
-        label = "instrumentalFill",
-    )
-
-    androidx.compose.foundation.Canvas(modifier = Modifier.size(48.dp)) {
-        val scaleX = size.width / 24f
-        val scaleY = size.height / 24f
-        val pivot = androidx.compose.ui.geometry.Offset.Zero
-
-        withTransform(
-            transformBlock = { scale(scaleX, scaleY, pivot) },
-        ) {
-            drawPath(path = musicNotePath, color = textColor.copy(alpha = inactiveAlpha))
-        }
-
-        if (fillFraction > 0f) {
-            val clipTop = size.height * (1f - fillFraction)
-            clipRect(
-                left = 0f,
-                top = clipTop,
-                right = size.width,
-                bottom = size.height,
-            ) {
-                withTransform(
-                    transformBlock = { scale(scaleX, scaleY, pivot) },
-                ) {
-                    drawPath(path = musicNotePath, color = textColor)
-                }
-            }
+            drawCircle(
+                color = textColor.copy(alpha = (0.90f * opacity).coerceIn(0f, 1f)),
+                radius = radius,
+                center = center,
+            )
         }
     }
 }

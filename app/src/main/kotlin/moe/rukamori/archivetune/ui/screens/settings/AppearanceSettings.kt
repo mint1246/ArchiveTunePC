@@ -73,6 +73,8 @@ import moe.rukamori.archivetune.constants.AppFontPreference
 import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
 import moe.rukamori.archivetune.constants.BackdropBlurAmountKey
 import moe.rukamori.archivetune.constants.BackdropEnabledKey
+import moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey
+import moe.rukamori.archivetune.constants.BeatSyncedVisualsIntensityKey
 import moe.rukamori.archivetune.constants.BlurRadiusKey
 import moe.rukamori.archivetune.constants.ChipSortTypeKey
 import moe.rukamori.archivetune.constants.CropThumbnailToSquareKey
@@ -183,6 +185,16 @@ fun AppearanceSettings(navController: NavController) {
         rememberPreference(
             ArchiveTuneCanvasKey,
             defaultValue = false,
+        )
+    val (beatSyncedVisualsEnabled, onBeatSyncedVisualsEnabledChange) =
+        rememberPreference(
+            BeatSyncedVisualsEnabledKey,
+            defaultValue = true,
+        )
+    val (beatSyncedVisualsIntensity, onBeatSyncedVisualsIntensityChange) =
+        rememberPreference(
+            BeatSyncedVisualsIntensityKey,
+            defaultValue = 0.75f,
         )
     val (thumbnailCornerRadius, onThumbnailCornerRadiusChange) =
         rememberPreference(
@@ -850,6 +862,38 @@ fun AppearanceSettings(navController: NavController) {
                         icon = { Icon(painterResource(R.drawable.motion_photos_on), null) },
                         checked = archiveTuneCanvasEnabled,
                         onCheckedChange = onArchiveTuneCanvasEnabledChange,
+                    )
+                }
+
+                item {
+                    SwitchPreference(
+                        title = { Text(stringResource(R.string.beat_synced_visuals)) },
+                        description = stringResource(R.string.beat_synced_visuals_desc),
+                        icon = { Icon(painterResource(R.drawable.graphic_eq), null) },
+                        checked = beatSyncedVisualsEnabled,
+                        onCheckedChange = onBeatSyncedVisualsEnabledChange,
+                    )
+                }
+
+                item(visible = beatSyncedVisualsEnabled) {
+                    PreferenceEntry(
+                        title = { Text(stringResource(R.string.beat_synced_visuals_intensity)) },
+                        description =
+                            stringResource(
+                                R.string.beat_synced_visuals_intensity_value,
+                                (beatSyncedVisualsIntensity * 100f).roundToInt(),
+                            ),
+                        icon = { Icon(painterResource(R.drawable.graphic_eq), null) },
+                        content = {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Slider(
+                                value = beatSyncedVisualsIntensity.coerceIn(0f, 1f),
+                                onValueChange = { onBeatSyncedVisualsIntensityChange(it.coerceIn(0f, 1f)) },
+                                valueRange = 0f..1f,
+                                steps = 19,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        },
                     )
                 }
 

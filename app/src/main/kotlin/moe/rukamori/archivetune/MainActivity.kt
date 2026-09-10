@@ -180,6 +180,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -250,6 +251,8 @@ import moe.rukamori.archivetune.playback.queues.LocalAlbumRadio
 import moe.rukamori.archivetune.playback.queues.Queue
 import moe.rukamori.archivetune.playback.queues.YouTubeAlbumRadio
 import moe.rukamori.archivetune.playback.queues.YouTubeQueue
+import moe.rukamori.archivetune.social.AndroidSocialManager
+import moe.rukamori.archivetune.social.socialPresenceForPlayback
 import moe.rukamori.archivetune.ui.component.BottomSheetMenu
 import moe.rukamori.archivetune.ui.component.BottomSheetPage
 import moe.rukamori.archivetune.ui.component.COLLAPSED_ANCHOR
@@ -336,6 +339,7 @@ class MainActivity : ComponentActivity() {
     private var latestUpdateChannel by mutableStateOf(defaultUpdateChannel)
 
     private var playerConnection by mutableStateOf<PlayerConnection?>(null)
+    private lateinit var socialManager: AndroidSocialManager
     private var isMusicServiceBound = false
     private var immersiveStatusBarsHidden = false
 
@@ -470,6 +474,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::socialManager.isInitialized) socialManager.close()
         super.onDestroy()
 
         val shouldStopOnTaskClear =
@@ -508,6 +513,8 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        socialManager = AndroidSocialManager.create(this, lifecycleScope)
+        lifecycleScope.launch { socialManager.restore() }
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_LTR
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -561,6 +568,19 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 gatekeeperViewModel.blockedMessages.collect { message ->
                     Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                }
+            }
+
+            LaunchedEffect(playerConnection) {
+                val connection = playerConnection
+                if (connection == null) {
+                    socialManager.publishPresence(moe.rukamori.archivetune.social.SocialPresence())
+                    return@LaunchedEffect
+                }
+                combine(connection.mediaMetadata, connection.isPlaying) { metadata, isPlaying ->
+                    socialPresenceForPlayback(metadata, isPlaying)
+                }.distinctUntilChanged().collect { presence ->
+                    socialManager.publishPresence(presence)
                 }
             }
 
@@ -2403,7 +2423,10 @@ class MainActivity : ComponentActivity() {
                                         navController,
                                         topAppBarScrollBehavior,
                                         { latestVersionName },
-                                        disableAnimations,
+                                        social = socialManager,
+                                        playerConnection = { playerConnection },
+                                        database = database,
+                                        disableAnimations = disableAnimations,
                                         onClearUpdateBadge = { latestVersionName = BuildConfig.VERSION_NAME },
                                         homeScrollConnection = homeScrollBehavior.nestedScrollConnection,
                                         searchScrollConnection = searchScrollBehavior.nestedScrollConnection,

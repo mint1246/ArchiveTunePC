@@ -113,6 +113,7 @@ import moe.rukamori.archivetune.extensions.move
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.extensions.toggleRepeatMode
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.together.permissionsFor
 import moe.rukamori.archivetune.ui.component.BottomSheet
 import moe.rukamori.archivetune.ui.component.BottomSheetState
 import moe.rukamori.archivetune.ui.component.LocalBottomSheetPageState
@@ -1079,7 +1080,10 @@ fun Queue(
                                                                     togetherSessionState as? moe.rukamori.archivetune.together.TogetherSessionState.Joined
                                                                 val isGuest = joined?.role is moe.rukamori.archivetune.together.TogetherRole.Guest
                                                                 if (isGuest) {
-                                                                    if (joined?.roomState?.settings?.allowGuestsToControlPlayback != true) {
+                                                                    if (joined?.roomState
+                                                                            ?.permissionsFor(joined.selfParticipantId)
+                                                                            ?.canChangeSong != true
+                                                                    ) {
                                                                         Toast
                                                                             .makeText(
                                                                                 context,

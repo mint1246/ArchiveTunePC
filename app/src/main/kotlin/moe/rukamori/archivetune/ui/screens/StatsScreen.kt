@@ -271,6 +271,15 @@ fun StatsScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = { navController.navigate("stats/authoritative") },
+                        onLongClick = {},
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.stats),
+                            contentDescription = stringResource(R.string.authoritative_statistics),
+                        )
+                    }
+                    IconButton(
                         onClick = viewModel::showYearPicker,
                         onLongClick = {},
                     ) {

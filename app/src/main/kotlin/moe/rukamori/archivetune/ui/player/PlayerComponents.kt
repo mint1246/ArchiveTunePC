@@ -86,6 +86,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -112,6 +113,7 @@ import androidx.navigation.NavController
 import coil3.compose.AsyncImage
 import me.saket.squiggles.SquigglySlider
 import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.audio.rememberPlayerBeatPulse
 import moe.rukamori.archivetune.constants.EnableHapticFeedbackKey
 import moe.rukamori.archivetune.constants.PlayerBackgroundStyle
 import moe.rukamori.archivetune.constants.PlayerDesignStyle
@@ -2582,10 +2584,16 @@ private fun V8Artwork(
     size: androidx.compose.ui.unit.Dp,
 ) {
     val artworkRequest = rememberOfflineArtworkImageRequest(artworkUrl)
+    val beatPulse = rememberPlayerBeatPulse(isPlaying)
+    val beatScale = 1f + 0.030f * beatPulse
     Box(
         modifier =
             Modifier
                 .size(size)
+                .graphicsLayer {
+                    scaleX = beatScale
+                    scaleY = beatScale
+                }
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color.White.copy(alpha = 0.08f)),
     ) {
@@ -3622,11 +3630,17 @@ private fun V9Artwork(
     size: Dp? = null,
 ) {
     val artworkRequest = rememberOfflineArtworkImageRequest(artworkUrl)
+    val beatPulse = rememberPlayerBeatPulse(isPlaying)
+    val beatScale = 1f + 0.030f * beatPulse
     val baseModifier = if (size != null) Modifier.size(size) else Modifier
     Box(
         modifier =
             modifier
                 .then(baseModifier)
+                .graphicsLayer {
+                    scaleX = beatScale
+                    scaleY = beatScale
+                }
                 .clip(RoundedCornerShape(36.dp))
                 .background(placeholderColor),
     ) {

@@ -304,13 +304,20 @@ class TogetherClient(
         sessionId: String,
         track: TogetherTrack,
         mode: AddTrackMode,
+        playNow: Boolean = false,
     ) {
         val pid = selfParticipantId ?: return
         scope.launch {
             session?.send(
                 TogetherJson.json.encodeToString(
                     TogetherMessage.serializer(),
-                    AddTrackRequest(sessionId = sessionId, participantId = pid, track = track, mode = mode),
+                    AddTrackRequest(
+                        sessionId = sessionId,
+                        participantId = pid,
+                        track = track,
+                        mode = mode,
+                        playNow = playNow,
+                    ),
                 ),
             )
         }

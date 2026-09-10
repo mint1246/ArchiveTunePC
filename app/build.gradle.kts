@@ -312,6 +312,14 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:${libs.versions.media3.get()}")
     implementation(libs.media3.session)
     implementation(libs.media3.okhttp)
+    // QNN's official Android package is arm64-only. Multi-ABI/universal and the other ABI
+    // flavors use the standard ORT AAR (NNAPI -> XNNPACK). Mixing both AARs in one variant would
+    // duplicate ai.onnxruntime classes/native libraries, so universal intentionally does not QNN.
+    add("arm64Implementation", "com.microsoft.onnxruntime:onnxruntime-android-qnn:1.29.0")
+    add("universalImplementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    add("armeabiImplementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    add("x86Implementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    add("x86_64Implementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
     implementation("androidx.media3:media3-ui:${libs.versions.media3.get()}")
     implementation("androidx.media3:media3-ui-compose:${libs.versions.media3.get()}")
     add("gmsImplementation", libs.media3.cast)

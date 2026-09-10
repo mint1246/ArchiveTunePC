@@ -86,6 +86,7 @@ class TogetherOnlineHost(
         val clientId: String,
         val name: String,
         var pending: Boolean,
+        var permissions: TogetherGuestPermissions = TogetherGuestPermissions(),
     )
 
     private val guests = LinkedHashMap<String, Guest>()
@@ -212,6 +213,15 @@ class TogetherOnlineHost(
         }
     }
 
+    suspend fun updateParticipantPermissions(
+        participantId: String,
+        permissions: TogetherGuestPermissions,
+    ) {
+        val guest = guests[participantId] ?: return
+        guest.permissions = permissions
+        rebuildParticipantsSnapshot()
+    }
+
     suspend fun approveParticipant(
         participantId: String,
         approved: Boolean,
@@ -249,6 +259,7 @@ class TogetherOnlineHost(
                     isHost = false,
                     isPending = false,
                     isConnected = true,
+                    permissions = guest.permissions,
                 ),
             ),
         )
@@ -340,6 +351,7 @@ class TogetherOnlineHost(
                         isHost = it.participantId == activeHostId,
                         isPending = it.pending,
                         isConnected = true,
+                        permissions = it.permissions,
                     )
                 }
 
@@ -377,7 +389,13 @@ class TogetherOnlineHost(
                             is ServerWelcome -> {
                                 if (message.sessionId == sessionId) {
                                     hostParticipantId = message.participantId
-                                    mutex.withLock { settings = message.settings }
+                                    mutex.withLock {
+                                        settings =
+                                            message.settings.copy(
+                                                allowGuestsToAddTracks = true,
+                                                allowGuestsToControlPlayback = true,
+                                            )
+                                    }
                                     authorityParticipantId = hostId
                                 }
                             }
@@ -438,11 +456,23 @@ class TogetherOnlineHost(
                             }
 
                             is ControlRequest -> {
-                                if (message.sessionId == sessionId) onEvent?.invoke(TogetherServerEvent.ControlRequested(message))
+                                val guest = guests[message.participantId]
+                                if (message.sessionId == sessionId &&
+                                    guest?.pending == false &&
+                                    guest.permissions.allows(message.action)
+                                ) {
+                                    onEvent?.invoke(TogetherServerEvent.ControlRequested(message))
+                                }
                             }
 
                             is AddTrackRequest -> {
-                                if (message.sessionId == sessionId) onEvent?.invoke(TogetherServerEvent.AddTrackRequested(message))
+                                val guest = guests[message.participantId]
+                                if (message.sessionId == sessionId &&
+                                    guest?.pending == false &&
+                                    guest.permissions.allows(message)
+                                ) {
+                                    onEvent?.invoke(TogetherServerEvent.AddTrackRequested(message))
+                                }
                             }
 
                             is ServerError -> {

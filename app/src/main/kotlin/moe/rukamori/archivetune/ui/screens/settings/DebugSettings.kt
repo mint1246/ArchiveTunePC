@@ -74,6 +74,7 @@ import kotlinx.coroutines.isActive
 import moe.rukamori.archivetune.LocalPlayerAwareWindowInsets
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.modelruntime.AndroidOnnxRuntime
 import moe.rukamori.archivetune.ui.component.IconButton
 import moe.rukamori.archivetune.ui.component.PreferenceEntry
 import moe.rukamori.archivetune.ui.component.PreferenceGroup
@@ -203,6 +204,7 @@ fun DebugSettings(navController: NavController) {
                 ) {
                     Spacer(modifier = Modifier.height(8.dp))
                     DiscordDebugSection()
+                    OnnxRuntimeDebugSection()
                 }
             }
 
@@ -222,6 +224,113 @@ fun DebugSettings(navController: NavController) {
 
             Spacer(modifier = Modifier.height(SettingsDimensions.ScreenBottomPadding))
         }
+    }
+}
+
+@Composable
+private fun OnnxRuntimeDebugSection() {
+    val diagnostics by AndroidOnnxRuntime.diagnostics.collectAsState()
+    val selected = diagnostics.selectedProvider?.name ?: "Not selected"
+    val providers = diagnostics.availableProviders.joinToString().ifBlank { "None reported" }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "ONNX runtime",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "QNN HTP → NNAPI → XNNPACK",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        text = selected,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            DebugRuntimeLine("ORT", diagnostics.ortVersion ?: "uninitialized")
+            DebugRuntimeLine("ABI", diagnostics.abi)
+            DebugRuntimeLine("Packaged EPs", providers)
+            diagnostics.sessionCreateMs?.let { DebugRuntimeLine("Session create", "${it} ms") }
+            diagnostics.lastRunMs?.let { DebugRuntimeLine("Last inference", "${it} ms") }
+            if (diagnostics.runCount > 0L) {
+                val averageRunMs = diagnostics.totalRunMs.toDouble() / diagnostics.runCount.toDouble()
+                DebugRuntimeLine("Inference runs", diagnostics.runCount.toString())
+                DebugRuntimeLine("Average inference", String.format(java.util.Locale.US, "%.1f ms", averageRunMs))
+            }
+
+            if (diagnostics.attempts.isEmpty()) {
+                Text(
+                    text = "No model session has been created yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                diagnostics.attempts.forEach { attempt ->
+                    val status = when {
+                        attempt.selected -> "selected"
+                        !attempt.available -> "unavailable"
+                        else -> "fallback"
+                    }
+                    DebugRuntimeLine(
+                        label = attempt.provider.name,
+                        value = "$status · ${attempt.message} · ${attempt.durationMs} ms",
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugRuntimeLine(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(0.32f),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(0.68f),
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+        )
     }
 }
 

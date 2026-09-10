@@ -88,6 +88,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.audio.rememberPlayerBeatPulse
 import moe.rukamori.archivetune.canvas.models.CanvasArtwork
 import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
 import moe.rukamori.archivetune.constants.BackdropBlurAmountKey
@@ -134,6 +135,8 @@ fun Thumbnail(
     // States
     val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
     val isPlaying by playerConnection.isPlaying.collectAsState()
+    val beatPulse = rememberPlayerBeatPulse(isPlaying)
+    val beatScale = 1f + 0.030f * beatPulse
     val queueTitle by playerConnection.queueTitle.collectAsState()
 
     val swipeThumbnail by rememberPreference(SwipeThumbnailKey, true)
@@ -497,6 +500,10 @@ fun Thumbnail(
                                 modifier =
                                     Modifier
                                         .size(containerMaxWidth - (PlayerHorizontalPadding * 2))
+                                        .graphicsLayer {
+                                            scaleX = beatScale
+                                            scaleY = beatScale
+                                        }
                                         .clip(RoundedCornerShape(thumbnailCornerRadius.dp)),
                             ) {
                                 if (hidePlayerThumbnail) {

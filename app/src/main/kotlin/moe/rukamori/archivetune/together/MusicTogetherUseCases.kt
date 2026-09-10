@@ -116,6 +116,13 @@ class MusicTogetherSessionActionsUseCase
             repository.approveParticipant(participantId, approved)
         }
 
+        fun updateParticipantPermissions(
+            participantId: String,
+            permissions: TogetherGuestPermissions,
+        ) {
+            repository.updateParticipantPermissions(participantId, permissions)
+        }
+
         fun kickParticipant(participantId: String) {
             repository.kickParticipant(participantId)
         }

@@ -37,6 +37,7 @@ data class ServerWelcome(
     val role: ServerRole,
     val isPending: Boolean,
     val settings: TogetherRoomSettings,
+    val permissions: TogetherGuestPermissions? = null,
 ) : TogetherMessage
 
 @Serializable
@@ -72,6 +73,7 @@ data class AddTrackRequest(
     val participantId: String,
     val track: TogetherTrack,
     val mode: AddTrackMode,
+    val playNow: Boolean = false,
 ) : TogetherMessage
 
 @Serializable
@@ -231,3 +233,26 @@ sealed interface ControlAction {
         val shuffleEnabled: Boolean,
     ) : ControlAction
 }
+
+fun TogetherGuestPermissions.allows(action: ControlAction): Boolean =
+    when (action) {
+        ControlAction.Play,
+        ControlAction.Pause,
+        -> canControlPlayback
+
+        ControlAction.SkipNext,
+        ControlAction.SkipPrevious,
+        -> canChangeSong
+
+        is ControlAction.SeekToIndex -> canChangeSong && (action.positionMs <= 0L || canSeek)
+        is ControlAction.SeekToTrack -> canChangeSong && (action.positionMs <= 0L || canSeek)
+
+        is ControlAction.SeekTo -> canSeek
+
+        is ControlAction.SetRepeatMode,
+        is ControlAction.SetShuffleEnabled,
+        -> false
+    }
+
+fun TogetherGuestPermissions.allows(request: AddTrackRequest): Boolean =
+    if (request.playNow) canChangeSong else canEditQueue

@@ -1109,4 +1109,13 @@
     <string name="scheduled_backup_load_failed">Scheduled backup settings could not be loaded</string>
     <string name="scheduled_backup_update_failed">Scheduled backup settings could not be saved</string>
     <string name="gatekeeper_connection_blocked">Connection blocked by ArchiveTune Remote. This app could not be verified as an official ArchiveTune build. Install an official build from https://github.com/rukamori/ArchiveTune or https://t.me/ArchiveTuneGC.</string>
+    <string name="beat_synced_visuals">Beat-synced visuals</string>
+    <string name="beat_synced_visuals_desc">Pulse player artwork from the audio itself.</string>
+    <string name="beat_synced_visuals_intensity">Beat visual intensity</string>
+    <string name="beat_synced_visuals_intensity_value">%1$d%%</string>
+    <string name="authoritative_statistics">Audible-time statistics</string>
+    <string name="together_permission_edit_queue">Edit queue</string>
+    <string name="together_permission_play_pause">Play / pause</string>
+    <string name="together_permission_change_song">Skip / play new song</string>
+    <string name="together_permission_seek">Seek</string>
 </resources>

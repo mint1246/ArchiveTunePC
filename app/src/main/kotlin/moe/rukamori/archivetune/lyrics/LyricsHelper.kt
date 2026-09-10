@@ -12,13 +12,13 @@ import android.util.Log
 import android.util.LruCache
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.constants.LyricsProviderOrderKey
 import moe.rukamori.archivetune.constants.PreferredLyricsProvider
 import moe.rukamori.archivetune.constants.deserializeLyricsProviderOrder
@@ -118,7 +118,7 @@ class LyricsHelper
             forceRefresh: Boolean = false,
             callback: (LyricsResult) -> Unit,
         ) {
-            val cacheKey = lyricsCacheKey(songTitle, songArtists)
+            val cacheKey = LyricsQueryPolicy.cacheKey(mediaId, songTitle, songArtists)
             if (forceRefresh) {
                 invalidateCache(cacheKey)
             } else {
@@ -146,13 +146,22 @@ class LyricsHelper
                     if (!provider.isEnabled(context)) return@forEach
 
                     try {
-                        provider.getAllLyrics(mediaId, songTitle, songArtists, songAlbum, duration) lyricsCallback@{ lyrics ->
-                            val normalizedLyrics = LyricsUtils.lyricsOrNotFound(lyrics)
-                            if (normalizedLyrics == LYRICS_NOT_FOUND) return@lyricsCallback
-                            val result = LyricsResult(provider.name, normalizedLyrics)
-                            allResult += result
-                            callback(result)
+                        withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
+                            for (title in LyricsQueryPolicy.titleVariants(songTitle)) {
+                                var providerFoundLyrics = false
+                                provider.getAllLyrics(mediaId, title, songArtists, songAlbum, duration) lyricsCallback@{ lyrics ->
+                                    val normalizedLyrics = LyricsUtils.lyricsOrNotFound(lyrics)
+                                    if (normalizedLyrics == LYRICS_NOT_FOUND) return@lyricsCallback
+                                    providerFoundLyrics = true
+                                    val result = LyricsResult(provider.name, normalizedLyrics)
+                                    allResult += result
+                                    callback(result)
+                                }
+                                if (providerFoundLyrics) break
+                            }
                         }
+                    } catch (_: TimeoutCancellationException) {
+                        GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during lyrics search")
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -182,8 +191,8 @@ class LyricsHelper
 
             if (results.isEmpty()) return LYRICS_NOT_FOUND
 
-            results.firstOrNull { LyricsUtils.hasWordSyncedLyrics(it) }?.let { return it }
-            results.firstOrNull { LyricsUtils.isLineSyncedLrc(it) }?.let { return it }
+            // Provider order is authoritative, matching desktop. A lower-priority provider must
+            // not silently win just because it returned a richer sync format.
             return results.first()
         }
 
@@ -193,22 +202,32 @@ class LyricsHelper
             artist: String,
         ): String? =
             try {
-                provider
-                    .getLyrics(
-                        mediaMetadata.id,
-                        mediaMetadata.title,
-                        artist,
-                        mediaMetadata.album?.title,
-                        mediaMetadata.duration,
-                    ).fold(
-                        onSuccess = { lyrics ->
-                            LyricsUtils.lyricsOrNotFound(lyrics).takeIf { it != LYRICS_NOT_FOUND }
-                        },
-                        onFailure = {
-                            reportException(it)
-                            null
-                        },
-                    )
+                withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
+                    for (title in LyricsQueryPolicy.titleVariants(mediaMetadata.title)) {
+                        val lyrics =
+                            provider
+                                .getLyrics(
+                                    mediaMetadata.id,
+                                    title,
+                                    artist,
+                                    mediaMetadata.album?.title,
+                                    mediaMetadata.duration,
+                                ).fold(
+                                    onSuccess = { value ->
+                                        LyricsUtils.lyricsOrNotFound(value).takeIf { it != LYRICS_NOT_FOUND }
+                                    },
+                                    onFailure = {
+                                        reportException(it)
+                                        null
+                                    },
+                                )
+                        if (lyrics != null) return@withTimeout lyrics
+                    }
+                    null
+                }
+            } catch (_: TimeoutCancellationException) {
+                GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during automatic lookup")
+                null
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -253,16 +272,7 @@ class LyricsHelper
         }
 
         private val MediaMetadata.lyricsCacheKey: String
-            get() =
-                lyricsCacheKey(
-                    title = title,
-                    artists = artists.joinToString { it.name },
-                )
-
-        private fun lyricsCacheKey(
-            title: String,
-            artists: String,
-        ): String = "$artists-$title".replace(" ", "")
+            get() = LyricsQueryPolicy.cacheKey(id, title, artists.joinToString { it.name })
 
         companion object {
             private const val MAX_CACHE_SIZE = 16

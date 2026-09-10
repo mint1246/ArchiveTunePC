@@ -180,6 +180,13 @@ class MusicTogetherRepository
             serviceFlow.value?.approveTogetherParticipant(participantId, approved)
         }
 
+        fun updateParticipantPermissions(
+            participantId: String,
+            permissions: TogetherGuestPermissions,
+        ) {
+            serviceFlow.value?.updateTogetherParticipantPermissions(participantId, permissions)
+        }
+
         fun kickParticipant(participantId: String) {
             serviceFlow.value?.kickTogetherParticipant(participantId)
         }
