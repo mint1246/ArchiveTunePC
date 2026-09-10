@@ -35,6 +35,9 @@ class AndroidStemCache(
         require(minStemBytes >= 0L)
     }
 
+    internal val rootDirectory: File
+        get() = root
+
     fun find(
         trackId: String,
         durationMs: Long,

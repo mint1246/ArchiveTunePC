@@ -11,14 +11,48 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import moe.rukamori.archivetune.models.ActiveOutputDevice
 import moe.rukamori.archivetune.models.PlayerOutputDevice
 
+@Immutable
+data class AudioOutputDevice(
+    val id: String?,
+    val name: String,
+    val type: PlayerOutputDevice,
+) {
+    companion object {
+        val SystemDefault =
+            AudioOutputDevice(
+                id = null,
+                name = "System default",
+                type = PlayerOutputDevice.Unknown,
+            )
+    }
+}
+
+@Immutable
+data class AudioOutputState(
+    val devices: List<AudioOutputDevice> = listOf(AudioOutputDevice.SystemDefault),
+    val selectedDeviceId: String? = null,
+    val activeDevice: ActiveOutputDevice =
+        ActiveOutputDevice(PlayerOutputDevice.Unknown, PlayerOutputDevice.Unknown.defaultName),
+    val resolved: Boolean = false,
+    val errorMessage: String? = null,
+)
+
+data class AudioOutputResolution internal constructor(
+    val state: AudioOutputState,
+    internal val preferredDevice: AudioDeviceInfo?,
+    val selectionDropped: Boolean,
+)
+
 class AudioOutputResolver(
     private val audioManager: AudioManager,
 ) {
+    private val lock = Any()
     private val mediaQueryAttributes =
         android.media.AudioAttributes
             .Builder()
@@ -30,11 +64,96 @@ class AudioOutputResolver(
         MutableStateFlow(
             ActiveOutputDevice(PlayerOutputDevice.Unknown, PlayerOutputDevice.Unknown.defaultName),
         )
+    private val _audioOutputState = MutableStateFlow(AudioOutputState())
+    private var preferredDeviceId: String? = null
 
     val activeAudioDevice = _activeAudioDevice.asStateFlow()
+    val audioOutputState = _audioOutputState.asStateFlow()
 
-    fun refresh() {
-        _activeAudioDevice.value = resolveActiveDevice()
+    fun refresh(): AudioOutputResolution = synchronized(lock) {
+        refreshLocked()
+    }
+
+    fun selectPreferredDevice(deviceId: String?): AudioOutputResolution = synchronized(lock) {
+        preferredDeviceId = deviceId?.trim()?.takeIf(String::isNotEmpty)
+        refreshLocked()
+    }
+
+    private fun refreshLocked(): AudioOutputResolution {
+        val sinkDevices =
+            runCatching {
+                audioManager
+                    .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    .filter { it.isSink }
+            }.getOrElse { error ->
+                val previous = _audioOutputState.value
+                val failed =
+                    previous.copy(
+                        resolved = false,
+                        errorMessage = error.message ?: "Could not enumerate audio outputs.",
+                    )
+                _audioOutputState.value = failed
+                _activeAudioDevice.value = failed.activeDevice
+                return AudioOutputResolution(
+                    state = failed,
+                    preferredDevice = null,
+                    selectionDropped = false,
+                )
+            }
+
+        val devicesByRuntimeId = sinkDevices.associateBy(AudioDeviceInfo::getId)
+        val identities =
+            sinkDevices.map { device ->
+                val type = PlayerOutputDevice.from(device)
+                AudioOutputIdentity(
+                    runtimeId = device.id,
+                    type = device.type,
+                    address = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) device.address else null,
+                    productName =
+                        device.productName
+                            ?.toString()
+                            ?.takeUnless { it.isBlank() || type == PlayerOutputDevice.BuiltinSpeaker },
+                    fallbackName = type.defaultName,
+                )
+            }
+        val choices = AudioOutputPolicy.normalize(identities)
+        val devices =
+            buildList {
+                add(AudioOutputDevice.SystemDefault)
+                choices.forEach { choice ->
+                    val info = devicesByRuntimeId[choice.runtimeId] ?: return@forEach
+                    add(
+                        AudioOutputDevice(
+                            id = choice.persistentId,
+                            name = choice.displayName,
+                            type = PlayerOutputDevice.from(info),
+                        ),
+                    )
+                }
+            }
+
+        val requested = preferredDeviceId
+        val runtimeId = AudioOutputPolicy.resolveRuntimeId(requested, choices)
+        val selectionDropped = requested != null && runtimeId == null
+        if (selectionDropped) preferredDeviceId = null
+        val selectedDeviceId = if (runtimeId == null) null else requested
+        val preferredDevice = runtimeId?.let(devicesByRuntimeId::get)
+        val active = runCatching(::resolveActiveDevice).getOrElse { _activeAudioDevice.value }
+        val state =
+            AudioOutputState(
+                devices = devices,
+                selectedDeviceId = selectedDeviceId,
+                activeDevice = active,
+                resolved = true,
+                errorMessage = null,
+            )
+        _activeAudioDevice.value = active
+        _audioOutputState.value = state
+        return AudioOutputResolution(
+            state = state,
+            preferredDevice = preferredDevice,
+            selectionDropped = selectionDropped,
+        )
     }
 
     private fun resolveActiveDevice(): ActiveOutputDevice {

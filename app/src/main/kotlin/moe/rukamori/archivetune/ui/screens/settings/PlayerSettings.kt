@@ -310,6 +310,10 @@ fun PlayerSettings(navController: NavController) {
                 }
 
                 item {
+                    AudioOutputPreference()
+                }
+
+                item {
                     ListPreference(
                         title = { Text(stringResource(R.string.player_stream_client)) },
                         description = stringResource(R.string.player_stream_client_desc),

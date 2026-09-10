@@ -983,12 +983,14 @@
     <string name="together_allow_guests_add">Guests can add songs</string>
     <string name="together_allow_guests_control">Guests can control playback</string>
     <string name="together_require_approval">Require approval</string>
-    <string name="together_lan">LAN</string>
-    <string name="together_online">Online</string>
-    <string name="together_join_link">Link</string>
-    <string name="together_join_code">Code</string>
+    <string name="together_lan">LAN (local)</string>
+    <string name="together_online">Cloudflare</string>
+    <string name="together_join_link">LAN link</string>
+    <string name="together_join_code">Cloudflare link</string>
     <string name="together_join_link_hint">Paste a join link or code</string>
     <string name="together_join_code_hint">Enter a session code</string>
+    <string name="together_join_lan_hint">Paste a LAN join link</string>
+    <string name="together_join_cloudflare_hint">Paste a trycloudflare.com party link</string>
     <string name="start_session">Start session</string>
     <string name="join_session">Join session</string>
     <string name="session_link">Session link</string>
@@ -1118,4 +1120,9 @@
     <string name="together_permission_play_pause">Play / pause</string>
     <string name="together_permission_change_song">Skip / play new song</string>
     <string name="together_permission_seek">Seek</string>
+    <string name="audio_output">Audio output</string>
+    <string name="audio_output_service_unavailable">Playback service unavailable</string>
+    <string name="audio_output_route_summary">Active: %1$s · Preferred: %2$s</string>
+    <string name="choose_audio_output">Choose audio output</string>
+    <string name="system_output_switcher">System output switcher</string>
 </resources>

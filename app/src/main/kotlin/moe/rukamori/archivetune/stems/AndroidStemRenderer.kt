@@ -8,6 +8,7 @@
 package moe.rukamori.archivetune.stems
 
 import android.content.Context
+import android.media.AudioDeviceInfo
 import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -36,6 +37,8 @@ internal interface AndroidStemRenderer : AutoCloseable {
     fun setPlaybackParameters(playbackParameters: PlaybackParameters)
 
     fun setAudioSessionId(audioSessionId: Int)
+
+    fun setPreferredAudioDevice(device: AudioDeviceInfo?)
 
     fun seekTo(positionMs: Long)
 
@@ -144,6 +147,10 @@ internal class Media3AndroidStemRenderer(
         players.values.forEach { player ->
             if (player.audioSessionId != audioSessionId) player.setAudioSessionId(audioSessionId)
         }
+    }
+
+    override fun setPreferredAudioDevice(device: AudioDeviceInfo?) {
+        players.values.forEach { player -> player.setPreferredAudioDevice(device) }
     }
 
     override fun seekTo(positionMs: Long) {

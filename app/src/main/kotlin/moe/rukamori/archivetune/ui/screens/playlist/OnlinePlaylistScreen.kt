@@ -636,6 +636,22 @@ fun OnlinePlaylistScreen(
                         }
                     }
 
+                    if (songs.isNotEmpty()) {
+                        item(key = "stem_batch") {
+                            moe.rukamori.archivetune.ui.screens.AndroidStemBatchAction(
+                                mediaItems = songs.map { it.toMediaItem() },
+                                navController = navController,
+                                label =
+                                    if (viewModel.continuation == null) {
+                                        "Create stems for playlist"
+                                    } else {
+                                        "Create stems for loaded tracks"
+                                    },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+
                     if (songs.isEmpty() && !isLoading && error == null) {
                         item(key = "empty") {
                             Column(

@@ -50,8 +50,11 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -98,6 +101,12 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.LocalDatabase
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.chords.ChordRequest
+import moe.rukamori.archivetune.chords.ChordTrack
+import moe.rukamori.archivetune.chords.ChordTrackSource
+import moe.rukamori.archivetune.chords.AndroidNeuralChordAnalyzer
+import moe.rukamori.archivetune.chords.SongsterrChordClient
+import moe.rukamori.archivetune.chords.resolveAndroidChordPriority
 import moe.rukamori.archivetune.constants.BlurRadiusKey
 import moe.rukamori.archivetune.constants.DisableBlurKey
 import moe.rukamori.archivetune.constants.EnableHapticFeedbackKey
@@ -208,6 +217,13 @@ fun LyricsScreen(
                     moe.rukamori.archivetune.di.LyricsHelperEntryPoint::class.java,
                 ).lyricsHelper()
         }
+    val neuralChordAnalyzer =
+        remember(context.applicationContext) {
+            AndroidNeuralChordAnalyzer(context.applicationContext)
+        }
+    DisposableEffect(neuralChordAnalyzer) {
+        onDispose { neuralChordAnalyzer.close() }
+    }
 
     LaunchedEffect(mediaMetadata.id, currentLyrics?.lyrics) {
         if (currentLyrics != null) return@LaunchedEffect
@@ -238,7 +254,14 @@ fun LyricsScreen(
 
     val positionState = remember(mediaMetadata.id) { mutableLongStateOf(0L) }
     val durationState = remember(mediaMetadata.id) { mutableLongStateOf(C.TIME_UNSET) }
+    val pitchState = remember(mediaMetadata.id) { mutableFloatStateOf(1f) }
     var sliderPosition by remember(mediaMetadata.id) { mutableStateOf<Long?>(null) }
+    var showChords by remember(mediaMetadata.id) { mutableStateOf(false) }
+    var chordTrack by remember(mediaMetadata.id) { mutableStateOf<ChordTrack?>(null) }
+    var chordLoading by remember(mediaMetadata.id) { mutableStateOf(false) }
+    var chordError by remember(mediaMetadata.id) { mutableStateOf<String?>(null) }
+    var chordReloadKey by remember(mediaMetadata.id) { mutableIntStateOf(0) }
+    var chordLocalOnlyRetry by remember(mediaMetadata.id) { mutableStateOf(false) }
     var gradientColors by remember(mediaMetadata.thumbnailUrl) { mutableStateOf(AppleMusicFallbackGradient) }
 
     val gradientColorsCache =
@@ -313,7 +336,42 @@ fun LyricsScreen(
         while (isActive) {
             positionState.longValue = player.currentPosition.coerceAtLeast(0L)
             durationState.longValue = player.duration
+            pitchState.floatValue = player.playbackParameters.pitch
             delay(250)
+        }
+    }
+
+    LaunchedEffect(showChords, mediaMetadata.id, chordReloadKey) {
+        if (!showChords || chordTrack != null || chordLoading) return@LaunchedEffect
+        val artist = mediaMetadata.artists.firstOrNull()?.name?.trim().orEmpty()
+        chordLoading = true
+        chordError = null
+        try {
+            val request =
+                ChordRequest(
+                    title = mediaMetadata.title,
+                    artist = artist.ifBlank { "Unknown artist" },
+                    durationMs = mediaMetadata.duration.takeIf { it > 0 }?.times(1_000L),
+                    videoId = mediaMetadata.id,
+                )
+            val mediaItem = player.currentMediaItem
+            val result =
+                if (chordLocalOnlyRetry || artist.isBlank()) {
+                    neuralChordAnalyzer.analyze(mediaItem, request, forceRecompute = chordLocalOnlyRetry)
+                } else {
+                    val songsterr = SongsterrChordClient()
+                    resolveAndroidChordPriority(
+                        authored = { songsterr.getChords(request, allowDerived = false) },
+                        localNeural = { neuralChordAnalyzer.analyze(mediaItem, request) },
+                        derived = { songsterr.getChords(request, allowDerived = true) },
+                    )
+                }
+            result.onSuccess {
+                chordTrack = it
+                chordLocalOnlyRetry = false
+            }.onFailure { chordError = it.message ?: "No usable chords were found for this song." }
+        } finally {
+            chordLoading = false
         }
     }
 
@@ -370,6 +428,8 @@ fun LyricsScreen(
             AppleMusicTrackHeader(
                 mediaMetadata = mediaMetadata,
                 foregroundColor = foregroundColor,
+                chordsSelected = showChords,
+                onChordsClick = { showChords = !showChords },
                 onMoreClick = showLyricsMenu,
                 onDismissClick = onBackClick,
                 modifier =
@@ -399,10 +459,41 @@ fun LyricsScreen(
                                 .padding(end = 32.dp),
                     )
 
+                    if (showChords) {
+                        ChordContent(
+                            track = chordTrack,
+                            loading = chordLoading,
+                            error = chordError,
+                            positionMs = positionState.longValue,
+                            pitchMultiplier = pitchState.floatValue,
+                            onRetry = {
+                                chordTrack = null
+                                chordError = null
+                                chordLocalOnlyRetry = false
+                                chordReloadKey++
+                            },
+                            onLocalModelRetry = {
+                                chordTrack = null
+                                chordError = null
+                                chordLocalOnlyRetry = true
+                                chordReloadKey++
+                            },
+                            onSeek = {
+                                player.seekTo(it)
+                                positionState.longValue = it
+                            },
+                            modifier =
+                                Modifier
+                                    .weight(0.85f)
+                                    .fillMaxHeight()
+                                    .padding(end = 20.dp),
+                        )
+                    }
+
                     Column(
                         modifier =
                             Modifier
-                                .weight(0.85f)
+                                .weight(if (showChords) 0.62f else 0.85f)
                                 .widthIn(max = 420.dp),
                         verticalArrangement = Arrangement.Center,
                     ) {
@@ -440,16 +531,47 @@ fun LyricsScreen(
                     }
                 }
             } else {
-                AppleMusicLyricsPane(
-                    lyricsMode = lyricsMode,
-                    foregroundColor = foregroundColor,
-                    sliderPositionProvider = { sliderPosition },
-                    lyricsSyncOffset = lyricsSyncOffset,
-                    modifier =
-                        Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                )
+                if (showChords) {
+                    ChordContent(
+                        track = chordTrack,
+                        loading = chordLoading,
+                        error = chordError,
+                        positionMs = positionState.longValue,
+                        pitchMultiplier = pitchState.floatValue,
+                        onRetry = {
+                            chordTrack = null
+                            chordError = null
+                            chordLocalOnlyRetry = false
+                            chordReloadKey++
+                        },
+                        onLocalModelRetry = {
+                            chordTrack = null
+                            chordError = null
+                            chordLocalOnlyRetry = true
+                            chordReloadKey++
+                        },
+                        onSeek = {
+                            player.seekTo(it)
+                            positionState.longValue = it
+                        },
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
+                } else {
+                    AppleMusicLyricsPane(
+                        lyricsMode = lyricsMode,
+                        foregroundColor = foregroundColor,
+                        sliderPositionProvider = { sliderPosition },
+                        lyricsSyncOffset = lyricsSyncOffset,
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                    )
+                }
 
                 if (showPlayerControls) {
                     AppleMusicControls(
@@ -648,6 +770,8 @@ private fun AppleMusicGrabber(
 private fun AppleMusicTrackHeader(
     mediaMetadata: MediaMetadata,
     foregroundColor: Color,
+    chordsSelected: Boolean,
+    onChordsClick: () -> Unit,
     onMoreClick: () -> Unit,
     onDismissClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -710,6 +834,15 @@ private fun AppleMusicTrackHeader(
         Spacer(modifier = Modifier.width(12.dp))
 
         AppleMusicHeaderIconButton(
+            iconRes = R.drawable.graphic_eq,
+            contentDescription = if (chordsSelected) "Show lyrics" else "Show chords",
+            foregroundColor = if (chordsSelected) foregroundColor else foregroundColor.copy(alpha = 0.82f),
+            onClick = onChordsClick,
+        )
+
+        Spacer(modifier = Modifier.width(4.dp))
+
+        AppleMusicHeaderIconButton(
             iconRes = R.drawable.close,
             contentDescription = stringResource(R.string.close),
             foregroundColor = foregroundColor,
@@ -724,6 +857,78 @@ private fun AppleMusicTrackHeader(
             foregroundColor = foregroundColor,
             onClick = onMoreClick,
         )
+    }
+}
+
+@Composable
+private fun ChordContent(
+    track: ChordTrack?,
+    loading: Boolean,
+    error: String?,
+    positionMs: Long,
+    pitchMultiplier: Float,
+    onRetry: () -> Unit,
+    onLocalModelRetry: () -> Unit,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        track != null -> {
+            if (track.source == ChordTrackSource.SONGSTERR_DERIVED_FROM_TAB) {
+                Column(modifier = modifier) {
+                    AndroidChordPanel(
+                        track = track,
+                        positionMs = positionMs,
+                        pitchMultiplier = pitchMultiplier,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        onSeek = onSeek,
+                    )
+                    androidx.compose.material3.TextButton(
+                        onClick = onLocalModelRetry,
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                    ) {
+                        Text("Try local neural chords", color = Color.White)
+                    }
+                }
+            } else {
+                AndroidChordPanel(
+                    track = track,
+                    positionMs = positionMs,
+                    pitchMultiplier = pitchMultiplier,
+                    modifier = modifier,
+                    onSeek = onSeek,
+                )
+            }
+        }
+
+        loading -> {
+            Box(modifier = modifier, contentAlignment = Alignment.Center) {
+                CircularWavyProgressIndicator(color = Color.White.copy(alpha = 0.86f))
+            }
+        }
+
+        else -> {
+            Column(
+                modifier = modifier.padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    error ?: "No usable chords were found for this song.",
+                    color = Color.White.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.TextButton(onClick = onRetry) {
+                        Text("Retry", color = Color.White)
+                    }
+                    androidx.compose.material3.TextButton(onClick = onLocalModelRetry) {
+                        Text("Retry local model", color = Color.White)
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -39,6 +39,7 @@ import moe.rukamori.archivetune.together.MusicTogetherSnapshot
 import moe.rukamori.archivetune.together.ObserveMusicTogetherStateUseCase
 import moe.rukamori.archivetune.together.TogetherGuestPermissions
 import moe.rukamori.archivetune.together.TogetherLink
+import moe.rukamori.archivetune.together.TogetherQuickTunnelInvite
 import moe.rukamori.archivetune.together.TogetherRole
 import moe.rukamori.archivetune.together.TogetherRoomSettings
 import moe.rukamori.archivetune.together.TogetherRoomState
@@ -234,8 +235,8 @@ class MusicTogetherViewModel
         private val updatePreferences: UpdateMusicTogetherPreferencesUseCase,
         private val sessionActions: MusicTogetherSessionActionsUseCase,
     ) : ViewModel() {
-        private val hostModeOnline = MutableStateFlow(false)
-        private val joinModeOnline = MutableStateFlow(false)
+        private val hostModeOnline = MutableStateFlow(true)
+        private val joinModeOnline = MutableStateFlow(true)
         private val dialog = MutableStateFlow<MusicTogetherDialogUiState>(MusicTogetherDialogUiState.None)
         private val welcomeDismissedThisSession = MutableStateFlow(false)
         private val welcomeDontShowAgain = MutableStateFlow(true)
@@ -636,9 +637,9 @@ class MusicTogetherViewModel
 
                     is TogetherSessionState.HostingOnline -> {
                         MusicTogetherSessionShareUiModel(
-                            labelResId = R.string.session_code,
+                            labelResId = R.string.session_link,
                             value = state.code,
-                            maxLines = 2,
+                            maxLines = 3,
                         )
                     }
 
@@ -662,7 +663,7 @@ class MusicTogetherViewModel
             val joinInput = preferences.lastJoinLink
             val canJoin =
                 if (joinOnline) {
-                    joinInput.trim().isNotBlank()
+                    TogetherQuickTunnelInvite.decode(joinInput) != null
                 } else {
                     TogetherLink.decode(joinInput) != null
                 }
@@ -670,7 +671,7 @@ class MusicTogetherViewModel
                 MusicTogetherJoinUiModel(
                     onlineMode = joinOnline,
                     input = joinInput,
-                    hintResId = if (joinOnline) R.string.together_join_code_hint else R.string.together_join_link_hint,
+                    hintResId = if (joinOnline) R.string.together_join_cloudflare_hint else R.string.together_join_lan_hint,
                     canJoin = canJoin && !disableJoinUi && !isJoining && !isJoinedAsAcceptedGuest && !isWaitingApproval,
                     disabled = disableJoinUi,
                     joined = isJoinedAsAcceptedGuest,
@@ -919,7 +920,7 @@ class MusicTogetherViewModel
 
                 is TogetherSessionState.Joining -> TogetherLink.decode(joinLink)?.sessionId
 
-                is TogetherSessionState.JoiningOnline -> code
+                is TogetherSessionState.JoiningOnline -> TogetherQuickTunnelInvite.decode(code)?.sessionId ?: code
 
                 is TogetherSessionState.Error,
                 TogetherSessionState.Idle,

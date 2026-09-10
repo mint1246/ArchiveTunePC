@@ -945,6 +945,29 @@ fun PlayerMenu(
                             modifier = Modifier.clickable { showPitchTempoDialog = true },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         )
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 56.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+
+                        ListItem(
+                            headlineContent = { Text(text = "Stem mixer") },
+                            supportingContent = { Text(text = "Generate and mix six HTDemucs stems") },
+                            leadingContent = {
+                                Icon(
+                                    painter = painterResource(R.drawable.graphic_eq),
+                                    contentDescription = null,
+                                )
+                            },
+                            modifier =
+                                Modifier.clickable {
+                                    navController.navigate("stems")
+                                    playerBottomSheetState.collapseSoft()
+                                    onDismiss()
+                                },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
                     }
                 }
             }

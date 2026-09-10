@@ -43,6 +43,7 @@ import coil3.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.LocalPlayerConnection
+import moe.rukamori.archivetune.audio.rememberPlayerBeatPulse
 import moe.rukamori.archivetune.constants.MiniPlayerBackgroundStyle
 import moe.rukamori.archivetune.constants.MiniPlayerBackgroundStyleKey
 import moe.rukamori.archivetune.constants.MiniPlayerHeight
@@ -91,6 +92,8 @@ private fun NewMiniPlayer(
         defaultValue = MiniPlayerBackgroundStyle.THEME,
     )
     val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
+    val isPlaying by playerConnection.isPlaying.collectAsStateWithLifecycle()
+    val beatPulse = rememberPlayerBeatPulse(isPlaying)
     var gradientColors by remember {
         mutableStateOf<List<Color>>(emptyList())
     }
@@ -216,6 +219,13 @@ private fun NewMiniPlayer(
                 palette = backgroundPalette,
                 modifier = Modifier.fillMaxSize(),
             )
+            if (beatPulse > 0.001f) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f * beatPulse)),
+                )
+            }
             NewMiniPlayerContent(
                 position = position,
                 duration = duration,

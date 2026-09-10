@@ -64,6 +64,25 @@ class AndroidSocialManagerTest {
         manager.close()
     }
 
+    @Test
+    fun partyInvitesOnlySendCanonicalCloudflareQuickTunnelUrls() = runBlocking {
+        val own = SocialUser("self", "d-self", "self", "Me", null)
+        val friend = SocialUser("friend", "d-friend", "friend", "Friend", null)
+        val api = FakeSocialApi(own, friend)
+        val store = FakeSessionStore(StoredSocialSession("ats_test", 10_000L))
+        val manager = newManager(api, store, FakeRealtime())
+        manager.restore()
+
+        val invite =
+            "https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef&sid=session"
+        assertTrue(manager.sendPartyInvite(friend.id, invite).isSuccess)
+        assertEquals(invite, api.lastPartyInviteUrl)
+
+        assertTrue(manager.sendPartyInvite(friend.id, "archivetune://together?code=legacy").isFailure)
+        assertEquals(invite, api.lastPartyInviteUrl)
+        manager.close()
+    }
+
     private fun newManager(
         api: FakeSocialApi,
         store: FakeSessionStore,
@@ -127,21 +146,25 @@ class AndroidSocialManagerTest {
     ) : SocialApi {
         override val baseUrl: String = "https://example.invalid"
         var lastSentJson: JSONObject? = null
+        var lastPartyInviteUrl: String? = null
         private var nextMessageId = 1
 
         override suspend fun exchangeAuthCode(code: String, nonce: String) = StoredSocialSession("ats_test", 10_000L)
         override suspend fun me(token: String) = own
         override suspend fun friends(token: String) = listOf(friend)
         override suspend fun presence(token: String) = mapOf(friend.id to SocialPresence(online = true))
-        override suspend fun requests(token: String) = emptyList<SocialFriendRequest>() to emptyList()
+        override suspend fun requests(token: String) = emptyList<SocialFriendRequest>() to emptyList<SocialFriendRequest>()
         override suspend fun search(token: String, query: String) = listOf(friend)
         override suspend fun sendFriendRequest(token: String, userId: String) = Unit
         override suspend fun acceptFriendRequest(token: String, userId: String) = Unit
         override suspend fun declineFriendRequest(token: String, userId: String) = Unit
         override suspend fun removeFriend(token: String, userId: String) = Unit
         override suspend fun block(token: String, userId: String) = Unit
-        override suspend fun sendPartyInvite(token: String, userId: String, partyUrl: String) = Unit
+        override suspend fun sendPartyInvite(token: String, userId: String, partyUrl: String) {
+            lastPartyInviteUrl = partyUrl
+        }
         override suspend fun chatMessages(token: String, userId: String) = emptyList<SocialChatMessage>()
+        override suspend fun uploadStatistics(token: String, snapshot: SocialStatisticsSnapshot) = Unit
         override suspend fun friendStatistics(token: String, userId: String) = SocialStatisticsSnapshot(emptyMap())
 
         override suspend fun sendChatMessage(

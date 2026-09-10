@@ -187,6 +187,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.aod.ACTION_AOD_MODE
+import moe.rukamori.archivetune.audio.rememberPlayerBeatPulse
 import moe.rukamori.archivetune.constants.AppBarHeight
 import moe.rukamori.archivetune.constants.AppFontPreference
 import moe.rukamori.archivetune.constants.AppLanguageKey
@@ -198,6 +199,8 @@ import moe.rukamori.archivetune.constants.DefaultOpenTabKey
 import moe.rukamori.archivetune.constants.DisableAnimationsKey
 import moe.rukamori.archivetune.constants.DisableScreenshotKey
 import moe.rukamori.archivetune.constants.DynamicThemeKey
+import moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey
+import moe.rukamori.archivetune.constants.BeatSyncedVisualsIntensityKey
 import moe.rukamori.archivetune.constants.EnableHapticFeedbackKey
 import moe.rukamori.archivetune.constants.FontPreferenceKey
 import moe.rukamori.archivetune.constants.HasPressedStarKey
@@ -253,6 +256,8 @@ import moe.rukamori.archivetune.playback.queues.YouTubeAlbumRadio
 import moe.rukamori.archivetune.playback.queues.YouTubeQueue
 import moe.rukamori.archivetune.social.AndroidSocialManager
 import moe.rukamori.archivetune.social.socialPresenceForPlayback
+import moe.rukamori.archivetune.social.socialSnapshot
+import moe.rukamori.archivetune.statistics.AndroidStatisticsStore
 import moe.rukamori.archivetune.ui.component.BottomSheetMenu
 import moe.rukamori.archivetune.ui.component.BottomSheetPage
 import moe.rukamori.archivetune.ui.component.COLLAPSED_ANCHOR
@@ -287,6 +292,7 @@ import moe.rukamori.archivetune.ui.screens.settings.NavigationTab
 import moe.rukamori.archivetune.ui.theme.ArchiveTuneTheme
 import moe.rukamori.archivetune.ui.theme.ColorSaver
 import moe.rukamori.archivetune.ui.theme.DefaultThemeColor
+import moe.rukamori.archivetune.ui.theme.DynamicAppBackdrop
 import moe.rukamori.archivetune.ui.theme.extractThemeColor
 import moe.rukamori.archivetune.ui.utils.appBarScrollBehavior
 import moe.rukamori.archivetune.ui.utils.backToMain
@@ -416,7 +422,12 @@ class MainActivity : ComponentActivity() {
                     .orEmpty()
                     .ifBlank { Build.MODEL ?: getString(R.string.app_name) }
             withContext(Dispatchers.Main) {
-                connection.service.joinTogether(pending, displayName)
+                val onlineCode = moe.rukamori.archivetune.together.TogetherLink.decodeOnlineCode(pending)
+                if (onlineCode != null) {
+                    connection.service.joinTogetherOnline(onlineCode, displayName)
+                } else {
+                    connection.service.joinTogether(pending, displayName)
+                }
             }
         }
     }
@@ -582,6 +593,28 @@ class MainActivity : ComponentActivity() {
                 }.distinctUntilChanged().collect { presence ->
                     socialManager.publishPresence(presence)
                 }
+            }
+
+            val socialStatisticsStore = remember(database) { AndroidStatisticsStore(database) }
+            LaunchedEffect(socialStatisticsStore) {
+                combine(
+                    socialManager.state
+                        .map { state -> state.account is moe.rukamori.archivetune.social.SocialAccountState.SignedIn }
+                        .distinctUntilChanged(),
+                    AndroidStatisticsStore.revision,
+                ) { signedIn, revision -> signedIn to revision }
+                    .distinctUntilChanged()
+                    .collectLatest { (signedIn, _) ->
+                        if (!signedIn) return@collectLatest
+                        // Coalesce bursts of player events while keeping desktop's "publish on
+                        // authoritative-statistics revision" behavior.
+                        delay(1_500L)
+                        val snapshot =
+                            withContext(Dispatchers.IO) {
+                                socialStatisticsStore.socialSnapshot()
+                            }
+                        socialManager.uploadStatistics(snapshot)
+                    }
             }
 
             val updateChannel by rememberEnumPreference(UpdateChannelKey, defaultValue = defaultUpdateChannel)
@@ -755,6 +788,8 @@ class MainActivity : ComponentActivity() {
             }
 
             val enableDynamicTheme by rememberPreference(DynamicThemeKey, defaultValue = true)
+            val beatSyncedVisualsEnabled by rememberPreference(BeatSyncedVisualsEnabledKey, defaultValue = true)
+            val beatSyncedVisualsIntensity by rememberPreference(BeatSyncedVisualsIntensityKey, defaultValue = 0.75f)
             val customThemeColorValue by rememberPreference(CustomThemeColorKey, defaultValue = "default")
             val darkTheme by rememberEnumPreference(DarkModeKey, defaultValue = DarkMode.AUTO)
             val defaultDisableAnimations = remember(this@MainActivity) { applicationContext.isLowRamDevice() }
@@ -811,6 +846,7 @@ class MainActivity : ComponentActivity() {
             var themeColor by rememberSaveable(stateSaver = ColorSaver) {
                 mutableStateOf(DefaultThemeColor)
             }
+            var dynamicArtworkUrl by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect(legacyUseSystemFont) {
                 if (!legacyUseSystemFont) return@LaunchedEffect
@@ -823,10 +859,12 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(playerConnection, enableDynamicTheme, isSystemInDarkTheme, customThemeColor) {
                 val playerConnection = playerConnection
                 if (!enableDynamicTheme || playerConnection == null) {
+                    dynamicArtworkUrl = null
                     themeColor = if (!enableDynamicTheme) customThemeColor else DefaultThemeColor
                     return@LaunchedEffect
                 }
                 playerConnection.service.currentMediaMetadata.collectLatest { song ->
+                    dynamicArtworkUrl = song?.thumbnailUrl
                     if (song != null) {
                         withContext(Dispatchers.Default) {
                             try {
@@ -858,6 +896,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val dynamicBackdropPlayingFlow =
+                remember(playerConnection) {
+                    playerConnection?.isPlaying ?: MutableStateFlow(false)
+                }
+            val dynamicBackdropIsPlaying by dynamicBackdropPlayingFlow.collectAsStateWithLifecycle()
+            val dynamicBackdropBeatPulse =
+                if (playerConnection != null) {
+                    rememberPlayerBeatPulse(
+                        isPlaying = dynamicBackdropIsPlaying,
+                        enabledOverride = enableDynamicTheme && !pureBlack && beatSyncedVisualsEnabled,
+                    )
+                } else {
+                    0f
+                }
+
             ArchiveTuneTheme(
                 darkTheme = useDarkTheme,
                 pureBlack = pureBlack,
@@ -882,14 +935,32 @@ class MainActivity : ComponentActivity() {
                     return@ArchiveTuneTheme
                 }
 
+                val showDynamicAppBackdrop =
+                    enableDynamicTheme &&
+                        !pureBlack &&
+                        !dynamicArtworkUrl.isNullOrBlank()
                 BoxWithConstraints(
                     modifier =
                         Modifier
                             .fillMaxSize()
                             .background(
-                                if (pureBlack) Color.Black else MaterialTheme.colorScheme.surface,
+                                when {
+                                    showDynamicAppBackdrop -> Color.Transparent
+                                    pureBlack -> Color.Black
+                                    else -> MaterialTheme.colorScheme.surface
+                                },
                             ),
                 ) {
+                    DynamicAppBackdrop(
+                        artworkUrl = dynamicArtworkUrl,
+                        accentColor = themeColor,
+                        enabled = showDynamicAppBackdrop,
+                        isPlaying = dynamicBackdropIsPlaying,
+                        animationsDisabled = disableAnimations,
+                        beatPulse = dynamicBackdropBeatPulse,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
                     val focusManager = LocalFocusManager.current
                     val density = LocalDensity.current
                     val windowsInsets = WindowInsets.systemBars
@@ -1622,7 +1693,12 @@ class MainActivity : ComponentActivity() {
                                     )
                                 } else {
                                     NavigationRail(
-                                        containerColor = if (pureBlack) Color.Black else MaterialTheme.colorScheme.surfaceContainer,
+                                        containerColor =
+                                            when {
+                                                pureBlack -> Color.Black
+                                                showDynamicAppBackdrop -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.78f)
+                                                else -> MaterialTheme.colorScheme.surfaceContainer
+                                            },
                                         contentColor = if (pureBlack) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                         header = { Spacer(Modifier.height(24.dp)) },
                                     ) {
@@ -1665,6 +1741,14 @@ class MainActivity : ComponentActivity() {
                             }
 
                             Scaffold(
+                                containerColor =
+                                    if (showDynamicAppBackdrop) {
+                                        Color.Transparent
+                                    } else if (pureBlack) {
+                                        Color.Black
+                                    } else {
+                                        MaterialTheme.colorScheme.surface
+                                    },
                                 topBar = {
                                     if (shouldShowTopBar) {
                                         val shouldUseFloatingTopBar =

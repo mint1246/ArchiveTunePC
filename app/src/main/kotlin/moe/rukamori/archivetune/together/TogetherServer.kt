@@ -96,14 +96,23 @@ class TogetherServer(
 
     suspend fun currentSettings(): TogetherRoomSettings = mutex.withLock { settings }
 
-    suspend fun start(port: Int) {
+    suspend fun start(
+        port: Int,
+        host: String = "0.0.0.0",
+        webSocketPath: String = "/together",
+        accessToken: String? = null,
+    ) {
         mutex.withLock {
             if (engine != null) return
             engine =
-                embeddedServer(CIO, port = port, host = "0.0.0.0") {
+                embeddedServer(CIO, port = port, host = host) {
                     install(WebSockets)
                     routing {
-                        webSocket("/together") {
+                        webSocket(webSocketPath) {
+                            if (accessToken != null && call.request.queryParameters["token"] != accessToken) {
+                                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid party token"))
+                                return@webSocket
+                            }
                             handleClient()
                         }
                     }

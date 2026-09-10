@@ -10,8 +10,13 @@ package moe.rukamori.archivetune.statistics
 import androidx.sqlite.db.SupportSQLiteDatabase
 import moe.rukamori.archivetune.db.MusicDatabase
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.min
 
 /**
@@ -67,6 +72,7 @@ class AndroidStatisticsStore(
         } finally {
             db.endTransaction()
         }
+        _revision.value = _revision.value + 1L
     }
 
     fun overview(
@@ -113,12 +119,79 @@ class AndroidStatisticsStore(
                     ).toSafeInt(),
             )
 
+        val hourSlices = hourSlices(db, range)
         return AndroidStatisticsOverview(
             summary = summary,
+            dailyListening = dailyTrend(hourSlices, range),
+            listeningByDayOfWeek = dayOfWeekTrend(hourSlices),
+            listeningByHour = hourOfDayTrend(hourSlices),
             topSongs = topSongs(db, range, songLimit),
             topArtists = topArtists(db, range, artistLimit),
             topAlbums = topAlbums(db, range, albumLimit),
         )
+    }
+
+    private fun hourSlices(
+        db: SupportSQLiteDatabase,
+        range: AndroidStatisticsEpochRange,
+    ): List<Pair<Long, Long>> {
+        val where = rangeWhere(range, "h")
+        val result = ArrayList<Pair<Long, Long>>()
+        db.query(
+            "SELECT h.hourStartEpochMs, COALESCE(SUM(h.listeningTimeMs), 0) FROM $TABLE_HOUR h$where GROUP BY h.hourStartEpochMs ORDER BY h.hourStartEpochMs",
+            rangeArgs(range).toTypedArray(),
+        ).use { cursor ->
+            while (cursor.moveToNext()) result += cursor.getLong(0) to cursor.getLong(1)
+        }
+        return result
+    }
+
+    private fun dailyTrend(
+        slices: List<Pair<Long, Long>>,
+        range: AndroidStatisticsEpochRange,
+    ): List<AndroidStatisticsBucket> {
+        if (slices.isEmpty()) return emptyList()
+        val values = LinkedHashMap<LocalDate, Long>()
+        slices.forEach { (epochMs, listeningMs) ->
+            val date = Instant.ofEpochMilli(epochMs).atZone(zoneId).toLocalDate()
+            values[date] = (values[date] ?: 0L) + listeningMs
+        }
+        val first = range.fromEpochMs
+            ?.let { Instant.ofEpochMilli(it).atZone(zoneId).toLocalDate() }
+            ?: values.keys.first()
+        val lastFromRange = range.toEpochMs
+            ?.let { end -> Instant.ofEpochMilli((end - 1L).coerceAtLeast(0L)).atZone(zoneId).toLocalDate() }
+        val last = lastFromRange ?: values.keys.last()
+        if (first > last) return emptyList()
+        val formatter = DateTimeFormatter.ofPattern("d MMM")
+        return generateSequence(first) { date -> date.plusDays(1).takeIf { it <= last } }
+            .map { date -> AndroidStatisticsBucket(date.format(formatter), values[date] ?: 0L) }
+            .toList()
+    }
+
+    private fun dayOfWeekTrend(slices: List<Pair<Long, Long>>): List<AndroidStatisticsBucket> {
+        if (slices.isEmpty()) return emptyList()
+        val totals = LongArray(7)
+        slices.forEach { (epochMs, listeningMs) ->
+            val day = Instant.ofEpochMilli(epochMs).atZone(zoneId).dayOfWeek
+            totals[day.value % 7] += listeningMs // Sunday first, matching desktop.
+        }
+        val labels = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        return totals.indices
+            .filter { totals[it] > 0L }
+            .map { index -> AndroidStatisticsBucket(labels[index], totals[index]) }
+    }
+
+    private fun hourOfDayTrend(slices: List<Pair<Long, Long>>): List<AndroidStatisticsBucket> {
+        if (slices.isEmpty()) return emptyList()
+        val totals = LongArray(24)
+        slices.forEach { (epochMs, listeningMs) ->
+            val hour = Instant.ofEpochMilli(epochMs).atZone(zoneId).hour
+            totals[hour] += listeningMs
+        }
+        return totals.indices
+            .filter { totals[it] > 0L }
+            .map { hour -> AndroidStatisticsBucket("%02d:00".format(hour), totals[hour]) }
     }
 
     private fun topSongs(
@@ -495,9 +568,11 @@ class AndroidStatisticsStore(
     private fun safeAdd(left: Long, right: Long): Long =
         if (right > 0L && left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
 
-    private companion object {
-        const val TABLE_SONG = "archivetune_statistics_song"
-        const val TABLE_ARTIST = "archivetune_statistics_artist"
-        const val TABLE_HOUR = "archivetune_statistics_hour"
+    companion object {
+        private const val TABLE_SONG = "archivetune_statistics_song"
+        private const val TABLE_ARTIST = "archivetune_statistics_artist"
+        private const val TABLE_HOUR = "archivetune_statistics_hour"
+        private val _revision = MutableStateFlow(0L)
+        val revision: StateFlow<Long> = _revision.asStateFlow()
     }
 }

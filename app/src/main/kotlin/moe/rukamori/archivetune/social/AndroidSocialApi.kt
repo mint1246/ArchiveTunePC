@@ -38,6 +38,7 @@ interface SocialApi {
     suspend fun sendPartyInvite(token: String, userId: String, partyUrl: String)
     suspend fun chatMessages(token: String, userId: String): List<SocialChatMessage>
     suspend fun sendChatMessage(token: String, userId: String, message: SocialOutgoingMessage): SocialChatMessage
+    suspend fun uploadStatistics(token: String, snapshot: SocialStatisticsSnapshot)
     suspend fun friendStatistics(token: String, userId: String): SocialStatisticsSnapshot
     suspend fun logout(token: String)
 
@@ -138,6 +139,15 @@ class AndroidSocialApi(
             body = JSONObject().put("kind", kind).put("payload", payload),
         )
         return parseSocialChatMessage(response.getJSONObject("message"))
+    }
+
+    override suspend fun uploadStatistics(token: String, snapshot: SocialStatisticsSnapshot) {
+        request(
+            method = "PUT",
+            path = "/v1/statistics",
+            token = token,
+            body = socialStatisticsSnapshotJson(snapshot),
+        )
     }
 
     override suspend fun friendStatistics(token: String, userId: String): SocialStatisticsSnapshot =
@@ -280,6 +290,9 @@ private fun parseSocialStatisticsRange(value: JSONObject): SocialStatisticsRange
         ),
         favoriteArtist = value.optJSONObject("favoriteArtist")?.let(::parseSocialStatisticsMedia),
         favoriteSong = value.optJSONObject("favoriteSong")?.let(::parseSocialStatisticsMedia),
+        dailyListening = value.optJSONArray("dailyListening").toStatisticsBucketList(),
+        listeningByDayOfWeek = value.optJSONArray("listeningByDayOfWeek").toStatisticsBucketList(),
+        listeningByHour = value.optJSONArray("listeningByHour").toStatisticsBucketList(),
         topSongs = value.optJSONArray("topSongs").toStatisticsMediaList(),
         topArtists = value.optJSONArray("topArtists").toStatisticsMediaList(),
         topAlbums = value.optJSONArray("topAlbums").toStatisticsMediaList(),
@@ -298,6 +311,73 @@ private fun parseSocialStatisticsMedia(value: JSONObject): SocialStatisticsMedia
 
 private fun JSONArray?.toStatisticsMediaList(): List<SocialStatisticsMedia> =
     if (this == null) emptyList() else List(length()) { parseSocialStatisticsMedia(getJSONObject(it)) }
+
+private fun JSONArray?.toStatisticsBucketList(): List<SocialStatisticsBucket> =
+    if (this == null) {
+        emptyList()
+    } else {
+        List(length()) { index ->
+            getJSONObject(index).let { value ->
+                SocialStatisticsBucket(
+                    label = value.getString("label"),
+                    listeningMillis = value.optLong("listeningMillis", 0L),
+                )
+            }
+        }
+    }
+
+internal fun socialStatisticsSnapshotJson(snapshot: SocialStatisticsSnapshot): JSONObject =
+    JSONObject()
+        .put("updatedAt", snapshot.updatedAt)
+        .put(
+            "ranges",
+            JSONObject().also { rangesJson ->
+                snapshot.ranges.forEach { (range, value) -> rangesJson.put(range, value.toJson()) }
+            },
+        )
+
+private fun SocialStatisticsRangeSnapshot.toJson(): JSONObject =
+    JSONObject()
+        .put(
+            "summary",
+            JSONObject()
+                .put("totalListeningMillis", summary.totalListeningMillis)
+                .put("totalPlays", summary.totalPlays)
+                .put("uniqueSongs", summary.uniqueSongs)
+                .put("uniqueArtists", summary.uniqueArtists)
+                .put("uniqueAlbums", summary.uniqueAlbums),
+        )
+        .putOpt("favoriteArtist", favoriteArtist?.toJson())
+        .putOpt("favoriteSong", favoriteSong?.toJson())
+        .put("dailyListening", dailyListening.toBucketJsonArray())
+        .put("listeningByDayOfWeek", listeningByDayOfWeek.toBucketJsonArray())
+        .put("listeningByHour", listeningByHour.toBucketJsonArray())
+        .put("topSongs", topSongs.toMediaJsonArray())
+        .put("topArtists", topArtists.toMediaJsonArray())
+        .put("topAlbums", topAlbums.toMediaJsonArray())
+
+private fun SocialStatisticsMedia.toJson(): JSONObject =
+    JSONObject()
+        .put("id", id)
+        .put("title", title)
+        .putOpt("subtitle", subtitle)
+        .putOpt("artworkUrl", artworkUrl)
+        .put("listeningMillis", listeningMillis)
+        .put("playCount", playCount)
+
+private fun List<SocialStatisticsBucket>.toBucketJsonArray(): JSONArray =
+    JSONArray().also { array ->
+        forEach { bucket ->
+            array.put(
+                JSONObject()
+                    .put("label", bucket.label)
+                    .put("listeningMillis", bucket.listeningMillis),
+            )
+        }
+    }
+
+private fun List<SocialStatisticsMedia>.toMediaJsonArray(): JSONArray =
+    JSONArray().also { array -> forEach { array.put(it.toJson()) } }
 
 internal fun SocialOutgoingMessage.toWirePayload(): Pair<String, JSONObject> = when (this) {
     is SocialOutgoingMessage.Text -> "text" to JSONObject().put("text", text.trim())

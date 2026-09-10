@@ -1071,7 +1071,7 @@ fun LocalPlaylistScreen(
                                                             ListQueue(
                                                                 title = playlist!!.playlist.name,
                                                                 items = songs.map { it.song.toMediaItem() },
-                                                                startIndex = index,
+                                                                startIndex = playlistOccurrenceStartIndex(songs.map { it.map.id }, song.map.id),
                                                             ),
                                                         )
                                                     }

@@ -84,6 +84,7 @@ import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.AppBarHeight
 import moe.rukamori.archivetune.constants.HideExplicitKey
 import moe.rukamori.archivetune.db.entities.Album
+import moe.rukamori.archivetune.extensions.toMediaItem
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.playback.queues.LocalAlbumRadio
 import moe.rukamori.archivetune.ui.component.IconButton
@@ -397,6 +398,15 @@ fun AlbumScreen(
                                 }
                             }
                         },
+                    )
+                }
+
+                item(key = "stem_batch") {
+                    AndroidStemBatchAction(
+                        mediaItems = albumWithSongs.songs.map { it.toMediaItem() },
+                        navController = navController,
+                        label = "Create stems for album",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                     )
                 }
 

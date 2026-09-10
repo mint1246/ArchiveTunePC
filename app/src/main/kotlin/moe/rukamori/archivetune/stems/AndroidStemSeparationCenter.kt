@@ -209,6 +209,20 @@ internal class AndroidStemSeparationCenter(
         session = null
     }
 
+    suspend fun clearStemModelCache(storage: AndroidStemStorage): Long =
+        mutex.withLock {
+            check(!closed) { "Stem separation center is closed" }
+            session?.close()
+            session = null
+            withContext(Dispatchers.IO) { storage.clearStemModel() }
+        }
+
+    suspend fun clearStemCache(storage: AndroidStemStorage): Long =
+        mutex.withLock {
+            check(!closed) { "Stem separation center is closed" }
+            withContext(Dispatchers.IO) { storage.clearStems() }
+        }
+
     private fun ensureSession(model: File): AndroidOnnxSession {
         session?.let { return it }
         return runtime

@@ -8,16 +8,24 @@
 package moe.rukamori.archivetune.ui.screens.social
 
 import android.net.Uri
+import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.constants.PlaylistSortType
+import moe.rukamori.archivetune.constants.TogetherAllowGuestsToAddTracksKey
+import moe.rukamori.archivetune.constants.TogetherAllowGuestsToControlPlaybackKey
+import moe.rukamori.archivetune.constants.TogetherDisplayNameKey
+import moe.rukamori.archivetune.constants.TogetherRequireHostApprovalToJoinKey
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.extensions.metadata
 import moe.rukamori.archivetune.extensions.toMediaItem
@@ -30,6 +38,10 @@ import moe.rukamori.archivetune.social.SocialSharedSong
 import moe.rukamori.archivetune.social.buildSocialSharedQueue
 import moe.rukamori.archivetune.social.toPlaybackMediaMetadata
 import moe.rukamori.archivetune.social.toSocialSharedSongOrNull
+import moe.rukamori.archivetune.together.TogetherQuickTunnelInvite
+import moe.rukamori.archivetune.together.TogetherRoomSettings
+import moe.rukamori.archivetune.together.TogetherSessionState
+import moe.rukamori.archivetune.utils.dataStore
 
 const val SocialFriendsRoute = "social/friends"
 private const val SocialFriendIdArgument = "friendId"
@@ -102,12 +114,78 @@ private fun SocialFriendsDestination(
     playerConnection: PlayerConnection?,
     database: MusicDatabase,
 ) {
+    val context = LocalContext.current
     val share = rememberSocialShareState(playerConnection, database)
+    val togetherStateFlow =
+        remember(playerConnection) {
+            playerConnection?.service?.togetherSessionState
+                ?: kotlinx.coroutines.flow.MutableStateFlow(TogetherSessionState.Idle)
+        }
+    val togetherState by togetherStateFlow.collectAsState()
+    val activePartyInviteUrl =
+        (togetherState as? TogetherSessionState.HostingOnline)
+            ?.code
+            ?.takeIf { TogetherQuickTunnelInvite.decode(it) != null }
     ArchiveTuneFriendsScreen(
         social = social,
         currentSong = share.song,
         currentQueue = share.queue,
         playlists = share.playlists,
+        activePartyInviteUrl = activePartyInviteUrl,
+        onStartParty = playerConnection?.let { connection ->
+            suspend {
+                runCatching {
+                    val existing = connection.service.togetherSessionState.value as? TogetherSessionState.HostingOnline
+                    existing?.code
+                        ?.takeIf { TogetherQuickTunnelInvite.decode(it) != null }
+                        ?.let { return@runCatching it }
+
+                    val preferences = context.dataStore.data.first()
+                    val displayName =
+                        preferences[TogetherDisplayNameKey]
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: Build.MODEL?.takeIf(String::isNotBlank)
+                            ?: "ArchiveTune"
+                    val settings =
+                        TogetherRoomSettings(
+                            allowGuestsToAddTracks = preferences[TogetherAllowGuestsToAddTracksKey] ?: true,
+                            allowGuestsToControlPlayback = preferences[TogetherAllowGuestsToControlPlaybackKey] ?: false,
+                            requireHostApprovalToJoin = preferences[TogetherRequireHostApprovalToJoinKey] ?: false,
+                        )
+                    connection.service.startTogetherOnlineHost(displayName, settings)
+                    val state =
+                        withTimeout(50_000L) {
+                            connection.service.togetherSessionState.first { candidate ->
+                                (
+                                    candidate is TogetherSessionState.HostingOnline &&
+                                        TogetherQuickTunnelInvite.decode(candidate.code) != null
+                                ) || candidate is TogetherSessionState.Error
+                            }
+                        }
+                    when (state) {
+                        is TogetherSessionState.HostingOnline -> state.code
+                        is TogetherSessionState.Error -> error(state.message)
+                        else -> error("Could not start Play Together")
+                    }
+                }
+            }
+        },
+        onJoinParty = playerConnection?.let { connection ->
+            suspend { rawInvite ->
+                runCatching {
+                    val preferences = context.dataStore.data.first()
+                    val displayName =
+                        preferences[TogetherDisplayNameKey]
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: Build.MODEL?.takeIf(String::isNotBlank)
+                            ?: "ArchiveTune"
+                    check(TogetherQuickTunnelInvite.decode(rawInvite) != null) { "Invalid Cloudflare Play Together invite" }
+                    connection.service.joinTogetherOnline(rawInvite, displayName)
+                }
+            }
+        },
         onOpenChat = { navController.navigate(socialChatRoute(it.id)) },
         onOpenFriendStatistics = { navController.navigate(socialFriendStatisticsRoute(it.id)) },
         onPlaySharedSong = { playerConnection?.playSocialSong(it) },

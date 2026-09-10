@@ -57,6 +57,16 @@ val hasReleaseSigningConfig =
         releaseStorePassword != null &&
         releaseKeyAlias != null &&
         releaseKeyPassword != null
+
+val cloudflaredVersion = "2026.9.0"
+val cloudflaredArm64Sha256 = "98aca3173f73248fad6180fc75dade2d186a6e54fa807e088108cb4345de8efe"
+val cloudflaredJniDir = layout.buildDirectory.dir("generated/cloudflared/jniLibs")
+val prepareCloudflaredArm64 = tasks.register<DownloadVerifiedFileTask>("prepareCloudflaredArm64") {
+    sourceUrl.set("https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-linux-arm64")
+    expectedSha256.set(cloudflaredArm64Sha256)
+    outputFile.set(cloudflaredJniDir.map { it.file("arm64-v8a/libcloudflared.so") })
+}
+
 android {
     namespace = "moe.rukamori.archivetune"
     compileSdk = 37
@@ -233,10 +243,13 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            // cloudflared must live in PackageManager's read-only executable native-lib directory.
+            // Android 10+ blocks executing a helper copied into writable app data.
+            useLegacyPackaging = true
             keepDebugSymbols += listOf(
                 "**/libandroidx.graphics.path.so",
-                "**/libdatastore_shared_counter.so"
+                "**/libdatastore_shared_counter.so",
+                "**/libcloudflared.so",
             )
         }
         resources {
@@ -247,7 +260,11 @@ android {
         }
     }
 
+    sourceSets.getByName("main").jniLibs.directories.add("build/generated/cloudflared/jniLibs")
+
 }
+
+tasks.named("preBuild").configure { dependsOn(prepareCloudflaredArm64) }
 
 kotlin {
     jvmToolchain(21)

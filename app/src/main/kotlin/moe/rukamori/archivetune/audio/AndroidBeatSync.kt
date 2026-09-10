@@ -13,12 +13,15 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsIntensityKey
@@ -177,13 +180,45 @@ fun rememberAndroidBeatPulse(
 }
 
 @Composable
-fun rememberPlayerBeatPulse(isPlaying: Boolean): Float {
+fun rememberPlayerBeatPulse(
+    isPlaying: Boolean,
+    enabledOverride: Boolean = true,
+): Float {
     val playerConnection = LocalPlayerConnection.current ?: return 0f
     val enabled by rememberPreference(BeatSyncedVisualsEnabledKey, true)
     val intensity by rememberPreference(BeatSyncedVisualsIntensityKey, 0.75f)
-    return rememberAndroidBeatPulse(
+    val effectiveEnabled = enabled && enabledOverride
+    val beatGrid by playerConnection.service.currentBeatAnalysis.collectAsState()
+    val analyzedPulse by
+        produceState(
+            initialValue = 0f,
+            beatGrid,
+            isPlaying,
+            effectiveEnabled,
+            intensity,
+        ) {
+            if (!effectiveEnabled || !isPlaying || beatGrid == null) {
+                value = 0f
+                return@produceState
+            }
+            while (true) {
+                val analysis = beatGrid?.analysis
+                value =
+                    if (analysis == null) {
+                        0f
+                    } else {
+                        sampleAndroidBeatTimeline(
+                            beatsSeconds = analysis.beatsSeconds,
+                            positionMs = playerConnection.player.currentPosition.toDouble(),
+                        ).pulse * intensity.coerceIn(0f, 1f)
+                    }
+                delay(16L)
+            }
+        }
+    val liveFallback = rememberAndroidBeatPulse(
         audioSessionId = playerConnection.player.audioSessionId,
-        enabled = enabled && isPlaying,
+        enabled = effectiveEnabled && isPlaying && beatGrid == null,
         intensity = intensity,
     )
+    return if (beatGrid != null) analyzedPulse else liveFallback
 }

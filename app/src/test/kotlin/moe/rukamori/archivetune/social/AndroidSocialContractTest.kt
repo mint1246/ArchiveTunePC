@@ -107,4 +107,32 @@ class AndroidSocialContractTest {
         assertEquals("song", range.topSongs.single().id)
         assertEquals("Artist", range.topSongs.single().subtitle)
     }
+
+    @Test
+    fun statisticsUploadJsonMatchesCloudRequiredShape() {
+        val range =
+            SocialStatisticsRangeSnapshot(
+                summary = SocialStatisticsSummary(123_000L, 4L, 2, 1, 1),
+                favoriteSong = SocialStatisticsMedia("song", "Song", "Artist", null, 90_000L, 3L),
+                dailyListening = listOf(SocialStatisticsBucket("10 Sep", 123_000L)),
+                listeningByDayOfWeek = listOf(SocialStatisticsBucket("Thu", 123_000L)),
+                listeningByHour = listOf(SocialStatisticsBucket("18:00", 123_000L)),
+                topSongs = listOf(SocialStatisticsMedia("song", "Song", "Artist", null, 90_000L, 3L)),
+            )
+        val snapshot = SocialStatisticsSnapshot(AndroidStatisticsRangeKeys.associateWith { range }, updatedAt = 99L)
+        val json = socialStatisticsSnapshotJson(snapshot)
+
+        assertEquals(99L, json.getLong("updatedAt"))
+        val ranges = json.getJSONObject("ranges")
+        assertEquals(AndroidStatisticsRangeKeys.toSet(), ranges.keys().asSequence().toSet())
+        val sevenDays = ranges.getJSONObject("DAYS_7")
+        assertEquals(123_000L, sevenDays.getJSONObject("summary").getLong("totalListeningMillis"))
+        assertEquals("10 Sep", sevenDays.getJSONArray("dailyListening").getJSONObject(0).getString("label"))
+        assertEquals(1, sevenDays.getJSONArray("listeningByDayOfWeek").length())
+        assertEquals(1, sevenDays.getJSONArray("listeningByHour").length())
+    }
+
+    private companion object {
+        val AndroidStatisticsRangeKeys = listOf("DAYS_7", "MONTH_1", "MONTHS_3", "MONTHS_6", "YEAR_1", "ALL_TIME")
+    }
 }

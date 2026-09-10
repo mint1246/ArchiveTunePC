@@ -30,6 +30,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaCodecList
+import android.media.MediaRouter2
 import android.media.audiofx.AudioEffect
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
@@ -42,6 +43,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.PowerManager
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
@@ -52,6 +54,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.ParserException
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Player.EVENT_POSITION_DISCONTINUITY
 import androidx.media3.common.Player.EVENT_TIMELINE_CHANGED
@@ -178,9 +181,12 @@ import moe.rukamori.archivetune.constants.PauseListenHistoryKey
 import moe.rukamori.archivetune.constants.PauseOnDeviceMuteKey
 import moe.rukamori.archivetune.constants.PermanentShuffleKey
 import moe.rukamori.archivetune.constants.PersistentQueueKey
+import moe.rukamori.archivetune.constants.PlaybackPitchSemitonesKey
+import moe.rukamori.archivetune.constants.PlaybackSpeedKey
 import moe.rukamori.archivetune.constants.PlayerStreamClient
 import moe.rukamori.archivetune.constants.PlayerStreamClientKey
 import moe.rukamori.archivetune.constants.PlayerVolumeKey
+import moe.rukamori.archivetune.constants.PreferredAudioOutputKey
 import moe.rukamori.archivetune.constants.RepeatModeKey
 import moe.rukamori.archivetune.constants.ScrobbleDelayPercentKey
 import moe.rukamori.archivetune.constants.ScrobbleDelaySecondsKey
@@ -336,6 +342,7 @@ class MusicService :
     private var wakeLock: PowerManager.WakeLock? = null
     private var wakelockEnabled = false
     private var audioDeviceCallbackRegistered = false
+    private var mediaRouter2CallbackRegistration: AutoCloseable? = null
     private var audioRouteRecoveryJob: Job? = null
     private var audiblePlaybackRecoveryJob: Job? = null
     private var lastAudioOutputDeviceSignature: String? = null
@@ -343,10 +350,59 @@ class MusicService :
     private var aodScreenOffReceiver: BroadcastReceiver? = null
 
     private lateinit var audioOutputResolver: AudioOutputResolver
+    private var preferredAudioDevice: AudioDeviceInfo? = null
 
     val activeAudioDevice get() = audioOutputResolver.activeAudioDevice
+    val audioOutputState get() = audioOutputResolver.audioOutputState
 
-    fun refreshActiveDevice() = audioOutputResolver.refresh()
+    fun refreshActiveDevice() = refreshAudioOutputDevices()
+
+    fun refreshAudioOutputDevices(): AudioOutputState {
+        val resolution = audioOutputResolver.refresh()
+        applyPreferredAudioDevice(resolution.preferredDevice)
+        if (resolution.selectionDropped) {
+            ioScope.launch {
+                dataStore.edit { it.remove(PreferredAudioOutputKey) }
+            }
+        }
+        return resolution.state
+    }
+
+    fun selectAudioOutputDevice(deviceId: String?): AudioOutputState {
+        val resolution = audioOutputResolver.selectPreferredDevice(deviceId)
+        applyPreferredAudioDevice(resolution.preferredDevice)
+        scope.launch {
+            delay(250L)
+            audioOutputResolver.refresh()
+        }
+        ioScope.launch {
+            dataStore.edit { preferences ->
+                val selectedId = resolution.state.selectedDeviceId
+                if (selectedId == null) {
+                    preferences.remove(PreferredAudioOutputKey)
+                } else {
+                    preferences[PreferredAudioOutputKey] = selectedId
+                }
+            }
+        }
+        return resolution.state
+    }
+
+    private fun applyPreferredAudioDevice(device: AudioDeviceInfo?) {
+        preferredAudioDevice = device
+        if (::localPlayer.isInitialized) {
+            runCatching { localPlayer.setPreferredAudioDevice(device) }
+                .onFailure { error -> Timber.tag("AudioOutput").w(error, "Could not set preferred audio device") }
+        }
+        secondaryCrossfadePlayer?.let { secondary ->
+            runCatching { secondary.setPreferredAudioDevice(device) }
+                .onFailure { error -> Timber.tag("AudioOutput").w(error, "Could not route crossfade player") }
+        }
+        if (::stemPlayback.isInitialized) {
+            runCatching { stemPlayback.setPreferredAudioDevice(device) }
+                .onFailure { error -> Timber.tag("AudioOutput").w(error, "Could not route stem players") }
+        }
+    }
 
     private val audioDeviceCallback =
         object : AudioDeviceCallback() {
@@ -520,6 +576,8 @@ class MusicService :
             }.flowOn(Dispatchers.IO)
 
     private val normalizeFactor = MutableStateFlow(1f)
+    private val playbackParametersToPersist = MutableStateFlow<PersistedPlaybackParameters?>(null)
+    private var playbackParametersRestored = false
     private val audioNormalizationFactorCache = ConcurrentHashMap<String, Float>()
     private var audioNormalizationEnabled = true
     var playerVolume = MutableStateFlow(1f)
@@ -680,6 +738,10 @@ class MusicService :
         private set
     lateinit var stemPlayback: AndroidStemPlaybackCoordinator
         private set
+    internal lateinit var beatAnalysis: moe.rukamori.archivetune.audio.AndroidBeatAnalysisCoordinator
+        private set
+    internal val currentBeatAnalysis: kotlinx.coroutines.flow.StateFlow<moe.rukamori.archivetune.audio.AndroidBeatGrid?>
+        get() = beatAnalysis.currentAnalysis
     private lateinit var castPlaybackRepository: CastPlaybackRepository
     private lateinit var mediaSession: MediaLibrarySession
 
@@ -745,6 +807,7 @@ class MusicService :
         )
     private var togetherServer: moe.rukamori.archivetune.together.TogetherServer? = null
     private var togetherOnlineHost: moe.rukamori.archivetune.together.TogetherOnlineHost? = null
+    private var togetherQuickTunnel: moe.rukamori.archivetune.together.AndroidCloudflaredQuickTunnel? = null
     private var togetherClient: moe.rukamori.archivetune.together.TogetherClient? = null
     private var togetherBroadcastJob: Job? = null
     private var togetherOnlineConnectJob: Job? = null
@@ -1141,6 +1204,18 @@ class MusicService :
                 castConnectedProvider = ::isCastConnected,
                 sourceResolver = ::resolveStemInput,
             )
+        beatAnalysis =
+            moe.rukamori.archivetune.audio.AndroidBeatAnalysisCoordinator(
+                context = this,
+                scope = ioScope,
+                resolveInput = ::resolveBeatAnalysisInput,
+            )
+        dataStore.data
+            .map { preferences -> preferences[moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey] ?: true }
+            .distinctUntilChanged()
+            .collect(scope) { enabled ->
+                if (enabled) updateBeatAnalysisQueue() else beatAnalysis.update(null, null)
+            }
         val authoritativeStatisticsStore = AndroidStatisticsStore(database)
         authoritativeStatisticsTracker =
             AndroidStatisticsTracker(
@@ -1207,8 +1282,11 @@ class MusicService :
         setupAudioFocusRequest()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, android.os.Handler(mainLooper))
         audioDeviceCallbackRegistered = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            registerMediaRouter2Callback()
+        }
         lastAudioOutputDeviceSignature = currentAudioOutputDeviceSignature()
-        audioOutputResolver.refresh()
+        refreshAudioOutputDevices()
 
         val screenOffFilter = IntentFilter(Intent.ACTION_SCREEN_OFF)
         val screenReceiver = object : BroadcastReceiver() {
@@ -1284,10 +1362,31 @@ class MusicService :
             val volume = (prefs[PlayerVolumeKey] ?: 1f).coerceIn(0f, 1f)
             val offload = prefs[AudioOffload] ?: false
             val crossfadePrefEnabled = prefs[CrossfadeEnabledKey] ?: false
+            val preferredOutputId = prefs[PreferredAudioOutputKey]
+            val persistedPlaybackParameters =
+                PlaybackParameterPersistence.sanitize(
+                    speed = prefs[PlaybackSpeedKey],
+                    pitchSemitones = prefs[PlaybackPitchSemitonesKey],
+                )
             withContext(Dispatchers.Main) {
                 player.repeatMode = repeatMode
                 playerVolume.value = volume
                 updateAudioOffload(offload && !crossfadePrefEnabled)
+                val outputResolution = audioOutputResolver.selectPreferredDevice(preferredOutputId)
+                applyPreferredAudioDevice(outputResolution.preferredDevice)
+                if (outputResolution.selectionDropped) {
+                    ioScope.launch {
+                        dataStore.edit { it.remove(PreferredAudioOutputKey) }
+                    }
+                }
+                player.playbackParameters =
+                    PlaybackParameters(
+                        persistedPlaybackParameters.speed,
+                        PlaybackParameterPersistence.semitonesToPitchMultiplier(
+                            persistedPlaybackParameters.pitchSemitones,
+                        ),
+                    )
+                playbackParametersRestored = true
             }
         }
 
@@ -1320,6 +1419,14 @@ class MusicService :
         playerVolume.debounce(1000).collect(ioScope) { volume ->
             dataStore.edit { settings ->
                 settings[PlayerVolumeKey] = volume
+            }
+        }
+
+        playbackParametersToPersist.debounce(300).collect(ioScope) { parameters ->
+            parameters ?: return@collect
+            dataStore.edit { settings ->
+                settings[PlaybackSpeedKey] = parameters.speed
+                settings[PlaybackPitchSemitonesKey] = parameters.pitchSemitones
             }
         }
 
@@ -2344,12 +2451,29 @@ class MusicService :
                 .build()
     }
 
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun registerMediaRouter2Callback() {
+        val router = MediaRouter2.getInstance(this)
+        val callback =
+            object : MediaRouter2.ControllerCallback() {
+                override fun onControllerUpdated(controller: MediaRouter2.RoutingController) {
+                    if (!::player.isInitialized) return
+                    audioOutputResolver.refresh()
+                }
+            }
+        router.registerControllerCallback(mainExecutor, callback)
+        mediaRouter2CallbackRegistration =
+            AutoCloseable {
+                runCatching { router.unregisterControllerCallback(callback) }
+            }
+    }
+
     private fun onAudioOutputDeviceChanged() {
         if (!::player.isInitialized) return
         val outputSignature = currentAudioOutputDeviceSignature()
         if (outputSignature == lastAudioOutputDeviceSignature) return
         lastAudioOutputDeviceSignature = outputSignature
-        audioOutputResolver.refresh()
+        refreshAudioOutputDevices()
         cancelCrossfade(resetVolume = true, resetPauseAtEnd = true)
         player.setAudioAttributes(playbackAudioAttributes(), false)
         audioRouteRecoveryJob?.cancel()
@@ -2576,6 +2700,54 @@ class MusicService :
                 requestHeaders = resolved.httpRequestHeaders,
             )
         }
+
+    private suspend fun resolveBeatAnalysisInput(mediaItem: MediaItem): moe.rukamori.archivetune.audio.AndroidBeatAnalysisInput? =
+        withContext(Dispatchers.IO) {
+            val configuration = mediaItem.localConfiguration ?: return@withContext null
+            val mediaId = configuration.customCacheKey ?: mediaItem.mediaId
+            val dataSpec =
+                DataSpec.Builder()
+                    .setUri(configuration.uri)
+                    .setKey(mediaId.takeIf(String::isNotBlank))
+                    .build()
+            val resolved =
+                resolvePlaybackDataSpec(
+                    dataSpec = dataSpec,
+                    allowCacheShortCircuit = false,
+                )
+            moe.rukamori.archivetune.audio.AndroidBeatAnalysisInput(
+                uri = resolved.uri,
+                requestHeaders = resolved.httpRequestHeaders,
+            )
+        }
+
+    private fun updateBeatAnalysisQueue() {
+        if (!::beatAnalysis.isInitialized || !::player.isInitialized || player.mediaItemCount <= 0) {
+            if (::beatAnalysis.isInitialized) beatAnalysis.update(null, null)
+            return
+        }
+        val currentIndex = player.currentMediaItemIndex
+        if (currentIndex !in 0 until player.mediaItemCount) {
+            beatAnalysis.update(null, null)
+            return
+        }
+        val currentItem = player.getMediaItemAt(currentIndex)
+        val currentDurationMs =
+            player.duration
+                .takeIf { it != C.TIME_UNSET && it > 0L }
+                ?: currentItem.metadata?.duration?.takeIf { it > 0 }?.toLong()?.times(1_000L)
+        val nextIndex =
+            player.currentTimeline
+                .takeUnless { it.isEmpty }
+                ?.getNextWindowIndex(currentIndex, REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                ?: C.INDEX_UNSET
+        val nextItem = nextIndex.takeIf { it in 0 until player.mediaItemCount }?.let(player::getMediaItemAt)
+        val nextDurationMs = nextItem?.metadata?.duration?.takeIf { it > 0 }?.toLong()?.times(1_000L)
+        beatAnalysis.update(
+            current = moe.rukamori.archivetune.audio.AndroidBeatTrack(currentItem, currentDurationMs),
+            next = nextItem?.let { moe.rukamori.archivetune.audio.AndroidBeatTrack(it, nextDurationMs) },
+        )
+    }
 
     private fun onStemRendererActiveChanged(active: Boolean) {
         if (!::player.isInitialized) return
@@ -2838,6 +3010,7 @@ class MusicService :
                 addListener(secondaryCrossfadeListener)
                 setOffloadEnabled(false)
                 skipSilenceEnabled = localPlayer.skipSilenceEnabled
+                setPreferredAudioDevice(preferredAudioDevice)
             }
 
     private fun startCrossfade(
@@ -4668,47 +4841,12 @@ class MusicService :
                     allowGuestsToAddTracks = true,
                     allowGuestsToControlPlayback = true,
                 )
-
-            val baseUrl =
-                moe.rukamori.archivetune.together.TogetherOnlineEndpoint
-                    .baseUrlOrNull(dataStore)
-            if (baseUrl == null) {
-                scope.launch(SilentHandler) {
-                    togetherSessionState.value =
-                        moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                            message = getString(R.string.together_online_not_configured),
-                            recoverable = true,
-                        )
-                }
-                return@launch
-            }
-
-            val togetherToken =
-                moe.rukamori.archivetune.BuildConfig.TOGETHER_BEARER_TOKEN
-                    .trim()
-                    .takeIf { it.isNotBlank() }
-            if (togetherToken == null) {
-                scope.launch(SilentHandler) {
-                    togetherSessionState.value =
-                        moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                            message = getString(R.string.together_token_missing),
-                            recoverable = true,
-                        )
-                }
-                return@launch
-            }
-
-            val api =
-                moe.rukamori.archivetune.together
-                    .TogetherOnlineApi(baseUrl = baseUrl, bearerToken = togetherToken)
             val hostName = displayName.trim().ifBlank { getString(R.string.app_name) }
-
-            val created =
+            val sessionId = java.util.UUID.randomUUID().toString()
+            val sessionKey = java.util.UUID.randomUUID().toString()
+            val originPort =
                 runCatching {
-                    api.createSession(
-                        hostDisplayName = hostName,
-                        settings = compatibleSettings,
-                    )
+                    java.net.ServerSocket(0, 0, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
                 }.getOrElse { t ->
                     scope.launch(SilentHandler) {
                         togetherSessionState.value =
@@ -4721,104 +4859,111 @@ class MusicService :
                     return@launch
                 }
 
-            val createdSettings =
-                created.settings.copy(
-                    allowGuestsToAddTracks = true,
-                    allowGuestsToControlPlayback = true,
-                )
-            val onlineHost =
-                moe.rukamori.archivetune.together.TogetherOnlineHost(
-                    externalScope = ioScope,
-                    sessionId = created.sessionId,
-                    sessionKey = created.hostKey,
-                    hostId = togetherHostId,
+            val server =
+                moe.rukamori.archivetune.together.TogetherServer(
+                    scope = ioScope,
+                    sessionId = sessionId,
+                    sessionKey = sessionKey,
                     hostDisplayName = hostName,
-                    initialSettings = createdSettings,
-                    clientId = getOrCreateTogetherClientId(),
-                    bearerToken = togetherToken,
+                    initialSettings = compatibleSettings,
+                    hostParticipantId = togetherHostId,
                 )
-
-            onlineHost.onEvent = { event ->
+            server.onEvent = { event ->
                 ioScope.launch(SilentHandler) {
-                    handleTogetherHostEvent(event) { onlineHost.currentSettings() }
+                    handleTogetherHostEvent(event) { server.currentSettings() }
                 }
             }
 
-            togetherOnlineHost = onlineHost
-            scheduleTogetherHostInactivityTimeout(created.sessionId) {
-                api.endSession(
-                    sessionId = created.sessionId,
-                    hostKey = created.hostKey,
+            try {
+                server.start(
+                    port = originPort,
+                    host = "127.0.0.1",
+                    webSocketPath = "/party",
+                    accessToken = sessionKey,
                 )
-            }
+                togetherServer = server
+                scope.launch(SilentHandler) {
+                    togetherSessionState.value =
+                        moe.rukamori.archivetune.together.TogetherSessionState.HostingOnline(
+                            sessionId = sessionId,
+                            code = "",
+                            settings = compatibleSettings,
+                            roomState = null,
+                        )
+                }
 
-            scope.launch(SilentHandler) {
-                togetherSessionState.value =
-                    moe.rukamori.archivetune.together.TogetherSessionState.HostingOnline(
-                        sessionId = created.sessionId,
-                        code = created.code,
-                        settings = createdSettings,
-                        roomState = null,
+                val tunnel =
+                    moe.rukamori.archivetune.together.AndroidCloudflaredQuickTunnel.start(
+                        context = this@MusicService,
+                        port = originPort,
+                        scope = ioScope,
                     )
-            }
+                if (togetherServer !== server) {
+                    tunnel.close()
+                    return@launch
+                }
+                togetherQuickTunnel = tunnel
+                val inviteUrl =
+                    moe.rukamori.archivetune.together.TogetherQuickTunnelInvite.encode(
+                        publicBaseUrl = tunnel.publicBaseUrl,
+                        sessionId = sessionId,
+                        sessionKey = sessionKey,
+                    )
+                scheduleTogetherHostInactivityTimeout(sessionId)
 
-            val wsUrl =
-                moe.rukamori.archivetune.together.TogetherOnlineEndpoint.onlineWebSocketUrlOrNull(
-                    rawWsUrl = created.wsUrl,
-                    baseUrl = baseUrl,
-                )
-            if (wsUrl == null) {
+                scope.launch(SilentHandler) {
+                    val current =
+                        togetherSessionState.value as? moe.rukamori.archivetune.together.TogetherSessionState.HostingOnline
+                    if (current?.sessionId == sessionId) {
+                        togetherSessionState.value = current.copy(code = inviteUrl)
+                    }
+                }
+
+                togetherBroadcastJob =
+                    ioScope.launch(SilentHandler) {
+                        while (togetherServer === server && togetherQuickTunnel === tunnel) {
+                            val state =
+                                if (togetherAuthorityParticipantId == null || togetherAuthorityParticipantId == togetherHostId) {
+                                    buildTogetherRoomState(
+                                        sessionId = sessionId,
+                                        hostId = togetherHostId,
+                                    )
+                                } else {
+                                    null
+                                }
+                            if (state != null) {
+                                server.broadcastRoomState(state)
+                                scope.launch(SilentHandler) {
+                                    val hosting =
+                                        togetherSessionState.value as? moe.rukamori.archivetune.together.TogetherSessionState.HostingOnline
+                                    if (hosting?.sessionId == sessionId) {
+                                        val currentSettings = server.currentSettings()
+                                        togetherSessionState.value =
+                                            hosting.copy(
+                                                settings = currentSettings,
+                                                roomState =
+                                                    state.copy(
+                                                        participants = server.currentParticipants(),
+                                                        settings = currentSettings,
+                                                    ),
+                                            )
+                                    }
+                                }
+                            }
+                            kotlinx.coroutines.delay(TogetherPlaybackSync.BroadcastIntervalMs)
+                        }
+                    }
+            } catch (t: Throwable) {
+                reportException(t)
                 scope.launch(SilentHandler) {
                     togetherSessionState.value =
                         moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                            message = "Connection failed: Invalid server websocket URL",
+                            message = t.message?.takeIf { it.isNotBlank() } ?: togetherOnlineErrorMessage(t),
                             recoverable = true,
                         )
                 }
-                ioScope.launch(SilentHandler) { stopTogetherInternal() }
-                return@launch
+                stopTogetherInternal()
             }
-
-            togetherOnlineConnectJob?.cancel()
-            togetherOnlineConnectJob =
-                ioScope.launch(SilentHandler) {
-                    onlineHost.connect(wsUrl)
-                }
-
-            togetherBroadcastJob =
-                ioScope.launch(SilentHandler) {
-                    while (togetherOnlineHost === onlineHost) {
-                        val state =
-                            if (togetherAuthorityParticipantId == null || togetherAuthorityParticipantId == togetherHostId) {
-                                buildTogetherRoomState(
-                                    sessionId = created.sessionId,
-                                    hostId = togetherHostId,
-                                )
-                            } else {
-                                null
-                            }
-                        if (state != null) {
-                            onlineHost.broadcastRoomState(state)
-                            scope.launch(SilentHandler) {
-                                val hosting =
-                                    togetherSessionState.value as? moe.rukamori.archivetune.together.TogetherSessionState.HostingOnline
-                                if (hosting?.sessionId == created.sessionId) {
-                                    val currentSettings = onlineHost.currentSettings()
-                                    togetherSessionState.value =
-                                        hosting.copy(
-                                            settings = currentSettings,
-                                            roomState =
-                                                state.copy(
-                                                    participants = onlineHost.currentParticipants(),
-                                                    settings = currentSettings,
-                                                ),
-                                        )
-                                }
-                            }
-                        }
-                        kotlinx.coroutines.delay(TogetherPlaybackSync.BroadcastIntervalMs)
-                    }
-                }
         }
     }
 
@@ -5035,16 +5180,18 @@ class MusicService :
     }
 
     fun joinTogetherOnline(
-        code: String,
+        rawInvite: String,
         displayName: String,
     ) {
         ensureScopesActive()
-        val trimmedCode = code.trim()
-        if (trimmedCode.isBlank()) {
+        val resolved =
+            moe.rukamori.archivetune.together.TogetherQuickTunnelInvite
+                .decode(rawInvite)
+        if (resolved == null) {
             scope.launch(SilentHandler) {
                 togetherSessionState.value =
                     moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                        message = getString(R.string.invalid_code),
+                        message = getString(R.string.invalid_link),
                         recoverable = true,
                     )
             }
@@ -5054,64 +5201,17 @@ class MusicService :
         scope.launch(SilentHandler) {
             togetherSessionState.value =
                 moe.rukamori.archivetune.together.TogetherSessionState
-                    .JoiningOnline(trimmedCode)
+                    .JoiningOnline(resolved.inviteUrl)
         }
 
         ioScope.launch(SilentHandler) {
             stopTogetherInternal()
             togetherIsOnlineSession = true
 
-            val baseUrl =
-                moe.rukamori.archivetune.together.TogetherOnlineEndpoint
-                    .baseUrlOrNull(dataStore)
-            if (baseUrl == null) {
-                scope.launch(SilentHandler) {
-                    togetherSessionState.value =
-                        moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                            message = getString(R.string.together_online_not_configured),
-                            recoverable = true,
-                        )
-                }
-                return@launch
-            }
-
-            val togetherToken =
-                moe.rukamori.archivetune.BuildConfig.TOGETHER_BEARER_TOKEN
-                    .trim()
-                    .takeIf { it.isNotBlank() }
-            if (togetherToken == null) {
-                scope.launch(SilentHandler) {
-                    togetherSessionState.value =
-                        moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                            message = getString(R.string.together_token_missing),
-                            recoverable = true,
-                        )
-                }
-                return@launch
-            }
-
-            val api =
-                moe.rukamori.archivetune.together
-                    .TogetherOnlineApi(baseUrl = baseUrl, bearerToken = togetherToken)
-            val resolved =
-                runCatching { api.resolveCode(trimmedCode) }
-                    .getOrElse { t ->
-                        scope.launch(SilentHandler) {
-                            togetherSessionState.value =
-                                moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                                    message = togetherOnlineErrorMessage(t),
-                                    recoverable = true,
-                                )
-                        }
-                        reportException(t)
-                        return@launch
-                    }
-
             val client =
                 moe.rukamori.archivetune.together.TogetherClient(
                     ioScope,
                     clientId = getOrCreateTogetherClientId(),
-                    bearerToken = togetherToken,
                 )
             togetherClient = client
             togetherClock =
@@ -5288,27 +5388,10 @@ class MusicService :
                     }
                 }
 
-            val wsUrl =
-                moe.rukamori.archivetune.together.TogetherOnlineEndpoint.onlineWebSocketUrlOrNull(
-                    rawWsUrl = resolved.wsUrl,
-                    baseUrl = baseUrl,
-                )
-            if (wsUrl == null) {
-                scope.launch(SilentHandler) {
-                    togetherSessionState.value =
-                        moe.rukamori.archivetune.together.TogetherSessionState.Error(
-                            message = "Connection failed: Invalid server websocket URL",
-                            recoverable = true,
-                        )
-                }
-                ioScope.launch(SilentHandler) { stopTogetherInternal() }
-                return@launch
-            }
-
             client.connect(
-                wsUrl = wsUrl,
+                wsUrl = resolved.wsUrl,
                 sessionId = resolved.sessionId,
-                sessionKey = resolved.guestKey,
+                sessionKey = resolved.sessionKey,
                 displayName = displayName.trim().ifBlank { getString(R.string.together_role_guest) },
             )
         }
@@ -6029,6 +6112,12 @@ class MusicService :
         } catch (_: Exception) {
         }
         togetherOnlineHost = null
+
+        try {
+            togetherQuickTunnel?.close()
+        } catch (_: Exception) {
+        }
+        togetherQuickTunnel = null
 
         try {
             togetherServer?.stop()
@@ -7001,9 +7090,19 @@ class MusicService :
         }
     }
 
-    override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
         super.onPlaybackParametersChanged(playbackParameters)
         secondaryCrossfadePlayer?.playbackParameters = playbackParameters
+        if (playbackParametersRestored) {
+            playbackParametersToPersist.value =
+                PlaybackParameterPersistence.sanitize(
+                    speed = playbackParameters.speed,
+                    pitchSemitones =
+                        PlaybackParameterPersistence.pitchMultiplierToSemitones(
+                            playbackParameters.pitch,
+                        ),
+                )
+        }
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -7031,6 +7130,9 @@ class MusicService :
         events: Player.Events,
     ) {
         updateNextTrackPreResolution()
+        if (::beatAnalysis.isInitialized && dataStore.get(moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey, true)) {
+            updateBeatAnalysisQueue()
+        }
         sampleAuthoritativeStatistics()
         val currentMediaId = player.currentMediaItem?.mediaId
         if (currentMediaId == null && currentHistoryMediaId != null) {
@@ -8751,6 +8853,9 @@ class MusicService :
         if (::stemPlayback.isInitialized) {
             runCatching { stemPlayback.close() }
         }
+        if (::beatAnalysis.isInitialized) {
+            runCatching { beatAnalysis.close() }
+        }
         discordServiceStopping = true
         requestDiscordSync(
             reason = "service_destroy",
@@ -8768,6 +8873,8 @@ class MusicService :
             audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
             audioDeviceCallbackRegistered = false
         }
+        mediaRouter2CallbackRegistration?.close()
+        mediaRouter2CallbackRegistration = null
         unregisterBluetoothReceiver()
         unregisterMuteRecoveryObserver()
         if (aodScreenOffReceiver != null) {

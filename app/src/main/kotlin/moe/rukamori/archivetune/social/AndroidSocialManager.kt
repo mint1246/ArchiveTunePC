@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.together.TogetherQuickTunnelInvite
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -132,8 +133,12 @@ class AndroidSocialManager(
         api.block(it.token, userId)
     }
 
-    suspend fun sendPartyInvite(userId: String, partyUrl: String): Result<Unit> =
-        withSession { api.sendPartyInvite(it.token, userId, partyUrl) }
+    suspend fun sendPartyInvite(userId: String, partyUrl: String): Result<Unit> {
+        val invite =
+            TogetherQuickTunnelInvite.decode(partyUrl)
+                ?: return Result.failure(IllegalArgumentException("Party invite must be a Cloudflare Quick Tunnel URL"))
+        return withSession { api.sendPartyInvite(it.token, userId, invite.inviteUrl) }
+    }
 
     suspend fun loadChat(userId: String): Result<List<SocialChatMessage>> {
         val current = session ?: return signedOutFailure()
@@ -202,6 +207,9 @@ class AndroidSocialManager(
 
     suspend fun sendPlaylist(userId: String, playlist: SocialSharedPlaylist): Result<SocialChatMessage> =
         sendMessage(userId, SocialOutgoingMessage.Playlist(playlist))
+
+    suspend fun uploadStatistics(snapshot: SocialStatisticsSnapshot): Result<Unit> =
+        withSession { api.uploadStatistics(it.token, snapshot) }
 
     fun publishPresence(presence: SocialPresence) {
         latestPresence = presence

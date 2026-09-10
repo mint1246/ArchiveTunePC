@@ -8,6 +8,7 @@
 package moe.rukamori.archivetune.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +48,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import moe.rukamori.archivetune.statistics.AndroidStatisticsMedia
+import moe.rukamori.archivetune.statistics.AndroidStatisticsBucket
 import moe.rukamori.archivetune.statistics.AndroidStatisticsOverview
 import moe.rukamori.archivetune.statistics.AndroidStatisticsRange
 import moe.rukamori.archivetune.statistics.AndroidStatisticsSummary
@@ -142,6 +147,24 @@ fun AndroidStatisticsScreen(
         } else {
             item(key = "statistics_summary") {
                 StatisticsSummary(overview.summary)
+            }
+
+            if (overview.dailyListening.isNotEmpty()) {
+                item(key = "statistics_daily_trend") {
+                    StatisticsTrendChart("Listening trend", overview.dailyListening)
+                }
+            }
+
+            if (overview.listeningByDayOfWeek.isNotEmpty()) {
+                item(key = "statistics_weekday_pattern") {
+                    StatisticsBucketShelf("By day of week", overview.listeningByDayOfWeek)
+                }
+            }
+
+            if (overview.listeningByHour.isNotEmpty()) {
+                item(key = "statistics_hour_pattern") {
+                    StatisticsBucketShelf("By hour", overview.listeningByHour)
+                }
             }
 
             if (overview.topSongs.isNotEmpty()) {
@@ -238,6 +261,83 @@ private fun StatisticsSummary(summary: AndroidStatisticsSummary) {
             }
         }
     }
+}
+
+@Composable
+private fun StatisticsTrendChart(
+    title: String,
+    buckets: List<AndroidStatisticsBucket>,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val outline = MaterialTheme.colorScheme.outlineVariant
+    val maxValue = buckets.maxOfOrNull(AndroidStatisticsBucket::listeningMs)?.coerceAtLeast(1L) ?: 1L
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        StatisticsSectionTitleInline(title)
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Canvas(Modifier.fillMaxWidth().height(120.dp)) {
+                    drawLine(outline, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1.dp.toPx())
+                    if (buckets.size == 1) {
+                        val y = size.height * (1f - buckets[0].listeningMs.toFloat() / maxValue.toFloat())
+                        drawCircle(primary, radius = 4.dp.toPx(), center = Offset(size.width / 2f, y))
+                    } else {
+                        val path = Path()
+                        buckets.forEachIndexed { index, bucket ->
+                            val x = size.width * index.toFloat() / buckets.lastIndex.toFloat()
+                            val y = size.height * (1f - bucket.listeningMs.toFloat() / maxValue.toFloat())
+                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        }
+                        drawPath(path, primary, style = Stroke(width = 2.5.dp.toPx()))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(buckets.first().label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (buckets.size > 1) {
+                        Text(buckets.last().label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatisticsBucketShelf(
+    title: String,
+    buckets: List<AndroidStatisticsBucket>,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatisticsSectionTitle(title)
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(buckets, key = { "$title-${it.label}" }) { bucket ->
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Column(Modifier.width(104.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(bucket.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            formatListeningTime(bucket.listeningMs),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatisticsSectionTitleInline(title: String) {
+    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 }
 
 @Composable

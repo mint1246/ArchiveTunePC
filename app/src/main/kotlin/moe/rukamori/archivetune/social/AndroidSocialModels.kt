@@ -93,10 +93,18 @@ data class SocialStatisticsMedia(
     val playCount: Long = 0L,
 )
 
+data class SocialStatisticsBucket(
+    val label: String,
+    val listeningMillis: Long,
+)
+
 data class SocialStatisticsRangeSnapshot(
     val summary: SocialStatisticsSummary = SocialStatisticsSummary(),
     val favoriteArtist: SocialStatisticsMedia? = null,
     val favoriteSong: SocialStatisticsMedia? = null,
+    val dailyListening: List<SocialStatisticsBucket> = emptyList(),
+    val listeningByDayOfWeek: List<SocialStatisticsBucket> = emptyList(),
+    val listeningByHour: List<SocialStatisticsBucket> = emptyList(),
     val topSongs: List<SocialStatisticsMedia> = emptyList(),
     val topArtists: List<SocialStatisticsMedia> = emptyList(),
     val topAlbums: List<SocialStatisticsMedia> = emptyList(),

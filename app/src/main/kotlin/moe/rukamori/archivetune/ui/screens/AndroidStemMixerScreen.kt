@@ -19,12 +19,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -34,6 +36,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -45,7 +50,10 @@ import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.stems.AndroidStemChannelControl
 import moe.rukamori.archivetune.stems.AndroidStemControls
+import moe.rukamori.archivetune.stems.AndroidStemQueueState
 import moe.rukamori.archivetune.stems.AndroidStemSource
+import moe.rukamori.archivetune.stems.AndroidStemStorageState
+import moe.rukamori.archivetune.stems.formatAndroidStemStorageBytes
 
 /** Mobile surface for the service-owned six-source HTDemucs renderer. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,6 +66,10 @@ fun AndroidStemMixerScreen(navController: NavController) {
         return
     }
     val state by coordinator.state.collectAsStateWithLifecycle()
+    val queue by coordinator.queueState.collectAsStateWithLifecycle()
+    val storage by coordinator.storageState.collectAsStateWithLifecycle()
+    var confirmClearStems by remember { mutableStateOf(false) }
+    var confirmClearModel by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -134,6 +146,18 @@ fun AndroidStemMixerScreen(navController: NavController) {
                 }
             }
 
+            StemBatchQueueCard(
+                state = queue,
+                onCancel = coordinator::cancelBatchQueue,
+            )
+
+            StemStorageCard(
+                state = storage,
+                onRefresh = { coordinator.refreshStorage() },
+                onClearStems = { confirmClearStems = true },
+                onClearModel = { confirmClearModel = true },
+            )
+
             AndroidStemSource.workerOrder.forEachIndexed { index, source ->
                 if (index > 0) HorizontalDivider()
                 StemChannelRow(
@@ -146,6 +170,150 @@ fun AndroidStemMixerScreen(navController: NavController) {
                 )
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    if (confirmClearStems) {
+        AlertDialog(
+            onDismissRequest = { confirmClearStems = false },
+            title = { Text("Clear generated stems?") },
+            text = { Text("This removes every generated six-stem set. The HTDemucs model stays installed.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearStems = false
+                        coordinator.clearStemCache()
+                    },
+                ) { Text("Clear stems") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearStems = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (confirmClearModel) {
+        AlertDialog(
+            onDismissRequest = { confirmClearModel = false },
+            title = { Text("Delete HTDemucs model?") },
+            text = { Text("The 6-stem model will be downloaded and verified again the next time stems are generated. Other local models are not touched.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearModel = false
+                        coordinator.clearStemModelCache()
+                    },
+                ) { Text("Delete model") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearModel = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun StemBatchQueueCard(
+    state: AndroidStemQueueState,
+    onCancel: () -> Unit,
+) {
+    if (!state.active && state.completed == 0 && state.failed == 0) return
+    val remaining = state.pending + if (state.activeTrackId != null) 1 else 0
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text("Stem queue", style = MaterialTheme.typography.titleMedium)
+            if (state.active) {
+                Text(
+                    buildString {
+                        append(remaining).append(" remaining")
+                        state.activeTitle?.let { append(" · Creating ").append(it) }
+                        if (state.completed > 0) append(" · ").append(state.completed).append(" ready")
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                state.activeProgress?.let { progress ->
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                state.activeMessage?.let { message ->
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = onCancel) { Text("Cancel queue") }
+            } else if (state.completed > 0) {
+                Text("${state.completed} stem set${if (state.completed == 1) "" else "s"} ready")
+            }
+            if (state.failed > 0) {
+                Text(
+                    "${state.failed} failed${state.lastError?.let { ": $it" }.orEmpty()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StemStorageCard(
+    state: AndroidStemStorageState,
+    onRefresh: () -> Unit,
+    onClearStems: () -> Unit,
+    onClearModel: () -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Stem storage", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (state.measuring) "Measuring…" else "${formatAndroidStemStorageBytes(state.usage.totalBytes)} total",
+                style = MaterialTheme.typography.titleLarge,
+            )
+            if (!state.measuring) {
+                Text(
+                    "${formatAndroidStemStorageBytes(state.usage.stemsBytes)} stems · ${formatAndroidStemStorageBytes(state.usage.modelBytes)} HTDemucs model",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.error?.let { error ->
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onRefresh, enabled = !state.busy) { Text("Refresh") }
+                OutlinedButton(
+                    onClick = onClearStems,
+                    enabled = !state.busy && state.usage.stemsBytes > 0L,
+                ) { Text(if (state.clearingStems) "Clearing…" else "Clear stems") }
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = onClearModel,
+                    enabled = !state.busy && state.usage.modelBytes > 0L,
+                ) { Text(if (state.clearingModel) "Deleting…" else "Delete model") }
+            }
         }
     }
 }

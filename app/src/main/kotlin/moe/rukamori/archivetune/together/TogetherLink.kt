@@ -38,6 +38,21 @@ data class TogetherJoinInfo(
 object TogetherLink {
     fun encode(joinInfo: TogetherJoinInfo): String = joinInfo.toDeepLink()
 
+    fun encodeOnlineCode(code: String): String {
+        val normalized = code.trim()
+        require(normalized.isNotBlank()) { "Together online code is blank" }
+        val charset = StandardCharsets.UTF_8.name()
+        return "archivetune://together?code=${URLEncoder.encode(normalized, charset)}"
+    }
+
+    fun decodeOnlineCode(raw: String): String? {
+        val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("archivetune", ignoreCase = true)) return null
+        val authority = uri.host?.lowercase() ?: uri.authority?.lowercase() ?: return null
+        if (authority != "together") return null
+        return parseQuery(uri.rawQuery)["code"]?.trim()?.takeIf(String::isNotBlank)
+    }
+
     fun decode(raw: String): TogetherJoinInfo? {
         val trimmed = raw.trim()
         if (trimmed.isBlank()) return null

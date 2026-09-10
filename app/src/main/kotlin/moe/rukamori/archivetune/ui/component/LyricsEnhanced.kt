@@ -20,6 +20,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -121,7 +123,10 @@ import moe.rukamori.archivetune.constants.PlayerBackgroundStyleKey
 import moe.rukamori.archivetune.db.entities.LyricsEntity
 import moe.rukamori.archivetune.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import moe.rukamori.archivetune.lyrics.LyricsEntry
+import moe.rukamori.archivetune.lyrics.LyricsInterludeMotion
 import moe.rukamori.archivetune.lyrics.LyricsRomanizationPreferences
+import moe.rukamori.archivetune.lyrics.LyricsUtils.effectiveLyricsEntryEndMs
+import moe.rukamori.archivetune.lyrics.LyricsUtils.insertInstrumentalBreaks
 import moe.rukamori.archivetune.lyrics.LyricsUtils.isLineSyncedLrc
 import moe.rukamori.archivetune.lyrics.LyricsUtils.isTtml
 import moe.rukamori.archivetune.lyrics.LyricsUtils.parseLyrics
@@ -241,16 +246,24 @@ fun LyricsEnhanced(
     val isSynced = remember(lyrics) { lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)) }
     val isTtmlFormat = remember(lyrics) { lyrics != null && isTtml(lyrics!!) }
 
+    val songDurationMs =
+        mediaMetadata
+            ?.duration
+            ?.takeIf { it > 0 }
+            ?.toLong()
+            ?.times(1_000L)
+            ?: player.duration.takeIf { it > 0L }
+            ?: 0L
     val lyricsEntries: List<LyricsEntry> =
-        remember(lyrics) {
+        remember(lyrics, songDurationMs) {
             if (lyrics == null || lyrics == LYRICS_NOT_FOUND) return@remember emptyList()
             when {
                 isTtml(lyrics!!) -> {
-                    parseTtml(lyrics!!)
+                    insertInstrumentalBreaks(parseTtml(lyrics!!), songDurationMs)
                 }
 
                 isLineSyncedLrc(lyrics!!) -> {
-                    parseLyrics(lyrics!!)
+                    insertInstrumentalBreaks(parseLyrics(lyrics!!), songDurationMs)
                 }
 
                 else -> {
@@ -334,6 +347,7 @@ fun LyricsEnhanced(
         remember(player) {
             mutableLongStateOf(player.currentPosition.coerceAtLeast(0L))
         }
+    val instrumentalEntries = remember(lyricsEntries) { lyricsEntries.filter(LyricsEntry::isInstrumental) }
     var isManualScrolling by remember { mutableStateOf(false) }
     var lastManualScrollTime by remember { mutableLongStateOf(0L) }
     val listState = key(lyricsSessionKey) { rememberLazyListState() }
@@ -740,6 +754,26 @@ fun LyricsEnhanced(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
+
+                    val interludePositionMs =
+                        (playbackPositionMs.longValue + latestLyricsSyncOffset.value.toLong()).coerceAtLeast(0L)
+                    val activeInterlude =
+                        instrumentalEntries.firstOrNull { entry ->
+                            interludePositionMs >= entry.time &&
+                                interludePositionMs < entry.time + entry.durationMs
+                        }
+                    if (activeInterlude != null) {
+                        EnhancedInterludeDots(
+                            startTimeMs = activeInterlude.time,
+                            durationMs = activeInterlude.durationMs,
+                            currentPositionMs = interludePositionMs,
+                            textColor = textColor,
+                            modifier =
+                                Modifier
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = maxHeight * LYRIC_FOCUS_ANCHOR_RATIO - 32.dp),
+                        )
+                    }
                 }
             }
         }
@@ -854,6 +888,64 @@ fun LyricsEnhanced(
             payload = LyricsSharePayload(lyricsText, songTitle, artists),
             onDismissRequest = { showShareImageDialog = false },
         )
+    }
+}
+
+@Composable
+private fun EnhancedInterludeDots(
+    startTimeMs: Long,
+    durationMs: Long,
+    currentPositionMs: Long,
+    textColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val frame =
+        remember(startTimeMs, durationMs, currentPositionMs) {
+            LyricsInterludeMotion.frame(startTimeMs, durationMs, currentPositionMs)
+        }
+
+    Canvas(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(64.dp),
+    ) {
+        val baseRadius = 7.5.dp.toPx()
+        val gap = 9.dp.toPx()
+        val step = baseRadius * 2f + gap
+        val groupScale = frame.groupScale.coerceIn(0f, 1f)
+        val yUnit = 48.dp.toPx()
+
+        frame.dots.forEachIndexed { index, dot ->
+            val scale = dot.scale.coerceAtLeast(0f) * groupScale
+            val opacity = dot.opacity.coerceIn(0f, 1f) * groupScale
+            val glow = dot.glow.coerceIn(0f, 1.15f) * groupScale
+            val radius = baseRadius * scale
+            if (radius <= 0.1f || opacity <= 0.001f) return@forEachIndexed
+
+            val center =
+                Offset(
+                    x = size.width / 2f + (index - 1) * step,
+                    y = size.height / 2f + dot.yOffsetFraction * yUnit,
+                )
+            if (glow > 0.01f) {
+                drawCircle(
+                    color = textColor.copy(alpha = (0.08f * glow * opacity).coerceIn(0f, 0.16f)),
+                    radius = radius * 2.6f,
+                    center = center,
+                )
+                drawCircle(
+                    color = textColor.copy(alpha = (0.16f * glow * opacity).coerceIn(0f, 0.28f)),
+                    radius = radius * 1.75f,
+                    center = center,
+                )
+            }
+            drawCircle(
+                color = textColor.copy(alpha = (0.90f * opacity).coerceIn(0f, 1f)),
+                radius = radius,
+                center = center,
+            )
+        }
     }
 }
 
@@ -1255,8 +1347,13 @@ private fun buildSyncedLyrics(
             val wordPhonetics = romanizationMap[index] ?: emptyList()
             val mainSyllables = wordsForMain.toKaraokeSyllables(wordPhonetics)
 
-            val lineStart = mainSyllables.first().start
-            val lineEnd = mainSyllables.last().end
+            val providerStart = entry.time.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+            val providerEnd =
+                effectiveLyricsEntryEndMs(entries, index)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong())
+                    .toInt()
+            val lineStart = minOf(providerStart, mainSyllables.first().start)
+            val lineEnd = maxOf(providerEnd, mainSyllables.last().end)
             if (lineEnd <= lineStart) return@forEachIndexed
 
             val accompanimentLines =

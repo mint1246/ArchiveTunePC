@@ -114,8 +114,17 @@ data class AndroidStatisticsMedia(
 )
 
 @Immutable
+data class AndroidStatisticsBucket(
+    val label: String,
+    val listeningMs: Long,
+)
+
+@Immutable
 data class AndroidStatisticsOverview(
     val summary: AndroidStatisticsSummary = AndroidStatisticsSummary(),
+    val dailyListening: List<AndroidStatisticsBucket> = emptyList(),
+    val listeningByDayOfWeek: List<AndroidStatisticsBucket> = emptyList(),
+    val listeningByHour: List<AndroidStatisticsBucket> = emptyList(),
     val topSongs: List<AndroidStatisticsMedia> = emptyList(),
     val topArtists: List<AndroidStatisticsMedia> = emptyList(),
     val topAlbums: List<AndroidStatisticsMedia> = emptyList(),
