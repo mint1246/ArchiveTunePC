@@ -128,6 +128,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -1134,6 +1135,8 @@ class MainActivity : ComponentActivity() {
                                     MiniPlayerHeight,
                             expandedBound = maxHeight,
                         )
+                    val hideShellContentBehindDynamicPlayer =
+                        showDynamicAppBackdrop && playerBottomSheetState.isExpandedOrExpanding
                     var homeOverflowMenuExpanded by rememberSaveable { mutableStateOf(false) }
                     val showHomeOverflowFab =
                         shouldShowHomeShuffleButton &&
@@ -1760,7 +1763,7 @@ class MainActivity : ComponentActivity() {
                                         MaterialTheme.colorScheme.surface
                                     },
                                 topBar = {
-                                    if (shouldShowTopBar) {
+                                    if (shouldShowTopBar && !hideShellContentBehindDynamicPlayer) {
                                         val shouldUseFloatingTopBar =
                                             remember(navBackStackEntry) {
                                                 navBackStackEntry?.destination?.route == Screens.Home.route ||
@@ -2018,8 +2021,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                     AnimatedVisibility(
                                         visible =
-                                            active ||
-                                                navBackStackEntry?.destination?.route?.startsWith(OnlineSearchResultRoutePrefix) == true,
+                                            !hideShellContentBehindDynamicPlayer &&
+                                                (active ||
+                                                    navBackStackEntry?.destination?.route?.startsWith(OnlineSearchResultRoutePrefix) == true),
                                         enter = fadeIn(animationSpec = tween(durationMillis = if (disableAnimations) 0 else 300)),
                                         exit = fadeOut(animationSpec = tween(durationMillis = if (disableAnimations) 0 else 200)),
                                     ) {
@@ -2511,7 +2515,11 @@ class MainActivity : ComponentActivity() {
                                                 // and OnlineSearchResult is gated by canScroll=false,
                                                 // so routing them through this shared arm is harmless.
                                                 topAppBarScrollBehavior.nestedScrollConnection,
-                                            ),
+                                            ).drawWithContent {
+                                                if (!hideShellContentBehindDynamicPlayer) {
+                                                    drawContent()
+                                                }
+                                            },
                                 ) {
                                     navigationBuilder(
                                         navController,
