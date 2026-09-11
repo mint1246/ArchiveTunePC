@@ -3900,33 +3900,20 @@ class MusicService :
 
         val failedUrl = responseException.dataSpec.uri.toString()
         val requestProfile = StreamClientUtils.resolveRequestProfile(failedUrl)
-        val authFingerprint = YouTube.currentPlaybackAuthState().fingerprint
-        val extractorAuthFingerprint = ArchiveTuneExtractorCacheFingerprintPrefix + authFingerprint
         val cachedFailedUrl = playbackUrlCache[mediaId]?.takeIf { it.url == failedUrl }
         val cachedExtractorFailedUrl = extractorPlaybackUrlCache[mediaId]?.takeIf { it.url == failedUrl }
-        val failedExpiredUrl =
-            YTPlayerUtils.isExpiredOrNearExpiredStreamUrl(failedUrl) ||
-                (
-                    cachedFailedUrl?.let {
-                        !it.isValidFor(
-                            authFingerprint = authFingerprint,
-                            minimumRemainingMs = YTPlayerUtils.STREAM_URL_EXPIRY_SAFETY_MS,
-                        )
-                    } == true
-                ) ||
-                (
-                    cachedExtractorFailedUrl?.let {
-                        !it.isValidFor(
-                            authFingerprint = extractorAuthFingerprint,
-                            minimumRemainingMs = 0L,
-                        )
-                    } == true
-                )
 
         playbackUrlCache.remove(mediaId)
         extractorPlaybackUrlCache.remove(mediaId)
         YTPlayerUtils.invalidateCachedStreamUrls(mediaId)
-        if (!failedExpiredUrl && cachedExtractorFailedUrl == null && requestProfile.clientKey.isNotEmpty()) {
+        if (
+            requestProfile.clientKey.isNotEmpty() &&
+                shouldRetireYouTubeMediaClient(
+                    failedUrl = failedUrl,
+                    cachedFailedUrl = cachedFailedUrl,
+                    cachedExtractorFailedUrl = cachedExtractorFailedUrl,
+                )
+        ) {
             YTPlayerUtils.markMediaStreamClientFailed(mediaId, requestProfile.clientKey, responseException.responseCode)
         }
 
@@ -9101,6 +9088,20 @@ class MusicService :
     }
 
     companion object {
+        internal fun shouldRetireYouTubeMediaClient(
+            failedUrl: String,
+            cachedFailedUrl: AuthScopedCacheValue?,
+            cachedExtractorFailedUrl: AuthScopedCacheValue?,
+            nowMs: Long = System.currentTimeMillis(),
+        ): Boolean {
+            if (cachedExtractorFailedUrl != null) return false
+            if (YTPlayerUtils.isExpiredOrNearExpiredStreamUrl(failedUrl, nowMs)) return false
+            return cachedFailedUrl?.hasUsableLifetime(
+                nowMs = nowMs,
+                minimumRemainingMs = YTPlayerUtils.STREAM_URL_EXPIRY_SAFETY_MS,
+            ) != false
+        }
+
         internal fun shouldStopServiceOnTaskRemoved(
             stopMusicOnTaskClearEnabled: Boolean,
             isHostSessionActive: Boolean,

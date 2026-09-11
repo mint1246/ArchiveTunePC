@@ -12,9 +12,16 @@ data class AuthScopedCacheValue(
     val expiresAtMs: Long,
     val authFingerprint: String,
 ) {
+    fun hasUsableLifetime(
+        nowMs: Long = System.currentTimeMillis(),
+        minimumRemainingMs: Long = 0L,
+    ): Boolean = expiresAtMs > nowMs + minimumRemainingMs
+
     fun isValidFor(
         authFingerprint: String,
         nowMs: Long = System.currentTimeMillis(),
         minimumRemainingMs: Long = 0L,
-    ): Boolean = this.authFingerprint == authFingerprint && expiresAtMs > nowMs + minimumRemainingMs
+    ): Boolean =
+        this.authFingerprint == authFingerprint &&
+            hasUsableLifetime(nowMs = nowMs, minimumRemainingMs = minimumRemainingMs)
 }

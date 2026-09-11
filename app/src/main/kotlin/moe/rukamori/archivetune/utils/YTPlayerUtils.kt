@@ -150,6 +150,7 @@ object YTPlayerUtils {
      */
     private val STREAM_FALLBACK_CLIENTS: Array<YouTubeClient> =
         arrayOf(
+            VISIONOS,
             ANDROID_VR_NO_AUTH,
             ANDROID_VR_1_65_10,
             ANDROID_VR_1_61_48,
@@ -171,7 +172,6 @@ object YTPlayerUtils {
             ANDROID_TESTSUITE,
             ANDROID_UNPLUGGED,
             IPADOS,
-            VISIONOS,
             TVHTML5_SIMPLY_EMBEDDED_PLAYER,
         )
 
@@ -1016,19 +1016,7 @@ object YTPlayerUtils {
                 ?.takeIf { it > 0 }
                 ?.times(1000L)
 
-        val streamClients =
-            buildStreamClientOrder(preferredStreamClient, authState).filterNot { client ->
-                val blocked =
-                    isStreamClientTemporarilyBlocked(
-                        videoId = videoId,
-                        clientKey = StreamClientUtils.buildClientKey(client),
-                        authFingerprint = authState.fingerprint,
-                    )
-                if (blocked) {
-                    Timber.tag(logTag).w("Temporarily blocked stream client for $videoId: ${describeClient(client)}")
-                }
-                blocked
-            }
+        val streamClients = buildStreamClientOrder(preferredStreamClient, authState)
 
         val botDetectedClients = mutableSetOf<String>()
         var gateFailure: PlaybackGateFailure? = null
@@ -1039,6 +1027,16 @@ object YTPlayerUtils {
 
         for ((index, candidateClient) in streamClients.withIndex()) {
             var client = candidateClient
+            if (
+                isStreamClientTemporarilyBlocked(
+                    videoId = videoId,
+                    clientKey = StreamClientUtils.buildClientKey(client),
+                    authFingerprint = authState.fingerprint,
+                )
+            ) {
+                Timber.tag(logTag).w("Temporarily blocked stream client for $videoId: ${describeClient(client)}")
+                continue
+            }
             var requestUsesCookieAuthentication = shouldUseCookieAuthentication(client)
             format = null
             streamUrl = null

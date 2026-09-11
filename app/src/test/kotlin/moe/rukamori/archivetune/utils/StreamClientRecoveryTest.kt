@@ -7,12 +7,59 @@
 package moe.rukamori.archivetune.utils
 
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
+import moe.rukamori.archivetune.playback.MusicService
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StreamClientRecoveryTest {
+    @Test
+    fun authRefreshInvalidatesCacheReuseWithoutMakingFreshStreamExpired() {
+        val nowMs = 1_000_000L
+        val streamUrl = "https://example.test/fresh-stream?expire=1120"
+        val cached =
+            AuthScopedCacheValue(
+                url = streamUrl,
+                expiresAtMs = nowMs + 120_000L,
+                authFingerprint = "auth-before-refresh",
+            )
+
+        assertFalse(
+            cached.isValidFor(
+                authFingerprint = "auth-after-refresh",
+                nowMs = nowMs,
+                minimumRemainingMs = 60_000L,
+            ),
+        )
+        assertTrue(cached.hasUsableLifetime(nowMs = nowMs, minimumRemainingMs = 60_000L))
+        assertTrue(
+            MusicService.shouldRetireYouTubeMediaClient(
+                failedUrl = streamUrl,
+                cachedFailedUrl = cached,
+                cachedExtractorFailedUrl = null,
+                nowMs = nowMs,
+            ),
+        )
+        assertFalse(
+            MusicService.shouldRetireYouTubeMediaClient(
+                failedUrl = "https://example.test/expired-stream?expire=1050",
+                cachedFailedUrl = null,
+                cachedExtractorFailedUrl = null,
+                nowMs = nowMs,
+            ),
+        )
+        assertFalse(
+            MusicService.shouldRetireYouTubeMediaClient(
+                failedUrl = streamUrl,
+                cachedFailedUrl = null,
+                cachedExtractorFailedUrl = cached,
+                nowMs = nowMs,
+            ),
+        )
+    }
+
     @Test
     fun androidVr137MediaUrlUsesItsOwnRequestProfile() {
         val url =
