@@ -1,5 +1,6 @@
 package moe.rukamori.archivetune.stream
 
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -10,6 +11,25 @@ import moe.rukamori.archivetune.innertube.models.YouTubeClient
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 
 class PlaybackStreamResolverTest {
+    @Test
+    fun resolvedUrlPreservesSignedClientParameters() =
+        runBlocking {
+            val signedUrl =
+                "https://rr1---sn.example.googlevideo.com/videoplayback?expire=2000000000&c=ANDROID_VR&cver=1.37&sig=signed"
+            val directFormat = format(251, 155_000, "audio/webm; codecs=\"opus\"", direct = true).copy(url = signedUrl)
+
+            val resolved =
+                PlaybackStreamResolver
+                    .resolveUrl(
+                        format = directFormat,
+                        videoId = "signed-video",
+                        client = YouTubeClient.ANDROID_VR_1_65_10,
+                        authState = PlaybackAuthState.EMPTY,
+                    ).getOrThrow()
+
+            assertEquals(signedUrl, resolved)
+        }
+
     @Test
     fun highQualityPrefersBestDirectFormatAtOrBelowTarget() {
         val response =

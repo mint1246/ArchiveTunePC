@@ -44,6 +44,7 @@ import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_EMB
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_PRIMARY
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_REMIX
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
+import moe.rukamori.archivetune.stream.PlaybackStreamResolver
 import moe.rukamori.archivetune.utils.potoken.BotGuardTokenGenerator
 import moe.rukamori.archivetune.utils.potoken.PoTokenResult
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -1579,21 +1580,24 @@ object YTPlayerUtils {
     }
 
     /**
-     * Wrapper around the [NewPipeUtils.getStreamUrl] function which reports exceptions.
-     * Also patches cver to match the client version.
+     * Resolves a stream URL through the shared Android/Desktop policy and reports exceptions.
+     *
+     * Important: never rewrite query parameters on the returned googlevideo URL here. Direct
+     * media URLs are already signed by YouTube; mutating cver (or any other signed parameter)
+     * after resolution can invalidate the signature and turn an otherwise valid stream into a
+     * 403. The request-profile layer reads the client/cver that are actually present in the URL
+     * and applies matching HTTP headers without touching the signed URL itself.
      */
     private suspend fun findUrl(
         format: PlayerResponse.StreamingData.Format,
         videoId: String,
-        client: YouTubeClient? = null,
+        client: YouTubeClient,
         authState: PlaybackAuthState,
     ): Result<String> {
         Timber.tag(logTag).i("Finding stream URL for format: ${format.mimeType}, videoId: $videoId")
-        return NewPipeUtils
-            .getStreamUrl(format, videoId, client, authState)
-            .map { url ->
-                if (client == null) url else StreamClientUtils.patchClientVersion(url, client.clientVersion)
-            }.onSuccess { Timber.tag(logTag).i("Stream URL obtained successfully") }
+        return PlaybackStreamResolver
+            .resolveUrl(format, videoId, client, authState)
+            .onSuccess { Timber.tag(logTag).i("Stream URL obtained successfully") }
     }
 
     private fun Throwable.isJavaScriptPlayerExtractorFailure(): Boolean {

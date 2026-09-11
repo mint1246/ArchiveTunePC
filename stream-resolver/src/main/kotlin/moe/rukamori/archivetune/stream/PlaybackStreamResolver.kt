@@ -186,7 +186,7 @@ object PlaybackStreamResolver {
         client: YouTubeClient,
         authState: PlaybackAuthState,
     ): Result<String> =
-        NewPipeUtils.getStreamUrl(format, videoId, client, authState).map { patchClientVersion(it, client.clientVersion) }
+        NewPipeUtils.getStreamUrl(format, videoId, client, authState)
 
     fun requestHeaders(client: YouTubeClient): Map<String, String> =
         buildMap {
@@ -256,9 +256,6 @@ object PlaybackStreamResolver {
 
     fun normalizeClientKey(clientKey: String?): String =
         clientKey?.trim()?.takeIf(String::isNotBlank)?.uppercase(Locale.US).orEmpty()
-
-    fun patchClientVersion(url: String, clientVersion: String): String =
-        if (url.contains("cver=")) url.replace(Regex("cver=[^&]+"), "cver=$clientVersion") else url
 
     private fun codecRank(mimeType: String): Int =
         when {
