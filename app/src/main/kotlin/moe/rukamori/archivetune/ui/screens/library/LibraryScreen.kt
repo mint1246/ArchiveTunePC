@@ -81,6 +81,7 @@ import moe.rukamori.archivetune.constants.toLibraryFilterOrder
 import moe.rukamori.archivetune.constants.toPlaylistTagOrder
 import moe.rukamori.archivetune.db.entities.TagEntity
 import moe.rukamori.archivetune.ui.component.TagsManagementDialog
+import moe.rukamori.archivetune.ui.theme.LocalDynamicBackdropActive
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
 
@@ -89,6 +90,7 @@ internal val LibraryPullToRefreshIndicatorOffset = 0.dp
 
 @Composable
 fun LibraryScreen(navController: NavController) {
+    val dynamicBackdropActive = LocalDynamicBackdropActive.current
     val defaultFilter by rememberEnumPreference(ChipSortTypeKey, LibraryFilter.LIBRARY)
     val database = LocalDatabase.current
     val (selectedTagIds, onSelectedTagIdsChange) = rememberPlaylistTagFilterState(database)
@@ -142,7 +144,7 @@ fun LibraryScreen(navController: NavController) {
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background),
     ) {
-        if (!disableBlur) {
+        if (!disableBlur && !dynamicBackdropActive) {
             Box(
                 modifier =
                     Modifier

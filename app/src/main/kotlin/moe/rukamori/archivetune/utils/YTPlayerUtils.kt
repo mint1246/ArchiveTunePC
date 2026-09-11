@@ -59,6 +59,7 @@ object YTPlayerUtils {
     private const val PLAYBACK_DATA_RESOLUTION_MUTEX_COUNT = 32
     const val STREAM_URL_EXPIRY_SAFETY_MS = 60_000L
     private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
+    private val failedMediaStreamClientsUntil = ConcurrentHashMap<String, Long>()
 
     private fun extractExpireTimestampMsFromUrl(url: String): Long? {
         val expireTimestamp =
@@ -467,6 +468,23 @@ object YTPlayerUtils {
             System.currentTimeMillis() + FAILED_CLIENT_BACKOFF_MS
     }
 
+    /**
+     * A player API response can be perfectly valid while the signed media URL it returns is rejected
+     * later by googlevideo.  Keep those failures independent of the mutable auth fingerprint: auth/
+     * visitor repair during the retry must not immediately re-enable the same broken media client.
+     */
+    fun markMediaStreamClientFailed(
+        videoId: String,
+        clientKey: String?,
+        httpStatusCode: Int?,
+    ) {
+        if (httpStatusCode != null && httpStatusCode !in RETRYABLE_STREAM_RESPONSE_CODES) return
+        mediaFailureClientKeys(clientKey).forEach { failedClientKey ->
+            failedMediaStreamClientsUntil[buildMediaFailedClientKey(videoId, failedClientKey)] =
+                System.currentTimeMillis() + FAILED_CLIENT_BACKOFF_MS
+        }
+    }
+
     fun markPreferredClientFailed(
         videoId: String,
         client: PlayerStreamClient,
@@ -476,13 +494,18 @@ object YTPlayerUtils {
         markStreamClientFailed(videoId, client.name, httpStatusCode, authFingerprint)
     }
 
-    private fun isStreamClientTemporarilyBlocked(
+    internal fun isStreamClientTemporarilyBlocked(
         videoId: String,
         clientKey: String?,
         authFingerprint: String,
     ): Boolean {
         val normalizedClientKey = normalizeStreamClientKey(clientKey)
         if (normalizedClientKey.isEmpty()) return false
+        val mediaFailureKey = buildMediaFailedClientKey(videoId, normalizedClientKey)
+        failedMediaStreamClientsUntil[mediaFailureKey]?.let { until ->
+            if (until > System.currentTimeMillis()) return true
+            failedMediaStreamClientsUntil.remove(mediaFailureKey, until)
+        }
         val key = buildFailedClientKey(videoId, normalizedClientKey, authFingerprint)
         val until = failedStreamClientsUntil[key] ?: return false
         if (until <= System.currentTimeMillis()) {
@@ -499,6 +522,23 @@ object YTPlayerUtils {
         clientKey: String,
         authFingerprint: String,
     ): String = "$authFingerprint:$videoId:${normalizeStreamClientKey(clientKey)}"
+
+    internal fun buildMediaFailedClientKey(
+        videoId: String,
+        clientKey: String,
+    ): String = "$videoId:${normalizeStreamClientKey(clientKey)}"
+
+    internal fun mediaFailureClientKeys(clientKey: String?): Set<String> {
+        val normalized = normalizeStreamClientKey(clientKey)
+        if (normalized.isEmpty()) return emptySet()
+        if (!normalized.startsWith("ANDROID_VR@")) return setOf(normalized)
+        return STREAM_FALLBACK_CLIENTS
+            .asSequence()
+            .filter { it.clientName.equals("ANDROID_VR", ignoreCase = true) }
+            .map(StreamClientUtils::buildClientKey)
+            .map(::normalizeStreamClientKey)
+            .toSet()
+    }
 
     internal fun resolvePreferredPlaybackClient(
         preferredStreamClient: PlayerStreamClient,

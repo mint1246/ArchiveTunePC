@@ -72,6 +72,7 @@ import moe.rukamori.archivetune.playback.PlayerConnection
 import moe.rukamori.archivetune.ui.component.ExpressivePullToRefreshBox
 import moe.rukamori.archivetune.ui.component.LocalMenuState
 import moe.rukamori.archivetune.ui.component.MenuState
+import moe.rukamori.archivetune.ui.theme.LocalDynamicBackdropActive
 import moe.rukamori.archivetune.ui.utils.SnapLayoutInfoProvider
 import moe.rukamori.archivetune.viewmodels.HomeViewModel
 
@@ -310,6 +311,7 @@ private fun HomeContent(
     onNotInterested: (moe.rukamori.archivetune.innertube.models.YTItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val dynamicBackdropActive = LocalDynamicBackdropActive.current
     val remoteQuickPicks =
         uiState
             .takeIf { it.quickPicksMode == QuickPicks.QUICK_PICKS }
@@ -317,7 +319,7 @@ private fun HomeContent(
     val tonalStart = MaterialTheme.colorScheme.primaryContainer
     val tonalMiddle = MaterialTheme.colorScheme.secondaryContainer
     Box(modifier = modifier.fillMaxSize()) {
-        if (uiState.showTonalBackdrop) {
+        if (uiState.showTonalBackdrop && !dynamicBackdropActive) {
             Box(
                 modifier =
                     Modifier

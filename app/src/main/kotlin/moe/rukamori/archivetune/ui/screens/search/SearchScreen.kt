@@ -90,6 +90,7 @@ import moe.rukamori.archivetune.ui.menu.YouTubeArtistMenu
 import moe.rukamori.archivetune.ui.menu.YouTubeSongMenu
 import moe.rukamori.archivetune.ui.screens.MoodAndGenresButton
 import moe.rukamori.archivetune.ui.screens.MoodAndGenresButtonHeight
+import moe.rukamori.archivetune.ui.theme.LocalDynamicBackdropActive
 import moe.rukamori.archivetune.utils.rememberPreference
 import moe.rukamori.archivetune.viewmodels.SearchDiscoveryScreenState
 import moe.rukamori.archivetune.viewmodels.SearchDiscoveryTab
@@ -103,6 +104,7 @@ fun SearchScreen(
     headerScrollConnection: NestedScrollConnection? = null,
     viewModel: SearchDiscoveryViewModel = hiltViewModel(),
 ) {
+    val dynamicBackdropActive = LocalDynamicBackdropActive.current
     val state by viewModel.state.collectAsStateWithLifecycle()
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val (disableBlur) = rememberPreference(DisableBlurKey, false)
@@ -137,7 +139,7 @@ fun SearchScreen(
                     },
                 ),
     ) {
-        if (!disableBlur) {
+        if (!disableBlur && !dynamicBackdropActive) {
             Box(
                 modifier =
                     Modifier

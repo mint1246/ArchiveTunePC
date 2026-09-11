@@ -197,6 +197,7 @@ import moe.rukamori.archivetune.ui.menu.PlayerMenu
 import moe.rukamori.archivetune.ui.screens.LOGIN_ROUTE
 import moe.rukamori.archivetune.ui.screens.buildLoginRoute
 import moe.rukamori.archivetune.ui.screens.settings.DarkMode
+import moe.rukamori.archivetune.ui.theme.LocalDynamicBackdropActive
 import moe.rukamori.archivetune.ui.theme.PlayerColorExtractor
 import moe.rukamori.archivetune.ui.utils.ShowMediaInfo
 import moe.rukamori.archivetune.ui.utils.YtimgResizePolicy
@@ -377,6 +378,7 @@ fun BottomSheetPlayer(
         playerDesignStyle == PlayerDesignStyle.V8 || playerDesignStyle == PlayerDesignStyle.V9
     val playerBackground =
         if (playerUsesFixedBackground) PlayerBackgroundStyle.DEFAULT else storedPlayerBackground
+    val dynamicBackdropActive = LocalDynamicBackdropActive.current
 
     // Custom background preferences (image + effects)
     val (playerCustomImageUri) = rememberPreference(PlayerCustomImageUriKey, "")
@@ -460,6 +462,10 @@ fun BottomSheetPlayer(
     val canSkipNext by playerConnection.canSkipNext.collectAsState()
 
     val aodModeEnabled by playerConnection.aodModeEnabled.collectAsStateWithLifecycle()
+    val useShellDynamicBackdrop =
+        dynamicBackdropActive &&
+            !aodModeEnabled &&
+            (playerUsesFixedBackground || playerBackground == PlayerBackgroundStyle.DEFAULT)
     val currentLyricsEntity by playerConnection.currentLyrics.collectAsStateWithLifecycle(initialValue = null)
     val (thumbnailCornerRadius) = rememberPreference(ThumbnailCornerRadiusKey, defaultValue = 8f)
     val archiveTuneCanvasEnabled by rememberPreference(ArchiveTuneCanvasKey, false)
@@ -1014,7 +1020,9 @@ fun BottomSheetPlayer(
                     }
                 },
         backgroundColor =
-            if (playerDesignStyle == PlayerDesignStyle.V9) {
+            if (useShellDynamicBackdrop) {
+                Color.Transparent
+            } else if (playerDesignStyle == PlayerDesignStyle.V9) {
                 val progress =
                     ((state.value - state.collapsedBound) / (state.expandedBound - state.collapsedBound))
                         .coerceIn(0f, 1f)
@@ -1301,6 +1309,7 @@ fun BottomSheetPlayer(
 
         if (!state.isCollapsed &&
             !aodModeEnabled &&
+            !useShellDynamicBackdrop &&
             playerDesignStyle != PlayerDesignStyle.V5 &&
             playerDesignStyle != PlayerDesignStyle.V7 &&
             playerDesignStyle != PlayerDesignStyle.V8 &&
@@ -1324,7 +1333,8 @@ fun BottomSheetPlayer(
         when (LocalConfiguration.current.orientation) {
             Configuration.ORIENTATION_LANDSCAPE -> {
                 if (playerDesignStyle == PlayerDesignStyle.V5) {
-                    val littleBackground = MaterialTheme.colorScheme.primaryContainer
+                    val littleBackground =
+                        if (useShellDynamicBackdrop) Color.Transparent else MaterialTheme.colorScheme.primaryContainer
                     val littleTextColor = MaterialTheme.colorScheme.onPrimaryContainer
                     val displayPositionMs = sliderPosition ?: position
                     val progressFraction =
@@ -1414,16 +1424,18 @@ fun BottomSheetPlayer(
                                 lowDataMode = lowDataModeActive,
                                 isMusicVideo = mediaMetadata?.isMusicVideo ?: false,
                             )
-                        V7PlayerBackdrop(
-                            thumbnailUrl = v7SwapState.displayUrl,
-                            canvasStaticUrl = v7CanvasArtwork?.static,
-                            canvasPrimaryUrl = v7CanvasArtwork?.animatedVertical,
-                            canvasFallbackUrl = v7CanvasArtwork?.videoUrlVertical,
-                            isPlaying = isPlaying,
-                            disableBlur = disableBlur,
-                            backdropBlurAmount = backdropBlurAmount,
-                            label = "v7BackdropLandscape",
-                        )
+                        if (!useShellDynamicBackdrop) {
+                            V7PlayerBackdrop(
+                                thumbnailUrl = v7SwapState.displayUrl,
+                                canvasStaticUrl = v7CanvasArtwork?.static,
+                                canvasPrimaryUrl = v7CanvasArtwork?.animatedVertical,
+                                canvasFallbackUrl = v7CanvasArtwork?.videoUrlVertical,
+                                isPlaying = isPlaying,
+                                disableBlur = disableBlur,
+                                backdropBlurAmount = backdropBlurAmount,
+                                label = "v7BackdropLandscape",
+                            )
+                        }
 
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1477,10 +1489,12 @@ fun BottomSheetPlayer(
                                 lowDataMode = lowDataModeActive,
                                 isMusicVideo = mediaMetadata?.isMusicVideo ?: false,
                             )
-                        V8PlayerBackdrop(
-                            thumbnailUrl = v8SwapState.displayUrl,
-                            backdropBlurAmount = backdropBlurAmount,
-                        )
+                        if (!useShellDynamicBackdrop) {
+                            V8PlayerBackdrop(
+                                thumbnailUrl = v8SwapState.displayUrl,
+                                backdropBlurAmount = backdropBlurAmount,
+                            )
+                        }
 
                         enrichedMetadata?.let { metadata ->
                             V8PlayerContent(
@@ -1599,7 +1613,8 @@ fun BottomSheetPlayer(
 
             else -> {
                 if (playerDesignStyle == PlayerDesignStyle.V5) {
-                    val littleBackground = MaterialTheme.colorScheme.primaryContainer
+                    val littleBackground =
+                        if (useShellDynamicBackdrop) Color.Transparent else MaterialTheme.colorScheme.primaryContainer
                     val littleTextColor = MaterialTheme.colorScheme.onPrimaryContainer
                     val displayPositionMs = sliderPosition ?: position
                     val progressFraction =
@@ -1692,16 +1707,18 @@ fun BottomSheetPlayer(
                                 lowDataMode = lowDataModeActive,
                                 isMusicVideo = mediaMetadata?.isMusicVideo ?: false,
                             )
-                        V7PlayerBackdrop(
-                            thumbnailUrl = v7SwapState.displayUrl,
-                            canvasStaticUrl = v7CanvasArtwork?.static,
-                            canvasPrimaryUrl = v7CanvasArtwork?.animatedVertical,
-                            canvasFallbackUrl = v7CanvasArtwork?.videoUrlVertical,
-                            isPlaying = isPlaying,
-                            disableBlur = disableBlur,
-                            backdropBlurAmount = backdropBlurAmount,
-                            label = "v7BackdropPortrait",
-                        )
+                        if (!useShellDynamicBackdrop) {
+                            V7PlayerBackdrop(
+                                thumbnailUrl = v7SwapState.displayUrl,
+                                canvasStaticUrl = v7CanvasArtwork?.static,
+                                canvasPrimaryUrl = v7CanvasArtwork?.animatedVertical,
+                                canvasFallbackUrl = v7CanvasArtwork?.videoUrlVertical,
+                                isPlaying = isPlaying,
+                                disableBlur = disableBlur,
+                                backdropBlurAmount = backdropBlurAmount,
+                                label = "v7BackdropPortrait",
+                            )
+                        }
 
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1753,10 +1770,12 @@ fun BottomSheetPlayer(
                                 lowDataMode = lowDataModeActive,
                                 isMusicVideo = mediaMetadata?.isMusicVideo ?: false,
                             )
-                        V8PlayerBackdrop(
-                            thumbnailUrl = v8SwapState.displayUrl,
-                            backdropBlurAmount = backdropBlurAmount,
-                        )
+                        if (!useShellDynamicBackdrop) {
+                            V8PlayerBackdrop(
+                                thumbnailUrl = v8SwapState.displayUrl,
+                                backdropBlurAmount = backdropBlurAmount,
+                            )
+                        }
 
                         enrichedMetadata?.let { metadata ->
                             V8PlayerContent(

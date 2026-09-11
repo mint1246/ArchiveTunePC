@@ -51,6 +51,7 @@ import kotlin.math.min
 val DefaultThemeColor = Color(0xFFED5564)
 val LocalArchiveTuneFontPreference = staticCompositionLocalOf { AppFontPreference.DEFAULT }
 val LocalArchiveTuneFontFamily = staticCompositionLocalOf { AppFontFamily }
+val LocalDynamicBackdropActive = staticCompositionLocalOf { false }
 
 @Composable
 fun rememberArchiveTuneLyricsFontFamily(): FontFamily {
@@ -190,6 +191,7 @@ fun ArchiveTuneTheme(
     CompositionLocalProvider(
         LocalArchiveTuneFontPreference provides fontPreference,
         LocalArchiveTuneFontFamily provides resolvedFontFamily,
+        LocalDynamicBackdropActive provides dynamicBackdropActive,
     ) {
         MaterialExpressiveTheme(
             colorScheme = animatedColorScheme,
@@ -209,14 +211,18 @@ fun ArchiveTuneTheme(
 private fun ColorScheme.dynamicBackdropGlass(): ColorScheme =
     copy(
         background = Color.Transparent,
-        surface = surface.copy(alpha = 0.88f),
-        surfaceDim = surfaceDim.copy(alpha = 0.94f),
-        surfaceBright = surfaceBright.copy(alpha = 0.80f),
-        surfaceContainerLowest = surfaceContainerLowest.copy(alpha = 0.58f),
-        surfaceContainerLow = surfaceContainerLow.copy(alpha = 0.60f),
-        surfaceContainer = surfaceContainer.copy(alpha = 0.64f),
-        surfaceContainerHigh = surfaceContainerHigh.copy(alpha = 0.68f),
-        surfaceContainerHighest = surfaceContainerHighest.copy(alpha = 0.74f),
+        // In dynamic mode the single root DynamicAppBackdrop is the page background. These roles
+        // are what Scaffold and most full-screen roots paint, so making them translucent merely
+        // layers the old page color over the artwork and looks like a foreground overlay.
+        surface = Color.Transparent,
+        surfaceDim = Color.Transparent,
+        surfaceBright = Color.Transparent,
+        surfaceContainerLowest = Color.Transparent,
+        // Component containers stay frosted/readable over that one shared backdrop.
+        surfaceContainerLow = surfaceContainerLow.copy(alpha = 0.44f),
+        surfaceContainer = surfaceContainer.copy(alpha = 0.52f),
+        surfaceContainerHigh = surfaceContainerHigh.copy(alpha = 0.60f),
+        surfaceContainerHighest = surfaceContainerHighest.copy(alpha = 0.68f),
         surfaceVariant = surfaceVariant.copy(alpha = 0.72f),
         primaryContainer = primaryContainer.copy(alpha = 0.88f),
         secondaryContainer = secondaryContainer.copy(alpha = 0.88f),
