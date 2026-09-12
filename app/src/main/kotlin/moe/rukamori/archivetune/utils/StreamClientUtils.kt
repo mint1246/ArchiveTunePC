@@ -58,7 +58,7 @@ object StreamClientUtils {
 
     /**
      * Determine the correct Origin and Referer for a YouTube media request.
-     * Web-type clients need YouTube Music origin; TV clients need YouTube origin.
+     * Web, mobile web, YouTube Music, and TV clients use their matching YouTube origin.
      * Other clients (native app clients) do not need these headers.
      *
      * @param clientParam  the value of the `c` query parameter
@@ -174,7 +174,11 @@ object StreamClientUtils {
             }
 
             clientName == "TVHTML5" -> {
-                YouTubeClient.TVHTML5
+                if (requestedClientVersion == YouTubeClient.TVHTML5_DOWNGRADED.clientVersion) {
+                    YouTubeClient.TVHTML5_DOWNGRADED
+                } else {
+                    YouTubeClient.TVHTML5
+                }
             }
 
             clientName == "TVHTML5_SIMPLY_EMBEDDED_PLAYER" || clientName == "TVHTML5_SIMPLY" -> {
@@ -239,8 +243,16 @@ object StreamClientUtils {
                 OriginReferer(YouTubeClient.ORIGIN_YOUTUBE, YouTubeClient.REFERER_YOUTUBE_TV)
             }
 
-            isWebMusicClient(client) -> {
+            isMobileWebClient(client) -> {
+                OriginReferer(YouTubeClient.ORIGIN_YOUTUBE_MOBILE, YouTubeClient.REFERER_YOUTUBE_MOBILE)
+            }
+
+            isMusicWebClient(client) -> {
                 OriginReferer(YouTubeClient.ORIGIN_YOUTUBE_MUSIC, YouTubeClient.REFERER_YOUTUBE_MUSIC)
+            }
+
+            isYouTubeWebClient(client) -> {
+                OriginReferer(YouTubeClient.ORIGIN_YOUTUBE, YouTubeClient.REFERER_YOUTUBE)
             }
 
             else -> {
@@ -248,19 +260,24 @@ object StreamClientUtils {
             }
         }
 
-    private fun isWebLikeClient(client: YouTubeClient): Boolean = isTvClient(client) || isWebMusicClient(client)
+    private fun isWebLikeClient(client: YouTubeClient): Boolean =
+        isTvClient(client) || isMobileWebClient(client) || isMusicWebClient(client) || isYouTubeWebClient(client)
 
     private fun isTvClient(client: YouTubeClient): Boolean {
         val clientName = client.clientName.uppercase(Locale.US)
         return clientName == "TVHTML5" || clientName == "TVHTML5_SIMPLY_EMBEDDED_PLAYER" || clientName == "TVHTML5_SIMPLY"
     }
 
-    private fun isWebMusicClient(client: YouTubeClient): Boolean {
+    private fun isMusicWebClient(client: YouTubeClient): Boolean =
+        client.clientName.equals("WEB_REMIX", ignoreCase = true)
+
+    private fun isMobileWebClient(client: YouTubeClient): Boolean =
+        client.clientName.equals("MWEB", ignoreCase = true)
+
+    private fun isYouTubeWebClient(client: YouTubeClient): Boolean {
         val clientName = client.clientName.uppercase(Locale.US)
         return clientName == "WEB" ||
-            clientName == "WEB_REMIX" ||
             clientName == "WEB_CREATOR" ||
-            clientName == "MWEB" ||
             clientName == "WEB_EMBEDDED_PLAYER"
     }
 

@@ -191,16 +191,10 @@ object PlaybackStreamResolver {
     fun requestHeaders(client: YouTubeClient): Map<String, String> =
         buildMap {
             put("User-Agent", client.userAgent)
-            when {
-                client.clientName.uppercase(Locale.US).startsWith("WEB") -> {
-                    put("Origin", YouTubeClient.ORIGIN_YOUTUBE_MUSIC)
-                    put("Referer", YouTubeClient.REFERER_YOUTUBE_MUSIC)
-                }
-
-                client.clientName.uppercase(Locale.US).startsWith("TVHTML5") -> {
-                    put("Origin", YouTubeClient.ORIGIN_YOUTUBE)
-                    put("Referer", YouTubeClient.REFERER_YOUTUBE_TV)
-                }
+            val clientName = client.clientName.uppercase(Locale.US)
+            if (clientName.startsWith("WEB") || clientName == "MWEB" || clientName.startsWith("TVHTML5")) {
+                put("Origin", client.requestOrigin())
+                put("Referer", client.requestReferer())
             }
         }
 
