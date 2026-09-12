@@ -57,11 +57,11 @@ import kotlin.math.sin
 
 private const val SHAPED_GLYPH_FADE_FRACTION = 0.2f
 private const val SHAPED_BRIGHT_OVERLAY_ALPHA = 0xE7 / 255f
-private const val SHAPED_SUNG_GLYPH_GLOW = 0.50f
-private const val SHAPED_SUNG_WORD_GLOW = 0.40f
+private const val SHAPED_SUNG_GLYPH_GLOW = 0.80f
+private const val SHAPED_SUNG_WORD_GLOW = 0.65f
 private val SHAPED_HORIZONTAL_OVERSCAN = 24.dp
-private val SHAPED_GLOW_TIGHT_RADIUS = 5.dp
-private val SHAPED_GLOW_WIDE_RADIUS = 13.dp
+private val SHAPED_GLOW_TIGHT_RADIUS = 8.dp
+private val SHAPED_GLOW_WIDE_RADIUS = 22.dp
 
 /**
  * Android's full-line counterpart to desktop SpicyPane's LineTextGeometry/ActiveLineText.
@@ -185,7 +185,7 @@ internal fun ShapedLyricsLine(
                     fontSizePx = fontSizePx,
                     bounceFactor = bounceFactor.coerceAtLeast(0f),
                     glowFactor = glowFactor.coerceAtLeast(0f),
-                    sourceAlphaMultiplier = 0.72f,
+                    sourceAlphaMultiplier = 1.15f,
                 )
             }
         }
@@ -207,7 +207,7 @@ internal fun ShapedLyricsLine(
                     fontSizePx = fontSizePx,
                     bounceFactor = bounceFactor.coerceAtLeast(0f),
                     glowFactor = glowFactor.coerceAtLeast(0f),
-                    sourceAlphaMultiplier = 1f,
+                    sourceAlphaMultiplier = 1.50f,
                 )
             }
         }
