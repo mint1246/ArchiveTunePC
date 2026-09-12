@@ -53,6 +53,7 @@ import moe.rukamori.archivetune.ui.screens.settings.ThemePalettes
 import moe.rukamori.archivetune.ui.theme.ThemeSeedPalette
 import moe.rukamori.archivetune.ui.theme.ThemeSeedPaletteCodec
 import moe.rukamori.archivetune.utils.MoriCipherUpdateScheduler
+import moe.rukamori.archivetune.utils.PlaylistCoverInterceptor
 import moe.rukamori.archivetune.utils.PreferenceStore
 import moe.rukamori.archivetune.utils.ProxyUtils
 import moe.rukamori.archivetune.utils.YTPlayerUtils
@@ -81,6 +82,8 @@ class App :
     @Inject
     lateinit var runGatekeeperCheckUseCase: RunGatekeeperCheckUseCase
 
+    @Inject
+    lateinit var playlistCoverInterceptor: PlaylistCoverInterceptor
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     @Volatile private var isInitialized = false
@@ -364,6 +367,9 @@ class App :
             .allowHardware(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
             .diskCache(diskCache)
             .diskCachePolicy(imageCacheConfig.policy)
+            .components {
+                add(playlistCoverInterceptor)
+            }
             .build()
     }
 

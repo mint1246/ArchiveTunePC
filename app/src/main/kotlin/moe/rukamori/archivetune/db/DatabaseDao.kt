@@ -315,6 +315,10 @@ interface DatabaseDao {
     fun playlistSongs(playlistId: String): Flow<List<PlaylistSong>>
 
     @Transaction
+    @Query("SELECT * FROM playlist_song_map WHERE playlistId = :playlistId ORDER BY position")
+    suspend fun getPlaylistSongs(playlistId: String): List<PlaylistSong>
+
+    @Transaction
     @Query(
         "SELECT song.* FROM song_artist_map JOIN song ON song_artist_map.songId = song.id WHERE artistId = :artistId AND inLibrary IS NOT NULL ORDER BY inLibrary",
     )
@@ -1241,6 +1245,17 @@ interface DatabaseDao {
         customOrder: Int?,
     )
 
+    @Query(
+        """
+        UPDATE playlist SET thumbnailUrl = :thumbnailUrl
+        WHERE browseId = :browseId AND thumbnailUrl = :previousThumbnailUrl
+        """,
+    )
+    fun refreshPlaylistThumbnail(
+        browseId: String,
+        previousThumbnailUrl: String,
+        thumbnailUrl: String,
+    )
     @Query("UPDATE playlist SET songSortType = :sortType, songSortDescending = :descending WHERE id = :playlistId")
     fun updatePlaylistSortPreference(
         playlistId: String,

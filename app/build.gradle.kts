@@ -75,8 +75,8 @@ android {
     applicationId = "moe.rukamori.archivetune"
         minSdk = 26
         targetSdk = 37
-        versionCode = 140
-        versionName = "14.1.0"
+        versionCode = 141
+        versionName = "15.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -394,7 +394,6 @@ dependencies {
     implementation(libs.accompanist.lyrics.ui)
     implementation(libs.accompanist.lyrics.core)
 
-    implementation("org.json:json:20240303")
 }
 
 androidComponents {

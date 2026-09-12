@@ -17,7 +17,6 @@ import android.app.PendingIntent
 import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -89,11 +88,8 @@ import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.session.CommandButton
-import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -102,6 +98,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -415,7 +412,7 @@ class MusicService :
             }
         }
 
-    private var scopeJob = Job()
+    private var scopeJob = SupervisorJob()
     private var scope = CoroutineScope(Dispatchers.Main + scopeJob)
     private var ioScope = CoroutineScope(Dispatchers.IO + scopeJob)
     private val binder = MusicBinder()
@@ -1349,13 +1346,11 @@ class MusicService :
                 smallIconResId = R.drawable.small_icon,
             ),
         )
+        addSession(mediaSession)
 
         updateNotification()
         player.repeatMode = REPEAT_MODE_OFF
 
-        val sessionToken = SessionToken(this, ComponentName(this, MusicService::class.java))
-        val controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
-        controllerFuture.addListener({ controllerFuture.get() }, MoreExecutors.directExecutor())
         scope.launch(Dispatchers.IO) {
             val prefs = dataStore.data.first()
             val repeatMode = prefs[RepeatModeKey] ?: REPEAT_MODE_OFF
@@ -1743,7 +1738,7 @@ class MusicService :
 
     private fun ensureScopesActive() {
         if (!scopeJob.isActive) {
-            scopeJob = Job()
+            scopeJob = SupervisorJob()
         }
         if (!scope.isActive) {
             scope = CoroutineScope(Dispatchers.Main + scopeJob)
@@ -3159,10 +3154,10 @@ class MusicService :
 
         var handoffCompleted = false
         try {
-            localPlayer.pauseAtEndOfMediaItems = false
-            player.volume = 0f
             crossfadeHandoffInProgress = true
             crossfadeHandoffProgress = 0f
+            localPlayer.pauseAtEndOfMediaItems = false
+            player.volume = 0f
             player.seekTo(targetIndex, incomingPosition)
             player.playWhenReady = shouldContinuePlayback
             if (shouldContinuePlayback) {
@@ -3831,7 +3826,10 @@ class MusicService :
 
         var throwable: Throwable? = error.cause
         while (throwable != null) {
-            if (throwable.message?.contains("Skipping atom with length", ignoreCase = true) == true) {
+            if (
+                throwable.message?.contains("Skipping atom with length", ignoreCase = true) == true ||
+                    throwable.isMedia3ExtractorBoundsFailure()
+            ) {
                 return true
             }
             throwable = throwable.cause
@@ -3871,6 +3869,10 @@ class MusicService :
                     }
                 }
 
+                isContentCached && throwable.isMedia3ExtractorBoundsFailure() -> {
+                    return true
+                }
+
                 isContainerParseError && isContentCached && throwable is ParserException -> {
                     return true
                 }
@@ -3888,6 +3890,10 @@ class MusicService :
         }
         return false
     }
+
+    private fun Throwable.isMedia3ExtractorBoundsFailure(): Boolean =
+        this is ArrayIndexOutOfBoundsException &&
+            stackTrace.any { it.className.startsWith("androidx.media3.extractor") }
 
     private fun retryPlaybackAfterStreamFailure(
         mediaId: String,
@@ -7050,7 +7056,8 @@ class MusicService :
                 val isEndOfOutgoingItemPause =
                     !playWhenReady &&
                         reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM &&
-                        localPlayer.pauseAtEndOfMediaItems
+                        crossfadePlaybackRequested &&
+                        (localPlayer.pauseAtEndOfMediaItems || crossfadeHandoffInProgress)
                 if (!isEndOfOutgoingItemPause) {
                     crossfadePlaybackRequested = playWhenReady
                     secondaryPlayer.playWhenReady = crossfadePlaybackRequested
@@ -7096,7 +7103,12 @@ class MusicService :
         super.onIsPlayingChanged(isPlaying)
         secondaryCrossfadePlayer?.let { secondaryPlayer ->
             if (isCrossfading && !crossfadeHandoffInProgress) {
-                if (isPlaying) {
+                val isEndOfOutgoingItemPause =
+                    !isPlaying &&
+                        !player.playWhenReady &&
+                        crossfadePlaybackRequested &&
+                        localPlayer.pauseAtEndOfMediaItems
+                if (isPlaying || isEndOfOutgoingItemPause) {
                     secondaryPlayer.play()
                 } else {
                     secondaryPlayer.pause()
