@@ -85,6 +85,8 @@ class App :
 
     @Inject
     lateinit var playlistCoverInterceptor: PlaylistCoverInterceptor
+
+    @Inject
     lateinit var downloadedArtworkRepository: DownloadedArtworkRepository
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
