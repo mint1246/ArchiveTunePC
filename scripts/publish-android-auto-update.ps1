@@ -172,10 +172,12 @@ try {
         throw "APK signer mismatch. Expected $ExpectedSignerSha256, got $signerSha256"
     }
 
-    $badging = (& $aapt dump badging $signedApk 2>&1 | Select-Object -First 1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw "aapt could not inspect the signed APK"
+    $badgingOutput = & $aapt dump badging $signedApk 2>&1
+    $aaptExitCode = $LASTEXITCODE
+    if ($aaptExitCode -ne 0) {
+        throw "aapt could not inspect the signed APK (exit code $aaptExitCode):`n$($badgingOutput | Out-String)"
     }
+    $badging = ($badgingOutput | Select-Object -First 1 | Out-String).Trim()
     $builtCodeMatch = [regex]::Match($badging, "versionCode='(\d+)'")
     if (-not $builtCodeMatch.Success -or [int]$builtCodeMatch.Groups[1].Value -ne $nextCode) {
         throw "Built APK does not contain versionCode ${nextCode}: $badging"
