@@ -3248,7 +3248,7 @@ private fun V9PortraitContent(
                     canvasPrimaryUrl = canvasPrimaryUrl,
                     canvasFallbackUrl = canvasFallbackUrl,
                     isPlaying = isPlaying,
-                    placeholderColor = textButtonColor.copy(alpha = 0.12f),
+                    placeholderColor = textBackgroundColor.copy(alpha = 0.08f),
                     modifier = Modifier.aspectRatio(1f)
                 )
             }
@@ -3329,9 +3329,9 @@ private fun V9PortraitContent(
                         onSliderValueChangeFinished()
                     },
                     enabled = duration > 0L,
-                    activeTrackColor = textButtonColor,
-                    inactiveTrackColor = textButtonColor.copy(alpha = 0.24f),
-                    thumbColor = textButtonColor,
+                    activeTrackColor = textBackgroundColor,
+                    inactiveTrackColor = textBackgroundColor.copy(alpha = 0.24f),
+                    thumbColor = textBackgroundColor,
                     isPlaying = isPlaying,
                     isVisible = true,
                     modifier = Modifier
@@ -3378,9 +3378,14 @@ private fun V9PortraitContent(
                 height = 80.dp,
                 pressAnimationSpec = controlSpatialSpec,
                 releaseDelay = 220L,
-                colorOtherButtons = textButtonColor.copy(alpha = 0.16f),
-                colorPlayPause = textButtonColor,
-                tintPlayPauseIcon = iconButtonColor,
+                colorOtherButtons = textBackgroundColor.copy(alpha = 0.08f),
+                colorPlayPause = textBackgroundColor,
+                tintPlayPauseIcon =
+                    if ((textBackgroundColor.red + textBackgroundColor.green + textBackgroundColor.blue) > 1.5f) {
+                        Color.Black
+                    } else {
+                        Color.White
+                    },
                 tintOtherIcons = textBackgroundColor,
             )
 
@@ -3446,7 +3451,7 @@ private fun V9LandscapeContent(
                 canvasFallbackUrl = canvasFallbackUrl,
                 isPlaying = isPlaying,
                 size = artworkSize,
-                placeholderColor = textButtonColor.copy(alpha = 0.12f),
+                placeholderColor = textBackgroundColor.copy(alpha = 0.08f),
             )
 
             Column(
@@ -3483,8 +3488,8 @@ private fun V9LandscapeContent(
                     position = position,
                     duration = duration,
                     isPlaying = isPlaying,
-                    activeColor = textButtonColor,
-                    inactiveColor = textButtonColor.copy(alpha = 0.24f),
+                    activeColor = textBackgroundColor,
+                    inactiveColor = textBackgroundColor.copy(alpha = 0.24f),
                     textColor = textBackgroundColor,
                     onSliderValueChange = onSliderValueChange,
                     onSliderValueChangeFinished = onSliderValueChangeFinished,
@@ -3503,9 +3508,14 @@ private fun V9LandscapeContent(
                     height = 64.dp,
                     pressAnimationSpec = controlSpatialSpec,
                     releaseDelay = 220L,
-                    colorOtherButtons = textButtonColor.copy(alpha = 0.14f),
-                    colorPlayPause = textButtonColor,
-                    tintPlayPauseIcon = iconButtonColor,
+                    colorOtherButtons = textBackgroundColor.copy(alpha = 0.08f),
+                    colorPlayPause = textBackgroundColor,
+                    tintPlayPauseIcon =
+                        if ((textBackgroundColor.red + textBackgroundColor.green + textBackgroundColor.blue) > 1.5f) {
+                            Color.Black
+                        } else {
+                            Color.White
+                        },
                     tintOtherIcons = textBackgroundColor,
                 )
 
@@ -3517,10 +3527,10 @@ private fun V9LandscapeContent(
                     onShuffleClick = onShuffleClick,
                     onRepeatClick = onRepeatClick,
                     onMenuClick = onMenuClick,
-                    activeColor = textButtonColor,
-                    inactiveColor = textButtonColor.copy(alpha = 0.16f),
+                    activeColor = textBackgroundColor,
+                    inactiveColor = textBackgroundColor.copy(alpha = 0.24f),
                     textColor = textBackgroundColor,
-                    containerColor = textButtonColor.copy(alpha = 0.08f),
+                    containerColor = textBackgroundColor.copy(alpha = 0.08f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),

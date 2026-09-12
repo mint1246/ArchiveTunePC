@@ -123,6 +123,7 @@ import moe.rukamori.archivetune.constants.PlayerBackgroundStyleKey
 import moe.rukamori.archivetune.db.entities.LyricsEntity
 import moe.rukamori.archivetune.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import moe.rukamori.archivetune.lyrics.LyricsEntry
+import moe.rukamori.archivetune.lyrics.PreparedLyrics
 import moe.rukamori.archivetune.lyrics.LyricsInterludeMotion
 import moe.rukamori.archivetune.lyrics.LyricsRomanizationPreferences
 import moe.rukamori.archivetune.lyrics.LyricsUtils.effectiveLyricsEntryEndMs
@@ -132,6 +133,7 @@ import moe.rukamori.archivetune.lyrics.LyricsUtils.isLineSyncedLrc
 import moe.rukamori.archivetune.lyrics.LyricsUtils.isTtml
 import moe.rukamori.archivetune.lyrics.LyricsUtils.parseLyrics
 import moe.rukamori.archivetune.lyrics.LyricsUtils.parseTtml
+import moe.rukamori.archivetune.lyrics.toLyricsEntries
 import moe.rukamori.archivetune.lyrics.LyricsUtils.providedRomanizedTextForEntry
 import moe.rukamori.archivetune.lyrics.LyricsUtils.providedRomanizedWordsForEntry
 import moe.rukamori.archivetune.lyrics.LyricsUtils.providedTranslationTextForEntry
@@ -171,6 +173,7 @@ private const val MIN_KARAOKE_SYLLABLE_DURATION_MS = 1
 fun LyricsEnhanced(
     sliderPositionProvider: () -> Long?,
     lyricsSyncOffset: Int,
+    preparedLyrics: PreparedLyrics? = null,
     modifier: Modifier = Modifier,
     textColorOverride: Color? = null,
     lyricsLineBlurOverride: Boolean? = null,
@@ -244,8 +247,16 @@ fun LyricsEnhanced(
             mediaMetadata?.id.orEmpty() to lyrics
         }
 
-    val isSynced = remember(lyrics) { lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)) }
-    val isWordSyncedFormat = remember(lyrics) { lyrics != null && hasWordSyncedLyrics(lyrics!!) }
+    val isSynced =
+        remember(lyrics, preparedLyrics) {
+            preparedLyrics?.syncType?.let { it != moe.rukamori.archivetune.lyrics.LyricsSyncType.PLAIN }
+                ?: (lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)))
+        }
+    val isWordSyncedFormat =
+        remember(lyrics, preparedLyrics) {
+            preparedLyrics?.syncType == moe.rukamori.archivetune.lyrics.LyricsSyncType.WORD ||
+                (preparedLyrics == null && lyrics != null && hasWordSyncedLyrics(lyrics!!))
+        }
 
     val songDurationMs =
         mediaMetadata
@@ -256,24 +267,25 @@ fun LyricsEnhanced(
             ?: player.duration.takeIf { it > 0L }
             ?: 0L
     val lyricsEntries: List<LyricsEntry> =
-        remember(lyrics, songDurationMs) {
+        remember(lyrics, songDurationMs, preparedLyrics) {
             if (lyrics == null || lyrics == LYRICS_NOT_FOUND) return@remember emptyList()
-            when {
-                isTtml(lyrics!!) -> {
-                    insertInstrumentalBreaks(parseTtml(lyrics!!), songDurationMs)
-                }
+            preparedLyrics?.toLyricsEntries()
+                ?: when {
+                    isTtml(lyrics!!) -> {
+                        insertInstrumentalBreaks(parseTtml(lyrics!!), songDurationMs)
+                    }
 
-                isLineSyncedLrc(lyrics!!) -> {
-                    insertInstrumentalBreaks(parseLyrics(lyrics!!), songDurationMs)
-                }
+                    isLineSyncedLrc(lyrics!!) -> {
+                        insertInstrumentalBreaks(parseLyrics(lyrics!!), songDurationMs)
+                    }
 
-                else -> {
-                    lyrics!!
-                        .lines()
-                        .filter { it.isNotBlank() }
-                        .map { line -> LyricsEntry(time = -1L, text = line.trim()) }
+                    else -> {
+                        lyrics!!
+                            .lines()
+                            .filter { it.isNotBlank() }
+                            .map { line -> LyricsEntry(time = -1L, text = line.trim()) }
+                    }
                 }
-            }
         }
 
     var syncedLyrics by remember(lyricsEntries, isWordSyncedFormat) {

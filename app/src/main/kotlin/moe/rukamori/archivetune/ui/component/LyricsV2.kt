@@ -120,6 +120,7 @@ import moe.rukamori.archivetune.constants.PlayerBackgroundStyleKey
 import moe.rukamori.archivetune.db.entities.LyricsEntity
 import moe.rukamori.archivetune.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import moe.rukamori.archivetune.lyrics.LyricsEntry
+import moe.rukamori.archivetune.lyrics.PreparedLyrics
 import moe.rukamori.archivetune.lyrics.LyricsInterludeMotion
 import moe.rukamori.archivetune.lyrics.LyricsRomanizationPreferences
 import moe.rukamori.archivetune.lyrics.LyricsUtils.effectiveLyricsEntryEndMs
@@ -135,6 +136,7 @@ import moe.rukamori.archivetune.lyrics.LyricsUtils.providedTranslationTextForEnt
 import moe.rukamori.archivetune.lyrics.LyricsUtils.romanizeLyricsLine
 import moe.rukamori.archivetune.lyrics.LyricsUtils.shouldRomanizeLyricsLine
 import moe.rukamori.archivetune.lyrics.WordTimestamp
+import moe.rukamori.archivetune.lyrics.toLyricsEntries
 import moe.rukamori.archivetune.ui.component.shimmer.ShimmerHost
 import moe.rukamori.archivetune.ui.component.shimmer.TextPlaceholder
 import moe.rukamori.archivetune.ui.theme.rememberArchiveTuneLyricsFontFamily
@@ -190,6 +192,7 @@ private fun isRtlText(text: String): Boolean {
 fun LyricsV2(
     sliderPositionProvider: () -> Long?,
     lyricsSyncOffset: Int,
+    preparedLyrics: PreparedLyrics? = null,
     modifier: Modifier = Modifier,
     textColorOverride: Color? = null,
     lyricsLineBlurOverride: Boolean? = null,
@@ -265,32 +268,41 @@ fun LyricsV2(
         }
 
     // ── Parse lyrics into entries ──
-    val isSynced = remember(lyrics) { lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)) }
-    val isWordSyncedFormat = remember(lyrics) { lyrics != null && hasWordSyncedLyrics(lyrics!!) }
+    val isSynced =
+        remember(lyrics, preparedLyrics) {
+            preparedLyrics?.syncType?.let { it != moe.rukamori.archivetune.lyrics.LyricsSyncType.PLAIN }
+                ?: (lyrics != null && (isLineSyncedLrc(lyrics!!) || isTtml(lyrics!!)))
+        }
+    val isWordSyncedFormat =
+        remember(lyrics, preparedLyrics) {
+            preparedLyrics?.syncType == moe.rukamori.archivetune.lyrics.LyricsSyncType.WORD ||
+                (preparedLyrics == null && lyrics != null && hasWordSyncedLyrics(lyrics!!))
+        }
     val lyricsDurationMs = player.duration.takeIf { it > 0L } ?: 0L
 
     val lyricsEntries: List<LyricsEntry> =
-        remember(lyrics, lyricsDurationMs) {
+        remember(lyrics, lyricsDurationMs, preparedLyrics) {
             if (lyrics == null || lyrics == LYRICS_NOT_FOUND) return@remember emptyList()
             val parsed =
-                when {
-                    isTtml(lyrics!!) -> {
-                        insertInstrumentalBreaks(parseTtml(lyrics!!), lyricsDurationMs)
-                    }
+                preparedLyrics?.toLyricsEntries()
+                    ?: when {
+                        isTtml(lyrics!!) -> {
+                            insertInstrumentalBreaks(parseTtml(lyrics!!), lyricsDurationMs)
+                        }
 
-                    isLineSyncedLrc(lyrics!!) -> {
-                        insertInstrumentalBreaks(parseLyrics(lyrics!!), lyricsDurationMs)
-                    }
+                        isLineSyncedLrc(lyrics!!) -> {
+                            insertInstrumentalBreaks(parseLyrics(lyrics!!), lyricsDurationMs)
+                        }
 
-                    else -> {
-                        lyrics!!
-                            .lines()
-                            .filter { it.isNotBlank() }
-                            .mapIndexed { index, line ->
-                                LyricsEntry(time = -1L, text = line.trim())
-                            }
+                        else -> {
+                            lyrics!!
+                                .lines()
+                                .filter { it.isNotBlank() }
+                                .mapIndexed { index, line ->
+                                    LyricsEntry(time = -1L, text = line.trim())
+                                }
+                        }
                     }
-                }
             if (parsed.isNotEmpty() && parsed.first().time >= 0) {
                 listOf(HEAD_LYRICS_ENTRY) + parsed
             } else {
@@ -767,7 +779,7 @@ fun LyricsV2(
                             ?.takeIf { it.isNotBlank() }
                             ?: item.text
                     }
-                val lineIsRtl = remember(lineText) { isRtlText(lineText) }
+                val lineIsRtl = remember(item.isRtl, lineText) { item.isRtl ?: isRtlText(lineText) }
                 val lineLayoutDirection =
                     remember(lineIsRtl, baseLayoutDirection) {
                         if (lineIsRtl) LayoutDirection.Rtl else baseLayoutDirection

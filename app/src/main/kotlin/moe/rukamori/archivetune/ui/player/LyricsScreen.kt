@@ -81,6 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.C
 import androidx.media3.common.Player.STATE_BUFFERING
 import androidx.media3.common.Player.STATE_READY
@@ -123,6 +124,7 @@ import moe.rukamori.archivetune.constants.PlayerCustomImageUriKey
 import moe.rukamori.archivetune.constants.ShowLyricsPlayerControlsKey
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.lyrics.PreparedLyrics
 import moe.rukamori.archivetune.ui.component.LocalMenuState
 import moe.rukamori.archivetune.ui.component.LyricsEnhanced
 import moe.rukamori.archivetune.ui.component.LyricsV2
@@ -132,6 +134,8 @@ import moe.rukamori.archivetune.ui.theme.PlayerColorExtractor
 import moe.rukamori.archivetune.utils.makeTimeString
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
+import moe.rukamori.archivetune.viewmodels.LyricsRenderScreenState
+import moe.rukamori.archivetune.viewmodels.LyricsRenderViewModel
 import kotlin.coroutines.cancellation.CancellationException
 
 private val AppleMusicFallbackGradient =
@@ -170,6 +174,9 @@ fun LyricsScreen(
             }
         }
     val currentLyrics by playerConnection.currentLyrics.collectAsStateWithLifecycle(initialValue = null)
+    val lyricsRenderViewModel: LyricsRenderViewModel = hiltViewModel()
+    val lyricsRenderState by lyricsRenderViewModel.state.collectAsStateWithLifecycle()
+    val preparedLyrics = (lyricsRenderState as? LyricsRenderScreenState.Success)?.lyrics
 
     val (enableHapticFeedback) = rememberPreference(EnableHapticFeedbackKey, true)
     val lyricsMode by rememberEnumPreference(LyricsModeKey, LyricsMode.ENHANCED)
@@ -258,6 +265,17 @@ fun LyricsScreen(
     var sliderPosition by remember(mediaMetadata.id) { mutableStateOf<Long?>(null) }
     var showChords by remember(mediaMetadata.id) { mutableStateOf(false) }
     var chordTrack by remember(mediaMetadata.id) { mutableStateOf<ChordTrack?>(null) }
+
+    LaunchedEffect(mediaMetadata.id, mediaMetadata.duration, durationState.longValue) {
+        val durationMs =
+            mediaMetadata.duration
+                .takeIf { it > 0 }
+                ?.toLong()
+                ?.times(1_000L)
+                ?: durationState.longValue.takeIf { it > 0L }
+                ?: 0L
+        lyricsRenderViewModel.bind(mediaMetadata.id, durationMs)
+    }
     var chordLoading by remember(mediaMetadata.id) { mutableStateOf(false) }
     var chordError by remember(mediaMetadata.id) { mutableStateOf<String?>(null) }
     var chordReloadKey by remember(mediaMetadata.id) { mutableIntStateOf(0) }
@@ -449,6 +467,7 @@ fun LyricsScreen(
                 ) {
                     AppleMusicLyricsPane(
                         lyricsMode = lyricsMode,
+                        preparedLyrics = preparedLyrics,
                         foregroundColor = foregroundColor,
                         sliderPositionProvider = { sliderPosition },
                         lyricsSyncOffset = lyricsSyncOffset,
@@ -563,6 +582,7 @@ fun LyricsScreen(
                 } else {
                     AppleMusicLyricsPane(
                         lyricsMode = lyricsMode,
+                        preparedLyrics = preparedLyrics,
                         foregroundColor = foregroundColor,
                         sliderPositionProvider = { sliderPosition },
                         lyricsSyncOffset = lyricsSyncOffset,
@@ -972,6 +992,7 @@ private fun AppleMusicHeaderIconButton(
 @Composable
 private fun AppleMusicLyricsPane(
     lyricsMode: LyricsMode,
+    preparedLyrics: PreparedLyrics?,
     foregroundColor: Color,
     sliderPositionProvider: () -> Long?,
     lyricsSyncOffset: Int,
@@ -979,6 +1000,7 @@ private fun AppleMusicLyricsPane(
 ) {
     LyricsContent(
         lyricsMode = lyricsMode,
+        preparedLyrics = preparedLyrics,
         sliderPositionProvider = sliderPositionProvider,
         lyricsSyncOffset = lyricsSyncOffset,
         modifier =
@@ -1199,6 +1221,7 @@ private fun AppleMusicSlider(
 @Composable
 private fun LyricsContent(
     lyricsMode: LyricsMode,
+    preparedLyrics: PreparedLyrics?,
     sliderPositionProvider: () -> Long?,
     lyricsSyncOffset: Int,
     textColor: Color,
@@ -1209,6 +1232,7 @@ private fun LyricsContent(
             LyricsV2(
                 sliderPositionProvider = sliderPositionProvider,
                 lyricsSyncOffset = lyricsSyncOffset,
+                preparedLyrics = preparedLyrics,
                 modifier = modifier,
                 textColorOverride = textColor,
             )
@@ -1218,6 +1242,7 @@ private fun LyricsContent(
             LyricsEnhanced(
                 sliderPositionProvider = sliderPositionProvider,
                 lyricsSyncOffset = lyricsSyncOffset,
+                preparedLyrics = preparedLyrics,
                 modifier = modifier,
                 textColorOverride = textColor,
             )
