@@ -21,11 +21,16 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RenderEffect
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -36,6 +41,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.isActive
 import moe.rukamori.archivetune.lyrics.LyricsGraphemeSpringState
 import moe.rukamori.archivetune.lyrics.LyricsInlineSpringState
@@ -51,6 +57,8 @@ import kotlin.math.sin
 
 private const val SHAPED_GLYPH_FADE_FRACTION = 0.2f
 private const val SHAPED_BRIGHT_OVERLAY_ALPHA = 0xE7 / 255f
+private val SHAPED_HORIZONTAL_OVERSCAN = 24.dp
+private const val SHAPED_GLOW_BLUR_PX = 12f
 
 /**
  * Android's full-line counterpart to desktop SpicyPane's LineTextGeometry/ActiveLineText.
@@ -77,7 +85,16 @@ internal fun ShapedLyricsLine(
 
     BoxWithConstraints(modifier = modifier) {
         val boundedWidth = constraints.maxWidth != Constraints.Infinity
-        val requestedWidthPx = if (boundedWidth) constraints.maxWidth.coerceAtLeast(0) else null
+        val horizontalOverscanPx = with(density) { SHAPED_HORIZONTAL_OVERSCAN.roundToPx() }
+        // LyricsV2 already supplies 12 dp of row padding. Reserving another 24 dp here
+        // gives the animated paragraph the same effective 36 dp breathing room as the
+        // desktop scene, so a 1.05–1.30x spring cannot hit the canvas edge.
+        val requestedWidthPx =
+            if (boundedWidth) {
+                (constraints.maxWidth - horizontalOverscanPx * 2).coerceAtLeast(1)
+            } else {
+                null
+            }
         val layout =
             remember(timeline.displayText, textStyle, requestedWidthPx, textMeasurer) {
                 measureAuthoritativeLine(
@@ -93,6 +110,14 @@ internal fun ShapedLyricsLine(
         val latestPosition by rememberUpdatedState(currentPositionMs)
         val pausedPositionKey = if (isPlaying) Long.MIN_VALUE else currentPositionMs
         var drawTick by remember(geometry) { mutableIntStateOf(0) }
+        val glowRenderEffect =
+            remember {
+                BlurEffect(
+                    radiusX = SHAPED_GLOW_BLUR_PX,
+                    radiusY = SHAPED_GLOW_BLUR_PX,
+                    edgeTreatment = TileMode.Decal,
+                ).takeIf(RenderEffect::isSupported)
+            }
 
         LaunchedEffect(motion, isPlaying, pausedPositionKey) {
             if (!isPlaying) {
@@ -128,6 +153,29 @@ internal fun ShapedLyricsLine(
                 Modifier.width(with(density) { layout.size.width.toDp() })
             }.height(with(density) { layout.size.height.toDp() })
 
+        // Render glow on its own blurred layer. Blurring the completed glyph layer matches
+        // desktop's DropShadowOnly path; blurring a saveLayer paint does not.
+        if (glowRenderEffect != null) {
+            Canvas(
+                modifier =
+                    canvasModifier.graphicsLayer {
+                        renderEffect = glowRenderEffect
+                        clip = false
+                    },
+            ) {
+                drawTick
+                drawShapedLyricsGlow(
+                    geometry = geometry,
+                    motion = motion,
+                    positionMs = currentPositionMs,
+                    textColor = textColor,
+                    fontSizePx = fontSizePx,
+                    bounceFactor = bounceFactor.coerceAtLeast(0f),
+                    glowFactor = glowFactor.coerceAtLeast(0f),
+                )
+            }
+        }
+
         Canvas(modifier = canvasModifier) {
             // drawTick is intentionally observed only by the draw node. Spring frames therefore
             // invalidate pixels without rebuilding the text layout or recomposing the line tree.
@@ -139,7 +187,6 @@ internal fun ShapedLyricsLine(
                 textColor = textColor,
                 fontSizePx = fontSizePx,
                 bounceFactor = bounceFactor.coerceAtLeast(0f),
-                glowFactor = glowFactor.coerceAtLeast(0f),
             )
         }
     }
@@ -153,7 +200,7 @@ private fun measureAuthoritativeLine(
 ): TextLayoutResult {
     val textConstraints =
         if (exactWidthPx != null) {
-            Constraints(minWidth = exactWidthPx, maxWidth = exactWidthPx)
+            Constraints(maxWidth = exactWidthPx)
         } else {
             Constraints()
         }
@@ -423,15 +470,16 @@ private fun DrawScope.drawShapedLyricsLine(
     textColor: Color,
     fontSizePx: Float,
     bounceFactor: Float,
-    glowFactor: Float,
 ) {
     val layout = geometry.layout
+    val lineOffsetX = ((size.width - layout.size.width) / 2f).coerceAtLeast(0f)
+    val textTopLeft = Offset(lineOffsetX, 0f)
     val dimColor = textColor.copy(alpha = textColor.alpha * 0.35f)
     val brightColor = textColor.copy(alpha = textColor.alpha * 0.85f)
 
     geometry.baseTextSegments.forEach { segment ->
-        clipRect(segment.left, segment.top, segment.right, segment.bottom) {
-            drawText(textLayoutResult = layout, color = dimColor)
+        clipRect(lineOffsetX + segment.left, segment.top, lineOffsetX + segment.right, segment.bottom) {
+            drawText(textLayoutResult = layout, color = dimColor, topLeft = textTopLeft)
         }
     }
 
@@ -446,7 +494,7 @@ private fun DrawScope.drawShapedLyricsLine(
         val state = shapedWordState(positionMs, word.startMs, word.endMs)
 
         withNativeLyricsTransform(
-            centerX = bounds.center.x,
+            centerX = lineOffsetX + bounds.center.x,
             centerY = bounds.center.y,
             scale = wordScale,
             yOffset = wordYOffset,
@@ -454,16 +502,16 @@ private fun DrawScope.drawShapedLyricsLine(
             when (state) {
                 ShapedLyricsWordState.NOT_SUNG -> {
                     wordGeometry.rowBands.forEach { band ->
-                        clipRect(band.left, band.top, band.right, band.bottom) {
-                            drawText(textLayoutResult = layout, color = dimColor)
+                        clipRect(lineOffsetX + band.left, band.top, lineOffsetX + band.right, band.bottom) {
+                            drawText(textLayoutResult = layout, color = dimColor, topLeft = textTopLeft)
                         }
                     }
                 }
 
                 ShapedLyricsWordState.SUNG -> {
                     wordGeometry.rowBands.forEach { band ->
-                        clipRect(band.left, band.top, band.right, band.bottom) {
-                            drawText(textLayoutResult = layout, color = brightColor)
+                        clipRect(lineOffsetX + band.left, band.top, lineOffsetX + band.right, band.bottom) {
+                            drawText(textLayoutResult = layout, color = brightColor, topLeft = textTopLeft)
                         }
                     }
                 }
@@ -474,16 +522,15 @@ private fun DrawScope.drawShapedLyricsLine(
                         val sweep =
                             -SHAPED_GLYPH_FADE_FRACTION +
                                 (1f + SHAPED_GLYPH_FADE_FRACTION) * progress
-                        val glow = wordSpring.glow * glowFactor
                         wordGeometry.rowBands.forEach { band ->
                             drawProgressiveBand(
                                 layout = layout,
-                                band = band,
+                                band = band.shiftX(lineOffsetX),
+                                textTopLeft = textTopLeft,
                                 sweep = sweep,
                                 rtl = wordGeometry.rtl,
                                 dimColor = dimColor,
                                 brightColor = brightColor,
-                                glowStrength = glow,
                             )
                         }
                     } else {
@@ -518,19 +565,19 @@ private fun DrawScope.drawShapedLyricsLine(
                                 }
 
                             withNativeLyricsTransform(
-                                centerX = band.center.x,
+                                centerX = lineOffsetX + band.center.x,
                                 centerY = band.center.y,
                                 scale = graphemeScale,
                                 yOffset = graphemeYOffset,
                             ) {
                                 drawProgressiveBand(
                                     layout = layout,
-                                    band = band,
+                                    band = band.shiftX(lineOffsetX),
+                                    textTopLeft = textTopLeft,
                                     sweep = sweep,
                                     rtl = graphemeGeometry.rtl,
                                     dimColor = dimColor,
                                     brightColor = brightColor,
-                                    glowStrength = spring.glow * glowFactor,
                                 )
                             }
                         }
@@ -540,6 +587,89 @@ private fun DrawScope.drawShapedLyricsLine(
         }
     }
 }
+
+/**
+ * Glow source pass. This is drawn into a separate RenderEffect-blurred canvas so the
+ * halo expands outside the glyph clip instead of being clipped back to the glyph box.
+ */
+private fun DrawScope.drawShapedLyricsGlow(
+    geometry: ShapedLyricsLineGeometry,
+    motion: ShapedLyricsLineMotion,
+    positionMs: Long,
+    textColor: Color,
+    fontSizePx: Float,
+    bounceFactor: Float,
+    glowFactor: Float,
+) {
+    val layout = geometry.layout
+    val lineOffsetX = ((size.width - layout.size.width) / 2f).coerceAtLeast(0f)
+    val textTopLeft = Offset(lineOffsetX, 0f)
+    val brightColor = textColor.copy(alpha = textColor.alpha * 0.85f)
+
+    geometry.words.forEachIndexed wordLoop@ { wordIndex, wordGeometry ->
+        val bounds = wordGeometry.bounds ?: return@wordLoop
+        val word = wordGeometry.word
+        if (shapedWordState(positionMs, word.startMs, word.endMs) != ShapedLyricsWordState.ACTIVE) {
+            return@wordLoop
+        }
+
+        val wordMotion = motion.words[wordIndex]
+        val wordSpring = wordMotion.word.snapshot()
+        val wordScale = 1f + (wordSpring.scale - 1f) * bounceFactor
+        val wordYOffset = wordSpring.yOffsetFraction * fontSizePx.coerceAtLeast(1f) * bounceFactor
+
+        withNativeLyricsTransform(
+            centerX = lineOffsetX + bounds.center.x,
+            centerY = bounds.center.y,
+            scale = wordScale,
+            yOffset = wordYOffset,
+        ) {
+            if (!wordGeometry.graphemeMotion) {
+                val glow = (wordSpring.glow * glowFactor).coerceIn(0f, 1.25f)
+                if (glow <= 0.01f) return@withNativeLyricsTransform
+                val glowColor = brightColor.copy(alpha = (glow * 0.82f).coerceIn(0f, 0.92f))
+                wordGeometry.rowBands.forEach { band ->
+                    val shifted = band.shiftX(lineOffsetX)
+                    clipRect(shifted.left, shifted.top, shifted.right, shifted.bottom) {
+                        drawText(textLayoutResult = layout, color = glowColor, topLeft = textTopLeft)
+                    }
+                }
+            } else {
+                val graphemeSnapshots = wordMotion.graphemes?.snapshot().orEmpty()
+                wordGeometry.graphemes.forEachIndexed { graphemeIndex, graphemeGeometry ->
+                    val band = graphemeGeometry.box
+                    if (band.width <= 0f || band.height <= 0f || graphemeIndex !in graphemeSnapshots.indices) {
+                        return@forEachIndexed
+                    }
+                    val spring = graphemeSnapshots[graphemeIndex]
+                    val glow = (spring.glow * glowFactor).coerceIn(0f, 1.25f)
+                    if (glow <= 0.01f) return@forEachIndexed
+                    val graphemeScale = 1f + (spring.scale - 1f) * bounceFactor
+                    val graphemeYOffset =
+                        shapedLyricsGraphemeYOffsetPx(
+                            yOffsetFraction = spring.yOffsetFraction,
+                            bounceFactor = bounceFactor,
+                        )
+                    val shiftedBand = band.shiftX(lineOffsetX)
+                    val glowColor = brightColor.copy(alpha = (glow * 0.82f).coerceIn(0f, 0.92f))
+
+                    withNativeLyricsTransform(
+                        centerX = lineOffsetX + band.center.x,
+                        centerY = band.center.y,
+                        scale = graphemeScale,
+                        yOffset = graphemeYOffset,
+                    ) {
+                        clipRect(shiftedBand.left, shiftedBand.top, shiftedBand.right, shiftedBand.bottom) {
+                            drawText(textLayoutResult = layout, color = glowColor, topLeft = textTopLeft)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun Rect.shiftX(delta: Float): Rect = Rect(left + delta, top, right + delta, bottom)
 
 /** Desktop SpicyPane applies letter Y as the raw spline value times 2 px, not font size. */
 internal fun shapedLyricsGraphemeYOffsetPx(
@@ -575,31 +705,21 @@ private inline fun DrawScope.withNativeLyricsTransform(
 private fun DrawScope.drawProgressiveBand(
     layout: TextLayoutResult,
     band: Rect,
+    textTopLeft: Offset,
     sweep: Float,
     rtl: Boolean,
     dimColor: Color,
     brightColor: Color,
-    glowStrength: Float,
 ) {
     clipRect(band.left, band.top, band.right, band.bottom) {
-        drawText(textLayoutResult = layout, color = dimColor)
-    }
-
-    val clampedGlow = glowStrength.coerceIn(0f, 1.25f)
-    if (clampedGlow > 0.01f) {
-        drawShapedBandGlow(
-            layout = layout,
-            band = band,
-            color = brightColor.copy(alpha = (brightColor.alpha * clampedGlow * 0.82f).coerceIn(0f, 0.92f)),
-            radiusPx = 4f + 12f * clampedGlow,
-        )
+        drawText(textLayoutResult = layout, color = dimColor, topLeft = textTopLeft)
     }
 
     when {
         sweep <= -SHAPED_GLYPH_FADE_FRACTION -> Unit
         sweep >= 1f -> {
             clipRect(band.left, band.top, band.right, band.bottom) {
-                drawText(textLayoutResult = layout, color = brightColor)
+                drawText(textLayoutResult = layout, color = brightColor, topLeft = textTopLeft)
             }
         }
 
@@ -615,47 +735,9 @@ private fun DrawScope.drawProgressiveBand(
                     brightColor = brightColor.copy(alpha = brightColor.alpha * SHAPED_BRIGHT_OVERLAY_ALPHA),
                 )
             clipRect(band.left, band.top, band.right, band.bottom) {
-                drawText(textLayoutResult = layout, brush = brush)
+                drawText(textLayoutResult = layout, brush = brush, topLeft = textTopLeft)
             }
         }
-    }
-}
-
-/** Android counterpart to desktop's native blurred glyph glow. */
-private fun DrawScope.drawShapedBandGlow(
-    layout: TextLayoutResult,
-    band: Rect,
-    color: Color,
-    radiusPx: Float,
-) {
-    // The previous Android approximation drew eight crisp translated copies of every
-    // active grapheme. On a small mobile font those copies were individually visible and
-    // looked like letters were duplicating/flying apart. Desktop uses a real native blur.
-    val blurRadius = radiusPx.coerceAtLeast(0.5f)
-    val pad = max(24f, blurRadius * 2f)
-    val layerBounds =
-        android.graphics.RectF(
-            band.left - pad,
-            band.top - pad,
-            band.right + pad,
-            band.bottom + pad,
-        )
-    val paint =
-        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            maskFilter =
-                android.graphics.BlurMaskFilter(
-                    blurRadius,
-                    android.graphics.BlurMaskFilter.Blur.NORMAL,
-                )
-        }
-    val native = drawContext.canvas.nativeCanvas
-    val saveCount = native.saveLayer(layerBounds, paint)
-    try {
-        clipRect(band.left, band.top, band.right, band.bottom) {
-            drawText(textLayoutResult = layout, color = color)
-        }
-    } finally {
-        native.restoreToCount(saveCount)
     }
 }
 
