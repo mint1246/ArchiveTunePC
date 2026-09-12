@@ -57,6 +57,8 @@ import kotlin.math.sin
 
 private const val SHAPED_GLYPH_FADE_FRACTION = 0.2f
 private const val SHAPED_BRIGHT_OVERLAY_ALPHA = 0xE7 / 255f
+private const val SHAPED_SUNG_GLYPH_GLOW = 0.50f
+private const val SHAPED_SUNG_WORD_GLOW = 0.40f
 private val SHAPED_HORIZONTAL_OVERSCAN = 24.dp
 private val SHAPED_GLOW_TIGHT_RADIUS = 5.dp
 private val SHAPED_GLOW_WIDE_RADIUS = 13.dp
@@ -644,7 +646,8 @@ private fun DrawScope.drawShapedLyricsGlow(
     geometry.words.forEachIndexed wordLoop@ { wordIndex, wordGeometry ->
         val bounds = wordGeometry.bounds ?: return@wordLoop
         val word = wordGeometry.word
-        if (shapedWordState(positionMs, word.startMs, word.endMs) != ShapedLyricsWordState.ACTIVE) {
+        val wordState = shapedWordState(positionMs, word.startMs, word.endMs)
+        if (wordState == ShapedLyricsWordState.NOT_SUNG) {
             return@wordLoop
         }
 
@@ -660,7 +663,13 @@ private fun DrawScope.drawShapedLyricsGlow(
             yOffset = wordYOffset,
         ) {
             if (!wordGeometry.graphemeMotion) {
-                val glow = (wordSpring.glow * glowFactor).coerceIn(0f, 1.25f)
+                val animatedGlow = (wordSpring.glow * glowFactor).coerceIn(0f, 1.25f)
+                val glow =
+                    if (wordState == ShapedLyricsWordState.SUNG) {
+                        max(animatedGlow, SHAPED_SUNG_WORD_GLOW)
+                    } else {
+                        animatedGlow
+                    }
                 if (glow <= 0.01f) return@withNativeLyricsTransform
                 val glowColor =
                     brightColor.copy(
@@ -680,7 +689,17 @@ private fun DrawScope.drawShapedLyricsGlow(
                         return@forEachIndexed
                     }
                     val spring = graphemeSnapshots[graphemeIndex]
-                    val glow = (spring.glow * glowFactor).coerceIn(0f, 1.25f)
+                    val animatedGlow = (spring.glow * glowFactor).coerceIn(0f, 1.25f)
+                    // Once the sweep has passed a glyph, keep a lower residual halo instead
+                    // of dropping immediately to zero. The currently active glyph still owns
+                    // the much stronger spring-driven bloom above this floor.
+                    val isSungGlyph = positionMs >= graphemeGeometry.grapheme.endMs
+                    val glow =
+                        if (isSungGlyph) {
+                            max(animatedGlow, SHAPED_SUNG_GLYPH_GLOW)
+                        } else {
+                            animatedGlow
+                        }
                     if (glow <= 0.01f) return@forEachIndexed
                     val graphemeScale = 1f + (spring.scale - 1f) * bounceFactor
                     val graphemeYOffset =
