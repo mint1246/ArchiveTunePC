@@ -17,9 +17,13 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import moe.rukamori.archivetune.constants.EnablePaxsenixLyricsKey
 import moe.rukamori.archivetune.constants.LyricsProviderOrderKey
+import moe.rukamori.archivetune.constants.PaxsenixApiKeyKey
 import moe.rukamori.archivetune.constants.PreferredLyricsProvider
 import moe.rukamori.archivetune.constants.deserializeLyricsProviderOrder
 import moe.rukamori.archivetune.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
@@ -57,6 +61,7 @@ class LyricsHelper
 
         private val cache = LruCache<String, List<LyricsResult>>(MAX_CACHE_SIZE)
         private val singleLyricsCache = LruCache<String, String>(MAX_CACHE_SIZE)
+        private val providerPermits = Semaphore(MAX_CONCURRENT_PROVIDERS)
 
         suspend fun getLyrics(
             mediaMetadata: MediaMetadata,
@@ -139,38 +144,59 @@ class LyricsHelper
                 return
             }
 
-            val allResult = mutableListOf<LyricsResult>()
-            val providers = orderedProviders()
-            withContext(Dispatchers.IO) {
-                providers.forEach { provider ->
-                    if (!provider.isEnabled(context)) return@forEach
-
-                    try {
-                        withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
-                            for (title in LyricsQueryPolicy.titleVariants(songTitle)) {
-                                var providerFoundLyrics = false
-                                provider.getAllLyrics(mediaId, title, songArtists, songAlbum, duration) lyricsCallback@{ lyrics ->
-                                    val normalizedLyrics = LyricsUtils.lyricsOrNotFound(lyrics)
-                                    if (normalizedLyrics == LYRICS_NOT_FOUND) return@lyricsCallback
-                                    providerFoundLyrics = true
-                                    val result = LyricsResult(provider.name, normalizedLyrics)
-                                    allResult += result
-                                    callback(result)
-                                }
-                                if (providerFoundLyrics) break
+            val providers = orderedProviders().filter { it.isEnabled(context) }
+            val resultsByProvider =
+                supervisorScope {
+                    providers.map { provider ->
+                        async(Dispatchers.IO) {
+                            providerPermits.withPermit {
+                                fetchAllProviderLyrics(
+                                    provider = provider,
+                                    mediaId = mediaId,
+                                    songTitle = songTitle,
+                                    songArtists = songArtists,
+                                    songAlbum = songAlbum,
+                                    duration = duration,
+                                )
                             }
                         }
-                    } catch (_: TimeoutCancellationException) {
-                        GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during lyrics search")
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        reportException(e)
-                    }
+                    }.map { it.await() }
                 }
-            }
+            val allResult = resultsByProvider.flatten()
+            allResult.forEach(callback)
             cache.put(cacheKey, allResult.toList())
         }
+
+        private suspend fun fetchAllProviderLyrics(
+            provider: LyricsProvider,
+            mediaId: String,
+            songTitle: String,
+            songArtists: String,
+            songAlbum: String?,
+            duration: Int,
+        ): List<LyricsResult> =
+            try {
+                withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
+                    for (title in LyricsQueryPolicy.titleVariants(songTitle)) {
+                        val results = mutableListOf<LyricsResult>()
+                        provider.getAllLyrics(mediaId, title, songArtists, songAlbum, duration) lyricsCallback@{ lyrics ->
+                            val normalizedLyrics = LyricsUtils.lyricsOrNotFound(lyrics)
+                            if (normalizedLyrics == LYRICS_NOT_FOUND) return@lyricsCallback
+                            results += LyricsResult(provider.name, normalizedLyrics)
+                        }
+                        if (results.isNotEmpty()) return@withTimeout results
+                    }
+                    emptyList()
+                }
+            } catch (_: TimeoutCancellationException) {
+                GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during lyrics search")
+                emptyList()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                reportException(e)
+                emptyList()
+            }
 
         private suspend fun fetchPriorityLyrics(
             providers: List<LyricsProvider>,
@@ -184,7 +210,9 @@ class LyricsHelper
                     providers
                         .map { provider ->
                             async(Dispatchers.IO) {
-                                fetchProviderLyrics(provider, mediaMetadata, artist)
+                                providerPermits.withPermit {
+                                    fetchProviderLyrics(provider, mediaMetadata, artist)
+                                }
                             }
                         }.mapNotNull { it.await() }
                 }
@@ -236,7 +264,8 @@ class LyricsHelper
             }
 
         private suspend fun orderedProviders(): List<LyricsProvider> {
-            val orderStr = context.dataStore.data.first()[LyricsProviderOrderKey]
+            val preferences = context.dataStore.data.first()
+            val orderStr = preferences[LyricsProviderOrderKey]
             val orderedEnums = deserializeLyricsProviderOrder(orderStr)
             val providerMap: Map<PreferredLyricsProvider, LyricsProvider> =
                 mapOf(
@@ -256,7 +285,11 @@ class LyricsHelper
                 )
             val userOrdered = orderedEnums.mapNotNull { providerMap[it] }
             val rest = baseProviders.filterNot { it in userOrdered }
-            return userOrdered + rest
+            val paxsenixEnabled = preferences[EnablePaxsenixLyricsKey] ?: true
+            val paxsenixApiKeyConfigured = !preferences[PaxsenixApiKeyKey].isNullOrBlank()
+            return (userOrdered + rest).filter { provider ->
+                provider !in paxsenixProviders || (paxsenixEnabled && paxsenixApiKeyConfigured)
+            }
         }
 
         private fun isMeaningfulLyrics(lyrics: String): Boolean = LyricsUtils.hasMeaningfulLyricsContent(lyrics)
@@ -276,6 +309,15 @@ class LyricsHelper
 
         companion object {
             private const val MAX_CACHE_SIZE = 16
+            private const val MAX_CONCURRENT_PROVIDERS = 6
+            private val paxsenixProviders =
+                setOf(
+                    PaxsenixAppleMusicLyricsProvider,
+                    PaxsenixNeteaseLyricsProvider,
+                    PaxsenixSpotifyLyricsProvider,
+                    PaxsenixMusixmatchLyricsProvider,
+                    PaxsenixYouTubeLyricsProvider,
+                )
         }
     }
 

@@ -160,6 +160,14 @@ class DownloadUtil
                 val requestedAudioQuality = resolveDownloadAudioQuality(lowDataModeActive)
                 val streamCacheKey = buildSongUrlCacheKey(mediaId, requestedAudioQuality)
                 val authFingerprint = YouTube.currentPlaybackAuthState().fingerprint
+                val downloadMetadata = downloadCache.getContentMetadata(mediaId)
+                val hasPartialDownload = downloadCache.getCachedSpans(mediaId).isNotEmpty()
+                val previousFormatId =
+                    downloadMetadata
+                        .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
+                        .toInt()
+                        .takeIf { it > 0 }
+                val pinnedFormatId = previousFormatId.takeIf { hasPartialDownload }
                 songUrlCache[streamCacheKey]
                     ?.takeIf {
                         it.isValidFor(
@@ -177,16 +185,11 @@ class DownloadUtil
                                 audioQuality = requestedAudioQuality,
                                 connectivityManager = connectivityManager,
                                 networkMetered = lowDataModeActive,
+                                pinnedFormatId = pinnedFormatId,
                             )
                         }
                     }.getOrThrow()
 
-                val downloadMetadata = downloadCache.getContentMetadata(mediaId)
-                val previousFormatId =
-                    downloadMetadata
-                        .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
-                        .toInt()
-                        .takeIf { it > 0 }
                 val previousContentLength =
                     downloadMetadata
                         .get(DOWNLOAD_CONTENT_LENGTH_METADATA_KEY, -1L)

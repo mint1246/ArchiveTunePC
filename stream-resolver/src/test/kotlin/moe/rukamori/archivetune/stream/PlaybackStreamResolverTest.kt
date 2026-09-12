@@ -91,7 +91,7 @@ class PlaybackStreamResolverTest {
     }
 
     @Test
-    fun desktopRetryOrderMovesFromWebRemixStraightToAndroidVr() {
+    fun desktopRetryOrderMovesFromWebRemixStraightToVisionOs() {
         val auth = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
 
         val ordered =
@@ -102,8 +102,8 @@ class PlaybackStreamResolverTest {
             )
 
         assertEquals(YouTubeClient.WEB_REMIX.clientName, ordered[0].clientName)
-        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientName, ordered[1].clientName)
-        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientVersion, ordered[1].clientVersion)
+        assertEquals(YouTubeClient.VISIONOS.clientName, ordered[1].clientName)
+        assertEquals(YouTubeClient.VISIONOS.clientVersion, ordered[1].clientVersion)
     }
 
     @Test

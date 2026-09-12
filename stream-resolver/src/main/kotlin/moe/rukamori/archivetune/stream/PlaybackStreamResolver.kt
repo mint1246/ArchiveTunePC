@@ -45,6 +45,7 @@ object PlaybackStreamResolver {
     /** Mirrors YTPlayerUtils.STREAM_FALLBACK_CLIENTS on Android. */
     val fullFallbackClients: List<YouTubeClient> =
         listOf(
+            YouTubeClient.VISIONOS,
             YouTubeClient.ANDROID_VR_NO_AUTH,
             YouTubeClient.ANDROID_VR_1_65_10,
             YouTubeClient.ANDROID_VR_1_61_48,
@@ -66,11 +67,10 @@ object PlaybackStreamResolver {
             YouTubeClient.ANDROID_TESTSUITE,
             YouTubeClient.ANDROID_UNPLUGGED,
             YouTubeClient.IPADOS,
-            YouTubeClient.VISIONOS,
             YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER,
         )
 
-    /** Desktop intentionally uses the same order so one HTTP retry reaches Android VR, as on Android. */
+    /** Desktop intentionally uses the same trace-proven fallback order as Android. */
     val desktopFallbackClients: List<YouTubeClient> = fullFallbackClients
 
     fun hasCompleteWebPlaybackPoToken(authState: PlaybackAuthState): Boolean =

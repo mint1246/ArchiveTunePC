@@ -68,12 +68,12 @@ class ArchiveTuneJvmClientTest {
         val ordered = client.orderedStreamClientsForTest(auth)
 
         assertEquals(YouTubeClient.WEB_REMIX.clientName, ordered[0].clientName)
-        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientName, ordered[1].clientName)
-        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientVersion, ordered[1].clientVersion)
+        assertEquals(YouTubeClient.VISIONOS.clientName, ordered[1].clientName)
+        assertEquals(YouTubeClient.VISIONOS.clientVersion, ordered[1].clientVersion)
     }
 
     @Test
-    fun signedInHttp403BackoffMakesAndroidVrTheRetryClient() {
+    fun signedInHttp403BackoffMakesVisionOsTheRetryClient() {
         val client = ArchiveTuneJvmClient(Files.createTempDirectory("archivetune-test-").toFile())
         val auth = PlaybackAuthState(cookie = "SAPISID=secret", dataSyncId = "channel").normalized()
         val videoId = "fresh-release"
@@ -90,8 +90,8 @@ class ArchiveTuneJvmClientTest {
         )
 
         val retry = client.orderedStreamClientsForTest(auth, videoId).first()
-        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientName, retry.clientName)
-        assertEquals(YouTubeClient.ANDROID_VR_NO_AUTH.clientVersion, retry.clientVersion)
+        assertEquals(YouTubeClient.VISIONOS.clientName, retry.clientName)
+        assertEquals(YouTubeClient.VISIONOS.clientVersion, retry.clientVersion)
     }
 
     @Test

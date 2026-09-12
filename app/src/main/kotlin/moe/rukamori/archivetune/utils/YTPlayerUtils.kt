@@ -12,8 +12,10 @@ import androidx.media3.common.PlaybackException
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.constants.AudioQuality
 import moe.rukamori.archivetune.constants.PlayerStreamClient
 import moe.rukamori.archivetune.innertube.NewPipeUtils
@@ -49,15 +51,19 @@ import moe.rukamori.archivetune.utils.potoken.BotGuardTokenGenerator
 import moe.rukamori.archivetune.utils.potoken.PoTokenResult
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import timber.log.Timber
+import java.net.SocketTimeoutException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 object YTPlayerUtils {
     private const val logTag = "YTPlayerUtils"
+    private const val PO_TOKEN_RESOLUTION_BUDGET_MS = 5_000L
     private const val FAILED_CLIENT_BACKOFF_MS = 10 * 60 * 1000L
     private const val DEFAULT_STREAM_EXPIRE_SECONDS = 300
     private const val MAX_PLAYBACK_DATA_CACHE_ENTRIES = 128
     private const val PLAYBACK_DATA_RESOLUTION_MUTEX_COUNT = 32
+    private const val PLAYBACK_RESOLUTION_TIMEOUT_MS = 45_000L
+    private const val DOWNLOAD_RESOLUTION_TIMEOUT_MS = 180_000L
     const val STREAM_URL_EXPIRY_SAFETY_MS = 60_000L
     private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)
     private val failedMediaStreamClientsUntil = ConcurrentHashMap<String, Long>()
@@ -186,6 +192,7 @@ object YTPlayerUtils {
         val audioQuality: AudioQuality,
         val networkMetered: Boolean,
         val authFingerprint: String,
+        val pinnedFormatId: Int?,
     )
 
     private data class CachedPlaybackData(
@@ -361,7 +368,12 @@ object YTPlayerUtils {
         authState: PlaybackAuthState,
     ): PlaybackAuthState {
         val sessionId = authState.sessionId ?: return authState
-        val tokenResult = BotGuardTokenGenerator.mintToken(videoId, sessionId) ?: return authState
+        val tokenResult =
+            BotGuardTokenGenerator.mintToken(
+                videoId = videoId,
+                sessionId = sessionId,
+                maximumWaitMillis = PO_TOKEN_RESOLUTION_BUDGET_MS,
+            ) ?: return authState
         return authState.withGeneratedPoTokens(videoId, tokenResult)
     }
 
@@ -639,6 +651,7 @@ object YTPlayerUtils {
         preferredStreamClient: PlayerStreamClient = PlayerStreamClient.WEB_REMIX,
         // if provided, this preference overrides ConnectivityManager.isActiveNetworkMetered
         networkMetered: Boolean? = null,
+        pinnedFormatId: Int? = null,
     ): Result<PlaybackData> {
         val isMetered = networkMetered ?: connectivityManager.isActiveNetworkMetered
         val initialKey =
@@ -647,35 +660,49 @@ object YTPlayerUtils {
                 audioQuality = audioQuality,
                 networkMetered = isMetered,
                 authFingerprint = YouTube.currentPlaybackAuthState().fingerprint,
+                pinnedFormatId = pinnedFormatId,
             )
         getCachedPlaybackData(initialKey)?.let { return Result.success(it) }
         val resolutionMutex =
             playbackDataResolutionMutexes[(initialKey.hashCode() and Int.MAX_VALUE) % playbackDataResolutionMutexes.size]
-        return resolutionMutex.withLock {
-            val currentKey =
-                buildPlaybackDataCacheKey(
-                    videoId = videoId,
-                    audioQuality = audioQuality,
-                    networkMetered = isMetered,
-                    authFingerprint = YouTube.currentPlaybackAuthState().fingerprint,
-                )
-            getCachedPlaybackData(currentKey)?.let { return@withLock Result.success(it) }
-            resolvePlaybackData(
-                videoId = videoId,
-                playlistId = playlistId,
-                audioQuality = audioQuality,
-                connectivityManager = connectivityManager,
-                preferredStreamClient = preferredStreamClient,
-                networkMetered = isMetered,
-            ).onSuccess { playbackData ->
-                cachePlaybackData(
-                    key = currentKey.copy(authFingerprint = playbackData.authFingerprint),
-                    playbackData = playbackData,
-                )
-            }.also { result ->
-                val failure = result.exceptionOrNull()
-                if (failure is CancellationException) throw failure
+        return try {
+            withTimeout(PLAYBACK_RESOLUTION_TIMEOUT_MS) {
+                resolutionMutex.withLock {
+                    val currentKey =
+                        buildPlaybackDataCacheKey(
+                            videoId = videoId,
+                            audioQuality = audioQuality,
+                            networkMetered = isMetered,
+                            authFingerprint = YouTube.currentPlaybackAuthState().fingerprint,
+                            pinnedFormatId = pinnedFormatId,
+                        )
+                    getCachedPlaybackData(currentKey)?.let { return@withLock Result.success(it) }
+                    resolvePlaybackData(
+                        videoId = videoId,
+                        playlistId = playlistId,
+                        audioQuality = audioQuality,
+                        connectivityManager = connectivityManager,
+                        preferredStreamClient = preferredStreamClient,
+                        networkMetered = isMetered,
+                        pinnedFormatId = pinnedFormatId,
+                    ).onSuccess { playbackData ->
+                        cachePlaybackData(
+                            key = currentKey.copy(authFingerprint = playbackData.authFingerprint),
+                            playbackData = playbackData,
+                        )
+                    }.also { result ->
+                        val failure = result.exceptionOrNull()
+                        if (failure is CancellationException) throw failure
+                    }
+                }
             }
+        } catch (timeout: TimeoutCancellationException) {
+            Timber.tag(logTag).w(timeout, "Playback stream resolution timed out for %s", videoId)
+            Result.failure(
+                SocketTimeoutException(
+                    "Audio stream resolution timed out after ${PLAYBACK_RESOLUTION_TIMEOUT_MS / 1000L} seconds",
+                ).apply { initCause(timeout) },
+            )
         }
     }
 
@@ -686,6 +713,7 @@ object YTPlayerUtils {
         connectivityManager: ConnectivityManager,
         preferredStreamClient: PlayerStreamClient,
         networkMetered: Boolean,
+        pinnedFormatId: Int?,
     ): Result<PlaybackData> =
         runCatching {
             val attempts =
@@ -709,6 +737,7 @@ object YTPlayerUtils {
                             connectivityManager = connectivityManager,
                             preferredStreamClient = preferredStreamClient,
                             networkMetered = networkMetered,
+                            pinnedFormatId = pinnedFormatId,
                         )
                     }
                 if (attemptResult.isSuccess) return@runCatching attemptResult.getOrThrow()
@@ -729,6 +758,7 @@ object YTPlayerUtils {
                                 connectivityManager = connectivityManager,
                                 preferredStreamClient = preferredStreamClient,
                                 networkMetered = networkMetered,
+                                pinnedFormatId = pinnedFormatId,
                             )
                         }
                     if (rotatedAttemptResult.isSuccess) return@runCatching rotatedAttemptResult.getOrThrow()
@@ -744,12 +774,14 @@ object YTPlayerUtils {
         audioQuality: AudioQuality,
         networkMetered: Boolean,
         authFingerprint: String,
+        pinnedFormatId: Int?,
     ): PlaybackDataCacheKey =
         PlaybackDataCacheKey(
             videoId = videoId,
             audioQuality = audioQuality,
             networkMetered = networkMetered,
             authFingerprint = authFingerprint,
+            pinnedFormatId = pinnedFormatId,
         )
 
     private fun getCachedPlaybackData(key: PlaybackDataCacheKey): PlaybackData? {
@@ -788,34 +820,69 @@ object YTPlayerUtils {
         audioQuality: AudioQuality,
         connectivityManager: ConnectivityManager,
         networkMetered: Boolean? = null,
+        pinnedFormatId: Int? = null,
     ): Result<PlaybackData> =
-        runCatching {
-            Timber.tag(logTag).i("Fetching download response for videoId: $videoId, playlistId: $playlistId")
-            var lastError: Throwable? = null
+        try {
+            withTimeout(DOWNLOAD_RESOLUTION_TIMEOUT_MS) {
+                Timber.tag(logTag).i("Fetching download response for videoId: $videoId, playlistId: $playlistId")
+                var lastError: Throwable? = null
 
-            for (preferredStreamClient in downloadPreferredStreamClientAttempts) {
-                val attemptResult =
-                    playerResponseForPlayback(
-                        videoId = videoId,
-                        playlistId = playlistId,
-                        audioQuality = audioQuality,
-                        connectivityManager = connectivityManager,
-                        preferredStreamClient = preferredStreamClient,
-                        networkMetered = networkMetered,
+                for (preferredStreamClient in downloadPreferredStreamClientAttempts) {
+                    val attemptResult =
+                        playerResponseForPlayback(
+                            videoId = videoId,
+                            playlistId = playlistId,
+                            audioQuality = audioQuality,
+                            connectivityManager = connectivityManager,
+                            preferredStreamClient = preferredStreamClient,
+                            networkMetered = networkMetered,
+                            pinnedFormatId = pinnedFormatId,
+                        )
+
+                    if (attemptResult.isSuccess) return@withTimeout attemptResult
+
+                    lastError = attemptResult.exceptionOrNull()
+                    if (lastError is CancellationException) throw lastError
+                    Timber.tag(logTag).w(
+                        lastError,
+                        "Download stream resolution failed with preferred client %s for %s",
+                        preferredStreamClient.name,
+                        videoId,
                     )
+                }
 
-                if (attemptResult.isSuccess) return@runCatching attemptResult.getOrThrow()
+                if (pinnedFormatId != null) {
+                    Timber.tag(logTag).w(
+                        "Pinned download itag %d is no longer available for %s; resolving a replacement representation",
+                        pinnedFormatId,
+                        videoId,
+                    )
+                    for (preferredStreamClient in downloadPreferredStreamClientAttempts) {
+                        val replacementResult =
+                            playerResponseForPlayback(
+                                videoId = videoId,
+                                playlistId = playlistId,
+                                audioQuality = audioQuality,
+                                connectivityManager = connectivityManager,
+                                preferredStreamClient = preferredStreamClient,
+                                networkMetered = networkMetered,
+                                pinnedFormatId = null,
+                            )
+                        if (replacementResult.isSuccess) return@withTimeout replacementResult
+                        lastError = replacementResult.exceptionOrNull()
+                        if (lastError is CancellationException) throw lastError
+                    }
+                }
 
-                lastError = attemptResult.exceptionOrNull()
-                Timber.tag(logTag).w(
-                    lastError,
-                    "Download stream resolution failed with preferred client %s for %s",
-                    preferredStreamClient.name,
-                    videoId,
-                )
+                Result.failure(lastError ?: IllegalStateException("Failed to resolve download stream for $videoId"))
             }
-
-            throw lastError ?: IllegalStateException("Failed to resolve download stream for $videoId")
+        } catch (timeout: TimeoutCancellationException) {
+            Timber.tag(logTag).w(timeout, "Download stream resolution timed out for %s", videoId)
+            Result.failure(
+                SocketTimeoutException(
+                    "Download stream resolution timed out after ${DOWNLOAD_RESOLUTION_TIMEOUT_MS / 1000L} seconds",
+                ).apply { initCause(timeout) },
+            )
         }
 
     private val downloadPreferredStreamClientAttempts: List<PlayerStreamClient> =
@@ -855,6 +922,7 @@ object YTPlayerUtils {
         connectivityManager: ConnectivityManager,
         preferredStreamClient: PlayerStreamClient,
         networkMetered: Boolean?,
+        pinnedFormatId: Int?,
     ): PlaybackData {
         Timber.tag(logTag).i("Fetching player response for videoId: $videoId, playlistId: $playlistId")
         val signatureTimestamp = getSignatureTimestampOrNull(videoId)
@@ -1210,7 +1278,13 @@ object YTPlayerUtils {
                     streamPlayerResponse,
                     audioQuality,
                     isMetered,
-                )
+                ).let { candidates ->
+                    if (pinnedFormatId == null) {
+                        candidates
+                    } else {
+                        candidates.filter { it.itag == pinnedFormatId }
+                    }
+                }
 
             if (candidates.isEmpty()) continue
 
