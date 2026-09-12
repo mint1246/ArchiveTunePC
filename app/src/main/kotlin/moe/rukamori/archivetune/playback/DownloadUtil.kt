@@ -9,11 +9,15 @@ package moe.rukamori.archivetune.playback
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Uri
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.database.DatabaseProvider
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
@@ -86,6 +90,7 @@ class DownloadUtil
         private val audioQuality by enumPreference(context, AudioQualityKey, AudioQuality.AUTO)
         private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private val songUrlCache = ConcurrentHashMap<String, AuthScopedCacheValue>()
+        private val playbackCacheReuseIds = ConcurrentHashMap.newKeySet<String>()
         private val downloadExecutor = Executors.newFixedThreadPool(DEFAULT_MAX_PARALLEL_DOWNLOADS)
         private val artworkJobs = mutableMapOf<String, Job>()
 
@@ -138,121 +143,29 @@ class DownloadUtil
 
         val downloads = MutableStateFlow<Map<String, Download>>(emptyMap())
 
-        private val dataSourceFactory =
+        private val resolvedNetworkDataSourceFactory =
             ResolvingDataSource.Factory(
-                CacheDataSource
-                    .Factory()
-                    .setCache(playerCache)
-                    .setUpstreamDataSourceFactory(
-                        OkHttpDataSource.Factory(
-                            mediaOkHttpClient,
-                        ),
-                    ).setCacheWriteDataSinkFactory(
-                        CacheDataSink.Factory().setCache(playerCache).setBufferSize(DOWNLOAD_WRITE_BUFFER_SIZE),
-                    ),
-            ) { dataSpec ->
-                val mediaId = dataSpec.key ?: error("No media id")
-                val downloadMetadata = downloadCache.getContentMetadata(mediaId)
-                val hasPartialDownload = downloadCache.getCachedSpans(mediaId).isNotEmpty()
-                val playbackContentLength =
-                    ContentMetadata
-                        .getContentLength(playerCache.getContentMetadata(mediaId))
-                        .takeIf { it > 0L }
-                val fullyCachedInPlayerCache =
-                    playbackContentLength?.let { contentLength ->
-                        playerCache.isCached(mediaId, 0L, contentLength)
-                    } == true
-                if (
-                    shouldReuseCompletePlaybackCache(
-                        hasPartialDownload = hasPartialDownload,
-                        playbackContentLength = playbackContentLength,
-                        fullyCached = fullyCachedInPlayerCache,
-                    )
-                ) {
-                    return@Factory dataSpec
-                }
-                val lowDataModeActive = context.isLowDataModeActive()
-                val requestedAudioQuality = resolveDownloadAudioQuality(lowDataModeActive)
-                val streamCacheKey = buildSongUrlCacheKey(mediaId, requestedAudioQuality)
-                val authFingerprint = YouTube.currentPlaybackAuthState().fingerprint
-                val previousFormatId =
-                    downloadMetadata
-                        .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
-                        .toInt()
-                        .takeIf { it > 0 }
-                val pinnedFormatId = previousFormatId.takeIf { hasPartialDownload }
-                songUrlCache[streamCacheKey]
-                    ?.takeIf {
-                        it.isValidFor(
-                            authFingerprint = authFingerprint,
-                            minimumRemainingMs = YTPlayerUtils.STREAM_URL_EXPIRY_SAFETY_MS,
-                        )
-                    }?.let {
-                        return@Factory dataSpec.withUri(it.url.toUri())
-                    }
-                val playbackData =
-                    runBlocking(Dispatchers.IO) {
-                        context.retryWithoutPlaybackLoginContext {
-                            YTPlayerUtils.playerResponseForDownload(
-                                mediaId,
-                                audioQuality = requestedAudioQuality,
-                                connectivityManager = connectivityManager,
-                                networkMetered = lowDataModeActive,
-                                pinnedFormatId = pinnedFormatId,
-                            )
-                        }
-                    }.getOrThrow()
+                OkHttpDataSource.Factory(mediaOkHttpClient),
+                ::resolveDownloadDataSpec,
+            )
 
-                val previousContentLength =
-                    downloadMetadata
-                        .get(DOWNLOAD_CONTENT_LENGTH_METADATA_KEY, -1L)
-                        .takeIf { it > 0L }
-                        ?: ContentMetadata.getContentLength(downloadMetadata).takeIf { it > 0L }
-                val resolvedFormatId = playbackData.format.itag
-                val resolvedContentLength = playbackData.format.contentLength?.takeIf { it > 0L }
-                val formatChanged = previousFormatId != null && resolvedFormatId > 0 && previousFormatId != resolvedFormatId
-                val lengthChanged =
-                    previousContentLength != null && resolvedContentLength != null &&
-                        previousContentLength != resolvedContentLength
-                if (formatChanged || lengthChanged) {
-                    throw DownloadContentChangedException()
-                }
+        private val playbackCacheDataSourceFactory =
+            CacheDataSource
+                .Factory()
+                .setCache(playerCache)
+                .setUpstreamDataSourceFactory(resolvedNetworkDataSourceFactory)
+                .setCacheWriteDataSinkFactory(null)
+                .setFlags(FLAG_IGNORE_CACHE_ON_ERROR)
 
-                val metadataMutations = ContentMetadataMutations()
-                if (resolvedFormatId > 0) {
-                    metadataMutations.set(DOWNLOAD_FORMAT_ID_METADATA_KEY, resolvedFormatId.toLong())
-                }
-                if (resolvedContentLength != null) {
-                    metadataMutations.set(DOWNLOAD_CONTENT_LENGTH_METADATA_KEY, resolvedContentLength)
-                }
-                downloadCache.applyContentMetadataMutations(mediaId, metadataMutations)
-                persistPlaybackMetadata(mediaId, playbackData)
-
-                val streamUrl = playbackData.streamUrl
-
-                songUrlCache[streamCacheKey] =
-                    AuthScopedCacheValue(
-                        url = streamUrl,
-                        expiresAtMs = System.currentTimeMillis() + (playbackData.streamExpiresInSeconds * 1000L),
-                        authFingerprint = playbackData.authFingerprint,
-                    )
-                dataSpec
-                    .buildUpon()
-                    .setUri(streamUrl.toUri())
-                    .apply {
-                        resolvedContentLength?.let { totalLength ->
-                            val remainingLength = totalLength - dataSpec.position
-                            if (remainingLength > 0L) {
-                                setLength(
-                                    if (dataSpec.length == C.LENGTH_UNSET.toLong()) {
-                                        remainingLength
-                                    } else {
-                                        minOf(dataSpec.length, remainingLength)
-                                    },
-                                )
-                            }
-                        }
-                    }.build()
+        private val downloadUpstreamDataSourceFactory =
+            DataSource.Factory {
+                CompletePlaybackCacheDataSource(
+                    downloadCache = downloadCache,
+                    playerCache = playerCache,
+                    playbackCacheDataSourceFactory = playbackCacheDataSourceFactory,
+                    networkDataSourceFactory = resolvedNetworkDataSourceFactory,
+                    playbackCacheReuseIds = playbackCacheReuseIds,
+                )
             }
 
         val downloadNotificationHelper =
@@ -263,7 +176,7 @@ class DownloadUtil
                 CacheDataSource
                     .Factory()
                     .setCache(downloadCache)
-                    .setUpstreamDataSourceFactory(dataSourceFactory)
+                    .setUpstreamDataSourceFactory(downloadUpstreamDataSourceFactory)
                     .setCacheWriteDataSinkFactory(
                         CacheDataSink.Factory()
                             .setCache(downloadCache)
@@ -296,6 +209,9 @@ class DownloadUtil
                             }
                             if (download.state == Download.STATE_COMPLETED) {
                                 scheduleDownloadedArtwork(download.request.id)
+                                playbackCacheReuseIds.remove(download.request.id)
+                            } else if (download.state == Download.STATE_FAILED) {
+                                playbackCacheReuseIds.remove(download.request.id)
                             }
                         }
 
@@ -305,6 +221,7 @@ class DownloadUtil
                         ) {
                             downloads.update { map -> map - download.request.id }
                             cancelDownloadedArtworkJob(download.request.id)
+                            playbackCacheReuseIds.remove(download.request.id)
                             downloadScope.launch {
                                 downloadedArtworkRepository.remove(download.request.id)
                             }
@@ -383,8 +300,96 @@ class DownloadUtil
             ContentMetadataMutations.setContentLength(mutations, C.LENGTH_UNSET.toLong())
             ContentMetadataMutations.setRedirectedUri(mutations, null)
             downloadCache.applyContentMetadataMutations(mediaId, mutations)
+            playbackCacheReuseIds.remove(mediaId)
             songUrlCache.keys.removeIf { it.startsWith("$mediaId:") }
             YTPlayerUtils.invalidateCachedStreamUrls(mediaId)
+        }
+
+        private fun resolveDownloadDataSpec(dataSpec: DataSpec): DataSpec {
+            val mediaId = dataSpec.key ?: error("No media id")
+            val downloadMetadata = downloadCache.getContentMetadata(mediaId)
+            val hasPartialDownload = downloadCache.getCachedSpans(mediaId).isNotEmpty()
+            val lowDataModeActive = context.isLowDataModeActive()
+            val requestedAudioQuality = resolveDownloadAudioQuality(lowDataModeActive)
+            val streamCacheKey = buildSongUrlCacheKey(mediaId, requestedAudioQuality)
+            val authFingerprint = YouTube.currentPlaybackAuthState().fingerprint
+            val previousFormatId =
+                downloadMetadata
+                    .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
+                    .toInt()
+                    .takeIf { it > 0 }
+            val pinnedFormatId = previousFormatId.takeIf { hasPartialDownload }
+            songUrlCache[streamCacheKey]
+                ?.takeIf {
+                    it.isValidFor(
+                        authFingerprint = authFingerprint,
+                        minimumRemainingMs = YTPlayerUtils.STREAM_URL_EXPIRY_SAFETY_MS,
+                    )
+                }?.let {
+                    return dataSpec.withUri(it.url.toUri())
+                }
+            val playbackData =
+                runBlocking(Dispatchers.IO) {
+                    context.retryWithoutPlaybackLoginContext {
+                        YTPlayerUtils.playerResponseForDownload(
+                            mediaId,
+                            audioQuality = requestedAudioQuality,
+                            connectivityManager = connectivityManager,
+                            networkMetered = lowDataModeActive,
+                            pinnedFormatId = pinnedFormatId,
+                        )
+                    }
+                }.getOrThrow()
+
+            val previousContentLength =
+                downloadMetadata
+                    .get(DOWNLOAD_CONTENT_LENGTH_METADATA_KEY, -1L)
+                    .takeIf { it > 0L }
+                    ?: ContentMetadata.getContentLength(downloadMetadata).takeIf { it > 0L }
+            val resolvedFormatId = playbackData.format.itag
+            val resolvedContentLength = playbackData.format.contentLength?.takeIf { it > 0L }
+            val formatChanged = previousFormatId != null && resolvedFormatId > 0 && previousFormatId != resolvedFormatId
+            val lengthChanged =
+                previousContentLength != null && resolvedContentLength != null &&
+                    previousContentLength != resolvedContentLength
+            if (formatChanged || lengthChanged) {
+                throw DownloadContentChangedException()
+            }
+
+            val metadataMutations = ContentMetadataMutations()
+            if (resolvedFormatId > 0) {
+                metadataMutations.set(DOWNLOAD_FORMAT_ID_METADATA_KEY, resolvedFormatId.toLong())
+            }
+            if (resolvedContentLength != null) {
+                metadataMutations.set(DOWNLOAD_CONTENT_LENGTH_METADATA_KEY, resolvedContentLength)
+            }
+            downloadCache.applyContentMetadataMutations(mediaId, metadataMutations)
+            persistPlaybackMetadata(mediaId, playbackData)
+
+            val streamUrl = playbackData.streamUrl
+            songUrlCache[streamCacheKey] =
+                AuthScopedCacheValue(
+                    url = streamUrl,
+                    expiresAtMs = System.currentTimeMillis() + (playbackData.streamExpiresInSeconds * 1000L),
+                    authFingerprint = playbackData.authFingerprint,
+                )
+            return dataSpec
+                .buildUpon()
+                .setUri(streamUrl.toUri())
+                .apply {
+                    resolvedContentLength?.let { totalLength ->
+                        val remainingLength = totalLength - dataSpec.position
+                        if (remainingLength > 0L) {
+                            setLength(
+                                if (dataSpec.length == C.LENGTH_UNSET.toLong()) {
+                                    remainingLength
+                                } else {
+                                    minOf(dataSpec.length, remainingLength)
+                                },
+                            )
+                        }
+                    }
+                }.build()
         }
 
         private fun Download.toProgressSnapshot(): Download {
@@ -523,6 +528,78 @@ class DownloadUtil
         private fun cancelDownloadedArtworkJob(mediaId: String) {
             synchronized(artworkJobs) {
                 artworkJobs.remove(mediaId)?.cancel()
+            }
+        }
+
+        private class CompletePlaybackCacheDataSource(
+            private val downloadCache: Cache,
+            private val playerCache: Cache,
+            private val playbackCacheDataSourceFactory: DataSource.Factory,
+            private val networkDataSourceFactory: DataSource.Factory,
+            private val playbackCacheReuseIds: MutableSet<String>,
+        ) : DataSource {
+            private val transferListeners = mutableListOf<TransferListener>()
+            private var delegate: DataSource? = null
+
+            override fun addTransferListener(transferListener: TransferListener) {
+                transferListeners += transferListener
+                delegate?.addTransferListener(transferListener)
+            }
+
+            override fun open(dataSpec: DataSpec): Long {
+                val mediaId = dataSpec.key
+                val selectedFactory =
+                    if (mediaId != null && shouldUsePlaybackCache(mediaId)) {
+                        playbackCacheDataSourceFactory
+                    } else {
+                        networkDataSourceFactory
+                    }
+                return selectedFactory
+                    .createDataSource()
+                    .also { selected ->
+                        transferListeners.forEach(selected::addTransferListener)
+                        delegate = selected
+                    }.open(dataSpec)
+            }
+
+            override fun read(
+                buffer: ByteArray,
+                offset: Int,
+                length: Int,
+            ): Int = checkNotNull(delegate).read(buffer, offset, length)
+
+            override fun getUri(): Uri? = delegate?.uri
+
+            override fun getResponseHeaders(): Map<String, List<String>> = delegate?.responseHeaders ?: emptyMap()
+
+            override fun close() {
+                val selected = delegate
+                delegate = null
+                selected?.close()
+            }
+
+            private fun shouldUsePlaybackCache(mediaId: String): Boolean {
+                if (mediaId in playbackCacheReuseIds) return true
+                val hasPartialDownload = downloadCache.getCachedSpans(mediaId).isNotEmpty()
+                val playbackContentLength =
+                    ContentMetadata
+                        .getContentLength(playerCache.getContentMetadata(mediaId))
+                        .takeIf { it > 0L }
+                val fullyCached =
+                    playbackContentLength?.let { contentLength ->
+                        playerCache.isCached(mediaId, 0L, contentLength)
+                    } == true
+                if (
+                    !shouldReuseCompletePlaybackCache(
+                        hasPartialDownload = hasPartialDownload,
+                        playbackContentLength = playbackContentLength,
+                        fullyCached = fullyCached,
+                    )
+                ) {
+                    return false
+                }
+                playbackCacheReuseIds += mediaId
+                return true
             }
         }
 
