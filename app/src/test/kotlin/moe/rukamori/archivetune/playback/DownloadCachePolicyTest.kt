@@ -55,4 +55,37 @@ class DownloadCachePolicyTest {
             ),
         )
     }
+
+    @Test
+    fun partialResume_prefersPersistedDownloadMetadataItag() {
+        assertTrue(
+            resolvePinnedDownloadFormatId(
+                hasPartialDownload = true,
+                metadataFormatId = 251,
+                databaseFormatId = 140,
+            ) == 251,
+        )
+    }
+
+    @Test
+    fun partialResume_fallsBackToDatabaseItagAfterPlaybackCacheCopyRestart() {
+        assertTrue(
+            resolvePinnedDownloadFormatId(
+                hasPartialDownload = true,
+                metadataFormatId = null,
+                databaseFormatId = 251,
+            ) == 251,
+        )
+    }
+
+    @Test
+    fun freshDownload_doesNotPinStaleDatabaseFormat() {
+        assertFalse(
+            resolvePinnedDownloadFormatId(
+                hasPartialDownload = false,
+                metadataFormatId = null,
+                databaseFormatId = 251,
+            ) != null,
+        )
+    }
 }

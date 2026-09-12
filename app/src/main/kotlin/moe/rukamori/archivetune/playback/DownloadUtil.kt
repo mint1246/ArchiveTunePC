@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -314,11 +315,23 @@ class DownloadUtil
             val streamCacheKey = buildSongUrlCacheKey(mediaId, requestedAudioQuality)
             val authFingerprint = YouTube.currentPlaybackAuthState().fingerprint
             val previousFormatId =
-                downloadMetadata
-                    .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
-                    .toInt()
-                    .takeIf { it > 0 }
-            val pinnedFormatId = previousFormatId.takeIf { hasPartialDownload }
+                resolvePinnedDownloadFormatId(
+                    hasPartialDownload = hasPartialDownload,
+                    metadataFormatId =
+                        downloadMetadata
+                            .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
+                            .toInt()
+                            .takeIf { it > 0 },
+                    databaseFormatId =
+                        if (hasPartialDownload) {
+                            runBlocking(Dispatchers.IO) {
+                                database.format(mediaId).first()?.itag?.takeIf { it > 0 }
+                            }
+                        } else {
+                            null
+                        },
+                )
+            val pinnedFormatId = previousFormatId
             songUrlCache[streamCacheKey]
                 ?.takeIf {
                     it.isValidFor(
@@ -622,3 +635,14 @@ internal fun shouldReuseCompletePlaybackCache(
     playbackContentLength: Long?,
     fullyCached: Boolean,
 ): Boolean = !hasPartialDownload && playbackContentLength != null && playbackContentLength > 0L && fullyCached
+
+internal fun resolvePinnedDownloadFormatId(
+    hasPartialDownload: Boolean,
+    metadataFormatId: Int?,
+    databaseFormatId: Int?,
+): Int? =
+    if (hasPartialDownload) {
+        metadataFormatId ?: databaseFormatId
+    } else {
+        null
+    }
