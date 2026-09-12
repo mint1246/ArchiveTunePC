@@ -258,25 +258,17 @@ fun LyricsEnhanced(
                 (preparedLyrics == null && lyrics != null && hasWordSyncedLyrics(lyrics!!))
         }
 
-    val songDurationMs =
-        mediaMetadata
-            ?.duration
-            ?.takeIf { it > 0 }
-            ?.toLong()
-            ?.times(1_000L)
-            ?: player.duration.takeIf { it > 0L }
-            ?: 0L
     val lyricsEntries: List<LyricsEntry> =
-        remember(lyrics, songDurationMs, preparedLyrics) {
+        remember(lyrics, preparedLyrics) {
             if (lyrics == null || lyrics == LYRICS_NOT_FOUND) return@remember emptyList()
             preparedLyrics?.toLyricsEntries()
                 ?: when {
                     isTtml(lyrics!!) -> {
-                        insertInstrumentalBreaks(parseTtml(lyrics!!), songDurationMs)
+                        insertInstrumentalBreaks(parseTtml(lyrics!!))
                     }
 
                     isLineSyncedLrc(lyrics!!) -> {
-                        insertInstrumentalBreaks(parseLyrics(lyrics!!), songDurationMs)
+                        insertInstrumentalBreaks(parseLyrics(lyrics!!))
                     }
 
                     else -> {

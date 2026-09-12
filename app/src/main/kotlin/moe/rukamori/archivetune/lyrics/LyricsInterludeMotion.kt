@@ -19,6 +19,58 @@ internal data class LyricsInterludeFrame(
     val dots: List<LyricsInterludeDotState>,
 )
 
+/** Persistent spring state matching the desktop three-dot interlude animator. */
+internal class LyricsInterludeSpringState {
+    private class DotSprings {
+        val scale = LyricsSpring(0.75, frequency = 0.7, dampingRatio = 0.6)
+        val yOffset = LyricsSpring(0.0, frequency = 1.25, dampingRatio = 0.4)
+        val glow = LyricsSpring(0.0, frequency = 1.0, dampingRatio = 0.5)
+        val opacity = LyricsSpring(0.35, frequency = 1.0, dampingRatio = 0.5)
+    }
+
+    private val groupScale = LyricsSpring(1.0, frequency = 5.0, dampingRatio = 0.7)
+    private val dots = List(3) { DotSprings() }
+
+    fun setTarget(frame: LyricsInterludeFrame, snap: Boolean = false) {
+        groupScale.setGoal(frame.groupScale.toDouble(), snap)
+        dots.forEachIndexed { index, springs ->
+            val target = frame.dots[index]
+            springs.scale.setGoal(target.scale.toDouble(), snap)
+            springs.yOffset.setGoal(target.yOffsetFraction.toDouble(), snap)
+            springs.glow.setGoal(target.glow.toDouble(), snap)
+            springs.opacity.setGoal(target.opacity.toDouble(), snap)
+        }
+    }
+
+    fun step(dt: Double) {
+        stepIfAwake(groupScale, dt)
+        dots.forEach { springs ->
+            stepIfAwake(springs.scale, dt)
+            stepIfAwake(springs.yOffset, dt)
+            stepIfAwake(springs.glow, dt)
+            stepIfAwake(springs.opacity, dt)
+        }
+    }
+
+    fun snapshot(): LyricsInterludeFrame =
+        LyricsInterludeFrame(
+            groupScale = groupScale.snapshotPosition().toFloat(),
+            dots =
+                dots.map { springs ->
+                    LyricsInterludeDotState(
+                        scale = springs.scale.snapshotPosition().toFloat(),
+                        yOffsetFraction = springs.yOffset.snapshotPosition().toFloat(),
+                        glow = springs.glow.snapshotPosition().toFloat(),
+                        opacity = springs.opacity.snapshotPosition().toFloat(),
+                    )
+                },
+        )
+
+    private fun stepIfAwake(spring: LyricsSpring, dt: Double) {
+        if (!spring.canSleep()) spring.step(dt)
+    }
+}
+
 /** Timing/curve model shared with the desktop SpicyLyrics-style three-dot interlude. */
 internal object LyricsInterludeMotion {
     private const val PREHIDE_MS = 500L
@@ -75,93 +127,15 @@ internal object LyricsInterludeMotion {
             }
         return LyricsInterludeFrame(groupScale = groupScale, dots = dots)
     }
-}
 
-/** Natural cubic spline matching the desktop `cubic-spline` interpolation. */
-private class NaturalCubicSpline(
-    times: DoubleArray,
-    values: DoubleArray,
-) {
-    private val xs = times.copyOf()
-    private val ys = values.copyOf()
-    private val slopes: DoubleArray
-
-    init {
-        require(xs.size == ys.size && xs.size >= 2)
-        for (index in 1 until xs.size) require(xs[index] > xs[index - 1])
-        slopes = solveNaturalSlopes()
-    }
-
-    fun at(progress: Double): Double {
-        val x = progress.coerceIn(xs.first(), xs.last())
-        if (x <= xs.first()) return ys.first()
-        if (x >= xs.last()) return ys.last()
-
-        var low = 0
-        var high = xs.lastIndex
-        while (high - low > 1) {
-            val middle = (low + high) ushr 1
-            if (xs[middle] <= x) low = middle else high = middle
-        }
-
-        val width = xs[high] - xs[low]
-        val t = (x - xs[low]) / width
-        val delta = ys[high] - ys[low]
-        val a = slopes[low] * width - delta
-        val b = -slopes[high] * width + delta
-        return (1.0 - t) * ys[low] + t * ys[high] +
-            t * (1.0 - t) * (a * (1.0 - t) + b * t)
-    }
-
-    private fun solveNaturalSlopes(): DoubleArray {
-        val last = xs.lastIndex
-        val matrix = Array(last + 1) { DoubleArray(last + 2) }
-        for (index in 1 until last) {
-            val left = xs[index] - xs[index - 1]
-            val right = xs[index + 1] - xs[index]
-            matrix[index][index - 1] = 1.0 / left
-            matrix[index][index] = 2.0 * (1.0 / left + 1.0 / right)
-            matrix[index][index + 1] = 1.0 / right
-            matrix[index][last + 1] =
-                3.0 * (
-                    (ys[index] - ys[index - 1]) / (left * left) +
-                        (ys[index + 1] - ys[index]) / (right * right)
-                    )
-        }
-        val firstWidth = xs[1] - xs[0]
-        matrix[0][0] = 2.0 / firstWidth
-        matrix[0][1] = 1.0 / firstWidth
-        matrix[0][last + 1] = 3.0 * (ys[1] - ys[0]) / (firstWidth * firstWidth)
-
-        val lastWidth = xs[last] - xs[last - 1]
-        matrix[last][last - 1] = 1.0 / lastWidth
-        matrix[last][last] = 2.0 / lastWidth
-        matrix[last][last + 1] = 3.0 * (ys[last] - ys[last - 1]) / (lastWidth * lastWidth)
-        return solve(matrix)
-    }
-
-    private fun solve(matrix: Array<DoubleArray>): DoubleArray {
-        val size = matrix.size
-        for (column in 0 until size) {
-            var pivot = column
-            for (row in column + 1 until size) {
-                if (kotlin.math.abs(matrix[row][column]) > kotlin.math.abs(matrix[pivot][column])) pivot = row
-            }
-            if (pivot != column) {
-                val temporary = matrix[column]
-                matrix[column] = matrix[pivot]
-                matrix[pivot] = temporary
-            }
-            val divisor = matrix[column][column]
-            require(kotlin.math.abs(divisor) > 1e-12)
-            for (cell in column until size + 1) matrix[column][cell] /= divisor
-            for (row in 0 until size) {
-                if (row == column) continue
-                val factor = matrix[row][column]
-                if (factor == 0.0) continue
-                for (cell in column until size + 1) matrix[row][cell] -= factor * matrix[column][cell]
-            }
-        }
-        return DoubleArray(size) { index -> matrix[index][size] }
+    /** Target frame for the desktop spring animator; group hiding is a step goal at -500 ms. */
+    fun springTarget(
+        startMs: Long,
+        durationMs: Long,
+        positionMs: Long,
+    ): LyricsInterludeFrame {
+        val frame = frame(startMs, durationMs, positionMs)
+        val endMs = startMs + durationMs.coerceAtLeast(0L)
+        return frame.copy(groupScale = if (positionMs >= endMs - PREHIDE_MS) 0f else 1f)
     }
 }

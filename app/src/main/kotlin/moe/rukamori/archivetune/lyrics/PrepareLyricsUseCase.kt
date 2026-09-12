@@ -96,7 +96,7 @@ class PrepareLyricsUseCase
             return PreparedLyrics(
                 sourceFormat = LyricsSourceFormat.TTML,
                 syncType = if (document.timingMode == TtmlTimingMode.WORD) LyricsSyncType.WORD else LyricsSyncType.LINE,
-                lines = ImmutableList.copyOf(lines),
+                lines = ImmutableList.copyOf(insertPreparedInstrumentalBreaks(lines)),
                 preferences = preferences,
             )
         }
@@ -105,8 +105,10 @@ class PrepareLyricsUseCase
             document: TtmlDocument,
             romanizationPreferences: LyricsRomanizationPreferences,
         ): PreparedLyricsLine {
-            val mainTrack = main.toPreparedTrack()
-            val backgroundTracks = backgrounds.map { track -> track.toPreparedTrack() }
+            val mainTrack = main.toPreparedTrack(timing.startMs, timing.endMs)
+            val backgroundTracks = backgrounds.map { track -> track.toPreparedTrack(timing.startMs, timing.endMs) }
+            val translationTracks = translations.map { track -> track.toPreparedTrack(timing.startMs, timing.endMs) }
+            val romanizationTracks = romanizations.map { track -> track.toPreparedTrack(timing.startMs, timing.endMs) }
             val romanizationTrack = chooseRomanization(romanizations)
             val providerRomanization =
                 romanizationTrack
@@ -158,10 +160,12 @@ class PrepareLyricsUseCase
                 direction = resolveDirection(language, text),
                 main = mainTrack,
                 backgrounds = ImmutableList.copyOf(backgroundTracks),
-                translation = translations.firstOrNull()?.text?.normalizedSupplementaryText()?.takeIf(String::isNotEmpty),
+                translation = translationTracks.firstOrNull()?.text?.normalizedSupplementaryText()?.takeIf(String::isNotEmpty),
                 romanizedText = lineRomanization,
                 phonetics = ImmutableList.copyOf(phonetics),
                 isInstrumental = false,
+                translationTracks = ImmutableList.copyOf(translationTracks),
+                romanizationTracks = ImmutableList.copyOf(romanizationTracks),
             )
         }
 
@@ -170,34 +174,26 @@ class PrepareLyricsUseCase
             durationMs: Long,
             preferences: LyricsRenderingPreferences,
         ): PreparedLyrics {
-            val entries = LyricsUtils.insertInstrumentalBreaks(LyricsUtils.parseLyrics(source), durationMs)
+            val entries = LyricsUtils.parseLyrics(source)
             val syncType = if (entries.any { !it.words.isNullOrEmpty() }) LyricsSyncType.WORD else LyricsSyncType.LINE
             val prepared =
-                entries.mapIndexed { index, entry ->
+                entries.mapIndexedNotNull { index, entry ->
                     val words =
                         entry.words.orEmpty().filterNot(WordTimestamp::isBackground).map { word ->
-                            val startMs = word.startTime.toMilliseconds()
-                            PreparedLyricsWord(
-                                text = word.text,
-                                startMs = startMs,
-                                endMs = word.endTime.toMilliseconds().coerceAtLeast(startMs + 1L),
-                            )
+                            word.toPreparedLyricsWord()
                         }
                     val backgroundWords =
                         entry.words.orEmpty().filter(WordTimestamp::isBackground).map { word ->
-                            val startMs = word.startTime.toMilliseconds()
-                            PreparedLyricsWord(
-                                text = word.text,
-                                startMs = startMs,
-                                endMs = word.endTime.toMilliseconds().coerceAtLeast(startMs + 1L),
-                            )
+                            word.toPreparedLyricsWord()
                         }
+                    val latestWordEndMs = (words + backgroundWords).maxOfOrNull(PreparedLyricsWord::endMs)
+                    val explicitEndMs = entry.durationMs.takeIf { it > 0L }?.let(entry.time::plus)
                     val endMs =
                         when {
-                            entry.durationMs > 0L -> entry.time + entry.durationMs
-                            words.isNotEmpty() -> words.maxOf(PreparedLyricsWord::endMs)
-                            else -> entries.getOrNull(index + 1)?.time?.minus(1L) ?: entry.time + DEFAULT_LINE_DURATION_MS
-                        }.coerceAtLeast(entry.time + 1L)
+                            explicitEndMs != null -> explicitEndMs
+                            latestWordEndMs != null -> latestWordEndMs
+                            else -> entries.getOrNull(index + 1)?.time
+                        }?.coerceAtLeast(entry.time + 1L) ?: return@mapIndexedNotNull null
                     val romanizedWords =
                         if (preferences.romanization.isEnabled && words.isNotEmpty()) {
                             words.map { word ->
@@ -219,7 +215,14 @@ class PrepareLyricsUseCase
                         text = entry.text,
                         alignment = entry.agent.toAlignment(),
                         direction = resolveDirection(null, entry.text),
-                        main = PreparedLyricsTrack(entry.text, null, ImmutableList.copyOf(words)),
+                        main =
+                            PreparedLyricsTrack(
+                                text = entry.text,
+                                language = null,
+                                words = ImmutableList.copyOf(words),
+                                startMs = entry.time.takeIf { it >= 0L },
+                                endMs = endMs.takeIf { entry.time >= 0L },
+                            ),
                         backgrounds =
                             if (backgroundWords.isEmpty()) {
                                 ImmutableList.of()
@@ -229,6 +232,8 @@ class PrepareLyricsUseCase
                                         text = backgroundWords.joinToString(separator = "") { it.text },
                                         language = null,
                                         words = ImmutableList.copyOf(backgroundWords),
+                                        startMs = backgroundWords.minOfOrNull(PreparedLyricsWord::startMs),
+                                        endMs = backgroundWords.maxOfOrNull(PreparedLyricsWord::endMs),
                                     ),
                                 )
                             },
@@ -241,7 +246,7 @@ class PrepareLyricsUseCase
             return PreparedLyrics(
                 sourceFormat = if (QRCParser.isQrc(source)) LyricsSourceFormat.QRC else LyricsSourceFormat.LRC,
                 syncType = syncType,
-                lines = ImmutableList.copyOf(prepared),
+                lines = ImmutableList.copyOf(insertPreparedInstrumentalBreaks(prepared)),
                 preferences = preferences,
             )
         }
@@ -280,19 +285,24 @@ class PrepareLyricsUseCase
             )
         }
 
-        private fun TtmlTrack.toPreparedTrack(): PreparedLyricsTrack =
-            PreparedLyricsTrack(
+        private fun TtmlTrack.toPreparedTrack(
+            fallbackStartMs: Long? = null,
+            fallbackEndMs: Long? = null,
+        ): PreparedLyricsTrack {
+            val words =
+                segments.mapNotNull { segment ->
+                    segment.timing?.let { timing ->
+                        PreparedLyricsWord(segment.text, timing.startMs, timing.endMs)
+                    }
+                }
+            return PreparedLyricsTrack(
                 text = text,
                 language = language,
-                words =
-                    ImmutableList.copyOf(
-                        segments.mapNotNull { segment ->
-                            segment.timing?.let { timing ->
-                                PreparedLyricsWord(segment.text, timing.startMs, timing.endMs)
-                            }
-                        },
-                    ),
+                words = ImmutableList.copyOf(words),
+                startMs = words.minOfOrNull(PreparedLyricsWord::startMs) ?: fallbackStartMs,
+                endMs = words.maxOfOrNull(PreparedLyricsWord::endMs) ?: fallbackEndMs,
             )
+        }
 
         private fun chooseRomanization(tracks: List<TtmlTrack>): TtmlTrack? =
             tracks.firstOrNull { it.language?.contains("Latn", ignoreCase = true) == true }
@@ -354,7 +364,6 @@ class PrepareLyricsUseCase
         private fun String.normalizedSupplementaryText(): String = replace(WHITESPACE_REGEX, " ").trim()
 
         private companion object {
-            const val DEFAULT_LINE_DURATION_MS = 4000L
             const val LYRICS_NOT_FOUND = "LYRICS_NOT_FOUND"
             const val TTML_ROOT_SCAN_LENGTH = 4096
             val WHITESPACE_REGEX = Regex("\\s+")
@@ -362,3 +371,62 @@ class PrepareLyricsUseCase
             val RTL_LANGUAGES = setOf("ar", "dv", "fa", "he", "ku", "ps", "sd", "ug", "ur", "yi")
         }
     }
+
+internal fun WordTimestamp.toPreparedLyricsWord(): PreparedLyricsWord =
+    PreparedLyricsWord(
+        text = text,
+        startMs = (startTime * 1000.0).roundToLong().coerceAtLeast(0L),
+        endMs = (endTime * 1000.0).roundToLong().coerceAtLeast(0L),
+    )
+
+/** Match desktop SpicyPane scene semantics: synthesize intro/internal gaps from the union of vocals, never an outro. */
+internal fun insertPreparedInstrumentalBreaks(lines: List<PreparedLyricsLine>): List<PreparedLyricsLine> {
+    if (lines.isEmpty()) return lines
+    val sortedLines = lines.sortedBy(PreparedLyricsLine::startMs)
+    val result = mutableListOf<PreparedLyricsLine>()
+    val first = sortedLines.first()
+
+    if (first.startMs >= PREPARED_INSTRUMENTAL_GAP_THRESHOLD_MS) {
+        result += preparedInstrumentalLine(0L, first.startMs)
+    }
+
+    result += first
+    var coveredUntilMs = first.endMs
+    for (line in sortedLines.drop(1)) {
+        val gapMs = line.startMs - coveredUntilMs
+        if (gapMs >= PREPARED_INSTRUMENTAL_GAP_THRESHOLD_MS) {
+            result += preparedInstrumentalLine(coveredUntilMs, line.startMs)
+        }
+        result += line
+        coveredUntilMs = maxOf(coveredUntilMs, line.endMs)
+    }
+    return result
+}
+
+private fun preparedInstrumentalLine(
+    startMs: Long,
+    endMs: Long,
+): PreparedLyricsLine =
+    PreparedLyricsLine(
+        id = "instrumental:$startMs:$endMs",
+        startMs = startMs,
+        endMs = endMs,
+        text = "",
+        alignment = LyricsLineAlignment.START,
+        direction = LyricsTextDirection.LTR,
+        main =
+            PreparedLyricsTrack(
+                text = "",
+                language = null,
+                words = ImmutableList.of(),
+                startMs = startMs,
+                endMs = endMs,
+            ),
+        backgrounds = ImmutableList.of(),
+        translation = null,
+        romanizedText = null,
+        phonetics = ImmutableList.of(),
+        isInstrumental = true,
+    )
+
+private const val PREPARED_INSTRUMENTAL_GAP_THRESHOLD_MS = 3_000L

@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.ai.AiLyricsTranslator
@@ -43,6 +44,7 @@ import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.LyricsEntity
 import moe.rukamori.archivetune.extensions.toEnum
 import moe.rukamori.archivetune.lyrics.LyricsHelper
+import moe.rukamori.archivetune.lyrics.LyricsProviderSearchStatus as HelperLyricsProviderSearchStatus
 import moe.rukamori.archivetune.lyrics.LyricsResult
 import moe.rukamori.archivetune.lyrics.LyricsUtils
 import moe.rukamori.archivetune.lyrics.LyricsUtils.displayLyricsText
@@ -61,6 +63,7 @@ sealed interface LyricsSearchScreenState {
 
     @Immutable
     data class Success(
+        val providers: ImmutableList<LyricsSearchProviderUiModel>,
         val results: ImmutableList<LyricsSearchResultUiModel>,
         val isSearching: Boolean,
     ) : LyricsSearchScreenState
@@ -73,6 +76,22 @@ sealed interface LyricsSearchScreenState {
     ) : LyricsSearchScreenState
 }
 
+enum class LyricsSearchProviderStatus {
+    SEARCHING,
+    FOUND,
+    NO_MATCH,
+    TIMED_OUT,
+    FAILED,
+}
+
+@Immutable
+data class LyricsSearchProviderUiModel(
+    val id: String,
+    val providerName: String,
+    val status: LyricsSearchProviderStatus,
+    val results: ImmutableList<LyricsSearchResultUiModel> = ImmutableList.of(),
+)
+
 @Immutable
 data class LyricsSearchResultUiModel(
     val id: String,
@@ -84,6 +103,25 @@ data class LyricsSearchResultUiModel(
     val isLineSynced: Boolean,
     val isWordSynced: Boolean,
 )
+
+internal fun LyricsSearchScreenState.Success.withProviderOutcome(
+    providerIndex: Int,
+    status: LyricsSearchProviderStatus,
+    results: ImmutableList<LyricsSearchResultUiModel>,
+): LyricsSearchScreenState.Success {
+    if (providerIndex !in providers.indices) return this
+
+    val updatedProviders = providers.toMutableList()
+    updatedProviders[providerIndex] =
+        updatedProviders[providerIndex].copy(
+            status = status,
+            results = results,
+        )
+    return copy(
+        providers = ImmutableList.copyOf(updatedProviders),
+        results = ImmutableList.copyOf(updatedProviders.flatMap(LyricsSearchProviderUiModel::results)),
+    )
+}
 
 @Immutable
 sealed interface LyricsTranslationError {
@@ -166,36 +204,60 @@ class LyricsMenuViewModel
             _lyricsSearchState.value = LyricsSearchScreenState.Loading
             job =
                 viewModelScope.launch(Dispatchers.IO) {
-                    val resultModels = mutableListOf<LyricsSearchResultUiModel>()
                     try {
-                        lyricsHelper.getAllLyrics(
+                        if (!_isNetworkAvailable.value) {
+                            if (generation == searchGeneration.get()) {
+                                _lyricsSearchState.value = LyricsSearchScreenState.Error(R.string.error_no_internet)
+                            }
+                            return@launch
+                        }
+
+                        lyricsHelper.searchAllLyrics(
                             mediaId = mediaId,
                             songTitle = title,
-                            songArtists = artist,
-                            songAlbum = album,
+                            songArtists = artist.trim(),
+                            songAlbum = album?.trim()?.takeIf(String::isNotEmpty),
                             duration = duration,
-                        ) { result ->
-                            if (generation != searchGeneration.get()) return@getAllLyrics
-                            val model = result.toUiModel(resultModels.size)
-                            if (model.preview.isBlank()) return@getAllLyrics
-
-                            resultModels += model
-                            _lyricsSearchState.value =
-                                LyricsSearchScreenState.Success(
-                                    results = ImmutableList.copyOf(resultModels),
-                                    isSearching = true,
+                        ) { update ->
+                            if (generation != searchGeneration.get()) return@searchAllLyrics
+                            val resultModels =
+                                ImmutableList.copyOf(
+                                    update.results.mapIndexedNotNull { index, result ->
+                                        result.toUiModel(index).takeIf { it.preview.isNotBlank() }
+                                    },
                                 )
+                            val status =
+                                when (update.status) {
+                                    HelperLyricsProviderSearchStatus.SEARCHING -> LyricsSearchProviderStatus.SEARCHING
+                                    HelperLyricsProviderSearchStatus.FOUND ->
+                                        if (resultModels.isEmpty()) {
+                                            LyricsSearchProviderStatus.NO_MATCH
+                                        } else {
+                                            LyricsSearchProviderStatus.FOUND
+                                        }
+
+                                    HelperLyricsProviderSearchStatus.NO_MATCH -> LyricsSearchProviderStatus.NO_MATCH
+                                    HelperLyricsProviderSearchStatus.TIMED_OUT -> LyricsSearchProviderStatus.TIMED_OUT
+                                    HelperLyricsProviderSearchStatus.FAILED -> LyricsSearchProviderStatus.FAILED
+                                }
+                            publishProviderSearchUpdate(
+                                generation = generation,
+                                providerIndex = update.providerIndex,
+                                providerName = update.providerName,
+                                status = status,
+                                results = resultModels,
+                            )
                         }
                         if (generation != searchGeneration.get()) return@launch
-                        _lyricsSearchState.value =
-                            if (resultModels.isEmpty()) {
-                                LyricsSearchScreenState.Empty
-                            } else {
-                                LyricsSearchScreenState.Success(
-                                    results = ImmutableList.copyOf(resultModels),
-                                    isSearching = false,
-                                )
+                        _lyricsSearchState.update { current ->
+                            when (current) {
+                                LyricsSearchScreenState.Loading -> LyricsSearchScreenState.Empty
+                                is LyricsSearchScreenState.Success -> current.copy(isSearching = false)
+                                LyricsSearchScreenState.Empty,
+                                is LyricsSearchScreenState.Error,
+                                -> current
                             }
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
@@ -204,6 +266,67 @@ class LyricsMenuViewModel
                         }
                     }
                 }
+        }
+
+        private fun publishProviderSearchUpdate(
+            generation: Long,
+            providerIndex: Int,
+            providerName: String,
+            status: LyricsSearchProviderStatus,
+            results: ImmutableList<LyricsSearchResultUiModel>,
+        ) {
+            _lyricsSearchState.update { current ->
+                if (generation != searchGeneration.get()) {
+                    return@update current
+                }
+                when (current) {
+                    LyricsSearchScreenState.Loading -> {
+                        LyricsSearchScreenState.Success(
+                            providers =
+                                ImmutableList.of(
+                                    LyricsSearchProviderUiModel(
+                                        id = "$providerIndex:$providerName",
+                                        providerName = providerName,
+                                        status = status,
+                                        results = results,
+                                    ),
+                                ),
+                            results = results,
+                            isSearching = true,
+                        )
+                    }
+
+                    is LyricsSearchScreenState.Success -> {
+                        if (providerIndex < current.providers.size) {
+                            current.withProviderOutcome(
+                                providerIndex = providerIndex,
+                                status = status,
+                                results = results,
+                            )
+                        } else {
+                            val providers =
+                                current.providers.toMutableList().apply {
+                                    add(
+                                        LyricsSearchProviderUiModel(
+                                            id = "$providerIndex:$providerName",
+                                            providerName = providerName,
+                                            status = status,
+                                            results = results,
+                                        ),
+                                    )
+                                }
+                            current.copy(
+                                providers = ImmutableList.copyOf(providers),
+                                results = ImmutableList.copyOf(providers.flatMap(LyricsSearchProviderUiModel::results)),
+                            )
+                        }
+                    }
+
+                    LyricsSearchScreenState.Empty,
+                    is LyricsSearchScreenState.Error,
+                    -> current
+                }
+            }
         }
 
         fun cancelSearch() {
@@ -423,4 +546,5 @@ class LyricsMenuViewModel
                 isWordSynced = isWordSynced,
             )
         }
+
     }

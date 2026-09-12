@@ -28,6 +28,14 @@ data class LyricsEntry(
     val providerRomanizedLanguage: String? = null,
     val providerTranslationText: String? = null,
     val isRtl: Boolean? = null,
+    val endTimeMs: Long? = null,
+    val lineAlignment: LyricsLineAlignment? = null,
+    val textDirection: LyricsTextDirection? = null,
+    val mainTrack: PreparedLyricsTrack? = null,
+    val backgroundTracks: List<PreparedLyricsTrack> = emptyList(),
+    val translationTracks: List<PreparedLyricsTrack> = emptyList(),
+    val romanizationTracks: List<PreparedLyricsTrack> = emptyList(),
+    val phonetics: List<PreparedLyricsPhonetic> = emptyList(),
     val romanizedTextFlow: MutableStateFlow<String?> = MutableStateFlow(null),
 ) : Comparable<LyricsEntry> {
     override fun compareTo(other: LyricsEntry): Int = (time - other.time).toInt()

@@ -111,6 +111,8 @@ import moe.rukamori.archivetune.utils.TranslatorLanguages
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
 import moe.rukamori.archivetune.viewmodels.LyricsMenuViewModel
+import moe.rukamori.archivetune.viewmodels.LyricsSearchProviderStatus
+import moe.rukamori.archivetune.viewmodels.LyricsSearchProviderUiModel
 import moe.rukamori.archivetune.viewmodels.LyricsSearchResultUiModel
 import moe.rukamori.archivetune.viewmodels.LyricsSearchScreenState
 import moe.rukamori.archivetune.viewmodels.LyricsTranslationError
@@ -132,6 +134,7 @@ fun LyricsMenu(
     onLyricsSyncOffsetChange: (Int) -> Unit,
     showPlayerControlsState: State<Boolean>,
     onShowPlayerControlsChange: (Boolean) -> Unit,
+    initialShowSearch: Boolean = false,
     onDismiss: () -> Unit,
     viewModel: LyricsMenuViewModel = hiltViewModel(),
 ) {
@@ -165,8 +168,8 @@ fun LyricsMenu(
         )
     }
 
-    var showSearchDialog by rememberSaveable {
-        mutableStateOf(false)
+    var showSearchDialog by rememberSaveable(initialShowSearch) {
+        mutableStateOf(initialShowSearch)
     }
     var showSearchResultDialog by rememberSaveable {
         mutableStateOf(false)
@@ -189,6 +192,14 @@ fun LyricsMenu(
             mutableStateOf(
                 TextFieldValue(
                     text = mediaMetadataProvider().artists.joinToString { it.name },
+                ),
+            )
+        }
+    val (albumField, onAlbumFieldChange) =
+        rememberSaveable(showSearchDialog, stateSaver = TextFieldValue.Saver) {
+            mutableStateOf(
+                TextFieldValue(
+                    text = mediaMetadataProvider().album?.title.orEmpty(),
                 ),
             )
         }
@@ -265,6 +276,8 @@ fun LyricsMenu(
             onTitleFieldChange = onTitleFieldChange,
             artistField = artistField,
             onArtistFieldChange = onArtistFieldChange,
+            albumField = albumField,
+            onAlbumFieldChange = onAlbumFieldChange,
             onDismiss = { showSearchDialog = false },
             onSearchOnline = {
                 showSearchDialog = false
@@ -274,7 +287,9 @@ fun LyricsMenu(
                         Intent(Intent.ACTION_WEB_SEARCH).apply {
                             putExtra(
                                 SearchManager.QUERY,
-                                "${artistField.text} ${titleField.text} lyrics",
+                                listOf(artistField.text, titleField.text, albumField.text, "lyrics")
+                                    .filter(String::isNotBlank)
+                                    .joinToString(" "),
                             )
                         },
                     )
@@ -286,7 +301,7 @@ fun LyricsMenu(
                     searchMediaMetadata.id,
                     titleField.text,
                     artistField.text,
-                    searchMediaMetadata.album?.title,
+                    albumField.text.trim().takeIf(String::isNotEmpty),
                     searchMediaMetadata.duration,
                 )
                 showSearchResultDialog = true
@@ -311,7 +326,7 @@ fun LyricsMenu(
                     searchMediaMetadata.id,
                     titleField.text,
                     artistField.text,
-                    searchMediaMetadata.album?.title,
+                    albumField.text.trim().takeIf(String::isNotEmpty),
                     searchMediaMetadata.duration,
                 )
             },
@@ -845,15 +860,15 @@ private fun LyricsSearchResultDialog(
 
                             is LyricsSearchScreenState.Success -> {
                                 itemsIndexed(
-                                    items = state.results,
-                                    key = { _, result -> result.id },
-                                    contentType = { _, _ -> "lyrics_search_result" },
-                                ) { _, result ->
-                                    LyricsSearchResultItem(
-                                        result = result,
-                                        isExpanded = result.id == expandedResultId,
-                                        onExpandedChange = { onExpandedResultChange(result.id) },
-                                        onResultSelected = { onResultSelected(result) },
+                                    items = state.providers,
+                                    key = { _, provider -> provider.id },
+                                    contentType = { _, _ -> "lyrics_search_provider" },
+                                ) { _, provider ->
+                                    LyricsSearchProviderSection(
+                                        provider = provider,
+                                        expandedResultId = expandedResultId,
+                                        onExpandedResultChange = onExpandedResultChange,
+                                        onResultSelected = onResultSelected,
                                     )
                                 }
 
@@ -867,6 +882,77 @@ private fun LyricsSearchResultDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LyricsSearchProviderSection(
+    provider: LyricsSearchProviderUiModel,
+    expandedResultId: String?,
+    onExpandedResultChange: (String) -> Unit,
+    onResultSelected: (LyricsSearchResultUiModel) -> Unit,
+) {
+    val statusText =
+        when (provider.status) {
+            LyricsSearchProviderStatus.SEARCHING -> stringResource(R.string.lyrics_provider_searching)
+            LyricsSearchProviderStatus.FOUND ->
+                stringResource(R.string.lyrics_provider_found_results, provider.results.size)
+            LyricsSearchProviderStatus.NO_MATCH -> stringResource(R.string.lyrics_provider_no_match)
+            LyricsSearchProviderStatus.TIMED_OUT -> stringResource(R.string.lyrics_provider_timed_out)
+            LyricsSearchProviderStatus.FAILED -> stringResource(R.string.lyrics_provider_failed)
+        }
+    val statusColor =
+        if (provider.status == LyricsSearchProviderStatus.FOUND) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = provider.providerName,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = statusColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (provider.status == LyricsSearchProviderStatus.SEARCHING) {
+                    LoadingIndicator(modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+
+        provider.results.forEach { result ->
+            LyricsSearchResultItem(
+                result = result,
+                isExpanded = result.id == expandedResultId,
+                onExpandedChange = { onExpandedResultChange(result.id) },
+                onResultSelected = { onResultSelected(result) },
+            )
         }
     }
 }
@@ -1318,6 +1404,8 @@ private fun SearchLyricsInputDialog(
     onTitleFieldChange: (TextFieldValue) -> Unit,
     artistField: TextFieldValue,
     onArtistFieldChange: (TextFieldValue) -> Unit,
+    albumField: TextFieldValue,
+    onAlbumFieldChange: (TextFieldValue) -> Unit,
     onDismiss: () -> Unit,
     onSearchOnline: () -> Unit,
     onSearch: () -> Unit,
@@ -1362,10 +1450,13 @@ private fun SearchLyricsInputDialog(
                     onTitleFieldChange = onTitleFieldChange,
                     artistField = artistField,
                     onArtistFieldChange = onArtistFieldChange,
+                    albumField = albumField,
+                    onAlbumFieldChange = onAlbumFieldChange,
                     onSearch = onSearch,
                 )
 
                 LyricsSearchInputActions(
+                    canSearch = titleField.text.isNotBlank() && artistField.text.isNotBlank(),
                     onSearchOnline = onSearchOnline,
                     onSearch = onSearch,
                 )
@@ -1405,9 +1496,12 @@ private fun LyricsSearchInputFields(
     onTitleFieldChange: (TextFieldValue) -> Unit,
     artistField: TextFieldValue,
     onArtistFieldChange: (TextFieldValue) -> Unit,
+    albumField: TextFieldValue,
+    onAlbumFieldChange: (TextFieldValue) -> Unit,
     onSearch: () -> Unit,
 ) {
     val fieldArrangement = remember { Arrangement.spacedBy(16.dp) }
+    val canSearch = titleField.text.isNotBlank() && artistField.text.isNotBlank()
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1426,8 +1520,16 @@ private fun LyricsSearchInputFields(
             onValueChange = onArtistFieldChange,
             label = stringResource(R.string.song_artists),
             iconResId = R.drawable.artist,
-            imeAction = ImeAction.Search,
+            imeAction = ImeAction.Next,
             onSearch = onSearch,
+        )
+        LyricsSearchTextField(
+            value = albumField,
+            onValueChange = onAlbumFieldChange,
+            label = stringResource(R.string.song_album_optional),
+            iconResId = R.drawable.album,
+            imeAction = ImeAction.Search,
+            onSearch = { if (canSearch) onSearch() },
         )
     }
 }
@@ -1487,6 +1589,7 @@ private fun LyricsSearchTextField(
 
 @Composable
 private fun LyricsSearchInputActions(
+    canSearch: Boolean,
     onSearchOnline: () -> Unit,
     onSearch: () -> Unit,
 ) {
@@ -1513,6 +1616,7 @@ private fun LyricsSearchInputActions(
 
         Button(
             onClick = onSearch,
+            enabled = canSearch,
             contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
         ) {
             Icon(

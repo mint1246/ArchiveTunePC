@@ -39,6 +39,9 @@ object LyricsUtils {
     private val INLINE_MILLISECONDS_TIME_REGEX = Regex("""<\d{1,8}(?:,\d{1,8})?>""")
     private val YRC_LINE_REGEX = Regex("""\[(\d{1,8}),\d{1,8}\](.*)""")
     private val YRC_WORD_TIME_REGEX = Regex("""\(\d{1,8},\d{1,8}(?:,\d{1,8})?\)""")
+    private val QRC_LINE_TIMING_REGEX = Regex("""\[(\d{1,8}),(\d{1,8})](.*)""")
+    private val QRC_WORD_TIMING_REGEX = Regex("""\(\d{1,8},\d{1,8}(?:,\d{1,8})?\)""")
+    private val QRC_LYRIC_CONTENT_ATTRIBUTE_REGEX = Regex("""LyricContent\s*=\s*\"""", RegexOption.IGNORE_CASE)
     private val TTML_SPAN_REGEX =
         Regex(
             pattern = """<span\b[^>]*>""",
@@ -461,7 +464,7 @@ object LyricsUtils {
     fun parseLyrics(lyrics: String): List<LyricsEntry> {
         val normalizedLyrics = normalizeLyricsText(lyrics)
         if (QRCParser.isQrc(normalizedLyrics)) {
-            return QRCParser.parseQrc(normalizedLyrics).map { line ->
+            val parsedQrc = QRCParser.parseQrc(normalizedLyrics).map { line ->
                 LyricsEntry(
                     time = (line.startTime * 1000.0).toLong(),
                     text = line.text,
@@ -478,6 +481,11 @@ object LyricsUtils {
                     durationMs = ((line.endTime - line.startTime) * 1000.0).toLong().coerceAtLeast(0L),
                 )
             }
+            if (parsedQrc.isNotEmpty()) return parsedQrc
+
+            // Some QRC mirrors only provide line timing in the LyricContent payload. Desktop
+            // accepts that as a valid synced fallback, so keep it renderable on Android too.
+            return parseLineTimedQrc(normalizedLyrics)
         }
 
         val lines = normalizedLyrics.lines()
@@ -495,6 +503,42 @@ object LyricsUtils {
             }
         }
         return mergeLineSyncedTranslations(result).sorted()
+    }
+
+    private fun parseLineTimedQrc(content: String): List<LyricsEntry> =
+        extractQrcLyricContent(content)
+            .lineSequence()
+            .mapNotNull { rawLine ->
+                val match = QRC_LINE_TIMING_REGEX.matchEntire(rawLine.trim()) ?: return@mapNotNull null
+                val startMs = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+                val durationMs = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+                val text =
+                    match.groupValues[3]
+                        .replace(QRC_WORD_TIMING_REGEX, "")
+                        .replace(WHITESPACE_REGEX, " ")
+                        .trim()
+                text.takeIf(String::isNotEmpty)?.let {
+                    LyricsEntry(
+                        time = startMs,
+                        text = it,
+                        durationMs = durationMs.coerceAtLeast(0L),
+                    )
+                }
+            }.toList()
+
+    private fun extractQrcLyricContent(content: String): String {
+        val marker = QRC_LYRIC_CONTENT_ATTRIBUTE_REGEX.find(content) ?: return content
+        val valueStart = marker.range.last + 1
+        val valueEnd = content.lastIndexOf('"').takeIf { it >= valueStart } ?: content.length
+        return content
+            .substring(valueStart, valueEnd)
+            .replace("&#13;", "\r")
+            .replace("&#10;", "\n")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
     }
 
     fun normalizeLyricsText(lyrics: String): String {
@@ -574,10 +618,7 @@ object LyricsUtils {
             trimmed.contains("&lt;", ignoreCase = true)
     }
 
-    fun insertInstrumentalBreaks(
-        entries: List<LyricsEntry>,
-        songDurationMs: Long = 0L,
-    ): List<LyricsEntry> {
+    fun insertInstrumentalBreaks(entries: List<LyricsEntry>): List<LyricsEntry> {
         if (entries.isEmpty()) return entries
         val sortedEntries = entries.sorted()
         val result = mutableListOf<LyricsEntry>()
@@ -599,12 +640,10 @@ object LyricsUtils {
                         )
                     }
                 }
-                coveredUntilMs = maxOf(coveredUntilMs, effectiveLyricsEntryEndMs(sortedEntries, index, songDurationMs))
+                coveredUntilMs = maxOf(coveredUntilMs, effectiveLyricsEntryEndMs(sortedEntries, index))
             }
             result.add(entry)
         }
-
-        insertOutroInstrumentalIfNeeded(songDurationMs, result, coveredUntilMs)
         return result
     }
 
@@ -625,27 +664,6 @@ object LyricsUtils {
                 text = "",
                 isInstrumental = true,
                 durationMs = introGapMs,
-            ),
-        )
-    }
-
-    private fun insertOutroInstrumentalIfNeeded(
-        songDurationMs: Long,
-        result: MutableList<LyricsEntry>,
-        coveredUntilMs: Long,
-    ) {
-        if (songDurationMs <= 0L) return
-        if (coveredUntilMs == Long.MIN_VALUE) return
-        val outroStartMs = coveredUntilMs.coerceAtMost(songDurationMs)
-        val outroDurationMs = songDurationMs - outroStartMs
-        if (outroDurationMs < INSTRUMENTAL_GAP_THRESHOLD_MS) return
-
-        result.add(
-            LyricsEntry(
-                time = outroStartMs,
-                text = "",
-                isInstrumental = true,
-                durationMs = outroDurationMs,
             ),
         )
     }
@@ -886,7 +904,9 @@ object LyricsUtils {
             val mid = (low + high).ushr(1)
             val midTime = lines[mid].time
 
-            if (midTime < target) {
+            // Desktop's scene search is inclusive at the line start. Without the equality
+            // case Android holds the previous line for one extra frame at an exact timestamp.
+            if (midTime <= target) {
                 low = mid + 1
             } else {
                 high = mid - 1

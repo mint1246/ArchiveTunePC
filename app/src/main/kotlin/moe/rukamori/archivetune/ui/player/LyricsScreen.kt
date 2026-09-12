@@ -14,15 +14,21 @@ import android.graphics.Bitmap
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -126,6 +132,7 @@ import moe.rukamori.archivetune.constants.PlayerCustomBrightnessKey
 import moe.rukamori.archivetune.constants.PlayerCustomContrastKey
 import moe.rukamori.archivetune.constants.PlayerCustomImageUriKey
 import moe.rukamori.archivetune.constants.ShowLyricsPlayerControlsKey
+import moe.rukamori.archivetune.db.entities.LyricsEntity
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.lyrics.PreparedLyrics
@@ -184,9 +191,19 @@ fun LyricsScreen(
     val lyricsRenderViewModel: LyricsRenderViewModel = hiltViewModel()
     val lyricsRenderState by lyricsRenderViewModel.state.collectAsStateWithLifecycle()
     val preparedLyrics = (lyricsRenderState as? LyricsRenderScreenState.Success)?.lyrics
+    val lyricsUnavailable = currentLyrics?.lyrics == LyricsEntity.LYRICS_NOT_FOUND
+    val lyricsSourceLabel =
+        when (currentLyrics?.source) {
+            LyricsEntity.Source.EMBEDDED.value -> stringResource(R.string.lyrics_source_embedded)
+            LyricsEntity.Source.USER_SELECTION.value -> stringResource(R.string.lyrics_source_selected)
+            LyricsEntity.Source.USER_EDIT.value -> stringResource(R.string.lyrics_source_edited)
+            LyricsEntity.Source.TRANSLATION.value -> stringResource(R.string.lyrics_source_translation)
+            LyricsEntity.Source.AI_TRANSLATION.value -> stringResource(R.string.lyrics_source_ai_translation)
+            else -> null
+        }
 
     val (enableHapticFeedback) = rememberPreference(EnableHapticFeedbackKey, true)
-    val lyricsMode by rememberEnumPreference(LyricsModeKey, LyricsMode.ENHANCED)
+    val lyricsMode by rememberEnumPreference(LyricsModeKey, LyricsMode.V2)
     val playerBackground by rememberEnumPreference(PlayerBackgroundStyleKey, PlayerBackgroundStyle.DEFAULT)
     val configuredLyricsBackground by rememberEnumPreference(LyricsBackgroundStyleKey, LyricsBackgroundStyle.DEFAULT)
     val lyricsBackground = configuredLyricsBackground.resolveFor(playerBackground)
@@ -430,7 +447,7 @@ fun LyricsScreen(
         }
     }
 
-    val showLyricsMenu = {
+    val showLyricsMenu: (Boolean) -> Unit = { initialShowSearch ->
         menuState.show {
             LyricsMenu(
                 lyricsProvider = { currentLyrics },
@@ -439,6 +456,7 @@ fun LyricsScreen(
                 onLyricsSyncOffsetChange = onLyricsSyncOffsetChange,
                 showPlayerControlsState = showPlayerControlsState,
                 onShowPlayerControlsChange = onShowPlayerControlsChange,
+                initialShowSearch = initialShowSearch,
                 onDismiss = menuState::dismiss,
             )
         }
@@ -489,9 +507,11 @@ fun LyricsScreen(
             AppleMusicTrackHeader(
                 mediaMetadata = mediaMetadata,
                 foregroundColor = foregroundColor,
+                lyricsSourceLabel = lyricsSourceLabel,
                 chordsSelected = showChords,
                 onChordsClick = { showChords = !showChords },
-                onMoreClick = showLyricsMenu,
+                onSearchLyricsClick = { showLyricsMenu(true) },
+                onMoreClick = { showLyricsMenu(false) },
                 onDismissClick = onBackClick,
                 modifier =
                     Modifier
@@ -500,6 +520,9 @@ fun LyricsScreen(
             )
 
             if (orientation == Configuration.ORIENTATION_LANDSCAPE && showPlayerControls) {
+                val landscapeChordWidth =
+                    (LocalConfiguration.current.screenWidthDp.dp * 0.28f)
+                        .coerceIn(220.dp, 320.dp)
                 Row(
                     modifier =
                         Modifier
@@ -508,20 +531,25 @@ fun LyricsScreen(
                             .padding(horizontal = 36.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    AppleMusicLyricsPane(
-                        lyricsMode = lyricsMode,
-                        preparedLyrics = preparedLyrics,
-                        foregroundColor = foregroundColor,
-                        sliderPositionProvider = { sliderPosition },
-                        lyricsSyncOffset = lyricsSyncOffset,
+                    AnimatedVisibility(
+                        visible = showChords,
                         modifier =
                             Modifier
-                                .weight(1.15f)
-                                .fillMaxHeight()
-                                .padding(end = 32.dp),
-                    )
-
-                    if (showChords) {
+                                .width(landscapeChordWidth)
+                                .fillMaxHeight(),
+                        enter =
+                            fadeIn(tween(if (animationsDisabled) 0 else 260)) +
+                                expandHorizontally(
+                                    expandFrom = Alignment.Start,
+                                    animationSpec = tween(if (animationsDisabled) 0 else 360),
+                                ),
+                        exit =
+                            fadeOut(tween(if (animationsDisabled) 0 else 180)) +
+                                shrinkHorizontally(
+                                    shrinkTowards = Alignment.Start,
+                                    animationSpec = tween(if (animationsDisabled) 0 else 300),
+                                ),
+                    ) {
                         ChordContent(
                             track = chordTrack,
                             loading = chordLoading,
@@ -546,11 +574,26 @@ fun LyricsScreen(
                             },
                             modifier =
                                 Modifier
-                                    .weight(0.85f)
-                                    .fillMaxHeight()
-                                    .padding(end = 20.dp),
+                                    .fillMaxSize()
+                                    .padding(end = 24.dp),
                         )
                     }
+
+                    AppleMusicLyricsPane(
+                        lyricsMode = lyricsMode,
+                        preparedLyrics = preparedLyrics,
+                        foregroundColor = foregroundColor,
+                        sliderPositionProvider = { sliderPosition },
+                        lyricsSyncOffset = lyricsSyncOffset,
+                        lyricsUnavailable = lyricsUnavailable,
+                        animationsDisabled = animationsDisabled,
+                        onSearchLyricsClick = { showLyricsMenu(true) },
+                        modifier =
+                            Modifier
+                                .weight(1.15f)
+                                .fillMaxHeight()
+                                .padding(end = 32.dp),
+                    )
 
                     Column(
                         modifier =
@@ -593,47 +636,76 @@ fun LyricsScreen(
                     }
                 }
             } else {
-                if (showChords) {
-                    ChordContent(
-                        track = chordTrack,
-                        loading = chordLoading,
-                        error = chordError,
-                        positionMs = positionState.longValue,
-                        pitchMultiplier = pitchState.floatValue,
-                        onRetry = {
-                            chordTrack = null
-                            chordError = null
-                            chordLocalOnlyRetry = false
-                            chordReloadKey++
-                        },
-                        onLocalModelRetry = {
-                            chordTrack = null
-                            chordError = null
-                            chordLocalOnlyRetry = true
-                            chordReloadKey++
-                        },
-                        onSeek = {
-                            player.seekTo(it)
-                            positionState.longValue = it
-                        },
-                        modifier =
-                            Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
-                } else {
-                    AppleMusicLyricsPane(
-                        lyricsMode = lyricsMode,
-                        preparedLyrics = preparedLyrics,
-                        foregroundColor = foregroundColor,
-                        sliderPositionProvider = { sliderPosition },
-                        lyricsSyncOffset = lyricsSyncOffset,
-                        modifier =
-                            Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                    )
+                AnimatedContent(
+                    targetState = showChords,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    transitionSpec = {
+                        val enterDuration = if (animationsDisabled) 0 else 320
+                        val exitDuration = if (animationsDisabled) 0 else 220
+                        if (targetState) {
+                            (
+                                fadeIn(tween(enterDuration)) +
+                                    slideInHorizontally(tween(enterDuration)) { width -> -width / 8 }
+                            ) togetherWith (
+                                fadeOut(tween(exitDuration)) +
+                                    slideOutHorizontally(tween(exitDuration)) { width -> width / 10 }
+                            )
+                        } else {
+                            (
+                                fadeIn(tween(enterDuration)) +
+                                    slideInHorizontally(tween(enterDuration)) { width -> width / 8 }
+                            ) togetherWith (
+                                fadeOut(tween(exitDuration)) +
+                                    slideOutHorizontally(tween(exitDuration)) { width -> -width / 10 }
+                            )
+                        }
+                    },
+                    label = "lyrics-surface-mode",
+                ) { chordsVisible ->
+                    if (chordsVisible) {
+                        ChordContent(
+                            track = chordTrack,
+                            loading = chordLoading,
+                            error = chordError,
+                            positionMs = positionState.longValue,
+                            pitchMultiplier = pitchState.floatValue,
+                            onRetry = {
+                                chordTrack = null
+                                chordError = null
+                                chordLocalOnlyRetry = false
+                                chordReloadKey++
+                            },
+                            onLocalModelRetry = {
+                                chordTrack = null
+                                chordError = null
+                                chordLocalOnlyRetry = true
+                                chordReloadKey++
+                            },
+                            onSeek = {
+                                player.seekTo(it)
+                                positionState.longValue = it
+                            },
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
+                    } else {
+                        AppleMusicLyricsPane(
+                            lyricsMode = lyricsMode,
+                            preparedLyrics = preparedLyrics,
+                            foregroundColor = foregroundColor,
+                            sliderPositionProvider = { sliderPosition },
+                            lyricsSyncOffset = lyricsSyncOffset,
+                            lyricsUnavailable = lyricsUnavailable,
+                            animationsDisabled = animationsDisabled,
+                            onSearchLyricsClick = { showLyricsMenu(true) },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
 
                 if (showPlayerControls) {
@@ -851,8 +923,10 @@ private fun AppleMusicGrabber(
 private fun AppleMusicTrackHeader(
     mediaMetadata: MediaMetadata,
     foregroundColor: Color,
+    lyricsSourceLabel: String?,
     chordsSelected: Boolean,
     onChordsClick: () -> Unit,
+    onSearchLyricsClick: () -> Unit,
     onMoreClick: () -> Unit,
     onDismissClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -909,6 +983,24 @@ private fun AppleMusicTrackHeader(
                 color = foregroundColor.copy(alpha = 0.72f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text =
+                    listOfNotNull(
+                        lyricsSourceLabel,
+                        stringResource(R.string.lyrics_find_another_version),
+                    ).joinToString("  ·  "),
+                style = MaterialTheme.typography.labelMedium,
+                color = foregroundColor.copy(alpha = 0.68f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier =
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onSearchLyricsClick,
+                    ),
             )
         }
 
@@ -1057,19 +1149,78 @@ private fun AppleMusicLyricsPane(
     foregroundColor: Color,
     sliderPositionProvider: () -> Long?,
     lyricsSyncOffset: Int,
+    lyricsUnavailable: Boolean,
+    animationsDisabled: Boolean,
+    onSearchLyricsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LyricsContent(
-        lyricsMode = lyricsMode,
-        preparedLyrics = preparedLyrics,
-        sliderPositionProvider = sliderPositionProvider,
-        lyricsSyncOffset = lyricsSyncOffset,
-        modifier =
-            modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp),
-        textColor = foregroundColor,
-    )
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val horizontalPadding = (maxWidth * 0.06f).coerceIn(20.dp, 48.dp)
+        AnimatedContent(
+            targetState = lyricsUnavailable,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                val duration = if (animationsDisabled) 0 else 240
+                fadeIn(tween(duration)) togetherWith fadeOut(tween(duration))
+            },
+            label = "lyrics-availability",
+        ) { unavailable ->
+            if (unavailable) {
+                LyricsUnavailableContent(
+                    foregroundColor = foregroundColor,
+                    onSearchLyricsClick = onSearchLyricsClick,
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = horizontalPadding),
+                )
+            } else {
+                LyricsContent(
+                    lyricsMode = lyricsMode,
+                    preparedLyrics = preparedLyrics,
+                    sliderPositionProvider = sliderPositionProvider,
+                    lyricsSyncOffset = lyricsSyncOffset,
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = horizontalPadding),
+                    textColor = foregroundColor,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LyricsUnavailableContent(
+    foregroundColor: Color,
+    onSearchLyricsClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.lyrics_not_found),
+            style = MaterialTheme.typography.titleMedium,
+            color = foregroundColor.copy(alpha = 0.72f),
+        )
+        androidx.compose.material3.TextButton(onClick = onSearchLyricsClick) {
+            Icon(
+                painter = painterResource(R.drawable.search),
+                contentDescription = null,
+                tint = foregroundColor,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.lyrics_find_another_version),
+                color = foregroundColor,
+            )
+        }
+    }
 }
 
 @Composable

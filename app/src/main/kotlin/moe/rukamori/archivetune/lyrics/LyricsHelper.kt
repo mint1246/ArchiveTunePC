@@ -101,8 +101,37 @@ class LyricsHelper
             forceRefresh: Boolean = false,
             callback: (LyricsResult) -> Unit,
         ) {
+            searchAllLyrics(
+                mediaId = mediaId,
+                songTitle = songTitle,
+                songArtists = songArtists,
+                songAlbum = songAlbum,
+                duration = duration,
+                forceRefresh = forceRefresh,
+                onProviderUpdate = {},
+            ).forEach(callback)
+        }
+
+        suspend fun searchAllLyrics(
+            mediaId: String,
+            songTitle: String,
+            songArtists: String,
+            songAlbum: String?,
+            duration: Int,
+            forceRefresh: Boolean = false,
+            onProviderUpdate: (LyricsProviderSearchUpdate) -> Unit,
+        ): List<LyricsResult> {
             val providers = orderedProviders().filter { it.isEnabled(context) }
             requestCache.alignProviderConfiguration(providers.map(LyricsProvider::name))
+            providers.forEachIndexed { index, provider ->
+                onProviderUpdate(
+                    LyricsProviderSearchUpdate(
+                        providerIndex = index,
+                        providerName = provider.name,
+                        status = LyricsProviderSearchStatus.SEARCHING,
+                    ),
+                )
+            }
             val request =
                 LyricsRequestKey(
                     mediaId = mediaId,
@@ -112,30 +141,76 @@ class LyricsHelper
                     duration = duration,
                     providers = providers.map(LyricsProvider::name),
                 )
+            var fetchedFresh = false
             val results =
                 requestCache.getOrFetchSearch(
                     request = request,
                     forceRefresh = forceRefresh,
                 ) {
-                    if (!isNetworkAvailable()) return@getOrFetchSearch emptyList()
+                    fetchedFresh = true
+                    if (!isNetworkAvailable()) {
+                        providers.forEachIndexed { index, provider ->
+                            onProviderUpdate(
+                                LyricsProviderSearchUpdate(
+                                    providerIndex = index,
+                                    providerName = provider.name,
+                                    status = LyricsProviderSearchStatus.FAILED,
+                                ),
+                            )
+                        }
+                        return@getOrFetchSearch emptyList()
+                    }
+
                     supervisorScope {
-                        providers.map { provider ->
-                            async(Dispatchers.IO) {
-                                providerPermits.withPermit {
-                                    fetchAllProviderLyrics(
-                                        provider = provider,
-                                        mediaId = mediaId,
-                                        songTitle = songTitle,
-                                        songArtists = songArtists,
-                                        songAlbum = songAlbum,
-                                        duration = duration,
+                        providers
+                            .mapIndexed { index, provider ->
+                                async(Dispatchers.IO) {
+                                    val outcome =
+                                        providerPermits.withPermit {
+                                            fetchAllProviderLyrics(
+                                                provider = provider,
+                                                mediaId = mediaId,
+                                                songTitle = songTitle,
+                                                songArtists = songArtists,
+                                                songAlbum = songAlbum,
+                                                duration = duration,
+                                            )
+                                        }
+                                    onProviderUpdate(
+                                        LyricsProviderSearchUpdate(
+                                            providerIndex = index,
+                                            providerName = provider.name,
+                                            status = outcome.status,
+                                            results = outcome.results,
+                                        ),
                                     )
+                                    outcome
                                 }
-                            }
-                        }.map { it.await() }
-                    }.flatten()
+                            }.map { it.await() }
+                            .flatMap(ProviderSearchOutcome::results)
+                    }
                 }
-            results.forEach(callback)
+
+            if (!fetchedFresh) {
+                val resultsByProvider = results.groupBy(LyricsResult::providerName)
+                providers.forEachIndexed { index, provider ->
+                    val providerResults = resultsByProvider[provider.name].orEmpty()
+                    onProviderUpdate(
+                        LyricsProviderSearchUpdate(
+                            providerIndex = index,
+                            providerName = provider.name,
+                            status =
+                                if (providerResults.isEmpty()) {
+                                    LyricsProviderSearchStatus.NO_MATCH
+                                } else {
+                                    LyricsProviderSearchStatus.FOUND
+                                },
+                            results = providerResults,
+                        ),
+                    )
+                }
+            }
+            return results
         }
 
         private suspend fun fetchAllProviderLyrics(
@@ -145,7 +220,7 @@ class LyricsHelper
             songArtists: String,
             songAlbum: String?,
             duration: Int,
-        ): List<LyricsResult> =
+        ): ProviderSearchOutcome =
             try {
                 withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
                     for (title in LyricsQueryPolicy.titleVariants(songTitle)) {
@@ -155,18 +230,23 @@ class LyricsHelper
                             if (normalizedLyrics == LYRICS_NOT_FOUND) return@lyricsCallback
                             results += LyricsResult(provider.name, normalizedLyrics)
                         }
-                        if (results.isNotEmpty()) return@withTimeout results
+                        if (results.isNotEmpty()) {
+                            return@withTimeout ProviderSearchOutcome(
+                                status = LyricsProviderSearchStatus.FOUND,
+                                results = results,
+                            )
+                        }
                     }
-                    emptyList()
+                    ProviderSearchOutcome(LyricsProviderSearchStatus.NO_MATCH)
                 }
             } catch (_: TimeoutCancellationException) {
                 GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during lyrics search")
-                emptyList()
+                ProviderSearchOutcome(LyricsProviderSearchStatus.TIMED_OUT)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 reportException(e)
-                emptyList()
+                ProviderSearchOutcome(LyricsProviderSearchStatus.FAILED)
             }
 
         private suspend fun fetchPriorityLyrics(
@@ -297,7 +377,27 @@ class LyricsHelper
                     PaxsenixYouTubeLyricsProvider,
                 )
         }
+
+        private data class ProviderSearchOutcome(
+            val status: LyricsProviderSearchStatus,
+            val results: List<LyricsResult> = emptyList(),
+        )
     }
+
+enum class LyricsProviderSearchStatus {
+    SEARCHING,
+    FOUND,
+    NO_MATCH,
+    TIMED_OUT,
+    FAILED,
+}
+
+data class LyricsProviderSearchUpdate(
+    val providerIndex: Int,
+    val providerName: String,
+    val status: LyricsProviderSearchStatus,
+    val results: List<LyricsResult> = emptyList(),
+)
 
 data class LyricsResult(
     val providerName: String,

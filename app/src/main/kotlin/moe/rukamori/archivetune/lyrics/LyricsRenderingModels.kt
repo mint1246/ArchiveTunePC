@@ -46,6 +46,8 @@ data class PreparedLyricsTrack(
     val text: String,
     val language: String?,
     val words: ImmutableList<PreparedLyricsWord>,
+    val startMs: Long? = null,
+    val endMs: Long? = null,
 )
 
 @Immutable
@@ -68,6 +70,8 @@ data class PreparedLyricsLine(
     val romanizedText: String?,
     val phonetics: ImmutableList<PreparedLyricsPhonetic>,
     val isInstrumental: Boolean,
+    val translationTracks: ImmutableList<PreparedLyricsTrack> = ImmutableList.of(),
+    val romanizationTracks: ImmutableList<PreparedLyricsTrack> = ImmutableList.of(),
 )
 
 @Immutable

@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.lyrics.PrepareLyricsUseCase
 import moe.rukamori.archivetune.lyrics.PreparedLyrics
+import moe.rukamori.archivetune.lyrics.activeLineIndex
+import moe.rukamori.archivetune.lyrics.isSynchronized
 import moe.rukamori.archivetune.utils.reportException
 import javax.inject.Inject
 
@@ -28,7 +30,12 @@ sealed interface LyricsRenderScreenState {
     @Immutable
     data class Success(
         val lyrics: PreparedLyrics,
-    ) : LyricsRenderScreenState
+    ) : LyricsRenderScreenState {
+        val synchronized: Boolean
+            get() = lyrics.isSynchronized
+
+        fun activeLineIndex(positionMs: Long): Int = lyrics.activeLineIndex(positionMs)
+    }
 
     data object Empty : LyricsRenderScreenState
 

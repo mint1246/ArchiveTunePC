@@ -41,11 +41,29 @@ fun PreparedLyrics.toLyricsEntries(): List<LyricsEntry> =
             durationMs = (line.endMs - line.startMs).coerceAtLeast(0L),
             providerRomanizedText = line.romanizedText,
             providerRomanizedWords = providerWords,
+            providerRomanizedLanguage = line.preferredRomanizationTrack()?.language,
             providerTranslationText = line.translation,
             isRtl = line.direction == LyricsTextDirection.RTL,
+            endTimeMs = line.endMs.takeIf { line.startMs >= 0L && it >= line.startMs },
+            lineAlignment = line.alignment,
+            textDirection = line.direction,
+            mainTrack = line.main,
+            backgroundTracks = line.backgrounds,
+            translationTracks = line.translationTracks,
+            romanizationTracks = line.romanizationTracks,
+            phonetics = line.phonetics,
             romanizedTextFlow = MutableStateFlow(line.romanizedText),
         )
     }
+
+private fun PreparedLyricsLine.preferredRomanizationTrack(): PreparedLyricsTrack? {
+    val selectedText = romanizedText?.normalizedTrackText()?.takeIf(String::isNotEmpty) ?: return null
+    val matchingTracks = romanizationTracks.filter { track -> track.text.normalizedTrackText() == selectedText }
+    return matchingTracks.firstOrNull { track -> track.language?.contains("Latn", ignoreCase = true) == true }
+        ?: matchingTracks.firstOrNull()
+}
+
+private fun String.normalizedTrackText(): String = replace(TRACK_WHITESPACE_REGEX, " ").trim()
 
 private fun PreparedLyricsWord.toWordTimestamp(isBackground: Boolean = false): WordTimestamp =
     WordTimestamp(
@@ -56,3 +74,4 @@ private fun PreparedLyricsWord.toWordTimestamp(isBackground: Boolean = false): W
     )
 
 private const val MILLIS_PER_SECOND = 1000.0
+private val TRACK_WHITESPACE_REGEX = Regex("\\s+")

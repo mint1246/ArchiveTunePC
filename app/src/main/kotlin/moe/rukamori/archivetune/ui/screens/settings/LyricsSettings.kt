@@ -164,7 +164,7 @@ fun LyricsSettings(
     val (lyricsScroll, onLyricsScrollChange) = rememberPreference(LyricsScrollKey, defaultValue = true)
     val (lyricsTextSize, onLyricsTextSizeChange) = rememberPreference(LyricsTextSizeKey, defaultValue = 26f)
     val (lyricsLineSpacing, onLyricsLineSpacingChange) = rememberPreference(LyricsLineSpacingKey, defaultValue = 1.3f)
-    val (lyricsMode, onLyricsModeChange) = rememberEnumPreference(LyricsModeKey, defaultValue = LyricsMode.ENHANCED)
+    val (lyricsMode, onLyricsModeChange) = rememberEnumPreference(LyricsModeKey, defaultValue = LyricsMode.V2)
     val (enableLrclib, onEnableLrclibChange) = rememberPreference(key = EnableLrcLibKey, defaultValue = true)
     val (enableKugou, onEnableKugouChange) = rememberPreference(key = EnableKugouKey, defaultValue = true)
     val (enableBetterLyrics, onEnableBetterLyricsChange) = rememberPreference(key = EnableBetterLyricsKey, defaultValue = true)
