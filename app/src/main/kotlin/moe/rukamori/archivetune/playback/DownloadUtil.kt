@@ -378,14 +378,14 @@ class DownloadUtil
                     percentDownloaded = this@toProgressSnapshot.percentDownloaded
                 }
             return Download(
-                request = request,
-                state = state,
-                startTimeMs = startTimeMs,
-                updateTimeMs = updateTimeMs,
-                contentLength = contentLength,
-                stopReason = stopReason,
-                failureReason = failureReason,
-                progress = progressSnapshot,
+                request,
+                state,
+                startTimeMs,
+                updateTimeMs,
+                contentLength,
+                stopReason,
+                failureReason,
+                progressSnapshot,
             )
         }
 
@@ -414,20 +414,19 @@ class DownloadUtil
                     val artworkUrls =
                         database.withTransaction {
                             upsert(
-                            FormatEntity(
-                                id = mediaId,
-                                itag = format.itag,
-                                mimeType = format.mimeType.split(";")[0],
-                                codecs = resolvedCodecs,
-                                bitrate = format.bitrate,
-                                sampleRate = format.audioSampleRate,
-                                contentLength = contentLength,
-                                loudnessDb = playbackData.audioConfig?.loudnessDb,
-                                perceptualLoudnessDb = playbackData.audioConfig?.perceptualLoudnessDb,
-                                playbackUrl = playbackData.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
-                            ),
-                            ),
-                        )
+                                FormatEntity(
+                                    id = mediaId,
+                                    itag = format.itag,
+                                    mimeType = format.mimeType.split(";")[0],
+                                    codecs = resolvedCodecs,
+                                    bitrate = format.bitrate,
+                                    sampleRate = format.audioSampleRate,
+                                    contentLength = contentLength,
+                                    loudnessDb = playbackData.audioConfig?.loudnessDb,
+                                    perceptualLoudnessDb = playbackData.audioConfig?.perceptualLoudnessDb,
+                                    playbackUrl = playbackData.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
+                                ),
+                            )
 
                         val now = LocalDateTime.now()
                         val existing = getSongByIdBlocking(mediaId)?.song
