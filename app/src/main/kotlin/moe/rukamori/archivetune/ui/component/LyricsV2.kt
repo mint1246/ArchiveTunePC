@@ -115,9 +115,6 @@ import moe.rukamori.archivetune.constants.LyricsRomanizeKoreanKey
 import moe.rukamori.archivetune.constants.LyricsRomanizeOtherLanguagesKey
 import moe.rukamori.archivetune.constants.LyricsScrollKey
 import moe.rukamori.archivetune.constants.LyricsTextSizeKey
-import moe.rukamori.archivetune.constants.LyricsV2BounceFactorKey
-import moe.rukamori.archivetune.constants.LyricsV2FillTransitionWidthKey
-import moe.rukamori.archivetune.constants.LyricsV2GlowFactorKey
 import moe.rukamori.archivetune.constants.PlayerBackgroundStyle
 import moe.rukamori.archivetune.constants.PlayerBackgroundStyleKey
 import moe.rukamori.archivetune.db.entities.LyricsEntity
@@ -201,9 +198,6 @@ fun LyricsV2(
     val (lyricsTextSize) = rememberPreference(LyricsTextSizeKey, defaultValue = 26f)
     val (lyricsLineSpacing) = rememberPreference(LyricsLineSpacingKey, defaultValue = 1.3f)
     val (lyricsLineBlurPreference) = rememberPreference(LyricsLineBlurKey, defaultValue = true)
-    val (bounceFactor) = rememberPreference(LyricsV2BounceFactorKey, defaultValue = 1f)
-    val (glowFactor) = rememberPreference(LyricsV2GlowFactorKey, defaultValue = 1f)
-    val (fillTransitionWidth) = rememberPreference(LyricsV2FillTransitionWidthKey, defaultValue = 8f)
     val (romanizeChinese) = rememberPreference(LyricsRomanizeChineseKey, defaultValue = true)
     val (romanizeHindi) = rememberPreference(LyricsRomanizeHindiKey, defaultValue = true)
     val (romanizeJapanese) = rememberPreference(LyricsRomanizeJapaneseKey, defaultValue = true)
@@ -918,8 +912,10 @@ fun LyricsV2(
                                     textAlign = textAlign,
                                     lyricsFontFamily = lyricsFontFamily,
                                     isPlaying = player.isPlaying,
-                                    bounceFactor = bounceFactor,
-                                    glowFactor = glowFactor,
+                                    // Desktop SpicyPane has fixed spring/glow tuning. Do not let
+                                    // old Android-only tuning preferences distort parity mode.
+                                    bounceFactor = 1f,
+                                    glowFactor = 1f,
                                 )
                             } else {
                                 Text(

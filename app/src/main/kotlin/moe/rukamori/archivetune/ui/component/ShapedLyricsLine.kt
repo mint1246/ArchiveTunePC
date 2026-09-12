@@ -21,13 +21,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -51,6 +50,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 private const val SHAPED_GLYPH_FADE_FRACTION = 0.2f
+private const val SHAPED_BRIGHT_OVERLAY_ALPHA = 0xE7 / 255f
 
 /**
  * Android's full-line counterpart to desktop SpicyPane's LineTextGeometry/ActiveLineText.
@@ -445,14 +445,12 @@ private fun DrawScope.drawShapedLyricsLine(
         val wordYOffset = wordSpring.yOffsetFraction * fontSizePx.coerceAtLeast(1f) * bounceFactor
         val state = shapedWordState(positionMs, word.startMs, word.endMs)
 
-        withTransform({
-            transformAround(
-                centerX = bounds.center.x,
-                centerY = bounds.center.y,
-                scale = wordScale,
-                yOffset = wordYOffset,
-            )
-        }) {
+        withNativeLyricsTransform(
+            centerX = bounds.center.x,
+            centerY = bounds.center.y,
+            scale = wordScale,
+            yOffset = wordYOffset,
+        ) {
             when (state) {
                 ShapedLyricsWordState.NOT_SUNG -> {
                     wordGeometry.rowBands.forEach { band ->
@@ -519,14 +517,12 @@ private fun DrawScope.drawShapedLyricsLine(
                                     else -> -SHAPED_GLYPH_FADE_FRACTION
                                 }
 
-                            withTransform({
-                                transformAround(
-                                    centerX = band.center.x,
-                                    centerY = band.center.y,
-                                    scale = graphemeScale,
-                                    yOffset = graphemeYOffset,
-                                )
-                            }) {
+                            withNativeLyricsTransform(
+                                centerX = band.center.x,
+                                centerY = band.center.y,
+                                scale = graphemeScale,
+                                yOffset = graphemeYOffset,
+                            ) {
                                 drawProgressiveBand(
                                     layout = layout,
                                     band = band,
@@ -551,15 +547,29 @@ internal fun shapedLyricsGraphemeYOffsetPx(
     bounceFactor: Float,
 ): Float = yOffsetFraction * 2f * bounceFactor
 
-private fun androidx.compose.ui.graphics.drawscope.DrawTransform.transformAround(
+/**
+ * Keep the transform order byte-for-byte equivalent in spirit to desktop SpicyPane's
+ * native Skia canvas sequence. Using DrawTransform here subtly changed the composed
+ * pivot when a glyph transform was nested inside a word transform, which could make
+ * individually animated letters drift sideways on Android.
+ */
+private inline fun DrawScope.withNativeLyricsTransform(
     centerX: Float,
     centerY: Float,
     scale: Float,
     yOffset: Float,
+    block: DrawScope.() -> Unit,
 ) {
-    translate(centerX, centerY)
-    scale(scale, scale)
-    translate(-centerX, -centerY + yOffset)
+    val native = drawContext.canvas.nativeCanvas
+    val saveCount = native.save()
+    native.translate(centerX, centerY)
+    native.scale(scale, scale)
+    native.translate(-centerX, -centerY + yOffset)
+    try {
+        block()
+    } finally {
+        native.restoreToCount(saveCount)
+    }
 }
 
 private fun DrawScope.drawProgressiveBand(
@@ -580,8 +590,8 @@ private fun DrawScope.drawProgressiveBand(
         drawShapedBandGlow(
             layout = layout,
             band = band,
-            color = brightColor.copy(alpha = (brightColor.alpha * clampedGlow * 0.18f).coerceIn(0f, 0.24f)),
-            radiusPx = 1.5f + 4.5f * clampedGlow,
+            color = brightColor.copy(alpha = (brightColor.alpha * clampedGlow * 0.82f).coerceIn(0f, 0.92f)),
+            radiusPx = 4f + 12f * clampedGlow,
         )
     }
 
@@ -594,7 +604,16 @@ private fun DrawScope.drawProgressiveBand(
         }
 
         else -> {
-            val brush = shapedSweepBrush(band, sweep, rtl, brightColor)
+            // Desktop draws the bright paragraph through a ~90.6% alpha mask over the
+            // already-painted dim paragraph. Applying full bright alpha here made the
+            // Android active glyph materially brighter than desktop.
+            val brush =
+                shapedSweepBrush(
+                    band = band,
+                    sweep = sweep,
+                    rtl = rtl,
+                    brightColor = brightColor.copy(alpha = brightColor.alpha * SHAPED_BRIGHT_OVERLAY_ALPHA),
+                )
             clipRect(band.left, band.top, band.right, band.bottom) {
                 drawText(textLayoutResult = layout, brush = brush)
             }
@@ -602,35 +621,41 @@ private fun DrawScope.drawProgressiveBand(
     }
 }
 
-/**
- * Cheap platform-neutral halo that still obeys the single-layout rule: each glow sample is a
- * translated, clipped redraw of the authoritative paragraph. It never asks Android to reshape a
- * standalone grapheme and therefore cannot disturb contextual scripts.
- */
+/** Android counterpart to desktop's native blurred glyph glow. */
 private fun DrawScope.drawShapedBandGlow(
     layout: TextLayoutResult,
     band: Rect,
     color: Color,
     radiusPx: Float,
 ) {
-    val diagonal = radiusPx * 0.70710677f
-    val offsets =
-        arrayOf(
-            Offset(radiusPx, 0f),
-            Offset(-radiusPx, 0f),
-            Offset(0f, radiusPx),
-            Offset(0f, -radiusPx),
-            Offset(diagonal, diagonal),
-            Offset(diagonal, -diagonal),
-            Offset(-diagonal, diagonal),
-            Offset(-diagonal, -diagonal),
+    // The previous Android approximation drew eight crisp translated copies of every
+    // active grapheme. On a small mobile font those copies were individually visible and
+    // looked like letters were duplicating/flying apart. Desktop uses a real native blur.
+    val blurRadius = radiusPx.coerceAtLeast(0.5f)
+    val pad = max(24f, blurRadius * 2f)
+    val layerBounds =
+        android.graphics.RectF(
+            band.left - pad,
+            band.top - pad,
+            band.right + pad,
+            band.bottom + pad,
         )
-    offsets.forEach { offset ->
-        withTransform({ translate(offset.x, offset.y) }) {
-            clipRect(band.left, band.top, band.right, band.bottom) {
-                drawText(textLayoutResult = layout, color = color)
-            }
+    val paint =
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            maskFilter =
+                android.graphics.BlurMaskFilter(
+                    blurRadius,
+                    android.graphics.BlurMaskFilter.Blur.NORMAL,
+                )
         }
+    val native = drawContext.canvas.nativeCanvas
+    val saveCount = native.saveLayer(layerBounds, paint)
+    try {
+        clipRect(band.left, band.top, band.right, band.bottom) {
+            drawText(textLayoutResult = layout, color = color)
+        }
+    } finally {
+        native.restoreToCount(saveCount)
     }
 }
 
