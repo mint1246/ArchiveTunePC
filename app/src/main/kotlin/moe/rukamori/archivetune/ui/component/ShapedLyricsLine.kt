@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -62,6 +63,7 @@ private const val SHAPED_SUNG_WORD_GLOW = 0.65f
 private val SHAPED_HORIZONTAL_OVERSCAN = 24.dp
 private val SHAPED_GLOW_TIGHT_RADIUS = 8.dp
 private val SHAPED_GLOW_WIDE_RADIUS = 22.dp
+private val SHAPED_GLOW_LAYER_OVERSCAN = 72.dp
 
 /**
  * Android's full-line counterpart to desktop SpicyPane's LineTextGeometry/ActiveLineText.
@@ -115,6 +117,10 @@ internal fun ShapedLyricsLine(
         var drawTick by remember(geometry) { mutableIntStateOf(0) }
         val glowTightRadiusPx = with(density) { SHAPED_GLOW_TIGHT_RADIUS.toPx() }
         val glowWideRadiusPx = with(density) { SHAPED_GLOW_WIDE_RADIUS.toPx() }
+        val glowLayerOverscanPx = with(density) { SHAPED_GLOW_LAYER_OVERSCAN.roundToPx() }
+        val contentCanvasWidthPx =
+            if (boundedWidth) constraints.maxWidth.coerceAtLeast(1) else layout.size.width.coerceAtLeast(1)
+        val contentCanvasHeightPx = layout.size.height.coerceAtLeast(1)
         val tightGlowRenderEffect =
             remember(glowTightRadiusPx) {
                 BlurEffect(
@@ -171,10 +177,15 @@ internal fun ShapedLyricsLine(
         if (wideGlowRenderEffect != null) {
             Canvas(
                 modifier =
-                    canvasModifier.graphicsLayer {
-                        renderEffect = wideGlowRenderEffect
-                        clip = false
-                    },
+                    Modifier
+                        .glowLayerOverscan(
+                            contentWidthPx = contentCanvasWidthPx,
+                            contentHeightPx = contentCanvasHeightPx,
+                            overscanPx = glowLayerOverscanPx,
+                        ).graphicsLayer {
+                            renderEffect = wideGlowRenderEffect
+                            clip = false
+                        },
             ) {
                 drawTick
                 drawShapedLyricsGlow(
@@ -186,6 +197,7 @@ internal fun ShapedLyricsLine(
                     bounceFactor = bounceFactor.coerceAtLeast(0f),
                     glowFactor = glowFactor.coerceAtLeast(0f),
                     sourceAlphaMultiplier = 1.15f,
+                    contentOffsetY = glowLayerOverscanPx.toFloat(),
                 )
             }
         }
@@ -193,10 +205,15 @@ internal fun ShapedLyricsLine(
         if (tightGlowRenderEffect != null) {
             Canvas(
                 modifier =
-                    canvasModifier.graphicsLayer {
-                        renderEffect = tightGlowRenderEffect
-                        clip = false
-                    },
+                    Modifier
+                        .glowLayerOverscan(
+                            contentWidthPx = contentCanvasWidthPx,
+                            contentHeightPx = contentCanvasHeightPx,
+                            overscanPx = glowLayerOverscanPx,
+                        ).graphicsLayer {
+                            renderEffect = tightGlowRenderEffect
+                            clip = false
+                        },
             ) {
                 drawTick
                 drawShapedLyricsGlow(
@@ -208,6 +225,7 @@ internal fun ShapedLyricsLine(
                     bounceFactor = bounceFactor.coerceAtLeast(0f),
                     glowFactor = glowFactor.coerceAtLeast(0f),
                     sourceAlphaMultiplier = 1.50f,
+                    contentOffsetY = glowLayerOverscanPx.toFloat(),
                 )
             }
         }
@@ -637,10 +655,11 @@ private fun DrawScope.drawShapedLyricsGlow(
     bounceFactor: Float,
     glowFactor: Float,
     sourceAlphaMultiplier: Float,
+    contentOffsetY: Float,
 ) {
     val layout = geometry.layout
     val lineOffsetX = ((size.width - layout.size.width) / 2f).coerceAtLeast(0f)
-    val textTopLeft = Offset(lineOffsetX, 0f)
+    val textTopLeft = Offset(lineOffsetX, contentOffsetY)
     val brightColor = textColor.copy(alpha = textColor.alpha * 0.85f)
 
     geometry.words.forEachIndexed wordLoop@ { wordIndex, wordGeometry ->
@@ -658,7 +677,7 @@ private fun DrawScope.drawShapedLyricsGlow(
 
         withNativeLyricsTransform(
             centerX = lineOffsetX + bounds.center.x,
-            centerY = bounds.center.y,
+            centerY = contentOffsetY + bounds.center.y,
             scale = wordScale,
             yOffset = wordYOffset,
         ) {
@@ -676,7 +695,7 @@ private fun DrawScope.drawShapedLyricsGlow(
                         alpha = (glow * 0.92f * sourceAlphaMultiplier).coerceIn(0f, 1f),
                     )
                 wordGeometry.rowBands.forEach { band ->
-                    val shifted = band.shiftX(lineOffsetX)
+                    val shifted = band.shift(lineOffsetX, contentOffsetY)
                     clipRect(shifted.left, shifted.top, shifted.right, shifted.bottom) {
                         drawText(textLayoutResult = layout, color = glowColor, topLeft = textTopLeft)
                     }
@@ -707,7 +726,7 @@ private fun DrawScope.drawShapedLyricsGlow(
                             yOffsetFraction = spring.yOffsetFraction,
                             bounceFactor = bounceFactor,
                         )
-                    val shiftedBand = band.shiftX(lineOffsetX)
+                    val shiftedBand = band.shift(lineOffsetX, contentOffsetY)
                     val glowColor =
                         brightColor.copy(
                             alpha = (glow * 0.92f * sourceAlphaMultiplier).coerceIn(0f, 1f),
@@ -715,7 +734,7 @@ private fun DrawScope.drawShapedLyricsGlow(
 
                     withNativeLyricsTransform(
                         centerX = lineOffsetX + band.center.x,
-                        centerY = band.center.y,
+                        centerY = contentOffsetY + band.center.y,
                         scale = graphemeScale,
                         yOffset = graphemeYOffset,
                     ) {
@@ -729,7 +748,42 @@ private fun DrawScope.drawShapedLyricsGlow(
     }
 }
 
-private fun Rect.shiftX(delta: Float): Rect = Rect(left + delta, top, right + delta, bottom)
+private fun Rect.shift(
+    deltaX: Float,
+    deltaY: Float,
+): Rect = Rect(left + deltaX, top + deltaY, right + deltaX, bottom + deltaY)
+
+private fun Rect.shiftX(delta: Float): Rect = shift(delta, 0f)
+
+/**
+ * Measure a glow canvas larger than the lyric row, but report the original row size to the
+ * parent. The oversized child is placed with negative overscan so RenderEffect gets a real
+ * transparent border to blur into without changing line spacing or text position.
+ */
+private fun Modifier.glowLayerOverscan(
+    contentWidthPx: Int,
+    contentHeightPx: Int,
+    overscanPx: Int,
+): Modifier =
+    layout { measurable, constraints ->
+        val safeOverscan = overscanPx.coerceAtLeast(0)
+        val expandedWidth = (contentWidthPx + safeOverscan * 2).coerceAtLeast(1)
+        val expandedHeight = (contentHeightPx + safeOverscan * 2).coerceAtLeast(1)
+        val placeable = measurable.measure(Constraints.fixed(expandedWidth, expandedHeight))
+        val reportedWidth =
+            contentWidthPx.coerceIn(
+                constraints.minWidth,
+                if (constraints.maxWidth == Constraints.Infinity) contentWidthPx else constraints.maxWidth,
+            )
+        val reportedHeight =
+            contentHeightPx.coerceIn(
+                constraints.minHeight,
+                if (constraints.maxHeight == Constraints.Infinity) contentHeightPx else constraints.maxHeight,
+            )
+        layout(reportedWidth, reportedHeight) {
+            placeable.placeRelative(-safeOverscan, -safeOverscan)
+        }
+    }
 
 /** Desktop SpicyPane applies letter Y as the raw spline value times 2 px, not font size. */
 internal fun shapedLyricsGraphemeYOffsetPx(
