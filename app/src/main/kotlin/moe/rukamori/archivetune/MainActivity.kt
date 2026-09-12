@@ -16,6 +16,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -857,6 +858,7 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf<moe.rukamori.archivetune.ui.theme.ThemeSeedPalette?>(null)
             }
             var dynamicArtworkUrl by remember { mutableStateOf<String?>(null) }
+            var dynamicBackdropArtwork by remember { mutableStateOf<Bitmap?>(null) }
 
             LaunchedEffect(legacyUseSystemFont) {
                 if (!legacyUseSystemFont) return@LaunchedEffect
@@ -870,6 +872,7 @@ class MainActivity : ComponentActivity() {
                 val playerConnection = playerConnection
                 if (!enableDynamicTheme || playerConnection == null) {
                     dynamicArtworkUrl = null
+                    dynamicBackdropArtwork = null
                     dynamicThemeSeedPalette = null
                     themeColor = if (!enableDynamicTheme) customThemeColor else DefaultThemeColor
                     return@LaunchedEffect
@@ -887,19 +890,23 @@ class MainActivity : ComponentActivity() {
                                             .allowHardware(false)
                                             .build(),
                                     )
-                                val extractedPalette = result.image?.toBitmap()?.extractThemeSeedPalette()
+                                val artworkBitmap = result.image?.toBitmap()
+                                val extractedPalette = artworkBitmap?.extractThemeSeedPalette()
                                 withContext(Dispatchers.Main) {
+                                    dynamicBackdropArtwork = artworkBitmap
                                     dynamicThemeSeedPalette = extractedPalette
                                     themeColor = extractedPalette?.primary ?: DefaultThemeColor
                                 }
                             } catch (e: Exception) {
                                 withContext(Dispatchers.Main) {
+                                    dynamicBackdropArtwork = null
                                     dynamicThemeSeedPalette = null
                                     themeColor = DefaultThemeColor
                                 }
                             }
                         }
                     } else {
+                        dynamicBackdropArtwork = null
                         dynamicThemeSeedPalette = null
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             themeColor = DefaultThemeColor
@@ -971,6 +978,7 @@ class MainActivity : ComponentActivity() {
                             ),
                 ) {
                     DynamicAppBackdrop(
+                        artwork = dynamicBackdropArtwork,
                         palette = dynamicThemeSeedPalette,
                         enabled = showDynamicAppBackdrop,
                         isPlaying = dynamicBackdropIsPlaying,
