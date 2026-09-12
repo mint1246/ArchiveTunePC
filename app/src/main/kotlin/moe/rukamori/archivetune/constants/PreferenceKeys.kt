@@ -925,6 +925,10 @@ val CanaryReleasesJsonKey = stringPreferencesKey("daily_nightly_releases_json")
 val CanaryReleasesLastCheckedAtKey = longPreferencesKey("daily_nightly_releases_last_checked_at")
 val CanaryReleasesFingerprintKey = stringPreferencesKey("daily_nightly_releases_fingerprint")
 
+val R2UpdateManifestEtagKey = stringPreferencesKey("r2_update_manifest_etag")
+val R2UpdateManifestJsonKey = stringPreferencesKey("r2_update_manifest_json")
+val R2UpdateManifestLastCheckedAtKey = longPreferencesKey("r2_update_manifest_last_checked_at")
+
 val TogetherOnlineEndpointCacheKey = stringPreferencesKey("together_online_endpoint_cache")
 val TogetherOnlineEndpointLastCheckedAtKey = longPreferencesKey("together_online_endpoint_last_checked_at")
 

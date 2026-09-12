@@ -12,7 +12,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -154,10 +153,11 @@ object UpdateNotificationManager {
         try {
             val dataStore = context.dataStore
             val lastNotified = dataStore.data.map { it[LastNotifiedVersionKey] ?: "" }.first()
+            val updateIdentity = Updater.updateIdentity(latestVersion)
 
-            if (latestVersion != lastNotified && Updater.isUpdateAvailable(latestVersion, BuildConfig.VERSION_NAME)) {
+            if (updateIdentity != lastNotified && Updater.isUpdateAvailable(latestVersion, BuildConfig.VERSION_NAME)) {
                 showUpdateNotification(context, latestVersion, updateChannel)
-                dataStore.edit { it[LastNotifiedVersionKey] = latestVersion }
+                dataStore.edit { it[LastNotifiedVersionKey] = updateIdentity }
             }
         } catch (e: Exception) {
             // Silently fail
@@ -184,20 +184,6 @@ object UpdateNotificationManager {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
-        val downloadUrl =
-            when (updateChannel) {
-                UpdateChannel.CANARY -> Updater.getLatestCanaryDownloadUrl()
-                UpdateChannel.STABLE -> Updater.getLatestDownloadUrl()
-            }
-        val downloadIntent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl))
-        val downloadPendingIntent =
-            PendingIntent.getActivity(
-                context,
-                1,
-                downloadIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-
         val notification =
             NotificationCompat
                 .Builder(context, CHANNEL_ID)
@@ -210,7 +196,7 @@ object UpdateNotificationManager {
                 .addAction(
                     R.drawable.download,
                     context.getString(R.string.download),
-                    downloadPendingIntent,
+                    openAppPendingIntent,
                 ).build()
 
         try {

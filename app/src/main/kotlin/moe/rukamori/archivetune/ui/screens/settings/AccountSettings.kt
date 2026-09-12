@@ -85,7 +85,6 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -156,7 +155,6 @@ fun AccountSettings(
     latestVersionName: String,
 ) {
     val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
     val scrollBehavior = appBarScrollBehavior()
 
     val accountLabel = stringResource(R.string.account)
@@ -465,7 +463,7 @@ fun AccountSettings(
                     item {
                         UpdateBannerStrip(
                             latestVersion = latestVersionName,
-                            onClick = { uriHandler.openUri(Updater.getLatestDownloadUrl()) },
+                            onClick = { navController.navigate("settings/update") },
                         )
                     }
                 }

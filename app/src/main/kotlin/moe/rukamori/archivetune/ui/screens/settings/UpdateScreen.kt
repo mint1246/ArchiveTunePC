@@ -179,6 +179,8 @@ fun UpdateScreen(
     var updateSheetLoading by remember { mutableStateOf(false) }
     var updateSheetVersion by remember { mutableStateOf<String?>(null) }
     var updateSheetNotes by remember { mutableStateOf<String?>(null) }
+    var updateSheetDownloadUrl by remember { mutableStateOf<String?>(null) }
+    var updateSheetSha256 by remember { mutableStateOf<String?>(null) }
     var updateSheetError by remember { mutableStateOf<String?>(null) }
     var updateSheetIsSameVersion by remember { mutableStateOf(false) }
     var updateCheckJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -208,7 +210,7 @@ fun UpdateScreen(
             updateDownloadJob =
                 coroutineScope.launch {
                     AppUpdateInstaller
-                        .downloadAndInstall(context, url) { progress ->
+                        .downloadAndInstall(context, url, updateSheetSha256) { progress ->
                             updateDownloadProgress = progress.fraction
                         }.onSuccess {
                             showUpdateDownloadDialog = false
@@ -275,14 +277,11 @@ fun UpdateScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        val downloadUrl =
-            when (updateChannel) {
-                UpdateChannel.CANARY -> Updater.getLatestCanaryDownloadUrl()
-                UpdateChannel.STABLE -> Updater.getLatestDownloadUrl()
-            }
+        val downloadUrl = updateSheetDownloadUrl.orEmpty()
 
         Button(
             onClick = { installUpdate(downloadUrl) },
+            enabled = downloadUrl.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             shapes = ButtonDefaults.shapes(),
         ) {
@@ -297,6 +296,8 @@ fun UpdateScreen(
             updateSheetLoading = true
             updateSheetVersion = null
             updateSheetNotes = null
+            updateSheetDownloadUrl = null
+            updateSheetSha256 = null
             updateSheetError = null
             updateSheetIsSameVersion = false
             showUpdateUpToDateDialog = false
@@ -317,7 +318,9 @@ fun UpdateScreen(
                             val version = Updater.getReleaseVersionName(release)
                             latestVersion = version
                             updateSheetNotes = release.body
-                            updateSheetIsSameVersion = !Updater.isUpdateAvailable(version, BuildConfig.VERSION_NAME)
+                            updateSheetDownloadUrl = release.downloadUrl
+                            updateSheetSha256 = release.sha256
+                            updateSheetIsSameVersion = !Updater.isUpdateAvailable(release)
                             updateSheetVersion = version
 
                             if (updateSheetIsSameVersion) {
@@ -366,7 +369,7 @@ fun UpdateScreen(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = stringResource(R.string.updates_channel_warning_stable_source),
+                            text = stringResource(R.string.updates_r2_stable_source),
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
@@ -382,7 +385,7 @@ fun UpdateScreen(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = stringResource(R.string.updates_canary_hosting_description),
+                            text = stringResource(R.string.updates_r2_canary_hosting_description),
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
@@ -396,7 +399,7 @@ fun UpdateScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        text = stringResource(R.string.updates_channel_warning_canary_acknowledgement),
+                        text = stringResource(R.string.updates_r2_canary_acknowledgement),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -430,7 +433,7 @@ fun UpdateScreen(
             title = { Text(stringResource(R.string.channel_canary)) },
             text = {
                 Text(
-                    text = stringResource(R.string.updates_canary_channel_confirmation),
+                    text = stringResource(R.string.updates_r2_canary_channel_confirmation),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },

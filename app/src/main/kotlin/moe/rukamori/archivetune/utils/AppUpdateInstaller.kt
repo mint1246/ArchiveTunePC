@@ -25,6 +25,7 @@ import moe.rukamori.archivetune.BuildConfig
 import okhttp3.ConnectionPool
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
@@ -59,6 +60,7 @@ object AppUpdateInstaller {
     suspend fun downloadAndInstall(
         context: Context,
         url: String,
+        expectedSha256: String? = null,
         onProgress: (Progress) -> Unit,
     ): Result<Unit> {
         if (BuildConfig.DISTRIBUTION != "gms") {
@@ -68,7 +70,7 @@ object AppUpdateInstaller {
         return try {
             val apkFile =
                 withContext(Dispatchers.IO) {
-                    downloadApk(context.applicationContext, url, onProgress)
+                    downloadApk(context.applicationContext, url, expectedSha256, onProgress)
                 }
             withContext(Dispatchers.Main) {
                 installApk(context, apkFile)
@@ -84,6 +86,7 @@ object AppUpdateInstaller {
     private suspend fun downloadApk(
         context: Context,
         url: String,
+        expectedSha256: String?,
         onProgress: (Progress) -> Unit,
     ): File {
         if (url.isBlank()) {
@@ -121,6 +124,17 @@ object AppUpdateInstaller {
                     }
                 }
                 emitProgress(downloadedBytes, totalBytes, onProgress)
+            }
+        }
+
+        expectedSha256?.trim()?.lowercase(Locale.US)?.takeIf(String::isNotBlank)?.let { expected ->
+            if (!expected.matches(Sha256Regex)) {
+                throw IOException("Update manifest contains an invalid SHA-256")
+            }
+            val actual = downloadedFile.sha256()
+            if (actual != expected) {
+                downloadedFile.delete()
+                throw IOException("Downloaded update failed SHA-256 verification")
             }
         }
 
@@ -199,6 +213,19 @@ object AppUpdateInstaller {
         return apkFile
     }
 
+    private fun File.sha256(): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        inputStream().use { input ->
+            val buffer = ByteArray(STREAM_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    }
+
     private fun installApk(
         context: Context,
         apkFile: File,
@@ -223,4 +250,5 @@ object AppUpdateInstaller {
     private const val ApkMimeType = "application/vnd.android.package-archive"
     private const val STREAM_BUFFER_SIZE = 256 * 1024
     private const val PROGRESS_UPDATE_INTERVAL_MS = 200L
+    private val Sha256Regex = Regex("^[0-9a-f]{64}$")
 }
