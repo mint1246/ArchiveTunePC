@@ -152,16 +152,29 @@ class DownloadUtil
                     ),
             ) { dataSpec ->
                 val mediaId = dataSpec.key ?: error("No media id")
-                val length = if (dataSpec.length >= 0) dataSpec.length else 1
-                if (playerCache.isCached(mediaId, dataSpec.position, length)) {
+                val downloadMetadata = downloadCache.getContentMetadata(mediaId)
+                val hasPartialDownload = downloadCache.getCachedSpans(mediaId).isNotEmpty()
+                val playbackContentLength =
+                    ContentMetadata
+                        .getContentLength(playerCache.getContentMetadata(mediaId))
+                        .takeIf { it > 0L }
+                val fullyCachedInPlayerCache =
+                    playbackContentLength?.let { contentLength ->
+                        playerCache.isCached(mediaId, 0L, contentLength)
+                    } == true
+                if (
+                    shouldReuseCompletePlaybackCache(
+                        hasPartialDownload = hasPartialDownload,
+                        playbackContentLength = playbackContentLength,
+                        fullyCached = fullyCachedInPlayerCache,
+                    )
+                ) {
                     return@Factory dataSpec
                 }
                 val lowDataModeActive = context.isLowDataModeActive()
                 val requestedAudioQuality = resolveDownloadAudioQuality(lowDataModeActive)
                 val streamCacheKey = buildSongUrlCacheKey(mediaId, requestedAudioQuality)
                 val authFingerprint = YouTube.currentPlaybackAuthState().fingerprint
-                val downloadMetadata = downloadCache.getContentMetadata(mediaId)
-                val hasPartialDownload = downloadCache.getCachedSpans(mediaId).isNotEmpty()
                 val previousFormatId =
                     downloadMetadata
                         .get(DOWNLOAD_FORMAT_ID_METADATA_KEY, -1L)
@@ -526,3 +539,9 @@ class DownloadUtil
             private val STREAM_REFRESH_RESPONSE_CODES = setOf(403, 404, 410, 416)
         }
     }
+
+internal fun shouldReuseCompletePlaybackCache(
+    hasPartialDownload: Boolean,
+    playbackContentLength: Long?,
+    fullyCached: Boolean,
+): Boolean = !hasPartialDownload && playbackContentLength != null && playbackContentLength > 0L && fullyCached
