@@ -87,6 +87,35 @@ class LyricsRequestCacheTest {
     }
 
     @Test
+    fun explicitSingleLyricsRefetch_bypassesCachedProviderResult() = runBlocking {
+        val cache = LyricsRequestCache()
+        cache.alignProviderConfiguration(listOf("first"))
+        val request = request()
+        var fetchCount = 0
+
+        val original =
+            cache.getOrFetchSingle(request, forceRefresh = false, cacheable = { true }) {
+                fetchCount++
+                "old provider result"
+            }
+        val cached =
+            cache.getOrFetchSingle(request, forceRefresh = false, cacheable = { true }) {
+                fetchCount++
+                "should not be fetched"
+            }
+        val refreshed =
+            cache.getOrFetchSingle(request, forceRefresh = true, cacheable = { true }) {
+                fetchCount++
+                "fresh provider result"
+            }
+
+        assertEquals("old provider result", original)
+        assertEquals("old provider result", cached)
+        assertEquals("fresh provider result", refreshed)
+        assertEquals(2, fetchCount)
+    }
+
+    @Test
     fun providerConfigurationChange_invalidatesOldEntries() = runBlocking {
         val cache = LyricsRequestCache()
         val firstRequest = request(providers = listOf("first"))
@@ -145,6 +174,26 @@ class LyricsRequestCacheTest {
             cache.getOrFetchSearch(request(mediaId = key), false) {
                 fetchCount++
                 listOf(LyricsResult("first", "12345")) // 10 bytes by upstream UTF-16 estimate.
+            }
+
+        fetch("one")
+        fetch("two")
+        fetch("three")
+        fetch("one")
+
+        assertEquals(4, fetchCount)
+    }
+
+    @Test
+    fun singleLyricsCache_isByteBoundedAndEvictsLeastRecentlyUsedEntry() = runBlocking {
+        val cache = LyricsRequestCache(singleCacheBytes = 20)
+        cache.alignProviderConfiguration(listOf("first"))
+        var fetchCount = 0
+
+        suspend fun fetch(key: String): String =
+            cache.getOrFetchSingle(request(mediaId = key), forceRefresh = false, cacheable = { true }) {
+                fetchCount++
+                "12345" // 10 bytes by upstream UTF-16 estimate.
             }
 
         fetch("one")
