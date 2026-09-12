@@ -32,7 +32,7 @@ class MediaInfoRepository @Inject constructor(private val database: MusicDatabas
         }.flowOn(Dispatchers.IO)
 
     suspend fun metadata(videoId: String): MediaInfoMetadata = withContext(Dispatchers.IO) {
-        val info = YouTube.getMediaMetadata(videoId)
+        val info = YouTube.getMediaInfo(videoId).getOrThrow()
         MediaInfoMetadata(
             title = info.title,
             author = info.author,
@@ -43,11 +43,11 @@ class MediaInfoRepository @Inject constructor(private val database: MusicDatabas
     }
 
     suspend fun statistics(videoId: String): MediaInfoStatistics = withContext(Dispatchers.IO) {
-        val statistics = YouTube.getMediaStatistics(videoId)
+        val statistics = YouTube.getMediaInfo(videoId).getOrThrow()
         MediaInfoStatistics(
             views = statistics.viewCount,
-            likes = statistics.likes,
-            dislikes = statistics.dislikes,
+            likes = statistics.like,
+            dislikes = statistics.dislike,
         )
     }
 }
