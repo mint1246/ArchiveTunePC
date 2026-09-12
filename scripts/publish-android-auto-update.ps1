@@ -85,9 +85,10 @@ try {
 
     $currentCode = [int]$currentCodeMatch.Groups[1].Value
     $versionName = $versionNameMatch.Groups[1].Value
-    $nextCode = if ($VersionCode -gt 0) { $VersionCode } else { $currentCode + 1 }
-    if ($nextCode -le $currentCode) {
-        throw "VersionCode must be greater than the current code $currentCode (requested $nextCode)"
+    $explicitVersionCode = $VersionCode -gt 0
+    $nextCode = if ($explicitVersionCode) { $VersionCode } else { $currentCode + 1 }
+    if ($explicitVersionCode -and $nextCode -lt $currentCode) {
+        throw "VersionCode cannot go backwards from $currentCode (requested $nextCode)"
     }
 
     $gradleText = [regex]::Replace(
@@ -98,15 +99,15 @@ try {
     )
     [IO.File]::WriteAllText($gradleFile, $gradleText, [Text.UTF8Encoding]::new($false))
 
-    Invoke-Native git diff --check
-    Invoke-Native git add -A
+    Invoke-Native -FilePath git -Arguments @("diff", "--check")
+    Invoke-Native -FilePath git -Arguments @("add", "-A")
 
     $message = if ([string]::IsNullOrWhiteSpace($CommitMessage)) {
         "chore(android): publish auto-update $versionName ($nextCode)"
     } else {
         $CommitMessage.Trim()
     }
-    Invoke-Native git commit -m $message
+    Invoke-Native -FilePath git -Arguments @("commit", "-m", $message)
     $commit = (git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw "Failed to read committed HEAD" }
 
@@ -117,7 +118,11 @@ try {
     }
 
     Write-Host "Building Android $versionName ($nextCode) from $commit"
-    Invoke-Native ".\gradlew.bat" ":app:assembleGmsMobileArm64Release" "--no-daemon" "--console=plain"
+    Invoke-Native -FilePath ".\gradlew.bat" -Arguments @(
+        ":app:assembleGmsMobileArm64Release",
+        "--no-daemon",
+        "--console=plain"
+    )
 
     $unsignedApk =
         Get-ChildItem "app\build\outputs\apk\gmsMobileArm64\release" -Filter "*.apk" -File |
@@ -144,13 +149,15 @@ try {
         $env:ARCHIVETUNE_APK_KEY_PASS = $env:ARCHIVETUNE_APK_KS_PASS
     }
 
-    Invoke-Native $apksigner sign `
-        --ks $keystore `
-        --ks-key-alias androiddebugkey `
-        --ks-pass env:ARCHIVETUNE_APK_KS_PASS `
-        --key-pass env:ARCHIVETUNE_APK_KEY_PASS `
-        --out $signedApk `
+    Invoke-Native -FilePath $apksigner -Arguments @(
+        "sign",
+        "--ks", $keystore,
+        "--ks-key-alias", "androiddebugkey",
+        "--ks-pass", "env:ARCHIVETUNE_APK_KS_PASS",
+        "--key-pass", "env:ARCHIVETUNE_APK_KEY_PASS",
+        "--out", $signedApk,
         $unsignedApk.FullName
+    )
 
     $verifyOutput = (& $apksigner verify --verbose --print-certs $signedApk 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) {
@@ -178,7 +185,7 @@ try {
     $size = (Get-Item -LiteralPath $signedApk).Length
 
     if (-not $SkipPush) {
-        Invoke-Native git push origin $branch
+        Invoke-Native -FilePath git -Arguments @("push", "origin", $branch)
     }
 
     $notes = if ([string]::IsNullOrWhiteSpace($ReleaseNotes)) { $message } else { $ReleaseNotes.Trim() }
