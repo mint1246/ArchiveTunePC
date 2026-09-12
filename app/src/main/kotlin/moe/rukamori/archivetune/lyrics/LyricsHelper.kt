@@ -9,7 +9,6 @@ package moe.rukamori.archivetune.lyrics
 
 import android.content.Context
 import android.util.Log
-import android.util.LruCache
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +32,9 @@ import moe.rukamori.archivetune.utils.NetworkConnectivityObserver
 import moe.rukamori.archivetune.utils.dataStore
 import moe.rukamori.archivetune.utils.reportException
 import javax.inject.Inject
+import javax.inject.Singleton
 
+@Singleton
 class LyricsHelper
     @Inject
     constructor(
@@ -59,8 +60,7 @@ class LyricsHelper
                 YouTubeLyricsProvider,
             )
 
-        private val cache = LruCache<String, List<LyricsResult>>(MAX_CACHE_SIZE)
-        private val singleLyricsCache = LruCache<String, String>(MAX_CACHE_SIZE)
+        private val requestCache = LyricsRequestCache()
         private val providerPermits = Semaphore(MAX_CONCURRENT_PROVIDERS)
 
         suspend fun getLyrics(
@@ -68,50 +68,28 @@ class LyricsHelper
             preferredProviderOnly: Boolean = false,
             forceRefresh: Boolean = false,
         ): String {
-            val cacheKey = mediaMetadata.lyricsCacheKey
-            if (forceRefresh) {
-                invalidateCache(cacheKey)
-            } else {
-                singleLyricsCache.get(cacheKey)?.let { lyrics ->
-                    GlobalLog.append(Log.DEBUG, "LyricsHelper", "Found lyrics in cache for ${mediaMetadata.title}")
-                    return lyrics
-                }
-
-                val cached = cache.get(cacheKey)?.firstOrNull()
-                if (cached != null) {
-                    GlobalLog.append(Log.DEBUG, "LyricsHelper", "Found lyrics in cache for ${mediaMetadata.title}")
-                    return cached.lyrics
+            val activeProviders = orderedProviders().filter { it.isEnabled(context) }
+            requestCache.alignProviderConfiguration(activeProviders.map(LyricsProvider::name))
+            val providers = if (preferredProviderOnly) activeProviders.take(1) else activeProviders
+            val request = mediaMetadata.toRequestKey(providers)
+            return requestCache.getOrFetchSingle(
+                request = request,
+                forceRefresh = forceRefresh,
+                cacheable = ::isMeaningfulLyrics,
+            ) {
+                GlobalLog.append(
+                    Log.DEBUG,
+                    "LyricsHelper",
+                    "Fetching lyrics for ${mediaMetadata.title} (Artist: ${mediaMetadata.artists.joinToString { it.name }}, " +
+                        "Album: ${mediaMetadata.album?.title})",
+                )
+                if (!isNetworkAvailable()) {
+                    GlobalLog.append(Log.WARN, "LyricsHelper", "Network unavailable, aborting lyrics fetch")
+                    LYRICS_NOT_FOUND
+                } else {
+                    fetchPriorityLyrics(providers, mediaMetadata)
                 }
             }
-
-            GlobalLog.append(
-                Log.DEBUG,
-                "LyricsHelper",
-                "Fetching lyrics for ${mediaMetadata.title} (Artist: ${mediaMetadata.artists.joinToString {
-                    it.name
-                }}, Album: ${mediaMetadata.album?.title})",
-            )
-
-            val isNetworkAvailable =
-                try {
-                    networkConnectivity.isCurrentlyConnected()
-                } catch (e: Exception) {
-                    true
-                }
-
-            if (!isNetworkAvailable) {
-                GlobalLog.append(Log.WARN, "LyricsHelper", "Network unavailable, aborting lyrics fetch")
-                return LYRICS_NOT_FOUND
-            }
-
-            val ordered = orderedProviders().filter { it.isEnabled(context) }
-            val providers = if (preferredProviderOnly) ordered.take(1) else ordered
-            val lyrics = fetchPriorityLyrics(providers, mediaMetadata)
-            if (isMeaningfulLyrics(lyrics)) {
-                singleLyricsCache.put(cacheKey, lyrics)
-            }
-
-            return lyrics
         }
 
         suspend fun getAllLyrics(
@@ -123,48 +101,41 @@ class LyricsHelper
             forceRefresh: Boolean = false,
             callback: (LyricsResult) -> Unit,
         ) {
-            val cacheKey = LyricsQueryPolicy.cacheKey(mediaId, songTitle, songArtists)
-            if (forceRefresh) {
-                invalidateCache(cacheKey)
-            } else {
-                cache.get(cacheKey)?.let { results ->
-                    results.forEach(callback)
-                    return
-                }
-            }
-
-            val isNetworkAvailable =
-                try {
-                    networkConnectivity.isCurrentlyConnected()
-                } catch (e: Exception) {
-                    true
-                }
-
-            if (!isNetworkAvailable) {
-                return
-            }
-
             val providers = orderedProviders().filter { it.isEnabled(context) }
-            val resultsByProvider =
-                supervisorScope {
-                    providers.map { provider ->
-                        async(Dispatchers.IO) {
-                            providerPermits.withPermit {
-                                fetchAllProviderLyrics(
-                                    provider = provider,
-                                    mediaId = mediaId,
-                                    songTitle = songTitle,
-                                    songArtists = songArtists,
-                                    songAlbum = songAlbum,
-                                    duration = duration,
-                                )
+            requestCache.alignProviderConfiguration(providers.map(LyricsProvider::name))
+            val request =
+                LyricsRequestKey(
+                    mediaId = mediaId,
+                    title = songTitle,
+                    artists = songArtists,
+                    album = songAlbum,
+                    duration = duration,
+                    providers = providers.map(LyricsProvider::name),
+                )
+            val results =
+                requestCache.getOrFetchSearch(
+                    request = request,
+                    forceRefresh = forceRefresh,
+                ) {
+                    if (!isNetworkAvailable()) return@getOrFetchSearch emptyList()
+                    supervisorScope {
+                        providers.map { provider ->
+                            async(Dispatchers.IO) {
+                                providerPermits.withPermit {
+                                    fetchAllProviderLyrics(
+                                        provider = provider,
+                                        mediaId = mediaId,
+                                        songTitle = songTitle,
+                                        songArtists = songArtists,
+                                        songAlbum = songAlbum,
+                                        duration = duration,
+                                    )
+                                }
                             }
-                        }
-                    }.map { it.await() }
+                        }.map { it.await() }
+                    }.flatten()
                 }
-            val allResult = resultsByProvider.flatten()
-            allResult.forEach(callback)
-            cache.put(cacheKey, allResult.toList())
+            results.forEach(callback)
         }
 
         private suspend fun fetchAllProviderLyrics(
@@ -214,14 +185,11 @@ class LyricsHelper
                                     fetchProviderLyrics(provider, mediaMetadata, artist)
                                 }
                             }
-                        }.mapNotNull { it.await() }
+                        }.map { it.await() }
                 }
-
-            if (results.isEmpty()) return LYRICS_NOT_FOUND
-
             // Provider order is authoritative, matching desktop. A lower-priority provider must
             // not silently win just because it returned a richer sync format.
-            return results.first()
+            return selectProviderOrderedLyrics(results) ?: LYRICS_NOT_FOUND
         }
 
         private suspend fun fetchProviderLyrics(
@@ -294,21 +262,31 @@ class LyricsHelper
 
         private fun isMeaningfulLyrics(lyrics: String): Boolean = LyricsUtils.hasMeaningfulLyricsContent(lyrics)
 
+        private fun isNetworkAvailable(): Boolean =
+            try {
+                networkConnectivity.isCurrentlyConnected()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                reportException(e)
+                true
+            }
+
         fun clearCache() {
-            cache.evictAll()
-            singleLyricsCache.evictAll()
+            requestCache.clear()
         }
 
-        private fun invalidateCache(cacheKey: String) {
-            cache.remove(cacheKey)
-            singleLyricsCache.remove(cacheKey)
-        }
-
-        private val MediaMetadata.lyricsCacheKey: String
-            get() = LyricsQueryPolicy.cacheKey(id, title, artists.joinToString { it.name })
+        private fun MediaMetadata.toRequestKey(providers: List<LyricsProvider>): LyricsRequestKey =
+            LyricsRequestKey(
+                mediaId = id,
+                title = title,
+                artists = artists.joinToString { it.name },
+                album = album?.title,
+                duration = duration,
+                providers = providers.map(LyricsProvider::name),
+            )
 
         companion object {
-            private const val MAX_CACHE_SIZE = 16
             private const val MAX_CONCURRENT_PROVIDERS = 6
             private val paxsenixProviders =
                 setOf(
@@ -325,3 +303,5 @@ data class LyricsResult(
     val providerName: String,
     val lyrics: String,
 )
+
+internal fun selectProviderOrderedLyrics(results: List<String?>): String? = results.firstOrNull { it != null }
