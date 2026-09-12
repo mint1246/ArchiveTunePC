@@ -75,7 +75,7 @@ android {
     applicationId = "moe.rukamori.archivetune"
         minSdk = 26
         targetSdk = 37
-        versionCode = 142
+        versionCode = 143
         versionName = "15.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -329,10 +329,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:${libs.versions.media3.get()}")
     implementation(libs.media3.session)
     implementation(libs.media3.okhttp)
-    // QNN's official Android package is arm64-only. Multi-ABI/universal and the other ABI
-    // flavors use the standard ORT AAR (NNAPI -> XNNPACK). Mixing both AARs in one variant would
-    // duplicate ai.onnxruntime classes/native libraries, so universal intentionally does not QNN.
-    add("arm64Implementation", "com.microsoft.onnxruntime:onnxruntime-android-qnn:1.29.0")
+    // Microsoft's QNN AAR is built without NNAPI/XNNPACK. ArchiveTune's arm64 runtime is the
+    // same ORT 1.29 Java/native package rebuilt with QNN + NNAPI + XNNPACK in one binary. Runtime
+    // policy is accelerator-first, then XNNPACK for uncovered nodes, then generic CPU last-resort.
+    add("arm64Implementation", "moe.rukamori.archivetune.runtime:onnxruntime-android-accelerated:1.29.0-2")
     add("universalImplementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
     add("armeabiImplementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
     add("x86Implementation", "com.microsoft.onnxruntime:onnxruntime-android:1.29.0")

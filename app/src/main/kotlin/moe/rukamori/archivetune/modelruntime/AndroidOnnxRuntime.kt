@@ -23,6 +23,7 @@ import timber.log.Timber
 
 enum class AndroidOnnxProvider {
     QNN_HTP,
+    QNN_GPU,
     NNAPI,
     XNNPACK,
 }
@@ -83,10 +84,10 @@ class AndroidOnnxSession internal constructor(
 }
 
 /**
- * Accelerated-only ORT session factory. CPU EP fallback is disabled at the ORT session level for
- * every provider, in addition to NNAPI's own CPU_DISABLED flag. This is deliberate: if QNN/NNAPI/
- * XNNPACK cannot own the complete model we report that truthfully instead of silently running the
- * expensive HTDemucs graph through generic ORT CPU kernels.
+ * Accelerator-first ORT session factory. Each accelerator is paired with XNNPACK in the same
+ * session so unsupported graph fragments can use optimized CPU kernels without forcing the whole
+ * model off the GPU/NPU. We first try with the default CPU EP disabled; only if every accelerated
+ * + XNNPACK combination still has uncovered nodes do we allow the default CPU EP as a last resort.
  */
 class AndroidOnnxRuntime {
     fun createAcceleratedSession(
@@ -99,60 +100,80 @@ class AndroidOnnxRuntime {
         val available = OrtEnvironment.getAvailableProviders()
         val attempts = mutableListOf<AndroidOnnxProviderAttempt>()
         val totalStarted = System.nanoTime()
-        for (provider in providerOrder()) {
-            val ortProvider = provider.ortProvider()
-            val platformReason = provider.platformRejectionReason(abi, Build.VERSION.SDK_INT)
-            val providerAvailable = ortProvider in available && platformReason == null
-            if (!providerAvailable) {
-                attempts +=
-                    AndroidOnnxProviderAttempt(
-                        provider = provider,
-                        available = false,
-                        selected = false,
-                        message = if (ortProvider !in available) "not present in packaged ORT" else checkNotNull(platformReason),
-                    )
-                publishDiagnostics(environment.version, abi, available, attempts, null, totalStarted)
-                continue
-            }
-            val options = OrtSession.SessionOptions()
-            val attemptStarted = System.nanoTime()
-            try {
-                configureCommonOptions(options)
-                configureProvider(options, provider)
-                val session = environment.createSession(model.absolutePath, options)
-                val missingInputs = contract?.expectedInputs.orEmpty() - session.inputNames
-                val missingOutputs = contract?.expectedOutputs.orEmpty() - session.outputNames
-                if (missingInputs.isNotEmpty() || missingOutputs.isNotEmpty()) {
-                    session.close()
-                    error("Unexpected ONNX graph contract; missing inputs=$missingInputs outputs=$missingOutputs")
+        for (allowDefaultCpuFallback in listOf(false, true)) {
+            for (provider in providerOrder()) {
+                val ortProvider = provider.ortProvider()
+                val platformReason = provider.platformRejectionReason(abi, Build.VERSION.SDK_INT)
+                val providerAvailable = ortProvider in available && platformReason == null
+                if (!providerAvailable) {
+                    if (!allowDefaultCpuFallback) {
+                        attempts +=
+                            AndroidOnnxProviderAttempt(
+                                provider = provider,
+                                available = false,
+                                selected = false,
+                                message = if (ortProvider !in available) "not present in packaged ORT" else checkNotNull(platformReason),
+                            )
+                        publishDiagnostics(environment.version, abi, available, attempts, null, totalStarted)
+                    }
+                    continue
                 }
-                val durationMs = elapsedMs(attemptStarted)
-                attempts += AndroidOnnxProviderAttempt(provider, true, true, "loaded", durationMs)
-                val diagnostics =
-                    AndroidOnnxDiagnostics(
-                        ortVersion = environment.version,
-                        abi = abi.ifBlank { "unknown" },
-                        availableProviders = available.mapTo(linkedSetOf()) { it.name },
-                        attempts = attempts.toList(),
-                        selectedProvider = provider,
-                        sessionCreateMs = elapsedMs(totalStarted),
-                    )
-                _diagnostics.value = diagnostics
-                Timber.tag(LOG_TAG).i("provider selected in %d ms: %s", diagnostics.sessionCreateMs, diagnostics.summary())
-                return AndroidOnnxSession(session, diagnostics)
-            } catch (error: Throwable) {
-                attempts +=
-                    AndroidOnnxProviderAttempt(
-                        provider = provider,
-                        available = true,
-                        selected = false,
-                        message = error.rootMessage(),
-                        durationMs = elapsedMs(attemptStarted),
-                    )
-                publishDiagnostics(environment.version, abi, available, attempts, null, totalStarted)
-                Timber.tag(LOG_TAG).w(error, "provider %s rejected model after %d ms", provider, attempts.last().durationMs)
-            } finally {
-                options.close()
+
+                val addXnnpackFallback =
+                    provider != AndroidOnnxProvider.XNNPACK &&
+                        OrtProvider.XNNPACK in available &&
+                        AndroidOnnxProvider.XNNPACK.platformRejectionReason(abi, Build.VERSION.SDK_INT) == null
+                val options = OrtSession.SessionOptions()
+                val attemptStarted = System.nanoTime()
+                try {
+                    configureCommonOptions(options, allowDefaultCpuFallback)
+                    configureProvider(options, provider)
+                    if (addXnnpackFallback) configureProvider(options, AndroidOnnxProvider.XNNPACK)
+                    val session = environment.createSession(model.absolutePath, options)
+                    val missingInputs = contract?.expectedInputs.orEmpty() - session.inputNames
+                    val missingOutputs = contract?.expectedOutputs.orEmpty() - session.outputNames
+                    if (missingInputs.isNotEmpty() || missingOutputs.isNotEmpty()) {
+                        session.close()
+                        error("Unexpected ONNX graph contract; missing inputs=$missingInputs outputs=$missingOutputs")
+                    }
+                    val durationMs = elapsedMs(attemptStarted)
+                    val chainMessage = buildString {
+                        append("loaded")
+                        if (addXnnpackFallback) append(" + XNNPACK fallback")
+                        if (allowDefaultCpuFallback) append(" + CPU last-resort") else append("; CPU fallback disabled")
+                    }
+                    attempts += AndroidOnnxProviderAttempt(provider, true, true, chainMessage, durationMs)
+                    val diagnostics =
+                        AndroidOnnxDiagnostics(
+                            ortVersion = environment.version,
+                            abi = abi.ifBlank { "unknown" },
+                            availableProviders = available.mapTo(linkedSetOf()) { it.name },
+                            attempts = attempts.toList(),
+                            selectedProvider = provider,
+                            sessionCreateMs = elapsedMs(totalStarted),
+                        )
+                    _diagnostics.value = diagnostics
+                    Timber.tag(LOG_TAG).i("provider selected in %d ms: %s", diagnostics.sessionCreateMs, diagnostics.summary())
+                    return AndroidOnnxSession(session, diagnostics)
+                } catch (error: Throwable) {
+                    val fallbackSuffix =
+                        buildString {
+                            if (addXnnpackFallback) append(" [XNNPACK fallback enabled]")
+                            append(if (allowDefaultCpuFallback) " [CPU last-resort enabled]" else " [CPU fallback disabled]")
+                        }
+                    attempts +=
+                        AndroidOnnxProviderAttempt(
+                            provider = provider,
+                            available = true,
+                            selected = false,
+                            message = error.rootMessage() + fallbackSuffix,
+                            durationMs = elapsedMs(attemptStarted),
+                        )
+                    publishDiagnostics(environment.version, abi, available, attempts, null, totalStarted)
+                    Timber.tag(LOG_TAG).w(error, "provider %s rejected model after %d ms", provider, attempts.last().durationMs)
+                } finally {
+                    options.close()
+                }
             }
         }
         val diagnostics = publishDiagnostics(environment.version, abi, available, attempts, null, totalStarted)
@@ -176,12 +197,15 @@ class AndroidOnnxRuntime {
             sessionCreateMs = elapsedMs(startedNanos),
         ).also { _diagnostics.value = it }
 
-    private fun configureCommonOptions(options: OrtSession.SessionOptions) {
+    private fun configureCommonOptions(
+        options: OrtSession.SessionOptions,
+        allowDefaultCpuFallback: Boolean,
+    ) {
         options.setMemoryPatternOptimization(false)
         options.setCPUArenaAllocator(false)
         options.setInterOpNumThreads(1)
         options.setIntraOpNumThreads(1)
-        options.addConfigEntry(DISABLE_CPU_FALLBACK_KEY, "1")
+        if (!allowDefaultCpuFallback) options.addConfigEntry(DISABLE_CPU_FALLBACK_KEY, "1")
         options.addConfigEntry(INTRA_OP_SPINNING_KEY, "0")
     }
 
@@ -198,6 +222,13 @@ class AndroidOnnxRuntime {
                         "enable_htp_fp16_precision" to "1",
                         // Keep graph I/O quantization away from CPU EP as well.
                         "offload_graph_io_quantization" to "0",
+                    ),
+                )
+
+            AndroidOnnxProvider.QNN_GPU ->
+                options.addQnn(
+                    linkedMapOf(
+                        "backend_path" to "libQnnGpu.so",
                     ),
                 )
 
@@ -245,7 +276,12 @@ class AndroidOnnxRuntime {
         }
 
         fun providerOrder(): List<AndroidOnnxProvider> =
-            listOf(AndroidOnnxProvider.QNN_HTP, AndroidOnnxProvider.NNAPI, AndroidOnnxProvider.XNNPACK)
+            listOf(
+                AndroidOnnxProvider.QNN_HTP,
+                AndroidOnnxProvider.QNN_GPU,
+                AndroidOnnxProvider.NNAPI,
+                AndroidOnnxProvider.XNNPACK,
+            )
 
         /** Pure policy helper used by diagnostics/tests without loading ORT native libraries. */
         fun permittedProviderOrder(
@@ -262,6 +298,7 @@ class AndroidOnnxRuntime {
 private fun AndroidOnnxProvider.ortProvider(): OrtProvider =
     when (this) {
         AndroidOnnxProvider.QNN_HTP -> OrtProvider.QNN
+        AndroidOnnxProvider.QNN_GPU -> OrtProvider.QNN
         AndroidOnnxProvider.NNAPI -> OrtProvider.NNAPI
         AndroidOnnxProvider.XNNPACK -> OrtProvider.XNNPACK
     }
@@ -272,6 +309,7 @@ private fun AndroidOnnxProvider.platformRejectionReason(
 ): String? =
     when {
         this == AndroidOnnxProvider.QNN_HTP && abi != "arm64-v8a" -> "QNN HTP requires arm64-v8a"
+        this == AndroidOnnxProvider.QNN_GPU && abi != "arm64-v8a" -> "QNN GPU requires arm64-v8a"
         this == AndroidOnnxProvider.NNAPI && sdkInt < 29 -> "NNAPI CPU_DISABLED requires API 29+"
         else -> null
     }

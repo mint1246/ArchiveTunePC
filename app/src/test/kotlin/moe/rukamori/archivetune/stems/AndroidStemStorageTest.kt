@@ -26,12 +26,14 @@ class AndroidStemStorageTest {
             stems.resolve("track-a/vocals.wav").writeBytes(ByteArray(1_500))
             stems.resolve("track-a/drums.wav").writeBytes(ByteArray(2_500))
             models.resolve(AndroidStemModelSpec.FILE).writeBytes(ByteArray(4_000))
+            val legacyModel = AndroidStemModelSpec.LEGACY_FILES.first()
+            models.resolve(legacyModel).writeBytes(ByteArray(1_000))
             models.resolve("chordmini-2e1d-v1.onnx").writeBytes(ByteArray(7_000))
             models.resolve(".${AndroidStemModelSpec.FILE}.download.part").writeBytes(ByteArray(500))
 
             val storage = AndroidStemStorage(stems, models)
             assertEquals(
-                AndroidStemStorageUsage(stemsBytes = 4_000L, modelBytes = 4_500L),
+                AndroidStemStorageUsage(stemsBytes = 4_000L, modelBytes = 5_500L),
                 storage.measure(),
             )
 
@@ -40,8 +42,9 @@ class AndroidStemStorageTest {
             assertEquals(0L, storage.measure().stemsBytes)
             assertTrue(models.resolve(AndroidStemModelSpec.FILE).isFile)
 
-            assertEquals(4_500L, storage.clearStemModel())
+            assertEquals(5_500L, storage.clearStemModel())
             assertFalse(models.resolve(AndroidStemModelSpec.FILE).exists())
+            assertFalse(models.resolve(legacyModel).exists())
             assertFalse(models.resolve(".${AndroidStemModelSpec.FILE}.download.part").exists())
             assertTrue(models.resolve("chordmini-2e1d-v1.onnx").isFile)
             assertEquals(0L, storage.measure().modelBytes)

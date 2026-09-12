@@ -205,7 +205,7 @@ fun ArchiveTuneTheme(
 
 /**
  * Desktop dynamic theme keeps the app background transparent and frosts normal Material surfaces
- * over the artwork field.  Doing this at the ColorScheme layer means every screen using standard
+ * over the artwork-derived colour field. Doing this at the ColorScheme layer means every screen using standard
  * Material colors participates automatically instead of needing per-screen backdrop hacks.
  */
 private fun ColorScheme.dynamicBackdropGlass(): ColorScheme =
@@ -213,7 +213,7 @@ private fun ColorScheme.dynamicBackdropGlass(): ColorScheme =
         background = Color.Transparent,
         // In dynamic mode the single root DynamicAppBackdrop is the page background. These roles
         // are what Scaffold and most full-screen roots paint, so making them translucent merely
-        // layers the old page color over the artwork and looks like a foreground overlay.
+        // layers the old page color over the colour field and looks like a foreground overlay.
         surface = Color.Transparent,
         surfaceDim = Color.Transparent,
         surfaceBright = Color.Transparent,
@@ -427,22 +427,95 @@ private fun paletteStyleFor(seedColor: Color): PaletteStyle {
 private fun Int.toComposeColor(): Color = Color(this.toLong() and 0xFFFFFFFFL)
 
 fun Bitmap.extractThemeColor(): Color {
-    val palette =
+    return extractThemeSeedPalette().primary
+}
+
+/**
+ * Extract the same kind of multi-colour artwork palette the desktop dynamic theme uses.
+ *
+ * Dynamic theme is deliberately not a one-colour Material You tint: the artwork contributes
+ * distinct primary/secondary/tertiary hues while its dominant colour anchors neutral surfaces.
+ */
+fun Bitmap.extractThemeSeedPalette(): ThemeSeedPalette {
+    val swatches =
         Palette
             .from(this)
-            .maximumColorCount(16)
+            .maximumColorCount(48)
             .generate()
+            .swatches
+            .filter { it.population > 0 }
 
-    val swatch =
-        palette.vibrantSwatch
-            ?: palette.dominantSwatch
-            ?: palette.mutedSwatch
-            ?: palette.lightVibrantSwatch
-            ?: palette.darkVibrantSwatch
-            ?: palette.lightMutedSwatch
-            ?: palette.darkMutedSwatch
+    if (swatches.isEmpty()) {
+        return ThemeSeedPalette(
+            primary = DefaultThemeColor,
+            secondary = DefaultThemeColor.shiftThemeHue(42f),
+            tertiary = DefaultThemeColor.shiftThemeHue(-58f),
+            neutral = Color(0xFF353A36),
+        )
+    }
 
-    return swatch?.rgb?.toComposeColor() ?: DefaultThemeColor
+    data class RankedSwatch(
+        val swatch: Palette.Swatch,
+        val hue: Float,
+        val saturation: Float,
+        val brightness: Float,
+    )
+
+    fun Palette.Swatch.ranked(): RankedSwatch {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(rgb, hsv)
+        return RankedSwatch(this, hsv[0], hsv[1], hsv[2])
+    }
+
+    val colors = swatches.map { it.ranked() }
+    val dominant = colors.maxByOrNull { it.swatch.population } ?: colors.first()
+    val ranked =
+        colors.sortedByDescending { color ->
+            color.swatch.population *
+                (0.45f + color.saturation * 1.35f) *
+                (0.55f + color.brightness)
+        }
+
+    val primary =
+        ranked.firstOrNull { it.saturation >= 0.16f && it.brightness >= 0.16f }
+            ?: dominant
+    val secondary =
+        ranked.firstOrNull {
+            it !== primary &&
+                hueDistance(primary.hue, it.hue) >= 28f &&
+                it.saturation >= 0.12f
+        }
+    val tertiary =
+        ranked.firstOrNull {
+            it !== primary &&
+                it !== secondary &&
+                hueDistance(primary.hue, it.hue) >= 42f &&
+                (secondary == null || hueDistance(secondary.hue, it.hue) >= 24f) &&
+                it.saturation >= 0.10f
+        }
+
+    val primaryColor =
+        if (primary.saturation < 0.12f) DefaultThemeColor else primary.swatch.rgb.toComposeColor()
+    return ThemeSeedPalette(
+        primary = primaryColor,
+        secondary = secondary?.swatch?.rgb?.toComposeColor() ?: primaryColor.shiftThemeHue(42f),
+        tertiary = tertiary?.swatch?.rgb?.toComposeColor() ?: primaryColor.shiftThemeHue(-58f),
+        neutral = dominant.swatch.rgb.toComposeColor(),
+    )
+}
+
+private fun hueDistance(a: Float, b: Float): Float {
+    val raw = abs(a - b)
+    return min(raw, 360f - raw)
+}
+
+private fun Color.shiftThemeHue(degrees: Float): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(toArgb(), hsv)
+    hsv[0] = ((hsv[0] + degrees) % 360f + 360f) % 360f
+    hsv[1] = hsv[1].coerceAtLeast(0.48f)
+    hsv[2] = hsv[2].coerceAtLeast(0.58f)
+    return android.graphics.Color.HSVToColor(hsv).toComposeColor()
 }
 
 fun Bitmap.extractGradientColors(): List<Color> {

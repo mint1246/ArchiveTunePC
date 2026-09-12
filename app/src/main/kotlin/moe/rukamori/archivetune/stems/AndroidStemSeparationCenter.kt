@@ -96,14 +96,25 @@ internal class AndroidStemSeparationCenter(
                                 onProgress,
                                 AndroidStemSeparationStage.MODEL,
                                 ratio.coerceIn(0f, 1f) * MODEL_SHARE,
-                                "Downloading HTDemucs model",
+                                buildString {
+                                    append("Downloading HTDemucs model")
+                                    if (total > 0L) {
+                                        append(" · ")
+                                        append(formatModelBytes(downloaded))
+                                        append(" / ")
+                                        append(formatModelBytes(total))
+                                    }
+                                },
                             )
                         }
                     currentCoroutineContext().ensureActive()
                     val activeSession = ensureSession(model)
-                    emit(onProgress, AndroidStemSeparationStage.DECODING, MODEL_SHARE, "Decoding audio")
+                    emit(onProgress, AndroidStemSeparationStage.DECODING, MODEL_SHARE, "Preparing audio")
 
-                    val decoded = decoder.decode(input, canonicalInput)
+                    val decoded =
+                        decoder.decode(input, canonicalInput) { status ->
+                            emit(onProgress, AndroidStemSeparationStage.DECODING, MODEL_SHARE, status)
+                        }
                     currentCoroutineContext().ensureActive()
                     val reader = CanonicalPcm16WavReader(decoded.file)
                     reader.use {
@@ -291,3 +302,16 @@ private fun emit(
 
 private fun elapsedMs(startedNanos: Long): Long =
     (System.nanoTime() - startedNanos).coerceAtLeast(0L) / 1_000_000L
+
+internal fun formatModelBytes(bytes: Long): String {
+    val safe = bytes.coerceAtLeast(0L).toDouble()
+    val kib = 1024.0
+    val mib = kib * 1024.0
+    val gib = mib * 1024.0
+    return when {
+        safe >= gib -> "%.2f GB".format(safe / gib)
+        safe >= mib -> "%.1f MB".format(safe / mib)
+        safe >= kib -> "%.1f KB".format(safe / kib)
+        else -> "${bytes.coerceAtLeast(0L)} B"
+    }
+}

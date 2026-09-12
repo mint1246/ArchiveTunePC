@@ -163,25 +163,34 @@ internal class AndroidNeuralChordAnalyzer(
         windowCount: Int,
     ): FloatArray {
         val environment = OrtEnvironment.getEnvironment()
+        val inputPerWindow = AndroidChordModelSpec.SEQUENCE_LENGTH * AndroidChordModelSpec.INPUT_BINS
+        val outputPerWindow = AndroidChordModelSpec.SEQUENCE_LENGTH * AndroidChordModelSpec.OUTPUT_CLASSES
+        check(padded.size == windowCount * inputPerWindow) {
+            "Unexpected padded chord feature size ${padded.size} for $windowCount windows"
+        }
+        val logits = FloatArray(windowCount * outputPerWindow)
         val shape =
             longArrayOf(
-                windowCount.toLong(),
+                1L,
                 AndroidChordModelSpec.SEQUENCE_LENGTH.toLong(),
                 AndroidChordModelSpec.INPUT_BINS.toLong(),
             )
-        OnnxTensor.createTensor(environment, FloatBuffer.wrap(padded), shape).use { tensor ->
-            session.run(mapOf("features" to tensor)).use { result ->
-                val value = result.get("logits").orElseThrow { IllegalStateException("ChordMini did not return logits") }
-                val output = value as? OnnxTensor ?: error("ChordMini logits output is not a tensor")
-                val expected =
-                    windowCount * AndroidChordModelSpec.SEQUENCE_LENGTH * AndroidChordModelSpec.OUTPUT_CLASSES
-                val buffer = output.floatBuffer.duplicate().apply { rewind() }
-                check(buffer.remaining() == expected) {
-                    "Unexpected chord model output size ${buffer.remaining()} (expected $expected)"
+        for (windowIndex in 0 until windowCount) {
+            val inputOffset = windowIndex * inputPerWindow
+            val input = FloatBuffer.wrap(padded, inputOffset, inputPerWindow).slice()
+            OnnxTensor.createTensor(environment, input, shape).use { tensor ->
+                session.run(mapOf("features" to tensor)).use { result ->
+                    val value = result.get("logits").orElseThrow { IllegalStateException("ChordMini did not return logits") }
+                    val output = value as? OnnxTensor ?: error("ChordMini logits output is not a tensor")
+                    val buffer = output.floatBuffer.duplicate().apply { rewind() }
+                    check(buffer.remaining() == outputPerWindow) {
+                        "Unexpected chord model output size ${buffer.remaining()} (expected $outputPerWindow)"
+                    }
+                    buffer.get(logits, windowIndex * outputPerWindow, outputPerWindow)
                 }
-                return FloatArray(expected).also(buffer::get)
             }
         }
+        return logits
     }
 
     private suspend fun resolveAudioInput(

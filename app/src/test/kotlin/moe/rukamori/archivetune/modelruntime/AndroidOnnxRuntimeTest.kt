@@ -16,7 +16,12 @@ class AndroidOnnxRuntimeTest {
     @Test
     fun arm64_prefersQnnThenNnapiThenXnnpack() {
         assertEquals(
-            listOf(AndroidOnnxProvider.QNN_HTP, AndroidOnnxProvider.NNAPI, AndroidOnnxProvider.XNNPACK),
+            listOf(
+                AndroidOnnxProvider.QNN_HTP,
+                AndroidOnnxProvider.QNN_GPU,
+                AndroidOnnxProvider.NNAPI,
+                AndroidOnnxProvider.XNNPACK,
+            ),
             AndroidOnnxRuntime.permittedProviderOrder("arm64-v8a", 35, allProviders),
         )
     }
@@ -32,7 +37,7 @@ class AndroidOnnxRuntimeTest {
     @Test
     fun pre29_skipsNnapiBecauseCpuDisabledCannotBeEnforced() {
         assertEquals(
-            listOf(AndroidOnnxProvider.QNN_HTP, AndroidOnnxProvider.XNNPACK),
+            listOf(AndroidOnnxProvider.QNN_HTP, AndroidOnnxProvider.QNN_GPU, AndroidOnnxProvider.XNNPACK),
             AndroidOnnxRuntime.permittedProviderOrder("arm64-v8a", 28, allProviders),
         )
     }
@@ -42,6 +47,14 @@ class AndroidOnnxRuntimeTest {
         assertEquals(
             listOf(AndroidOnnxProvider.XNNPACK),
             AndroidOnnxRuntime.permittedProviderOrder("arm64-v8a", 35, setOf("CPU", "XNNPACK")),
+        )
+    }
+
+    @Test
+    fun cpuOnlyProvider_isNeverSelectedAsPrimaryFallback() {
+        assertEquals(
+            emptyList<AndroidOnnxProvider>(),
+            AndroidOnnxRuntime.permittedProviderOrder("arm64-v8a", 35, setOf("CPU")),
         )
     }
 }

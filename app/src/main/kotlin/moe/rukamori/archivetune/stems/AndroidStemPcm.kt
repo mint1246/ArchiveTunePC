@@ -13,19 +13,32 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import androidx.media3.datasource.cache.Cache
 import java.io.BufferedOutputStream
+import java.io.FileInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import moe.rukamori.archivetune.innertube.YouTube
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import timber.log.Timber
 
 data class AndroidStemInput(
     val uri: Uri,
     val requestHeaders: Map<String, String> = emptyMap(),
+    val cache: Cache? = null,
+    val cacheKey: String? = null,
+    val cachedContentLength: Long? = null,
 )
 
 internal data class AndroidCanonicalPcm(
@@ -35,17 +48,35 @@ internal data class AndroidCanonicalPcm(
 
 /** Android MediaExtractor/MediaCodec decode followed by deterministic stereo 44.1 kHz resampling. */
 internal class AndroidStemPcmDecoder(private val context: Context) {
+    private val streamHttpClient by lazy {
+        OkHttpClient
+            .Builder()
+            .proxy(YouTube.streamOkHttpProxy)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
     suspend fun decode(
         input: AndroidStemInput,
         outputWav: File,
+        onStatus: (String) -> Unit = {},
     ): AndroidCanonicalPcm {
         outputWav.parentFile?.mkdirs()
         val raw = File(outputWav.parentFile, ".${outputWav.name}.source-pcm.part")
+        val materializedSource = File(outputWav.parentFile, ".${outputWav.name}.source-media.part")
         raw.delete()
+        materializedSource.delete()
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
-            setExtractorDataSource(extractor, input)
+            val decodeStarted = System.nanoTime()
+            val decoderInput = materializeInput(input, materializedSource, onStatus)
+            onStatus("Decoding source audio")
+            setExtractorDataSource(extractor, decoderInput)
             val trackIndex =
                 (0 until extractor.trackCount).firstOrNull { index ->
                     extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
@@ -115,14 +146,137 @@ internal class AndroidStemPcmDecoder(private val context: Context) {
                 }
             }
             check(wroteFrames > 0) { "Audio decoder produced no PCM" }
-            val targetFrames = resampleStereoPcm16ToWav(raw, sampleRate, wroteFrames, outputWav)
+            val codecElapsedMs = elapsedMs(decodeStarted)
+            Timber.tag(LOG_TAG).i(
+                "stem decode produced %d source frames at %d Hz in %d ms",
+                wroteFrames,
+                sampleRate,
+                codecElapsedMs,
+            )
+            onStatus("Resampling audio to 44.1 kHz")
+            val resampleStarted = System.nanoTime()
+            val targetFrames = resampleStereoPcm16ToWav(raw, sampleRate, wroteFrames, outputWav) { done, total ->
+                onStatus("Resampling audio to 44.1 kHz · ${done / 44100}s / ${total / 44100}s")
+            }
+            Timber.tag(LOG_TAG).i(
+                "stem resample produced %d frames in %d ms",
+                targetFrames,
+                elapsedMs(resampleStarted),
+            )
             return AndroidCanonicalPcm(outputWav, targetFrames)
         } finally {
             raw.delete()
+            materializedSource.delete()
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             extractor.release()
         }
+    }
+
+    private suspend fun materializeInput(
+        input: AndroidStemInput,
+        destination: File,
+        onStatus: (String) -> Unit,
+    ): AndroidStemInput {
+        val cache = input.cache
+        val cacheKey = input.cacheKey
+        val cachedLength = input.cachedContentLength
+        if (cache != null && !cacheKey.isNullOrBlank() && cachedLength != null && cachedLength > 0L && cache.isCached(cacheKey, 0L, cachedLength)) {
+            return withContext(Dispatchers.IO) {
+                onStatus("Reading downloaded audio")
+                materializeCachedInput(cache, cacheKey, cachedLength, destination)
+                Timber.tag(LOG_TAG).i("materialized downloaded stem source key=%s bytes=%d", cacheKey, cachedLength)
+                AndroidStemInput(Uri.fromFile(destination))
+            }
+        }
+
+        val scheme = input.uri.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return input
+
+        return withContext(Dispatchers.IO) {
+            val started = System.nanoTime()
+            val requestBuilder = Request.Builder().url(input.uri.toString())
+            input.requestHeaders.forEach { (name, value) ->
+                runCatching { requestBuilder.header(name, value) }
+            }
+            val call = streamHttpClient.newCall(requestBuilder.build())
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("Stem source request failed: HTTP ${response.code}")
+                }
+                val body = response.body ?: throw IOException("Stem source response body is empty")
+                val totalBytes = body.contentLength().takeIf { it > 0L }
+                destination.parentFile?.mkdirs()
+                FileOutputStream(destination).buffered(256 * 1024).use { output ->
+                    body.byteStream().use { source ->
+                        val buffer = ByteArray(256 * 1024)
+                        var downloaded = 0L
+                        var lastReportedMiB = -1L
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = source.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            val downloadedMiB = downloaded / (1024L * 1024L)
+                            if (downloadedMiB != lastReportedMiB) {
+                                lastReportedMiB = downloadedMiB
+                                onStatus(
+                                    if (totalBytes != null) {
+                                        "Fetching source audio · ${formatMiB(downloaded)} / ${formatMiB(totalBytes)}"
+                                    } else {
+                                        "Fetching source audio · ${formatMiB(downloaded)}"
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            check(destination.length() > 0L) { "Stem source download produced an empty file" }
+            Timber.tag(LOG_TAG).i(
+                "stem source materialized %.2f MiB in %d ms",
+                destination.length() / (1024.0 * 1024.0),
+                elapsedMs(started),
+            )
+            AndroidStemInput(Uri.fromFile(destination))
+        }
+    }
+
+    private suspend fun materializeCachedInput(
+        cache: Cache,
+        key: String,
+        contentLength: Long,
+        destination: File,
+    ) {
+        val spans = cache.getCachedSpans(key).sortedBy { it.position }
+        var cursor = 0L
+        val copyBuffer = ByteArray(256 * 1024)
+        FileOutputStream(destination).buffered(256 * 1024).use { output ->
+            for (span in spans) {
+                currentCoroutineContext().ensureActive()
+                if (cursor >= contentLength) break
+                val spanEnd = span.position + span.length
+                if (spanEnd <= cursor) continue
+                check(span.position <= cursor) { "Downloaded audio cache has a gap at byte $cursor" }
+                val file = span.file ?: error("Downloaded audio cache span has no backing file")
+                val sourceOffset = (cursor - span.position).coerceAtLeast(0L)
+                var remaining = minOf(span.length - sourceOffset, contentLength - cursor)
+                FileInputStream(file).use { input ->
+                    input.channel.position(sourceOffset)
+                    while (remaining > 0L) {
+                        currentCoroutineContext().ensureActive()
+                        val wanted = minOf(copyBuffer.size.toLong(), remaining).toInt()
+                        val read = input.read(copyBuffer, 0, wanted)
+                        check(read > 0) { "Downloaded audio cache span ended early" }
+                        output.write(copyBuffer, 0, read)
+                        cursor += read
+                        remaining -= read
+                    }
+                }
+            }
+        }
+        check(cursor == contentLength) { "Downloaded audio cache is incomplete ($cursor / $contentLength bytes)" }
     }
 
     private fun setExtractorDataSource(extractor: MediaExtractor, input: AndroidStemInput) {
@@ -135,6 +289,7 @@ internal class AndroidStemPcmDecoder(private val context: Context) {
     }
 
     private companion object {
+        const val LOG_TAG = "StemDecode"
         const val CODEC_TIMEOUT_US = 10_000L
     }
 }
@@ -181,40 +336,91 @@ private suspend fun resampleStereoPcm16ToWav(
     sourceRate: Int,
     sourceFrames: Long,
     destination: File,
+    onProgress: (Long, Long) -> Unit,
 ): Int {
     require(sourceRate > 0 && sourceFrames > 0)
     val targetFrames = ((sourceFrames.toDouble() * AndroidDemucsContract.SAMPLE_RATE / sourceRate).roundToInt()).coerceAtLeast(1)
     Pcm16WavOutput(destination, AndroidDemucsContract.SAMPLE_RATE, 2).use { wav ->
-        RandomAccessFile(raw, "r").use { input ->
-            fun readFrame(): IntArray {
-                val b0 = input.read()
-                val b1 = input.read()
-                val b2 = input.read()
-                val b3 = input.read()
-                if (b3 < 0) return intArrayOf(0, 0)
-                return intArrayOf(((b1 shl 8) or b0).toShort().toInt(), ((b3 shl 8) or b2).toShort().toInt())
-            }
+        BufferedStereoPcm16Reader(raw).use { input ->
             var sourceIndex = 0L
-            var current = readFrame()
-            var next = if (sourceFrames > 1) readFrame() else current
+            var current = input.readFrame()
+            var next = if (sourceFrames > 1) input.readFrame() else current
+            val outputBlock = ByteArray(RESAMPLE_OUTPUT_FRAMES * 4)
+            var outputFrames = 0
+
+            fun flushOutputBlock() {
+                if (outputFrames <= 0) return
+                wav.writeStereoPcm16Bytes(outputBlock, outputFrames)
+                outputFrames = 0
+            }
+
             for (targetIndex in 0 until targetFrames) {
-                if (targetIndex and 0x3fff == 0) currentCoroutineContext().ensureActive()
+                if (targetIndex and 0x3fff == 0) {
+                    currentCoroutineContext().ensureActive()
+                    if (targetIndex % (RESAMPLE_OUTPUT_FRAMES * 16) == 0) {
+                        onProgress(targetIndex.toLong(), targetFrames.toLong())
+                    }
+                }
                 val sourcePosition = targetIndex.toDouble() * sourceRate / AndroidDemucsContract.SAMPLE_RATE
                 val wanted = sourcePosition.toLong().coerceAtMost(sourceFrames - 1)
                 while (sourceIndex < wanted) {
                     current = next
                     sourceIndex++
-                    next = if (sourceIndex + 1 < sourceFrames) readFrame() else current
+                    next = if (sourceIndex + 1 < sourceFrames) input.readFrame() else current
                 }
                 val fraction = (sourcePosition - wanted).toFloat().coerceIn(0f, 1f)
                 val left = current[0] + (next[0] - current[0]) * fraction
                 val right = current[1] + (next[1] - current[1]) * fraction
-                wav.writePcm16(left.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort(), right.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
+                val leftShort = left.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                val rightShort = right.roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+                val offset = outputFrames * 4
+                outputBlock[offset] = leftShort.toByte()
+                outputBlock[offset + 1] = (leftShort.toInt() ushr 8).toByte()
+                outputBlock[offset + 2] = rightShort.toByte()
+                outputBlock[offset + 3] = (rightShort.toInt() ushr 8).toByte()
+                outputFrames++
+                if (outputFrames == RESAMPLE_OUTPUT_FRAMES) flushOutputBlock()
             }
+            flushOutputBlock()
         }
     }
     return targetFrames
 }
+
+private class BufferedStereoPcm16Reader(file: File) : AutoCloseable {
+    private val input = FileInputStream(file)
+    private val buffer = ByteArray(256 * 1024)
+    private var position = 0
+    private var limit = 0
+
+    fun readFrame(): IntArray {
+        ensureAvailable(4)
+        val b0 = buffer[position++].toInt() and 0xff
+        val b1 = buffer[position++].toInt() and 0xff
+        val b2 = buffer[position++].toInt() and 0xff
+        val b3 = buffer[position++].toInt() and 0xff
+        return intArrayOf(((b1 shl 8) or b0).toShort().toInt(), ((b3 shl 8) or b2).toShort().toInt())
+    }
+
+    private fun ensureAvailable(bytes: Int) {
+        if (limit - position >= bytes) return
+        val remaining = limit - position
+        if (remaining > 0) {
+            System.arraycopy(buffer, position, buffer, 0, remaining)
+        }
+        position = 0
+        limit = remaining
+        while (limit < bytes) {
+            val read = input.read(buffer, limit, buffer.size - limit)
+            if (read < 0) error("Unexpected end of source PCM")
+            limit += read
+        }
+    }
+
+    override fun close() = input.close()
+}
+
+private const val RESAMPLE_OUTPUT_FRAMES = 16 * 1024
 
 internal class CanonicalPcm16WavReader(private val file: File) : AutoCloseable {
     private val input = RandomAccessFile(file, "r")
@@ -346,6 +552,13 @@ private class Pcm16WavOutput(
         frames++
     }
 
+    fun writeStereoPcm16Bytes(bytes: ByteArray, frameCount: Int) {
+        require(channels == 2)
+        require(frameCount >= 0 && frameCount * 4 <= bytes.size)
+        output.write(bytes, 0, frameCount * 4)
+        frames += frameCount
+    }
+
     private fun writeShort(value: Short) {
         val int = value.toInt()
         output.write(int and 0xff)
@@ -387,6 +600,11 @@ private fun wavHeader(sampleRate: Int, channels: Int, dataBytes: Long): ByteArra
 
 private fun floatToPcm16(sample: Float): Short =
     (sample.coerceIn(-1f, 1f) * 32767f).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+
+private fun elapsedMs(startedNanos: Long): Long =
+    ((System.nanoTime() - startedNanos).coerceAtLeast(0L) / 1_000_000L)
+
+private fun formatMiB(bytes: Long): String = "%.1f MB".format(bytes.coerceAtLeast(0L) / (1024.0 * 1024.0))
 
 private fun readPcm16(input: RandomAccessFile): Short {
     val low = input.read()

@@ -1,0 +1,24 @@
+{
+    "version":  "14.16",
+    "url":  "https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev/releases/ArchiveTune-14.16.0.msi",
+    "sha256":  "061e5b572e9c901225fa8b20e0a1f8c20280f6bec88d438f2770c88197036f10",
+    "exeSha256":  "57f89553f3d1ec8bcc9f9c28658f21b69ad0280535ef7f554b1b34012e3c86c7",
+    "android":  {
+                    "schema":  1,
+                    "stable":  {
+                                   "version":  "15.0.0",
+                                   "versionCode":  143,
+                                   "name":  "ArchiveTune 15.0.0",
+                                   "publishedAt":  "2026-09-12T14:47:53Z",
+                                   "notes":  "ArchiveTune 15.0.0 Android update: dynamic theme color-field overhaul plus current uncommitted Android work.",
+                                   "artifacts":  {
+                                                     "gms-mobile-arm64":  {
+                                                                              "url":  "https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev/releases/android/ArchiveTune-15.0.0-gms-mobile-arm64.apk?sha256=0365d9edca2a2fcee373a72058158116fad354acef73a284db402474675549e1",
+                                                                              "sha256":  "0365d9edca2a2fcee373a72058158116fad354acef73a284db402474675549e1",
+                                                                              "size":  106117532
+                                                                          }
+                                                 }
+                               },
+                    "canary":  null
+                }
+}

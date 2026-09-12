@@ -36,6 +36,17 @@ dependencyResolutionManagement {
                 includeGroup("com.github.TeamNewPipe")
             }
         }
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "ArchiveTuneRuntime"
+                    setUrl("https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev/maven")
+                }
+            }
+            filter {
+                includeGroup("moe.rukamori.archivetune.runtime")
+            }
+        }
     }
 }
 

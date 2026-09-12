@@ -13,13 +13,19 @@ import org.junit.Test
 
 class AndroidModelStoreTest {
     @Test
-    fun desktopManifestContract_parsesAndPinsExactStemAsset() {
+    fun androidManifestContract_prefersAndPinsAndroidStemAsset() {
         val parsed =
             AndroidModelStore.parseStemManifest(
                 """
                 {
                   "models": {
                     "stems": {
+                      "version": "desktop-old",
+                      "file": "desktop.onnx",
+                      "size": 1,
+                      "sha256": "${"0".repeat(64)}"
+                    },
+                    "stemsAndroid": {
                       "version": "${AndroidStemModelSpec.VERSION}",
                       "file": "${AndroidStemModelSpec.FILE}",
                       "size": ${AndroidStemModelSpec.SIZE},
@@ -48,5 +54,16 @@ class AndroidModelStoreTest {
             )
         val failure = runCatching { AndroidModelStore.validateStemManifest(wrong) }
         assertTrue(failure.isFailure)
+    }
+
+    @Test
+    fun modelDownload_resolvesBesideDesktopManifest() {
+        assertEquals(
+            "https://models.example/models/${AndroidStemModelSpec.FILE}",
+            AndroidModelStore.resolveRelativeUrl(
+                "https://models.example/models/manifest.json",
+                AndroidStemModelSpec.FILE,
+            ),
+        )
     }
 }

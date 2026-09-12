@@ -28,12 +28,13 @@ data class AndroidModelAsset(
     val sha256: String,
 )
 
-/** Pinned to the exact desktop 1-second six-source model contract. */
+/** Android-fixed HTDemucs graph derived from the desktop 1-second six-source model. */
 object AndroidStemModelSpec {
-    const val VERSION = "htdemucs-6s-1s-dml-v1"
-    const val FILE = "htdemucs-6s-core-1s-dml.onnx"
-    const val SIZE = 110_858_418L
-    const val SHA256 = "30ef61623d5d3a768f12dd87faadfdaaca26c5b8ef6a1c73f26b8c949b6e047c"
+    const val VERSION = "htdemucs-6s-1s-android-v1"
+    const val FILE = "htdemucs-6s-core-1s-android-v1.onnx"
+    const val SIZE = 115_120_667L
+    const val SHA256 = "f5d58cd44d88e55c4a4309969ce517f55803a58e329fc8bf54fbb479afcb7855"
+    val LEGACY_FILES = setOf("htdemucs-6s-core-1s-dml.onnx")
     const val MANIFEST_URL = "https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev/models/manifest.json"
 }
 
@@ -54,6 +55,7 @@ class AndroidModelStore(
                 val asset = validateStemManifest(parseStemManifest(manifest))
                 val temporary = File(root, ".${asset.file}.${UUID.randomUUID()}.part")
                 try {
+                    onProgress(0L, asset.size)
                     downloadVerified(resolveRelativeUrl(manifestUrl, asset.file), temporary, asset, onProgress)
                     if (destination.exists() && !destination.delete()) error("Could not replace old stem model")
                     if (!temporary.renameTo(destination)) {
@@ -61,6 +63,9 @@ class AndroidModelStore(
                         if (!temporary.delete()) temporary.deleteOnExit()
                     }
                     check(isVerified(destination)) { "Installed HTDemucs model failed verification" }
+                    AndroidStemModelSpec.LEGACY_FILES.forEach { legacy ->
+                        File(root, legacy).takeIf(File::isFile)?.delete()
+                    }
                     destination
                 } finally {
                     temporary.delete()
@@ -134,7 +139,8 @@ class AndroidModelStore(
     companion object {
         fun parseStemManifest(json: String): AndroidModelAsset {
             val root = JSONObject(json)
-            val entry = root.optJSONObject("models")?.optJSONObject("stems") ?: root
+            val models = root.optJSONObject("models")
+            val entry = models?.optJSONObject("stemsAndroid") ?: models?.optJSONObject("stems") ?: root
             return AndroidModelAsset(
                 version = entry.getString("version").trim(),
                 file = entry.getString("file").trim(),

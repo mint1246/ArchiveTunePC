@@ -294,7 +294,7 @@ import moe.rukamori.archivetune.ui.theme.ArchiveTuneTheme
 import moe.rukamori.archivetune.ui.theme.ColorSaver
 import moe.rukamori.archivetune.ui.theme.DefaultThemeColor
 import moe.rukamori.archivetune.ui.theme.DynamicAppBackdrop
-import moe.rukamori.archivetune.ui.theme.extractThemeColor
+import moe.rukamori.archivetune.ui.theme.extractThemeSeedPalette
 import moe.rukamori.archivetune.ui.utils.appBarScrollBehavior
 import moe.rukamori.archivetune.ui.utils.backToMain
 import moe.rukamori.archivetune.ui.utils.resetHeightOffset
@@ -853,6 +853,9 @@ class MainActivity : ComponentActivity() {
             var themeColor by rememberSaveable(stateSaver = ColorSaver) {
                 mutableStateOf(DefaultThemeColor)
             }
+            var dynamicThemeSeedPalette by remember {
+                mutableStateOf<moe.rukamori.archivetune.ui.theme.ThemeSeedPalette?>(null)
+            }
             var dynamicArtworkUrl by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect(legacyUseSystemFont) {
@@ -867,6 +870,7 @@ class MainActivity : ComponentActivity() {
                 val playerConnection = playerConnection
                 if (!enableDynamicTheme || playerConnection == null) {
                     dynamicArtworkUrl = null
+                    dynamicThemeSeedPalette = null
                     themeColor = if (!enableDynamicTheme) customThemeColor else DefaultThemeColor
                     return@LaunchedEffect
                 }
@@ -883,17 +887,20 @@ class MainActivity : ComponentActivity() {
                                             .allowHardware(false)
                                             .build(),
                                     )
-                                val extractedColor = result.image?.toBitmap()?.extractThemeColor()
+                                val extractedPalette = result.image?.toBitmap()?.extractThemeSeedPalette()
                                 withContext(Dispatchers.Main) {
-                                    themeColor = extractedColor ?: DefaultThemeColor
+                                    dynamicThemeSeedPalette = extractedPalette
+                                    themeColor = extractedPalette?.primary ?: DefaultThemeColor
                                 }
                             } catch (e: Exception) {
                                 withContext(Dispatchers.Main) {
+                                    dynamicThemeSeedPalette = null
                                     themeColor = DefaultThemeColor
                                 }
                             }
                         }
                     } else {
+                        dynamicThemeSeedPalette = null
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             themeColor = DefaultThemeColor
                         } else {
@@ -922,13 +929,14 @@ class MainActivity : ComponentActivity() {
             val dynamicBackdropActive =
                 enableDynamicTheme &&
                     !pureBlack &&
-                    !dynamicArtworkUrl.isNullOrBlank()
+                    !dynamicArtworkUrl.isNullOrBlank() &&
+                    dynamicThemeSeedPalette != null
 
             ArchiveTuneTheme(
                 darkTheme = useDarkTheme,
                 pureBlack = pureBlack,
                 themeColor = themeColor,
-                seedPalette = if (!enableDynamicTheme) customThemeSeedPalette else null,
+                seedPalette = if (enableDynamicTheme) dynamicThemeSeedPalette else customThemeSeedPalette,
                 dynamicBackdropActive = dynamicBackdropActive,
                 disableAnimations = disableAnimations,
                 fontPreference = fontPreference,
@@ -963,8 +971,7 @@ class MainActivity : ComponentActivity() {
                             ),
                 ) {
                     DynamicAppBackdrop(
-                        artworkUrl = dynamicArtworkUrl,
-                        accentColor = themeColor,
+                        palette = dynamicThemeSeedPalette,
                         enabled = showDynamicAppBackdrop,
                         isPlaying = dynamicBackdropIsPlaying,
                         animationsDisabled = disableAnimations,

@@ -61,11 +61,11 @@ class AndroidStemStorage(
 
     private fun stemModelFiles(): List<File> {
         if (!modelRoot.isDirectory) return emptyList()
-        val stableName = AndroidStemModelSpec.FILE
+        val acceptedNames = AndroidStemModelSpec.LEGACY_FILES + AndroidStemModelSpec.FILE
         return modelRoot.listFiles().orEmpty().filter { file ->
-            file.isFile &&
-                (file.name == stableName ||
-                    (file.name.startsWith(".$stableName.") && file.name.endsWith(".part")))
+            file.isFile && acceptedNames.any { name ->
+                file.name == name || (file.name.startsWith(".$name.") && file.name.endsWith(".part"))
+            }
         }
     }
 

@@ -6,7 +6,7 @@ import org.junit.Test
 
 class AndroidChordModelStoreTest {
     @Test
-    fun `manifest pins exact desktop chord bundle`() {
+    fun `manifest pins exact accelerated Android chord bundle`() {
         val parsed = AndroidChordModelStore.parseAndValidateManifest(validManifest())
         assertEquals(AndroidChordModelSpec.VERSION, parsed.version)
         assertEquals(AndroidChordModelSpec.SHA256, parsed.sha256)
@@ -28,7 +28,7 @@ class AndroidChordModelStoreTest {
         {
           "schemaVersion": 2,
           "models": {
-            "chords": {
+            "chordsAndroid": {
               "version": "${AndroidChordModelSpec.VERSION}",
               "file": "${AndroidChordModelSpec.FILE}",
               "size": ${AndroidChordModelSpec.SIZE},

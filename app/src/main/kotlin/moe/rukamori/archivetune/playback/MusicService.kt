@@ -2724,6 +2724,34 @@ class MusicService :
         withContext(Dispatchers.IO) {
             val configuration = mediaItem.localConfiguration ?: return@withContext null
             val mediaId = configuration.customCacheKey ?: mediaItem.mediaId
+            // Download cache metadata is authoritative for the bytes actually stored. The format
+            // row can be refreshed by later playback resolution and point at a different YouTube
+            // representation (and therefore a different content length) than the completed download.
+            val downloadedLength =
+                runCatching {
+                    downloadCache
+                        .getContentMetadata(mediaId)
+                        .get(ContentMetadata.KEY_CONTENT_LENGTH, -1L)
+                }.getOrNull()?.takeIf { it > 0L }
+            val formatLength = database.format(mediaId).first()?.contentLength?.takeIf { it > 0L }
+            val cachedLength = downloadedLength ?: formatLength
+            val fullyDownloaded = cachedLength != null && downloadCache.isCached(mediaId, 0L, cachedLength)
+            Timber.tag("StemInput").i(
+                "resolve stem input mediaId=%s downloadLength=%s formatLength=%s fullyDownloaded=%s spans=%d",
+                mediaId,
+                downloadedLength,
+                formatLength,
+                fullyDownloaded,
+                runCatching { downloadCache.getCachedSpans(mediaId).size }.getOrDefault(0),
+            )
+            if (fullyDownloaded) {
+                return@withContext AndroidStemInput(
+                    uri = configuration.uri,
+                    cache = downloadCache,
+                    cacheKey = mediaId,
+                    cachedContentLength = cachedLength,
+                )
+            }
             val dataSpec =
                 DataSpec.Builder()
                     .setUri(configuration.uri)

@@ -29,10 +29,13 @@ internal data class AndroidChordAssetSpec(
 )
 
 internal object AndroidChordModelSpec {
-    const val VERSION = "chordmini-2e1d-v1"
-    const val FILE = "chordmini-2e1d-v1.onnx"
-    const val SIZE = 9_604_664L
-    const val SHA256 = "9a6570bf611cdc3f2c36286307af46fb94927fe7f6a2bc22a87c0ebf5f6c082e"
+    // Android uses a statically-shaped single-window graph. The upstream/directml export leaves
+    // the batch dimension symbolic, which expands into Shape/Range/Scatter machinery that none of
+    // our accelerated Android EPs can own completely while generic CPU fallback is disabled.
+    const val VERSION = "chordmini-2e1d-android-static1-v1"
+    const val FILE = "chordmini-2e1d-android-static1-v1.onnx"
+    const val SIZE = 9_445_643L
+    const val SHA256 = "490f787d6b58388d2443ae1048399058d4e0bad23553a4b55edac05b942b56d1"
     const val MANIFEST_URL = "https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev/models/manifest.json"
     const val SAMPLE_RATE = 22_050
     const val SEQUENCE_LENGTH = 108
@@ -185,7 +188,7 @@ internal class AndroidChordModelStore(
         internal fun parseAndValidateManifest(json: String): AndroidChordManifest {
             val root = JSONObject(json)
             check(root.optInt("schemaVersion", -1) == 2) { "Unsupported model manifest schema" }
-            val entry = root.getJSONObject("models").getJSONObject("chords")
+            val entry = root.getJSONObject("models").getJSONObject("chordsAndroid")
             check(entry.getString("version").trim() == AndroidChordModelSpec.VERSION) { "Unexpected chord model version" }
             check(entry.getString("file").trim() == AndroidChordModelSpec.FILE) { "Unexpected chord model file" }
             check(entry.getLong("size") == AndroidChordModelSpec.SIZE) { "Unexpected chord model size" }

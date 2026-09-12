@@ -246,8 +246,7 @@ class AndroidStemPlaybackCoordinator internal constructor(
                         ) { progress ->
                             if (
                                 separationGeneration == separationEpoch &&
-                                separationTrackId == identity.trackId &&
-                                currentIdentity()?.trackId == identity.trackId
+                                separationTrackId == identity.trackId
                             ) {
                                 _state.value =
                                     _state.value.copy(
