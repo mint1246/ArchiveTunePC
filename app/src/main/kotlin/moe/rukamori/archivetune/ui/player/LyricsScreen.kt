@@ -10,6 +10,7 @@
 package moe.rukamori.archivetune.ui.player
 
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -108,8 +109,11 @@ import moe.rukamori.archivetune.chords.ChordTrackSource
 import moe.rukamori.archivetune.chords.AndroidNeuralChordAnalyzer
 import moe.rukamori.archivetune.chords.SongsterrChordClient
 import moe.rukamori.archivetune.chords.resolveAndroidChordPriority
+import moe.rukamori.archivetune.audio.rememberPlayerBeatPulse
 import moe.rukamori.archivetune.constants.BlurRadiusKey
+import moe.rukamori.archivetune.constants.DisableAnimationsKey
 import moe.rukamori.archivetune.constants.DisableBlurKey
+import moe.rukamori.archivetune.constants.DynamicThemeKey
 import moe.rukamori.archivetune.constants.EnableHapticFeedbackKey
 import moe.rukamori.archivetune.constants.LyricsBackgroundStyle
 import moe.rukamori.archivetune.constants.LyricsBackgroundStyleKey
@@ -130,7 +134,10 @@ import moe.rukamori.archivetune.ui.component.LyricsEnhanced
 import moe.rukamori.archivetune.ui.component.LyricsV2
 import moe.rukamori.archivetune.ui.component.PlayerSliderTrack
 import moe.rukamori.archivetune.ui.menu.LyricsMenu
+import moe.rukamori.archivetune.ui.theme.DynamicAppBackdrop
 import moe.rukamori.archivetune.ui.theme.PlayerColorExtractor
+import moe.rukamori.archivetune.ui.theme.ThemeSeedPalette
+import moe.rukamori.archivetune.ui.theme.extractThemeSeedPalette
 import moe.rukamori.archivetune.utils.makeTimeString
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
@@ -183,6 +190,8 @@ fun LyricsScreen(
     val playerBackground by rememberEnumPreference(PlayerBackgroundStyleKey, PlayerBackgroundStyle.DEFAULT)
     val configuredLyricsBackground by rememberEnumPreference(LyricsBackgroundStyleKey, LyricsBackgroundStyle.DEFAULT)
     val lyricsBackground = configuredLyricsBackground.resolveFor(playerBackground)
+    val dynamicThemeEnabled by rememberPreference(DynamicThemeKey, false)
+    val animationsDisabled by rememberPreference(DisableAnimationsKey, false)
     val disableBlur by rememberPreference(DisableBlurKey, false)
     val blurRadius by rememberPreference(BlurRadiusKey, 48f)
     val playerCustomImageUri by rememberPreference(PlayerCustomImageUriKey, "")
@@ -281,6 +290,17 @@ fun LyricsScreen(
     var chordReloadKey by remember(mediaMetadata.id) { mutableIntStateOf(0) }
     var chordLocalOnlyRetry by remember(mediaMetadata.id) { mutableStateOf(false) }
     var gradientColors by remember(mediaMetadata.thumbnailUrl) { mutableStateOf(AppleMusicFallbackGradient) }
+    var lyricsBackdropArtwork by remember(mediaMetadata.thumbnailUrl) { mutableStateOf<Bitmap?>(null) }
+    var lyricsBackdropPalette by remember(mediaMetadata.thumbnailUrl) { mutableStateOf<ThemeSeedPalette?>(null) }
+
+    val useDynamicLyricsBackdrop =
+        dynamicThemeEnabled && lyricsBackground == LyricsBackgroundStyle.DEFAULT
+    val lyricsBackdropBeatPulse =
+        rememberPlayerBeatPulse(
+            isPlaying = isPlaying,
+            enabledOverride = useDynamicLyricsBackdrop,
+            playerConnectionOverride = playerConnection,
+        )
 
     val gradientColorsCache =
         remember {
@@ -290,19 +310,25 @@ fun LyricsScreen(
         }
     val fallbackColor = remember { Color.Black.toArgb() }
 
-    LaunchedEffect(mediaMetadata.id, mediaMetadata.thumbnailUrl, lyricsBackground) {
+    LaunchedEffect(mediaMetadata.id, mediaMetadata.thumbnailUrl, lyricsBackground, useDynamicLyricsBackdrop) {
         if (lyricsBackground != LyricsBackgroundStyle.DEFAULT && lyricsBackground != LyricsBackgroundStyle.COLORING) {
             gradientColors = AppleMusicFallbackGradient
+            lyricsBackdropArtwork = null
+            lyricsBackdropPalette = null
             return@LaunchedEffect
         }
         val thumbnailUrl = mediaMetadata.thumbnailUrl
         if (thumbnailUrl == null) {
             gradientColors = AppleMusicFallbackGradient
+            lyricsBackdropArtwork = null
+            lyricsBackdropPalette = null
             return@LaunchedEffect
         }
 
-        gradientColorsCache[thumbnailUrl]?.let {
+        if (lyricsBackground == LyricsBackgroundStyle.COLORING) gradientColorsCache[thumbnailUrl]?.let {
             gradientColors = it
+            lyricsBackdropArtwork = null
+            lyricsBackdropPalette = null
             return@LaunchedEffect
         }
 
@@ -316,7 +342,7 @@ fun LyricsScreen(
                 .allowHardware(false)
                 .build()
 
-        val extractedColors =
+        val extracted =
             try {
                 val image =
                     withContext(Dispatchers.IO) {
@@ -333,9 +359,13 @@ fun LyricsScreen(
                                 .maximumColorCount(PlayerColorExtractor.Config.MAX_COLOR_COUNT)
                                 .resizeBitmapArea(PlayerColorExtractor.Config.BITMAP_AREA)
                                 .generate()
-                        PlayerColorExtractor.extractGradientColors(
-                            palette = palette,
-                            fallbackColor = fallbackColor,
+                        Triple(
+                            PlayerColorExtractor.extractGradientColors(
+                                palette = palette,
+                                fallbackColor = fallbackColor,
+                            ),
+                            bitmap,
+                            bitmap.extractThemeSeedPalette(),
                         )
                     }
                 }
@@ -345,8 +375,15 @@ fun LyricsScreen(
                 null
             }
 
-        gradientColors = extractedColors ?: AppleMusicFallbackGradient
+        gradientColors = extracted?.first ?: AppleMusicFallbackGradient
         gradientColorsCache[thumbnailUrl] = gradientColors
+        if (useDynamicLyricsBackdrop) {
+            lyricsBackdropArtwork = extracted?.second
+            lyricsBackdropPalette = extracted?.third
+        } else {
+            lyricsBackdropArtwork = null
+            lyricsBackdropPalette = null
+        }
     }
 
     LaunchedEffect(player, playbackState, mediaMetadata.id) {
@@ -421,6 +458,12 @@ fun LyricsScreen(
             style = lyricsBackground,
             mediaMetadata = mediaMetadata,
             gradientColors = gradientColors,
+            dynamicArtwork = lyricsBackdropArtwork,
+            dynamicPalette = lyricsBackdropPalette,
+            dynamicEnabled = useDynamicLyricsBackdrop,
+            isPlaying = isPlaying,
+            animationsDisabled = animationsDisabled,
+            beatPulse = lyricsBackdropBeatPulse,
             disableBlur = disableBlur,
             blurRadius = blurRadius,
             playerCustomImageUri = playerCustomImageUri,
@@ -639,6 +682,12 @@ private fun LyricsScreenBackground(
     style: LyricsBackgroundStyle,
     mediaMetadata: MediaMetadata,
     gradientColors: List<Color>,
+    dynamicArtwork: Bitmap?,
+    dynamicPalette: ThemeSeedPalette?,
+    dynamicEnabled: Boolean,
+    isPlaying: Boolean,
+    animationsDisabled: Boolean,
+    beatPulse: Float,
     disableBlur: Boolean,
     blurRadius: Float,
     playerCustomImageUri: String,
@@ -661,10 +710,22 @@ private fun LyricsScreenBackground(
     ) {
         when (style) {
             LyricsBackgroundStyle.DEFAULT -> {
-                AppleMusicBackground(
-                    mediaMetadata = mediaMetadata,
-                    gradientColors = gradientColors,
-                )
+                if (dynamicEnabled && dynamicArtwork != null && dynamicPalette != null) {
+                    DynamicAppBackdrop(
+                        artwork = dynamicArtwork,
+                        palette = dynamicPalette,
+                        enabled = true,
+                        isPlaying = isPlaying,
+                        animationsDisabled = animationsDisabled,
+                        beatPulse = beatPulse,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    AppleMusicBackground(
+                        mediaMetadata = mediaMetadata,
+                        gradientColors = gradientColors,
+                    )
+                }
             }
 
             LyricsBackgroundStyle.FOLLOW_THEME -> Unit

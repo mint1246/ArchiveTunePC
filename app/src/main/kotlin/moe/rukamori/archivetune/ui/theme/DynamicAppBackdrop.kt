@@ -7,8 +7,11 @@
 
 package moe.rukamori.archivetune.ui.theme
 
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Paint
 import android.graphics.RuntimeShader
+import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateColorAsState
@@ -20,9 +23,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -34,25 +39,41 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.max
 
-/** Keep the ambient field capped to 60 fps even on high-refresh phones. */
+/** Same colour-field size used by the desktop Kawarp/SpicyLyrics pipeline. */
+private const val FIELD_SIZE = 128
+
+/** Android CPU blur approximation for desktop's sigma-10 Gaussian. */
+private const val BLUR_RADIUS = 4
+private const val BLUR_PASSES = 3
+
+/** Match desktop's intentional 60 fps cap even on 120/144 Hz phones. */
 private const val BACKGROUND_FRAME_INTERVAL_NANOS = 1_000_000_000L / 60L
 
 /**
- * Pure-colour dynamic backdrop.
+ * Shell-wide dynamic-theme colour field.
  *
- * Album art is used only to extract a palette. No cover pixels ever reach the fullscreen renderer,
- * which avoids the "blurred/swirled album cover" look that is especially obvious on tall phones.
- * Android 13+ instead synthesizes a native-resolution organic field from the three album hues using
- * simplex noise. Each hue is lifted to a high saturation/value floor before rendering, so colourful
- * albums stay bright instead of collapsing into a dark muddy wash.
+ * Android 13+ uses the desktop 128x128 artwork colour-field pipeline, but with a brighter mobile
+ * grade so the field stays vivid behind translucent UI:
+ *
+ *  1. destroy the cover into a heavily blurred 128x128 colour texture;
+ *  2. domain-warp that texture with layered simplex noise at the *screen's native resolution*;
+ *  3. push saturation to 4.25x, brightness to 0.88x and use a softer vignette;
+ *  4. apply only a light 6% readability veil.
+ *
+ * No recognisable cover detail survives step 1. Older Android versions keep the palette-only
+ * fallback because android.graphics.RuntimeShader/AGSL is API 33+.
  */
 @Composable
 fun DynamicAppBackdrop(
+    artwork: Bitmap?,
     palette: ThemeSeedPalette?,
     enabled: Boolean,
     isPlaying: Boolean,
@@ -62,28 +83,36 @@ fun DynamicAppBackdrop(
 ) {
     if (!enabled || palette == null) return
 
-    val primary by animateColorAsState(
-        targetValue = palette.primary.vividBackdropTone(saturationFloor = 0.88f, brightnessFloor = 0.94f),
-        animationSpec = tween(650, easing = FastOutSlowInEasing),
-        label = "dynamic-field-primary",
-    )
-    val secondary by animateColorAsState(
-        targetValue = palette.secondary.vividBackdropTone(saturationFloor = 0.84f, brightnessFloor = 0.92f),
-        animationSpec = tween(650, easing = FastOutSlowInEasing),
-        label = "dynamic-field-secondary",
-    )
-    val tertiary by animateColorAsState(
-        targetValue = palette.tertiary.vividBackdropTone(saturationFloor = 0.86f, brightnessFloor = 0.93f),
-        animationSpec = tween(650, easing = FastOutSlowInEasing),
-        label = "dynamic-field-tertiary",
-    )
+    var colourField by remember { mutableStateOf<Bitmap?>(null) }
+    val currentField by rememberUpdatedState(colourField)
 
-    Box(modifier.fillMaxSize().background(primary)) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            RuntimePaletteBackdrop(
-                primary = primary,
-                secondary = secondary,
-                tertiary = tertiary,
+    LaunchedEffect(artwork) {
+        if (artwork == null || artwork.isRecycled) return@LaunchedEffect
+        val next = withContext(Dispatchers.Default) { makeColourField(artwork) }
+        val previous = colourField
+        colourField = next
+
+        // Desktop cross-fades for 650 ms. Keep the previous tiny 128x128 bitmap alive long enough
+        // for the visual hand-off, then release its native pixels.
+        if (previous != null && previous !== next && previous !== artwork && !previous.isRecycled) {
+            delay(800)
+            previous.recycle()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            currentField?.let { field ->
+                if (field !== artwork && !field.isRecycled) field.recycle()
+            }
+        }
+    }
+
+    Box(modifier.fillMaxSize().background(Color(0xFF0A0712))) {
+        val field = colourField
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && field != null && !field.isRecycled) {
+            RuntimeWarpBackdrop(
+                colourField = field,
                 isPlaying = isPlaying,
                 animationsDisabled = animationsDisabled,
                 beatPulse = beatPulse,
@@ -91,9 +120,7 @@ fun DynamicAppBackdrop(
             )
         } else {
             PaletteFallbackBackdrop(
-                primary = primary,
-                secondary = secondary,
-                tertiary = tertiary,
+                palette = palette,
                 isPlaying = isPlaying,
                 animationsDisabled = animationsDisabled,
                 beatPulse = beatPulse,
@@ -101,36 +128,26 @@ fun DynamicAppBackdrop(
             )
         }
 
-        // Mobile surfaces already provide their own dark glass. A heavy global veil made the whole
-        // screen look dim; keep only a tiny readability trim so the colour itself stays luminous.
+        // The mobile shell already darkens/frosts its own surfaces. Keep the global veil minimal so
+        // the real artwork-derived colour field remains bright rather than being crushed twice.
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.06f)))
     }
 }
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun RuntimePaletteBackdrop(
-    primary: Color,
-    secondary: Color,
-    tertiary: Color,
+private fun RuntimeWarpBackdrop(
+    colourField: Bitmap,
     isPlaying: Boolean,
     animationsDisabled: Boolean,
     beatPulse: Float,
     modifier: Modifier = Modifier,
 ) {
-    val runtimeShader = remember { runCatching { RuntimeShader(PURE_COLOUR_FIELD_AGSL) }.getOrNull() }
-    if (runtimeShader == null) {
-        PaletteFallbackBackdrop(
-            primary = primary,
-            secondary = secondary,
-            tertiary = tertiary,
-            isPlaying = isPlaying,
-            animationsDisabled = animationsDisabled,
-            beatPulse = beatPulse,
-            modifier = modifier,
-        )
-        return
-    }
+    val runtimeShader = remember { RuntimeShader(DESKTOP_KAWARP_AGSL) }
+    val bitmapShader =
+        remember(colourField) {
+            BitmapShader(colourField, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        }
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG) }
     var time by remember { mutableFloatStateOf(0f) }
     val playing by rememberUpdatedState(isPlaying)
@@ -160,26 +177,26 @@ private fun RuntimePaletteBackdrop(
 
         runtimeShader.setFloatUniform("time", time)
         runtimeShader.setFloatUniform("resolution", size.width, size.height)
-        runtimeShader.setFloatUniform("primary", primary.red, primary.green, primary.blue)
-        runtimeShader.setFloatUniform("secondary", secondary.red, secondary.green, secondary.blue)
-        runtimeShader.setFloatUniform("tertiary", tertiary.red, tertiary.green, tertiary.blue)
+        runtimeShader.setFloatUniform("saturation", 4.25f)
         runtimeShader.setFloatUniform("beatPulse", beatPulse.coerceIn(0f, 1f))
+        runtimeShader.setInputShader("content", bitmapShader)
         paint.shader = runtimeShader
 
-        // Compose DrawScope dimensions are physical pixels, so AGSL evaluates at the phone's native
-        // render resolution while the generated shapes remain aspect-ratio independent.
+        // DrawScope's size is in physical pixels. AGSL therefore evaluates once per native output
+        // pixel while sampling only the intentionally low-detail 128x128 colour texture.
         drawIntoCanvas { canvas ->
             canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint)
         }
     }
 }
 
-/** API < 33 fallback using the same bright palette but simple drifting fields. */
+/**
+ * API < 33 fallback. This is deliberately retained rather than trying to emulate a full runtime
+ * shader on CPU every frame.
+ */
 @Composable
 private fun PaletteFallbackBackdrop(
-    primary: Color,
-    secondary: Color,
-    tertiary: Color,
+    palette: ThemeSeedPalette,
     isPlaying: Boolean,
     animationsDisabled: Boolean,
     beatPulse: Float,
@@ -213,19 +230,42 @@ private fun PaletteFallbackBackdrop(
         }
     }
 
+    // Use stronger values than the old mobile implementation so the fallback still resembles the
+    // desktop high-chroma field rather than collapsing into a muddy purple wash.
+    val primary by animateColorAsState(
+        palette.primary.backdropTone(saturation = 1f, brightness = 0.90f),
+        tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-field-primary",
+    )
+    val secondary by animateColorAsState(
+        palette.secondary.backdropTone(saturation = 0.96f, brightness = 0.84f),
+        tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-field-secondary",
+    )
+    val tertiary by animateColorAsState(
+        palette.tertiary.backdropTone(saturation = 0.98f, brightness = 0.86f),
+        tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-field-tertiary",
+    )
+    val neutral by animateColorAsState(
+        palette.neutral.backdropTone(saturation = 0.38f, brightness = 0.24f),
+        tween(650, easing = FastOutSlowInEasing),
+        label = "dynamic-field-neutral",
+    )
+
     val pulse = beatPulse.coerceIn(0f, 1f)
     Canvas(modifier) {
         val w = size.width
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
 
-        drawRect(primary.copy(alpha = 0.90f))
+        drawRect(neutral)
 
         val longest = max(w, h)
         val dx = driftX.value
         val dy = driftY.value
         val breathing = breathe.value
-        val pulseScale = 1f + pulse * 0.08f
+        val pulseScale = 1f + pulse * 0.10f
 
         fun colourBlob(
             color: Color,
@@ -235,48 +275,120 @@ private fun PaletteFallbackBackdrop(
             alpha: Float,
         ) {
             drawRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        color.copy(alpha = (alpha + pulse * 0.04f).coerceAtMost(1f)),
-                        color.copy(alpha = alpha * 0.62f),
-                        Color.Transparent,
+                brush =
+                    Brush.radialGradient(
+                        colors =
+                            listOf(
+                                color.copy(alpha = (alpha + pulse * 0.05f).coerceAtMost(1f)),
+                                color.copy(alpha = alpha * 0.50f),
+                                Color.Transparent,
+                            ),
+                        center = Offset(centerX, centerY),
+                        radius = longest * radiusScale * pulseScale,
                     ),
-                    center = Offset(centerX, centerY),
-                    radius = longest * radiusScale * pulseScale,
-                ),
             )
         }
 
-        colourBlob(primary, w * (0.12f + dx * 0.08f), h * (0.22f + dy * 0.06f), 0.84f + breathing * 0.05f, 1f)
-        colourBlob(secondary, w * (0.88f - dx * 0.07f), h * (0.38f - dy * 0.08f), 0.78f - breathing * 0.03f, 0.96f)
-        colourBlob(tertiary, w * (0.40f - dx * 0.09f), h * (0.87f + dy * 0.04f), 0.88f + breathing * 0.03f, 0.96f)
+        colourBlob(primary, w * (0.17f + dx * 0.10f), h * (0.24f + dy * 0.08f), 0.78f + breathing * 0.06f, 0.98f)
+        colourBlob(secondary, w * (0.86f - dx * 0.08f), h * (0.32f - dy * 0.11f), 0.72f - breathing * 0.04f, 0.92f)
+        colourBlob(tertiary, w * (0.38f - dx * 0.12f), h * (0.91f + dy * 0.05f), 0.82f + breathing * 0.03f, 0.90f)
+        colourBlob(primary, w * (1.03f + dx * 0.04f), h * (0.94f - dy * 0.07f), 0.62f, 0.62f)
     }
 }
 
-private fun Color.vividBackdropTone(
-    saturationFloor: Float,
-    brightnessFloor: Float,
+/**
+ * Turn album art into the same kind of unrecognisable low-frequency texture desktop feeds into
+ * Kawarp. Work happens once per track off the main thread; the animated full-screen shader then
+ * samples this tiny texture.
+ */
+private fun makeColourField(source: Bitmap): Bitmap {
+    var current = source
+
+    while (current.width > FIELD_SIZE * 2 || current.height > FIELD_SIZE * 2) {
+        val next =
+            Bitmap.createScaledBitmap(
+                current,
+                maxOf(1, current.width / 2),
+                maxOf(1, current.height / 2),
+                true,
+            )
+        if (current !== source && current !== next && !current.isRecycled) current.recycle()
+        current = next
+    }
+
+    val square = Bitmap.createScaledBitmap(current, FIELD_SIZE, FIELD_SIZE, true)
+    if (current !== source && current !== square && !current.isRecycled) current.recycle()
+    current = square
+
+    repeat(BLUR_PASSES) {
+        val next = boxBlur(current, BLUR_RADIUS)
+        if (current !== source && current !== next && !current.isRecycled) current.recycle()
+        current = next
+    }
+
+    return current
+}
+
+private fun boxBlur(source: Bitmap, radius: Int): Bitmap {
+    if (radius <= 0) return source.copy(Bitmap.Config.ARGB_8888, false)
+
+    val width = source.width
+    val height = source.height
+    val input = IntArray(width * height)
+    val output = IntArray(input.size)
+    source.getPixels(input, 0, width, 0, 0, width, height)
+
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            var alpha = 0
+            var red = 0
+            var green = 0
+            var blue = 0
+            var samples = 0
+
+            for (dy in -radius..radius) {
+                val sampleY = (y + dy).coerceIn(0, height - 1)
+                val row = sampleY * width
+                for (dx in -radius..radius) {
+                    val sampleX = (x + dx).coerceIn(0, width - 1)
+                    val argb = input[row + sampleX]
+                    alpha += argb ushr 24 and 0xFF
+                    red += argb ushr 16 and 0xFF
+                    green += argb ushr 8 and 0xFF
+                    blue += argb and 0xFF
+                    samples++
+                }
+            }
+
+            output[y * width + x] =
+                ((alpha / samples) shl 24) or
+                    ((red / samples) shl 16) or
+                    ((green / samples) shl 8) or
+                    (blue / samples)
+        }
+    }
+
+    return Bitmap.createBitmap(output, width, height, Bitmap.Config.ARGB_8888)
+}
+
+private fun Color.backdropTone(
+    saturation: Float,
+    brightness: Float,
 ): Color {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(toArgb(), hsv)
-    hsv[1] = hsv[1].coerceAtLeast(saturationFloor).coerceIn(0f, 1f)
-    hsv[2] = hsv[2].coerceAtLeast(brightnessFloor).coerceIn(0f, 1f)
+    hsv[1] = saturation.coerceIn(0f, 1f)
+    hsv[2] = brightness.coerceIn(0f, 1f)
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
-/**
- * Organic palette-only field. Unlike the desktop Kawarp shader this never samples album pixels:
- * the three album hues compete through independent simplex-noise masks, producing soft regions of
- * mostly pure colour instead of a smeared image. Coordinates are normalized by the short screen
- * edge so a phone's tall aspect ratio cannot stretch recognizable structures vertically.
- */
-private val PURE_COLOUR_FIELD_AGSL =
+/** Faithful AGSL translation of desktop's SkSL Kawarp shader. */
+private val DESKTOP_KAWARP_AGSL =
     """
+    uniform shader content;
     uniform float time;
     uniform float2 resolution;
-    uniform float3 primary;
-    uniform float3 secondary;
-    uniform float3 tertiary;
+    uniform float saturation;
     uniform float beatPulse;
 
     float mod289(float x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -308,40 +420,30 @@ private val PURE_COLOUR_FIELD_AGSL =
     }
 
     half4 main(float2 coord) {
-        float shortSide = max(min(resolution.x, resolution.y), 1.0);
-        float2 p = (coord - resolution * 0.5) / shortSide;
-        float t = time * 0.035;
-
-        // A slow domain drift gives motion without resembling any source artwork.
-        float2 drift = float2(
-            snoise(p * 0.55 + float2(t, t * 0.73)),
-            snoise(p * 0.55 + float2(-t * 0.81, t * 0.57) + float2(41.0, 17.0))
-        );
-        float2 q = p + drift * 0.34;
-
-        // Independent low-frequency masks. Cubing the weights keeps regions saturated and mostly
-        // one hue at a time instead of averaging complementary colours into brown/grey.
-        float a = 0.5 + 0.5 * snoise(q * 0.72 + float2(t * 0.65, -t * 0.42));
-        float b = 0.5 + 0.5 * snoise(q * 0.68 + float2(-t * 0.48, t * 0.70) + float2(23.0, 71.0));
-        float c = 0.5 + 0.5 * snoise(q * 0.76 + float2(t * 0.57, t * 0.39) + float2(83.0, 29.0));
-        float a2 = a * a;
-        float b2 = b * b;
-        float c2 = c * c;
-        float3 weights = max(float3(a2 * a2 * a, b2 * b2 * b, c2 * c2 * c), float3(0.006));
-        weights /= max(weights.x + weights.y + weights.z, 0.001);
-
-        float3 rgb = primary * weights.x + secondary * weights.y + tertiary * weights.z;
-
-        // Keep mobile deliberately luminous. The palette already has a high HSV value floor; this
-        // adds a gentle midtone lift rather than desktop's 0.65 brightness reduction.
-        float shimmer = 0.5 + 0.5 * snoise(q * 1.10 + float2(-t * 0.35, t * 0.28) + float2(9.0, 57.0));
-        rgb = mix(rgb, float3(1.0), 0.075);
-        rgb = min(rgb * (1.04 + shimmer * 0.12) + float3(0.02), float3(1.0));
-
         float2 uv = coord / resolution;
-        float centerWeight = 1.0 - smoothstep(0.0, 0.72, length(uv - float2(0.5)));
-        rgb = min(rgb * (1.0 + beatPulse * 0.10 * centerWeight), float3(1.0));
+        float t = time * 0.05;
 
-        return half4(half3(rgb), 1.0);
+        float2 center = uv - float2(0.5);
+        float centerWeight = 1.0 - smoothstep(0.0, 0.7, length(center));
+
+        float n1 = snoise(uv * 0.35 + float2(t, t * 0.7));
+        float n2 = snoise(uv * 0.35 + float2(-t * 0.8, t * 0.5) + float2(50.0, 50.0));
+        float n3 = snoise(uv * 0.9 + float2(t * 1.2, -t) + float2(100.0, 0.0));
+        float n4 = snoise(uv * 0.9 + float2(-t, t * 1.1) + float2(0.0, 100.0));
+
+        float2 warp = float2(n1 * 0.65 + n3 * 0.35, n2 * 0.65 + n4 * 0.35) * centerWeight;
+        float2 warpedUV = clamp(uv + warp, float2(0.0), float2(1.0));
+
+        half4 sampled = content.eval(warpedUV * float2(128.0));
+        float3 rgb = float3(sampled.rgb);
+
+        float vignette = 1.0 - dot(center, center) * 0.16;
+        rgb *= vignette;
+
+        float gray = dot(rgb, float3(0.299, 0.587, 0.114));
+        rgb = mix(float3(gray), rgb, saturation);
+        rgb *= 0.88 * (1.0 + beatPulse * 0.16 * centerWeight);
+
+        return half4(half3(rgb), sampled.a);
     }
     """.trimIndent()
