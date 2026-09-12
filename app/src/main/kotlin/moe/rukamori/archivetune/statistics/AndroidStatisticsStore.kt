@@ -75,6 +75,20 @@ class AndroidStatisticsStore(
         _revision.value = _revision.value + 1L
     }
 
+    fun reset() {
+        val db = writableDb()
+        db.beginTransaction()
+        try {
+            db.execSQL("DELETE FROM $TABLE_HOUR")
+            db.execSQL("DELETE FROM $TABLE_ARTIST")
+            db.execSQL("DELETE FROM $TABLE_SONG")
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        _revision.value = _revision.value + 1L
+    }
+
     fun overview(
         range: AndroidStatisticsEpochRange,
         songLimit: Int = 20,

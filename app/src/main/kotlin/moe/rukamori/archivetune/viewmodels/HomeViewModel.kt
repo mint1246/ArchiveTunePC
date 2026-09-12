@@ -20,6 +20,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.supervisorScope
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.aicontentfilter.FilterAiContentUseCase
@@ -200,6 +202,7 @@ class HomeViewModel
         private val isInitialLoadComplete = MutableStateFlow(false)
         private val loadError = MutableStateFlow<Int?>(null)
         private val isLoadingMore = MutableStateFlow(false)
+        private val homeLoadMutex = Mutex()
 
         private val quickPicksMode =
             context.dataStore.data
@@ -330,7 +333,7 @@ class HomeViewModel
                 initialValue = HomeScreenState.Loading,
             )
 
-        private var wasLoggedIn = false
+        private var previousLoginState: Boolean? = null
         private var chipLoadJob: Job? = null
 
         private fun filterHomeChips(chips: List<HomePage.Chip>?): List<HomePage.Chip>? =
@@ -495,7 +498,12 @@ class HomeViewModel
         }
 
         private suspend fun load() {
-            if (isLoading.value) return
+            homeLoadMutex.withLock {
+                loadInternal()
+            }
+        }
+
+        private suspend fun loadInternal() {
             isLoading.value = true
             loadError.value = null
 
@@ -569,7 +577,9 @@ class HomeViewModel
                                     )
                                 val (pageWithoutQuickPicks, quickPicksSection) =
                                     filteredPage.withoutHiddenRemoteRecommendations().extractQuickPicks()
-                                remoteQuickPicks.value = quickPicksSection
+                                quickPicksSection?.takeIf { it.items.isNotEmpty() }?.let {
+                                    remoteQuickPicks.value = it
+                                }
                                 homePage.value = pageWithoutQuickPicks
                             }.onFailure {
                                 reportException(it)
@@ -1027,8 +1037,8 @@ class HomeViewModel
                     .collect { cookie ->
                         try {
                             val isLoggedIn = hasYouTubeLoginCookie(cookie)
-                            val loginTransition = isLoggedIn && !wasLoggedIn
-                            wasLoggedIn = isLoggedIn
+                            val loginTransition = previousLoginState == false && isLoggedIn
+                            previousLoginState = isLoggedIn
 
                             if (isLoggedIn && cookie != null && cookie.isNotEmpty()) {
                                 if (!prepareYouTubeAccount(cookie)) {

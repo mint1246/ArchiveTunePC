@@ -3,6 +3,7 @@ package moe.rukamori.archivetune.privacy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.db.MusicDatabase
+import moe.rukamori.archivetune.statistics.AndroidStatisticsStore
 import javax.inject.Inject
 
 class ListeningStatsRepository @Inject constructor(
@@ -14,5 +15,6 @@ class ListeningStatsRepository @Inject constructor(
             resetTotalPlayTime()
             clearPlayCounts()
         }
+        AndroidStatisticsStore(database).reset()
     }
 }
