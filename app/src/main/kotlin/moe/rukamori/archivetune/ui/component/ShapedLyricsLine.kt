@@ -58,7 +58,8 @@ import kotlin.math.sin
 private const val SHAPED_GLYPH_FADE_FRACTION = 0.2f
 private const val SHAPED_BRIGHT_OVERLAY_ALPHA = 0xE7 / 255f
 private val SHAPED_HORIZONTAL_OVERSCAN = 24.dp
-private const val SHAPED_GLOW_BLUR_PX = 12f
+private val SHAPED_GLOW_TIGHT_RADIUS = 5.dp
+private val SHAPED_GLOW_WIDE_RADIUS = 13.dp
 
 /**
  * Android's full-line counterpart to desktop SpicyPane's LineTextGeometry/ActiveLineText.
@@ -110,11 +111,21 @@ internal fun ShapedLyricsLine(
         val latestPosition by rememberUpdatedState(currentPositionMs)
         val pausedPositionKey = if (isPlaying) Long.MIN_VALUE else currentPositionMs
         var drawTick by remember(geometry) { mutableIntStateOf(0) }
-        val glowRenderEffect =
-            remember {
+        val glowTightRadiusPx = with(density) { SHAPED_GLOW_TIGHT_RADIUS.toPx() }
+        val glowWideRadiusPx = with(density) { SHAPED_GLOW_WIDE_RADIUS.toPx() }
+        val tightGlowRenderEffect =
+            remember(glowTightRadiusPx) {
                 BlurEffect(
-                    radiusX = SHAPED_GLOW_BLUR_PX,
-                    radiusY = SHAPED_GLOW_BLUR_PX,
+                    radiusX = glowTightRadiusPx,
+                    radiusY = glowTightRadiusPx,
+                    edgeTreatment = TileMode.Decal,
+                ).takeIf(RenderEffect::isSupported)
+            }
+        val wideGlowRenderEffect =
+            remember(glowWideRadiusPx) {
+                BlurEffect(
+                    radiusX = glowWideRadiusPx,
+                    radiusY = glowWideRadiusPx,
                     edgeTreatment = TileMode.Decal,
                 ).takeIf(RenderEffect::isSupported)
             }
@@ -155,11 +166,11 @@ internal fun ShapedLyricsLine(
 
         // Render glow on its own blurred layer. Blurring the completed glyph layer matches
         // desktop's DropShadowOnly path; blurring a saveLayer paint does not.
-        if (glowRenderEffect != null) {
+        if (wideGlowRenderEffect != null) {
             Canvas(
                 modifier =
                     canvasModifier.graphicsLayer {
-                        renderEffect = glowRenderEffect
+                        renderEffect = wideGlowRenderEffect
                         clip = false
                     },
             ) {
@@ -172,6 +183,29 @@ internal fun ShapedLyricsLine(
                     fontSizePx = fontSizePx,
                     bounceFactor = bounceFactor.coerceAtLeast(0f),
                     glowFactor = glowFactor.coerceAtLeast(0f),
+                    sourceAlphaMultiplier = 0.72f,
+                )
+            }
+        }
+
+        if (tightGlowRenderEffect != null) {
+            Canvas(
+                modifier =
+                    canvasModifier.graphicsLayer {
+                        renderEffect = tightGlowRenderEffect
+                        clip = false
+                    },
+            ) {
+                drawTick
+                drawShapedLyricsGlow(
+                    geometry = geometry,
+                    motion = motion,
+                    positionMs = currentPositionMs,
+                    textColor = textColor,
+                    fontSizePx = fontSizePx,
+                    bounceFactor = bounceFactor.coerceAtLeast(0f),
+                    glowFactor = glowFactor.coerceAtLeast(0f),
+                    sourceAlphaMultiplier = 1f,
                 )
             }
         }
@@ -600,6 +634,7 @@ private fun DrawScope.drawShapedLyricsGlow(
     fontSizePx: Float,
     bounceFactor: Float,
     glowFactor: Float,
+    sourceAlphaMultiplier: Float,
 ) {
     val layout = geometry.layout
     val lineOffsetX = ((size.width - layout.size.width) / 2f).coerceAtLeast(0f)
@@ -627,7 +662,10 @@ private fun DrawScope.drawShapedLyricsGlow(
             if (!wordGeometry.graphemeMotion) {
                 val glow = (wordSpring.glow * glowFactor).coerceIn(0f, 1.25f)
                 if (glow <= 0.01f) return@withNativeLyricsTransform
-                val glowColor = brightColor.copy(alpha = (glow * 0.82f).coerceIn(0f, 0.92f))
+                val glowColor =
+                    brightColor.copy(
+                        alpha = (glow * 0.92f * sourceAlphaMultiplier).coerceIn(0f, 1f),
+                    )
                 wordGeometry.rowBands.forEach { band ->
                     val shifted = band.shiftX(lineOffsetX)
                     clipRect(shifted.left, shifted.top, shifted.right, shifted.bottom) {
@@ -651,7 +689,10 @@ private fun DrawScope.drawShapedLyricsGlow(
                             bounceFactor = bounceFactor,
                         )
                     val shiftedBand = band.shiftX(lineOffsetX)
-                    val glowColor = brightColor.copy(alpha = (glow * 0.82f).coerceIn(0f, 0.92f))
+                    val glowColor =
+                        brightColor.copy(
+                            alpha = (glow * 0.92f * sourceAlphaMultiplier).coerceIn(0f, 1f),
+                        )
 
                     withNativeLyricsTransform(
                         centerX = lineOffsetX + band.center.x,
