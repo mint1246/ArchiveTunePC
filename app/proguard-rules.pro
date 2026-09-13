@@ -124,15 +124,10 @@
 }
 
 ## Media3 Protection Rules
-# Protect Guava from conflicts with system versions
--keep class com.google.common.** { *; }
--keep class com.google.common.util.concurrent.** { *; }
--keep class com.google.common.collect.** { *; }
+# Guava and Media3 ship consumer R8 rules. Blanket-keeping either dependency makes
+# tens of thousands of otherwise shrinkable classes into roots and slows every release build.
 -dontwarn com.google.common.**
 
-# Protect Media3 from obfuscation
--keep class androidx.media3.** { *; }
--keep interface androidx.media3.** { *; }
 -dontwarn androidx.media3.**
 
 ## JAudioTagger - suppress missing AWT/ImageIO classes (not available on Android)
@@ -154,7 +149,7 @@
 -keep class * extends androidx.glance.appwidget.GlanceAppWidgetReceiver { *; }
 
 # internal Ktor HTTP Client
--keep class io.ktor.** { *; }
+# Ktor ships META-INF/proguard/ktor.pro with its ServiceLoader/reflection rules.
 -dontwarn io.ktor.**
 -keep class moe.rukamori.archivetune.moriextractor.BackendExtractorResponse { *; }
 

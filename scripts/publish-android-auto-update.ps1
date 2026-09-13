@@ -120,7 +120,6 @@ try {
     Write-Host "Building Android $versionName ($nextCode) from $commit"
     Invoke-Native -FilePath ".\gradlew.bat" -Arguments @(
         ":app:assembleGmsMobileArm64Release",
-        "--no-daemon",
         "--console=plain"
     )
 

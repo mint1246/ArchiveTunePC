@@ -242,6 +242,9 @@ android {
         warningsAsErrors = false
         abortOnError = false
         checkDependencies = false
+        // Release lint never gates this build (abortOnError=false) and was adding ~2.5 min
+        // of CPU-heavy work beside R8. Keep lint available as an explicit task instead.
+        checkReleaseBuilds = false
     }
 
     androidResources {
