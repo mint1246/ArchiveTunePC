@@ -61,10 +61,17 @@ val hasReleaseSigningConfig =
 val cloudflaredVersion = "2026.9.0"
 val cloudflaredArm64Sha256 = "98aca3173f73248fad6180fc75dade2d186a6e54fa807e088108cb4345de8efe"
 val cloudflaredJniDir = layout.buildDirectory.dir("generated/cloudflared/jniLibs")
-val prepareCloudflaredArm64 = tasks.register<DownloadVerifiedFileTask>("prepareCloudflaredArm64") {
+val cloudflaredDownloadFile = layout.buildDirectory.file("downloads/cloudflared/$cloudflaredVersion/cloudflared-linux-arm64")
+val downloadCloudflaredArm64 = tasks.register<DownloadVerifiedFileTask>("downloadCloudflaredArm64") {
     sourceUrl.set("https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-linux-arm64")
     expectedSha256.set(cloudflaredArm64Sha256)
-    outputFile.set(cloudflaredJniDir.map { it.file("arm64-v8a/libcloudflared.so") })
+    outputFile.set(cloudflaredDownloadFile)
+}
+val cloudflaredAndroidArm64File = cloudflaredJniDir.map { it.file("arm64-v8a/libcloudflared.so") }
+val prepareCloudflaredArm64 = tasks.register<PatchCloudflaredForAndroidTask>("prepareCloudflaredArm64") {
+    dependsOn(downloadCloudflaredArm64)
+    inputFile.set(cloudflaredDownloadFile)
+    outputFile.set(cloudflaredAndroidArm64File)
 }
 
 android {
@@ -75,7 +82,7 @@ android {
     applicationId = "moe.rukamori.archivetune"
         minSdk = 26
         targetSdk = 37
-        versionCode = 146
+        versionCode = 147
         versionName = "15.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
