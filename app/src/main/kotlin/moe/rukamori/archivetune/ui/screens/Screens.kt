@@ -40,6 +40,13 @@ sealed class Screens(
         route = "library",
     )
 
+    object Friends : Screens(
+        titleId = R.string.friends,
+        iconIdInactive = R.drawable.person,
+        iconIdActive = R.drawable.person,
+        route = "social/friends",
+    )
+
     object MoodAndGenres : Screens(
         titleId = R.string.mood_and_genres,
         iconIdInactive = R.drawable.style,
@@ -48,7 +55,7 @@ sealed class Screens(
     )
 
     companion object {
-        val MainScreens = listOf(Home, Search, Library)
+        val MainScreens = listOf(Home, Search, Library, Friends)
         val TvMainScreens = listOf(Home, Search, Library)
     }
 }

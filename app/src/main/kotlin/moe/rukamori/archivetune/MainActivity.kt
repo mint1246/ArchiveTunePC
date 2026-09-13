@@ -1650,6 +1650,7 @@ class MainActivity : ComponentActivity() {
                                 Screens.Home.route -> R.string.home
                                 Screens.Search.route -> R.string.search
                                 Screens.Library.route -> R.string.filter_library
+                                Screens.Friends.route -> R.string.friends
                                 else -> null
                             }
                         }
@@ -1784,7 +1785,8 @@ class MainActivity : ComponentActivity() {
                                             remember(navBackStackEntry) {
                                                 navBackStackEntry?.destination?.route == Screens.Home.route ||
                                                     navBackStackEntry?.destination?.route == Screens.Search.route ||
-                                                    navBackStackEntry?.destination?.route == Screens.Library.route
+                                                    navBackStackEntry?.destination?.route == Screens.Library.route ||
+                                                    navBackStackEntry?.destination?.route == Screens.Friends.route
                                             }
                                         val shouldShowBlurBackground =
                                             remember(navBackStackEntry) {
