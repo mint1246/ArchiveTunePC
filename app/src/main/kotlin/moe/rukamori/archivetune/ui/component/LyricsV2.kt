@@ -932,7 +932,14 @@ fun LyricsV2(
                                         ),
                                     color = textColor,
                                     textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth(),
+                                    // ShapedLyricsLine reserves this inset while the line is in
+                                    // its animated window. Keep the exact same wrapping width for
+                                    // lines before/after that window so switching renderers can
+                                    // never reflow the lyric text.
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = SHAPED_HORIZONTAL_OVERSCAN),
                                 )
                             }
                         } else {
