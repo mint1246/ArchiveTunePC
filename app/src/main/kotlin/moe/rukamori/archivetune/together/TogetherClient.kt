@@ -102,6 +102,7 @@ class TogetherClient(
     private val externalScope: CoroutineScope,
     clientId: String = UUID.randomUUID().toString(),
     private val bearerToken: String? = null,
+    private val elapsedRealtimeMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
 ) {
     private val client =
         HttpClient(OkHttp) {
@@ -130,6 +131,9 @@ class TogetherClient(
     private var session: WebSocketSession? = null
     private var loopJob: Job? = null
     private var selfParticipantId: String? = null
+    @Volatile private var desktopProtocol = false
+    private var desktopRoomState: TogetherRoomState? = null
+    private var desktopPermissions: TogetherGuestPermissions = TogetherGuestPermissions()
     private val clientId = clientId.trim().ifBlank { UUID.randomUUID().toString() }.take(64)
     private val normalizedBearerToken: String? = bearerToken?.trim()?.takeIf { it.isNotBlank() }
 
@@ -166,7 +170,7 @@ class TogetherClient(
                             )
                         send(TogetherJson.json.encodeToString(TogetherMessage.serializer(), hello))
                         _state.value = TogetherClientState.Connected(joinInfo)
-                        runLoop(this, joinInfo.sessionId)
+                        runLoop(this, joinInfo.sessionId, allowDesktopProtocol = false)
                     }
                     return@launch
                 } catch (t: Throwable) {
@@ -213,7 +217,7 @@ class TogetherClient(
                             )
                         send(TogetherJson.json.encodeToString(TogetherMessage.serializer(), hello))
                         _state.value = TogetherClientState.ConnectedRemote(wsUrl = candidate, sessionId = sessionId)
-                        runLoop(this, sessionId)
+                        runLoop(this, sessionId, allowDesktopProtocol = true)
                     }
                     return@launch
                 } catch (t: Throwable) {
@@ -282,6 +286,9 @@ class TogetherClient(
         runCatching { session?.close(CloseReason(CloseReason.Codes.NORMAL, "Disconnect")) }
         session = null
         selfParticipantId = null
+        desktopProtocol = false
+        desktopRoomState = null
+        desktopPermissions = TogetherGuestPermissions()
         _state.value = TogetherClientState.Idle
     }
 
@@ -291,6 +298,10 @@ class TogetherClient(
     ) {
         val pid = selfParticipantId ?: return
         scope.launch {
+            if (desktopProtocol) {
+                TogetherDesktopPartyProtocol.encodeControl(action, desktopRoomState)?.let { session?.send(it) }
+                return@launch
+            }
             session?.send(
                 TogetherJson.json.encodeToString(
                     TogetherMessage.serializer(),
@@ -308,6 +319,16 @@ class TogetherClient(
     ) {
         val pid = selfParticipantId ?: return
         scope.launch {
+            if (desktopProtocol) {
+                val message =
+                    if (playNow) {
+                        TogetherDesktopPartyProtocol.encodePlayNowTrack(track, desktopRoomState)
+                    } else {
+                        TogetherDesktopPartyProtocol.encodeAddTrack(track, mode, desktopRoomState)
+                    }
+                session?.send(message)
+                return@launch
+            }
             session?.send(
                 TogetherJson.json.encodeToString(
                     TogetherMessage.serializer(),
@@ -354,6 +375,10 @@ class TogetherClient(
         clientElapsedRealtimeMs: Long,
     ) {
         scope.launch {
+            if (desktopProtocol) {
+                session?.send(TogetherDesktopPartyProtocol.encodePing(clientElapsedRealtimeMs))
+                return@launch
+            }
             session?.send(
                 TogetherJson.json.encodeToString(
                     TogetherMessage.serializer(),
@@ -370,6 +395,7 @@ class TogetherClient(
     private suspend fun runLoop(
         session: WebSocketSession,
         sessionId: String,
+        allowDesktopProtocol: Boolean,
     ) {
         loopJob =
             scope.launch {
@@ -383,12 +409,17 @@ class TogetherClient(
                             }
 
                         val text = (frame as? Frame.Text)?.readText() ?: continue
-                        val message =
-                            runCatching { TogetherJson.json.decodeFromString(TogetherMessage.serializer(), text) }
-                                .getOrElse {
-                                    _events.tryEmit(TogetherClientEvent.Error("Failed to decode message", it))
-                                    continue
-                                }
+                        val decoded = runCatching { TogetherJson.json.decodeFromString(TogetherMessage.serializer(), text) }
+                        val message = decoded.getOrNull()
+                        if (message == null) {
+                            val legacy = if (allowDesktopProtocol) TogetherDesktopPartyProtocol.parse(text) else null
+                            if (legacy != null && TogetherDesktopPartyProtocol.isKnown(legacy)) {
+                                handleDesktopMessage(sessionId, legacy)
+                                continue
+                            }
+                            _events.tryEmit(TogetherClientEvent.Error("Failed to decode message", decoded.exceptionOrNull()))
+                            continue
+                        }
 
                         when (message) {
                             is ServerWelcome -> {
@@ -445,7 +476,7 @@ class TogetherClient(
                                     _events.tryEmit(
                                         TogetherClientEvent.HeartbeatPong(
                                             pong = message,
-                                            receivedAtElapsedRealtimeMs = android.os.SystemClock.elapsedRealtime(),
+                                            receivedAtElapsedRealtimeMs = elapsedRealtimeMs(),
                                         ),
                                     )
                                 }
@@ -481,4 +512,67 @@ class TogetherClient(
             }
         loopJob?.join()
     }
+
+    private fun handleDesktopMessage(
+        sessionId: String,
+        message: kotlinx.serialization.json.JsonObject,
+    ) {
+        if (!desktopProtocol) {
+            desktopProtocol = true
+            val participantId = "android-${clientId.take(16)}"
+            selfParticipantId = participantId
+            _events.tryEmit(
+                TogetherClientEvent.Welcome(
+                    ServerWelcome(
+                        protocolVersion = TogetherProtocolVersion,
+                        sessionId = sessionId,
+                        participantId = participantId,
+                        role = ServerRole.GUEST,
+                        isPending = false,
+                        settings = TogetherRoomSettings(
+                            allowGuestsToAddTracks = desktopPermissions.canEditQueue,
+                            allowGuestsToControlPlayback = desktopPermissions.canControlPlayback,
+                        ),
+                        permissions = desktopPermissions,
+                    ),
+                ),
+            )
+        }
+
+        val pid = selfParticipantId ?: return
+        when (TogetherDesktopPartyProtocol.type(message)) {
+            "permissions" -> desktopPermissions = TogetherDesktopPartyProtocol.decodePermissions(message)
+            "pong" -> {
+                val nonce = TogetherDesktopPartyProtocol.nonce(message)
+                if (nonce != 0L) {
+                    val receivedAt = elapsedRealtimeMs()
+                    _events.tryEmit(
+                        TogetherClientEvent.HeartbeatPong(
+                            HeartbeatPong(
+                                sessionId = sessionId,
+                                pingId = nonce,
+                                clientElapsedRealtimeMs = nonce,
+                                serverElapsedRealtimeMs = nonce + ((receivedAt - nonce).coerceAtLeast(0L) / 2L),
+                            ),
+                            receivedAtElapsedRealtimeMs = receivedAt,
+                        ),
+                    )
+                }
+            }
+            "offer" -> Unit // Android keeps the websocket relay; desktop falls back cleanly.
+        }
+
+        TogetherDesktopPartyProtocol.mergeRemoteSnapshot(
+            message = message,
+            sessionId = sessionId,
+            selfParticipantId = pid,
+            previous = desktopRoomState,
+            permissions = desktopPermissions,
+            nowElapsedRealtimeMs = elapsedRealtimeMs(),
+        )?.let { state ->
+            desktopRoomState = state
+            _events.tryEmit(TogetherClientEvent.RoomState(state))
+        }
+    }
+
 }

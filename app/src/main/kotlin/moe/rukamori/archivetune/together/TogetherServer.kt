@@ -20,10 +20,12 @@ import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -49,6 +51,18 @@ sealed interface TogetherServerEvent {
         val request: AddTrackRequest,
     ) : TogetherServerEvent
 
+    data class ReplaceQueueRequested(
+        val participantId: String,
+        val tracks: List<TogetherTrack>,
+        val startIndex: Int,
+    ) : TogetherServerEvent
+
+    data class RemoveTrackRequested(
+        val participantId: String,
+        val index: Int,
+        val expectedId: String,
+    ) : TogetherServerEvent
+
     data class RoomStateReceived(
         val state: TogetherRoomState,
     ) : TogetherServerEvent
@@ -70,6 +84,7 @@ class TogetherServer(
     private val hostDisplayName: String,
     initialSettings: TogetherRoomSettings,
     private val hostParticipantId: String = "host",
+    private val allowDesktopProtocol: Boolean = false,
 ) {
     private val mutex = Mutex()
     private var settings: TogetherRoomSettings = initialSettings
@@ -86,6 +101,8 @@ class TogetherServer(
         val session: WebSocketSession,
         var pending: Boolean,
         var permissions: TogetherGuestPermissions = TogetherGuestPermissions(),
+        val legacyDesktop: Boolean = false,
+        var lastDesktopQueueHash: String? = null,
     )
 
     private val clients = ConcurrentHashMap<String, Client>()
@@ -148,6 +165,9 @@ class TogetherServer(
     ) {
         val client = clients[participantId] ?: return
         client.permissions = permissions
+        if (client.legacyDesktop) {
+            runCatching { client.session.send(TogetherDesktopPartyProtocol.encodePermissions(permissions)) }
+        }
     }
 
     suspend fun transferHostOwnership(participantId: String) {
@@ -263,12 +283,23 @@ class TogetherServer(
                 }
 
             runCatching {
-                client.session.send(
-                    TogetherJson.json.encodeToString(
-                        TogetherMessage.serializer(),
-                        RoomStateMessage(safeState),
-                    ),
-                )
+                if (client.legacyDesktop) {
+                    val message =
+                        if (client.lastDesktopQueueHash != safeState.queueHash) {
+                            client.lastDesktopQueueHash = safeState.queueHash
+                            TogetherDesktopPartyProtocol.encodeFull(safeState)
+                        } else {
+                            TogetherDesktopPartyProtocol.encodeTransport(safeState)
+                        }
+                    client.session.send(message)
+                } else {
+                    client.session.send(
+                        TogetherJson.json.encodeToString(
+                            TogetherMessage.serializer(),
+                            RoomStateMessage(safeState),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -302,21 +333,33 @@ class TogetherServer(
     }
 
     private suspend fun WebSocketSession.handleClient() {
-        val helloText =
+        val firstFrame =
             try {
-                incoming.receive() as? Frame.Text
+                if (allowDesktopProtocol) {
+                    withTimeoutOrNull(2_000L) { incoming.receive() as? Frame.Text }
+                } else {
+                    incoming.receive() as? Frame.Text
+                }
             } catch (_: ClosedReceiveChannelException) {
                 null
             }
 
+        val firstText = firstFrame?.readText()
+
         val hello =
             runCatching {
-                val txt = helloText?.readText().orEmpty()
-                val decoded = TogetherJson.json.decodeFromString(TogetherMessage.serializer(), txt)
+                val decoded = TogetherJson.json.decodeFromString(TogetherMessage.serializer(), firstText.orEmpty())
                 decoded as? ClientHello
             }.getOrNull()
 
         if (hello == null) {
+            if (allowDesktopProtocol) {
+                val legacy = firstText?.let(TogetherDesktopPartyProtocol::parse)
+                if (firstText == null || (legacy != null && TogetherDesktopPartyProtocol.isKnown(legacy))) {
+                    handleDesktopClient(firstText)
+                    return
+                }
+            }
             close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Handshake required"))
             return
         }
@@ -462,11 +505,124 @@ class TogetherServer(
                 }
             }
         } catch (t: Throwable) {
-            onEvent?.invoke(TogetherServerEvent.Error("Client loop failed", t))
+            if (t is CancellationException) throw t
         } finally {
             clients.remove(participantId)
             onEvent?.invoke(TogetherServerEvent.ParticipantLeft(participantId, "Disconnected"))
             runCatching { close() }
+        }
+    }
+
+    private suspend fun WebSocketSession.handleDesktopClient(firstText: String?) {
+        val participantId = UUID.randomUUID().toString()
+        val name = "Guest ${participantId.take(4)}"
+        val client =
+            Client(
+                participantId = participantId,
+                clientId = "desktop-$participantId",
+                name = name,
+                session = this,
+                pending = false,
+                permissions = TogetherGuestPermissions(),
+                legacyDesktop = true,
+            )
+        clients[participantId] = client
+
+        val participant =
+            TogetherParticipant(
+                id = participantId,
+                name = name,
+                isHost = false,
+                isPending = false,
+                isConnected = true,
+                permissions = client.permissions,
+            )
+        onEvent?.invoke(TogetherServerEvent.ParticipantJoined(participant))
+        runCatching { send(TogetherDesktopPartyProtocol.encodePermissions(client.permissions)) }
+
+        suspend fun consume(raw: String) {
+            val message = TogetherDesktopPartyProtocol.parse(raw) ?: return
+            if (!TogetherDesktopPartyProtocol.isKnown(message)) return
+            handleDesktopGuestMessage(client, message)
+        }
+
+        try {
+            if (firstText != null) consume(firstText)
+            for (frame in incoming) {
+                val text = (frame as? Frame.Text)?.readText() ?: continue
+                consume(text)
+            }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+        } finally {
+            clients.remove(participantId)
+            onEvent?.invoke(TogetherServerEvent.ParticipantLeft(participantId, "Disconnected"))
+            runCatching { close() }
+        }
+    }
+
+    private suspend fun handleDesktopGuestMessage(
+        client: Client,
+        message: kotlinx.serialization.json.JsonObject,
+    ) {
+        when (TogetherDesktopPartyProtocol.type(message)) {
+            "ping" -> {
+                runCatching { client.session.send(TogetherDesktopPartyProtocol.encodePong(TogetherDesktopPartyProtocol.nonce(message))) }
+            }
+
+            else -> {
+                TogetherDesktopPartyProtocol.decodeGuestQueueReplace(message)?.let { (startIndex, tracks) ->
+                    if (client.permissions.canChangeSong) {
+                        onEvent?.invoke(
+                            TogetherServerEvent.ReplaceQueueRequested(
+                                participantId = client.participantId,
+                                tracks = tracks,
+                                startIndex = startIndex,
+                            ),
+                        )
+                    }
+                    return
+                }
+
+                TogetherDesktopPartyProtocol.decodeGuestQueueRemove(message)?.let { (index, expectedId) ->
+                    if (client.permissions.canEditQueue) {
+                        onEvent?.invoke(
+                            TogetherServerEvent.RemoveTrackRequested(
+                                participantId = client.participantId,
+                                index = index,
+                                expectedId = expectedId,
+                            ),
+                        )
+                    }
+                    return
+                }
+
+                TogetherDesktopPartyProtocol.decodeGuestControl(message)?.let { action ->
+                    if (client.permissions.allows(action)) {
+                        onEvent?.invoke(
+                            TogetherServerEvent.ControlRequested(
+                                ControlRequest(sessionId = sessionId, participantId = client.participantId, action = action),
+                            ),
+                        )
+                    }
+                    return
+                }
+
+                TogetherDesktopPartyProtocol.decodeGuestAddTracks(message)?.let { (mode, tracks) ->
+                    tracks.forEach { track ->
+                        val request =
+                            AddTrackRequest(
+                                sessionId = sessionId,
+                                participantId = client.participantId,
+                                track = track,
+                                mode = mode,
+                            )
+                        if (client.permissions.allows(request)) {
+                            onEvent?.invoke(TogetherServerEvent.AddTrackRequested(request))
+                        }
+                    }
+                }
+            }
         }
     }
 }

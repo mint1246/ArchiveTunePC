@@ -1075,6 +1075,12 @@ class MusicService :
             .onFailure { reportException(it) }
     }
 
+    private fun keepTogetherServiceAlive() {
+        cancelIdleStop()
+        promoteToStartedService()
+        ensureStartedAsForeground()
+    }
+
     private fun cancelIdleStop() {
         idleStopJob?.cancel()
         idleStopJob = null
@@ -4778,6 +4784,7 @@ class MusicService :
         settings: moe.rukamori.archivetune.together.TogetherRoomSettings,
     ) {
         ensureScopesActive()
+        keepTogetherServiceAlive()
         scope.launch(SilentHandler) {
             togetherSessionState.value = moe.rukamori.archivetune.together.TogetherSessionState.Idle
         }
@@ -4894,6 +4901,7 @@ class MusicService :
         settings: moe.rukamori.archivetune.together.TogetherRoomSettings,
     ) {
         ensureScopesActive()
+        keepTogetherServiceAlive()
         scope.launch(SilentHandler) {
             togetherSessionState.value = moe.rukamori.archivetune.together.TogetherSessionState.Idle
         }
@@ -4933,6 +4941,7 @@ class MusicService :
                     hostDisplayName = hostName,
                     initialSettings = compatibleSettings,
                     hostParticipantId = togetherHostId,
+                    allowDesktopProtocol = true,
                 )
             server.onEvent = { event ->
                 ioScope.launch(SilentHandler) {
@@ -5037,6 +5046,7 @@ class MusicService :
         displayName: String,
     ) {
         ensureScopesActive()
+        keepTogetherServiceAlive()
         val joinInfo =
             moe.rukamori.archivetune.together.TogetherLink
                 .decode(rawLink)
@@ -5249,6 +5259,7 @@ class MusicService :
         displayName: String,
     ) {
         ensureScopesActive()
+        keepTogetherServiceAlive()
         val resolved =
             moe.rukamori.archivetune.together.TogetherQuickTunnelInvite
                 .decode(rawInvite)
@@ -5466,6 +5477,7 @@ class MusicService :
         ensureScopesActive()
         scope.launch(SilentHandler) {
             togetherSessionState.value = moe.rukamori.archivetune.together.TogetherSessionState.Idle
+            scheduleStopIfIdle()
         }
         ioScope.launch(SilentHandler) { stopTogetherInternal() }
     }
@@ -5647,6 +5659,14 @@ class MusicService :
 
             is moe.rukamori.archivetune.together.TogetherServerEvent.AddTrackRequested -> {
                 applyHostAddTrack(event.request.track, event.request.mode, event.request.playNow)
+            }
+
+            is moe.rukamori.archivetune.together.TogetherServerEvent.ReplaceQueueRequested -> {
+                applyHostReplaceQueue(event.tracks, event.startIndex)
+            }
+
+            is moe.rukamori.archivetune.together.TogetherServerEvent.RemoveTrackRequested -> {
+                applyHostRemoveTrack(event.index, event.expectedId)
             }
 
             is moe.rukamori.archivetune.together.TogetherServerEvent.ParticipantJoined -> {
@@ -5831,6 +5851,42 @@ class MusicService :
                 moe.rukamori.archivetune.together.AddTrackMode.PLAY_NEXT -> playNext(listOf(mediaItem))
                 moe.rukamori.archivetune.together.AddTrackMode.ADD_TO_QUEUE -> addToQueue(listOf(mediaItem))
             }
+        }
+    }
+
+    private suspend fun applyHostReplaceQueue(
+        tracks: List<moe.rukamori.archivetune.together.TogetherTrack>,
+        startIndex: Int,
+    ) {
+        val items = tracks.map { it.toMediaMetadata().toMediaItem() }
+        if (items.isEmpty()) return
+        withContext(Dispatchers.Main) {
+            val index = startIndex.coerceIn(0, items.lastIndex)
+            suppressAutoPlayback = false
+            currentQueue =
+                moe.rukamori.archivetune.playback.queues.ListQueue(
+                    title = getString(R.string.music_player),
+                    items = items,
+                    startIndex = index,
+                    position = 0L,
+                )
+            queueTitle = null
+            player.setMediaItems(items, index, 0L)
+            player.prepare()
+            player.playWhenReady = true
+        }
+    }
+
+    private suspend fun applyHostRemoveTrack(
+        index: Int,
+        expectedId: String,
+    ) {
+        withContext(Dispatchers.Main) {
+            if (index !in 0 until player.mediaItemCount || index == player.currentMediaItemIndex) return@withContext
+            val item = player.getMediaItemAt(index)
+            val id = item.metadata?.id?.takeIf { it.isNotBlank() } ?: item.mediaId
+            if (id != expectedId) return@withContext
+            player.removeMediaItem(index)
         }
     }
 
@@ -6051,7 +6107,16 @@ class MusicService :
                         localIds = localIds,
                     )
 
-                if (desiredItems.isNotEmpty() && needsRebuild) {
+                if (desiredItems.isEmpty() && needsRebuild && player.mediaItemCount > 0) {
+                    togetherLastAppliedQueueHash = desiredHash
+                    suppressAutoPlayback = true
+                    currentQueue = EmptyQueue
+                    queueTitle = null
+                    player.playWhenReady = false
+                    player.stop()
+                    player.clearMediaItems()
+                    togetherLastRemoteAppliedIndex = -1
+                } else if (desiredItems.isNotEmpty() && needsRebuild) {
                     togetherLastAppliedQueueHash = desiredHash.ifBlank { localHash }
                     val startIndex = state.currentIndex.coerceIn(0, desiredItems.lastIndex)
                     suppressAutoPlayback = false
@@ -9066,40 +9131,15 @@ class MusicService :
         val stopMusicOnTaskClearEnabled = dataStore.get(StopMusicOnTaskClearKey, false)
 
         try {
-            val state = togetherSessionState.value
-            val isHostSessionActive =
-                state is moe.rukamori.archivetune.together.TogetherSessionState.Hosting ||
-                    state is moe.rukamori.archivetune.together.TogetherSessionState.HostingOnline ||
-                    (
-                        state is moe.rukamori.archivetune.together.TogetherSessionState.Joined &&
-                            state.role is moe.rukamori.archivetune.together.TogetherRole.Host
-                    )
-
-            val isPlaybackInactive = player.playbackState == Player.STATE_IDLE || player.mediaItemCount == 0
-
-            if (shouldStopServiceOnTaskRemoved(stopMusicOnTaskClearEnabled, isHostSessionActive, isPlaybackInactive)) {
-                if (stopMusicOnTaskClearEnabled) {
-                    discordServiceStopping = true
-                    requestDiscordSync(
-                        reason = "task_removed_stop_music_on_task_clear",
-                        force = true,
-                    )
-                    runCatching { stopAndClearPlayback(clearPersistentState = true) }
-                    stopForegroundAndSelf()
-                    return
-                }
-
-                if (isHostSessionActive && isPlaybackInactive) {
-                    discordServiceStopping = true
-                    requestDiscordSync(
-                        reason = "task_removed_host_inactive",
-                        force = true,
-                    )
-                    runCatching { scope.launch { stopTogetherInternal() } }
-                    runCatching { togetherSessionState.value = moe.rukamori.archivetune.together.TogetherSessionState.Idle }
-                    stopSelf()
-                    return
-                }
+            if (shouldStopServiceOnTaskRemoved(stopMusicOnTaskClearEnabled)) {
+                discordServiceStopping = true
+                requestDiscordSync(
+                    reason = "task_removed_stop_music_on_task_clear",
+                    force = true,
+                )
+                runCatching { stopAndClearPlayback(clearPersistentState = true) }
+                stopForegroundAndSelf()
+                return
             }
 
             if (dataStore.get(PersistentQueueKey, true) && player.mediaItemCount > 0) {
@@ -9221,12 +9261,7 @@ class MusicService :
             ) != false
         }
 
-        internal fun shouldStopServiceOnTaskRemoved(
-            stopMusicOnTaskClearEnabled: Boolean,
-            isHostSessionActive: Boolean,
-            isPlaybackInactive: Boolean,
-        ): Boolean = (isHostSessionActive && isPlaybackInactive) || stopMusicOnTaskClearEnabled
-
+        internal fun shouldStopServiceOnTaskRemoved(stopMusicOnTaskClearEnabled: Boolean): Boolean = stopMusicOnTaskClearEnabled
         internal fun shouldShowPlaybackNotification(
             startInForegroundRequired: Boolean,
             hasResumablePlayback: Boolean,
