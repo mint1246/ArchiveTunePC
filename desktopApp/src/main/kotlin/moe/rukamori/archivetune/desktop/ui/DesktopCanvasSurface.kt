@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -46,9 +47,15 @@ internal fun DesktopCanvasSurface(
             value = null
             return@produceState
         }
-        val created = withContext(Dispatchers.IO) { runCatching { VlcjCanvasVideoPlayer() }.getOrNull() }
-        value = created
-        awaitDispose { created?.close() }
+        var created: VlcjCanvasVideoPlayer? = null
+        try {
+            // Retain ownership even if cancellation happens while returning from the IO dispatcher.
+            withContext(Dispatchers.IO) { created = runCatching { VlcjCanvasVideoPlayer() }.getOrNull() }
+            value = created
+            awaitDispose { }
+        } finally {
+            created?.close()
+        }
     }
     val activePlayer = player
     val ready by (player?.ready ?: remember { kotlinx.coroutines.flow.MutableStateFlow(false) }).collectAsState()
@@ -63,11 +70,14 @@ internal fun DesktopCanvasSurface(
         contentAlignment = Alignment.Center,
     ) {
         if (activePlayer != null) {
-            SwingPanel(
-                factory = { activePlayer.awtComponent as JPanel },
-                modifier = Modifier.fillMaxSize(),
-                update = { _ -> Unit },
-            )
+            // SwingPanel's factory is only called on insertion, so a replacement player needs a new panel.
+            key(activePlayer) {
+                SwingPanel(
+                    factory = { activePlayer.awtComponent as JPanel },
+                    modifier = Modifier.fillMaxSize(),
+                    update = { _ -> Unit },
+                )
+            }
         }
         if (!ready || player == null) {
             if (!artworkUri.isNullOrBlank()) {
