@@ -63,12 +63,12 @@ val desktopLastFmLocalProperties = Properties().apply {
     }
 }
 val desktopLastFmApiKey =
-    desktopLastFmLocalProperties.getProperty("LASTFM_API_KEY")
-        ?: System.getenv("LASTFM_API_KEY")
+    desktopLastFmLocalProperties.getProperty("LASTFM_API_KEY")?.trim()?.takeIf { it.isNotBlank() }
+        ?: System.getenv("LASTFM_API_KEY")?.trim()?.takeIf { it.isNotBlank() }
         ?: ""
 val desktopLastFmSecret =
-    desktopLastFmLocalProperties.getProperty("LASTFM_SECRET")
-        ?: System.getenv("LASTFM_SECRET")
+    desktopLastFmLocalProperties.getProperty("LASTFM_SECRET")?.trim()?.takeIf { it.isNotBlank() }
+        ?: System.getenv("LASTFM_SECRET")?.trim()?.takeIf { it.isNotBlank() }
         ?: ""
 
 fun String.asKotlinStringLiteral(): String = buildString {

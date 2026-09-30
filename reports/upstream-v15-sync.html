@@ -166,6 +166,9 @@
             </tbody>
           </table></div>
           <p class="callout" style="margin-top:16px">Desktop 15.10 and Android 15.1.0 deployments are complete and verified on R2. The source branch remains local and has not been pushed; no GitHub release was created.</p>
+          <h3>Desktop local credential follow-up</h3>
+          <p>Desktop builds now read <span class="mono">LASTFM_API_KEY</span> and <span class="mono">LASTFM_SECRET</span> from the root <span class="mono">local.properties</span>, with environment fallback for blank or missing entries. A complete saved DPAPI credential override keeps priority. Git ignores both the local configuration and the generated Kotlin source under <span class="mono">desktopApp/build/generated/</span>; the configuration file itself is not packaged. An ignored empty template was created for local entry. Source implementation is recorded in <span class="mono">f1c37daa8</span>.</p>
+          <p>Desktop compilation and eight focused Last.fm tests passed, covering first-run linking, saved overrides, empty/corrupt storage, and alternate endpoint isolation. Generation was also checked with an absent local file, special characters in environment values, and blank local entries. Evidence: <span class="mono">.validation/lastfm-local-properties-test.log</span>, <span class="mono">lastfm-local-properties-final.log</span>, and <span class="mono">lastfm-local-properties-env.log</span>. This source follow-up takes effect in a subsequent build; the published artifacts listed above are unchanged.</p>
         </section>
 
         <section id="android">
@@ -297,7 +300,7 @@
               <tr><td>core history merge</td><td class="mono">e0da0e6c8fd80e94bd90c77186479dc7bee6c452</td><td>Preserves local core Home-fallback commit <span class="mono">3300f43</span> alongside upstream podcast/featured-renderer work; the submodule tree is unchanged from <span class="mono">e33a207</span>.</td></tr>
               <tr><td>Native dependency checkout</td><td class="mono">b056bbd94847f275a9145a0411fdd162bc4a0547</td><td>Enables long paths for Windows native dependency source checkouts; audio DLL build passed.</td></tr>
               <tr><td>Native smoke fixes</td><td class="mono">b2e113627713afd918d11c07200b9fead7c87c04</td><td>Fixes Kernel32 proxy calls and registers the libVLC audio output device <span class="mono">ByReference</span> constructor for Native Image.</td></tr>
-              <tr><td>Native CLI and smoke fixture / code HEAD</td><td class="mono">e0f00ed82b7fe2f62df2f2ef50fd0370e3b2c444</td><td>Updates Native CLI and fixture; all code commits are fast-forwarded on main. Original unfinished work remains uncommitted and preserved; it is excluded from the isolated build artifacts. This report is committed separately.</td></tr>
+              <tr><td>Native CLI and smoke fixture</td><td class="mono">e0f00ed82b7fe2f62df2f2ef50fd0370e3b2c444</td><td>Updates Native CLI and fixture; all code commits are fast-forwarded on main. Original unfinished work remains uncommitted and preserved; it is excluded from the isolated build artifacts. This report is committed separately.</td></tr>
               <tr><td>core submodule</td><td class="mono">08a7e820a99e8aeb0db0447ae5c5de3f77f4bbe8</td><td>Parent gitlink points here; tree matches prior <span class="mono">e33a207</span> exactly.</td></tr>
               <tr><td>lyrics submodule</td><td class="mono">86792f9497dba016c5fdef1f12d203f75f46baf4</td><td>Parent gitlink points to this revision.</td></tr>
               <tr><td>morideobfuscator submodule</td><td class="mono">387706fb24876d7da4a0a3a00e10ad9752abbda4</td><td>Parent gitlink points to this revision.</td></tr>
