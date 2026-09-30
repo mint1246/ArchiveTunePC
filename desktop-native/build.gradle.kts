@@ -25,6 +25,8 @@ kotlin {
 
 dependencies {
     implementation(project(":desktopApp"))
+    implementation(project(":desktop-playback"))
+    implementation(libs.coroutines.core)
     implementation("dev.nucleusframework:nucleus.nucleus-application:2.1.10")
     implementation("dev.nucleusframework:nucleus.graalvm-runtime:2.1.10")
 }

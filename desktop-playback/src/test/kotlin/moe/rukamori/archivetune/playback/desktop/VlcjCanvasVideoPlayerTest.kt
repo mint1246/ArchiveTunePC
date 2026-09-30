@@ -26,6 +26,7 @@ class VlcjCanvasVideoPlayerTest {
         val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
         val video = Files.createTempFile("archivetune-canvas-", ".mkv")
         Files.write(video, fixture())
+        System.getenv("ARCHIVETUNE_CANVAS_FIXTURE_OUTPUT")?.let { Files.copy(video, java.nio.file.Path.of(it), java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
         val player = VlcjCanvasVideoPlayer(VlcRuntimeConfiguration(directory = runtime.root))
         try {
             assertTrue(player.show(video.toUri().toString(), true))

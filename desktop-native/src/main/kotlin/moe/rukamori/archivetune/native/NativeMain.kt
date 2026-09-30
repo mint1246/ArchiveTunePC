@@ -11,7 +11,7 @@ import moe.rukamori.archivetune.desktop.main as archiveTuneMain
  * Compose, or Skiko. The production desktop entry point remains unchanged and is called directly
  * afterwards so the native build exercises the same application code as the regular JVM build.
  */
-fun main() {
+fun main(args: Array<String>) {
     GraalVmInitializer.initialize()
 
     // Native Image has no JVM application image from which ArchiveTune can infer its install root.
@@ -24,6 +24,11 @@ fun main() {
             ?.normalize()
             ?.parent
             ?.let { System.setProperty("archivetune.app.dir", it.toString()) }
+    }
+
+    if (args.firstOrNull() == "--canvas-smoke") {
+        runNativeCanvasSmoke(args.drop(1))
+        return
     }
 
     archiveTuneMain()
