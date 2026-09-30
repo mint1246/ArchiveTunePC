@@ -52,10 +52,8 @@ class LyricsHelper
                 SimpMusicLyricsProvider,
                 UnisonLyricsProvider,
                 PaxsenixAppleMusicLyricsProvider,
-                PaxsenixNeteaseLyricsProvider,
                 PaxsenixSpotifyLyricsProvider,
                 PaxsenixMusixmatchLyricsProvider,
-                PaxsenixYouTubeLyricsProvider,
                 YouTubeSubtitleLyricsProvider,
                 YouTubeLyricsProvider,
             )
@@ -325,10 +323,8 @@ class LyricsHelper
                     PreferredLyricsProvider.YOULY_PLUS to YouLyPlusLyricsProvider,
                     PreferredLyricsProvider.SIMPMUSIC to SimpMusicLyricsProvider,
                     PreferredLyricsProvider.PAXSENIX_APPLE_MUSIC to PaxsenixAppleMusicLyricsProvider,
-                    PreferredLyricsProvider.PAXSENIX_NETEASE to PaxsenixNeteaseLyricsProvider,
                     PreferredLyricsProvider.PAXSENIX_SPOTIFY to PaxsenixSpotifyLyricsProvider,
                     PreferredLyricsProvider.PAXSENIX_MUSIXMATCH to PaxsenixMusixmatchLyricsProvider,
-                    PreferredLyricsProvider.PAXSENIX_YOUTUBE to PaxsenixYouTubeLyricsProvider,
                     PreferredLyricsProvider.UNISON to UnisonLyricsProvider,
                 )
             val userOrdered = orderedEnums.mapNotNull { providerMap[it] }
@@ -371,10 +367,8 @@ class LyricsHelper
             private val paxsenixProviders =
                 setOf(
                     PaxsenixAppleMusicLyricsProvider,
-                    PaxsenixNeteaseLyricsProvider,
                     PaxsenixSpotifyLyricsProvider,
                     PaxsenixMusixmatchLyricsProvider,
-                    PaxsenixYouTubeLyricsProvider,
                 )
         }
 

@@ -76,6 +76,7 @@ import androidx.compose.ui.util.fastForEach
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.ui.AspectRatioFrameLayout
 import coil3.compose.AsyncImage
 import coil3.imageLoader
 import coil3.request.CachePolicy
@@ -89,15 +90,13 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.audio.rememberPlayerBeatPulse
-import moe.rukamori.archivetune.canvas.models.CanvasArtwork
-import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
+import moe.rukamori.archivetune.canvas.CanvasVideo
 import moe.rukamori.archivetune.constants.BackdropBlurAmountKey
 import moe.rukamori.archivetune.constants.BackdropEnabledKey
 import moe.rukamori.archivetune.constants.CropThumbnailToSquareKey
 import moe.rukamori.archivetune.constants.DisableBlurKey
 import moe.rukamori.archivetune.constants.EnableHapticFeedbackKey
 import moe.rukamori.archivetune.constants.HidePlayerThumbnailKey
-import moe.rukamori.archivetune.constants.MaxCanvasCacheSizeKey
 import moe.rukamori.archivetune.constants.PlayerBackgroundStyle
 import moe.rukamori.archivetune.constants.PlayerBackgroundStyleKey
 import moe.rukamori.archivetune.constants.PlayerDesignStyle
@@ -113,7 +112,6 @@ import moe.rukamori.archivetune.utils.ImageBlurUtils
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberLowDataModeActive
 import moe.rukamori.archivetune.utils.rememberPreference
-import java.util.Locale
 import kotlin.math.abs
 
 private data class ThumbnailPage(
@@ -126,6 +124,7 @@ private data class ThumbnailPage(
 @Composable
 fun Thumbnail(
     sliderPositionProvider: () -> Long?,
+    canvas: CanvasVideo?,
     modifier: Modifier = Modifier,
     isPlayerExpanded: Boolean = true, // Add parameter to control swipe based on player state
 ) {
@@ -145,17 +144,11 @@ fun Thumbnail(
     val (enableHapticFeedback) = rememberPreference(EnableHapticFeedbackKey, true)
 
     val hidePlayerThumbnail by rememberPreference(HidePlayerThumbnailKey, false)
-    val archiveTuneCanvasEnabled by rememberPreference(ArchiveTuneCanvasKey, false)
     val lowDataModeActive = rememberLowDataModeActive()
     val playerDesignStyle by rememberEnumPreference(
         key = PlayerDesignStyleKey,
         defaultValue = PlayerDesignStyle.V4,
     )
-    val (maxCanvasCacheSize, _) =
-        rememberPreference(
-            key = MaxCanvasCacheSizeKey,
-            defaultValue = 256,
-        )
     val (thumbnailCornerRadius, _) =
         rememberPreference(
             key = ThumbnailCornerRadiusKey,
@@ -185,10 +178,6 @@ fun Thumbnail(
             PlayerBackgroundStyle.GLOW_ANIMATED -> Color.White
             PlayerBackgroundStyle.CUSTOM -> Color.White
         }
-
-    LaunchedEffect(maxCanvasCacheSize) {
-        CanvasArtworkPlaybackCache.setMaxSize(maxCanvasCacheSize)
-    }
 
     // Grid state
     val thumbnailLazyGridState = rememberLazyGridState()
@@ -384,66 +373,8 @@ fun Thumbnail(
                         val incrementalSeekSkipEnabled by rememberPreference(SeekExtraSeconds, defaultValue = false)
                         var skipMultiplier by remember { mutableStateOf(1) }
                         var lastTapTime by remember { mutableLongStateOf(0L) }
-                        val itemMetadata = remember(item) { item.metadata }
-                        val storefront =
-                            remember {
-                                val country = Locale.getDefault().country
-                                if (country.length == 2) country.lowercase(Locale.ROOT) else "us"
-                            }
-                        val shouldUseCanvas =
-                            archiveTuneCanvasEnabled &&
-                                playerDesignStyle != PlayerDesignStyle.V7 &&
-                                playerDesignStyle != PlayerDesignStyle.V8 &&
-                                item.mediaId.isNotBlank() &&
-                                item.mediaId == currentMediaItem?.mediaId
-                        val shouldFetchCanvas = shouldUseCanvas && !lowDataModeActive
-                        var canvasArtwork by remember(item.mediaId) { mutableStateOf<CanvasArtwork?>(null) }
-                        var canvasFetchInFlight by remember(item.mediaId) { mutableStateOf(false) }
-
-                        LaunchedEffect(shouldUseCanvas) {
-                            if (!shouldUseCanvas) {
-                                canvasArtwork = null
-                                canvasFetchInFlight = false
-                            }
-                        }
-
-                        LaunchedEffect(shouldUseCanvas, shouldFetchCanvas, item.mediaId) {
-                            if (!shouldUseCanvas) return@LaunchedEffect
-
-                            val songTitleRaw =
-                                itemMetadata
-                                    ?.title
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: item.mediaMetadata.title?.toString()
-                                    ?: ""
-
-                            val artistNameRaw =
-                                itemMetadata
-                                    ?.artists
-                                    ?.firstOrNull()
-                                    ?.name
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: item.mediaMetadata.artist?.toString()
-                                    ?: item.mediaMetadata.subtitle?.toString()
-                                    ?: ""
-
-                            if (canvasFetchInFlight) return@LaunchedEffect
-                            canvasFetchInFlight = true
-
-                            try {
-                                canvasArtwork =
-                                    resolveCanvasArtworkForPlayback(
-                                        mediaId = item.mediaId,
-                                        songTitleRaw = songTitleRaw,
-                                        artistNameRaw = artistNameRaw,
-                                        storefront = storefront,
-                                        requireVertical = false,
-                                        allowNetwork = shouldFetchCanvas,
-                                    )
-                            } finally {
-                                canvasFetchInFlight = false
-                            }
-                        }
+                        val shouldUseCanvas = item.mediaId.isNotBlank() && item.mediaId == currentMediaItem?.mediaId
+                        val canvasArtwork = canvas.takeIf { shouldUseCanvas }
 
                         Box(
                             modifier =
@@ -597,9 +528,11 @@ fun Thumbnail(
                                         (!primaryCanvasUrl.isNullOrBlank() || !fallbackCanvasUrl.isNullOrBlank())
                                     ) {
                                         CanvasArtworkPlayer(
+                                            source = canvasArtwork?.source,
                                             primaryUrl = primaryCanvasUrl,
                                             fallbackUrl = fallbackCanvasUrl,
                                             isPlaying = isPlaying,
+                                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                     }

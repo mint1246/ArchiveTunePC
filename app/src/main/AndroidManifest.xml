@@ -374,21 +374,12 @@
 </receiver>
 
 
-        <meta-data
-            android:name="com.google.android.gms.car.application"
-            android:resource="@xml/automotive_app_desc" />
-
         <activity
             android:name=".DebugActivity"
             android:exported="true"
             android:process=":crash"
             android:theme="@style/Theme.ArchiveTune">
         </activity>
-
-        <activity
-            android:name=".ui.screens.settings.PoTokenExtractionActivity"
-            android:exported="false"
-            android:theme="@style/Theme.ArchiveTune" />
 
         <activity
             android:name=".discord.DiscordOAuthCallbackActivity"

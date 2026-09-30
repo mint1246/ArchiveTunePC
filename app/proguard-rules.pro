@@ -12,13 +12,8 @@
 #   public *;
 #}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+-dontobfuscate
+-keepattributes SourceFile,LineNumberTable
 
 ## Kotlin Serialization
 # Keep `Companion` object fields of serializable classes.
@@ -55,9 +50,6 @@
 -dontwarn pl.droidsonroids.gif.**
 
 -dontwarn javax.servlet.ServletContainerInitializer
--dontwarn org.bouncycastle.jsse.BCSSLParameters
--dontwarn org.bouncycastle.jsse.BCSSLSocket
--dontwarn org.bouncycastle.jsse.provider.BouncyCastleJsseProvider
 -dontwarn org.conscrypt.Conscrypt$Version
 -dontwarn org.conscrypt.Conscrypt
 -dontwarn org.conscrypt.ConscryptHostnameVerifier
@@ -151,7 +143,6 @@
 # internal Ktor HTTP Client
 # Ktor ships META-INF/proguard/ktor.pro with its ServiceLoader/reflection rules.
 -dontwarn io.ktor.**
--keep class moe.rukamori.archivetune.moriextractor.BackendExtractorResponse { *; }
 
 # engine HTTP Android/OkHttp Ktor
 -dontwarn kotlinx.coroutines.**

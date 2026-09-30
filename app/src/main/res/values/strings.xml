@@ -1173,4 +1173,47 @@
     <string name="system_output_switcher">System output switcher</string>
     <string name="social_notification_channel_name">Friends &amp; messages</string>
     <string name="social_notification_channel_description">Friend requests, messages, and Play Together invites</string>
+
+    <string name="podcast">Podcast</string>
+    <string name="your_shows">Your shows</string>
+    <string name="browse_empty_description">There’s nothing to show here yet.</string>
+    <string name="browse_load_failed">Couldn’t load this page</string>
+    <string name="episodes">Episodes</string>
+    <string name="search_episodes">Search episodes</string>
+    <string name="podcast_has_no_episodes">This podcast has no available episodes.</string>
+    <plurals name="n_episode">
+        <item quantity="one">%d episode</item>
+        <item quantity="other">%d episodes</item>
+    </plurals>
+    <string name="wallpaper_permission">Wallpaper color permission</string>
+    <string name="wallpaper_permission_desc">Grant storage permission to extract colors from your wallpaper on older devices</string>
+    <string name="playing_from">Playing from %1$s</string>
+    <string name="remaining_time">-%1$s</string>
+    <string name="paxsenix_apple_music">Paxsenix: Apple Music</string>
+    <string name="paxsenix_spotify">Paxsenix: Spotify</string>
+    <string name="paxsenix_musixmatch">Paxsenix: Musixmatch</string>
+    <string name="preload_next_song_title">Preload Mode</string>
+    <string name="preload_next_song_warning">Uses additional data, battery, and processing in the background.</string>
+    <string name="updates_subtitle_artifact">Artifact builds from GitHub Actions workflow</string>
+    <string name="automatic_update_checks">Automatic Updates Check</string>
+    <string name="automatic_update_checks_desc">Check the selected channel automatically for new releases</string>
+    <string name="channel_artifact">Artifact</string>
+    <string name="updates_artifact_hosting_description">Artifact builds are fetched directly from GitHub Actions workflow runs.</string>
+    <string name="updates_channel_warning_artifact_title">Artifact builds</string>
+    <string name="updates_channel_warning_artifact_risk">Artifact builds may include experimental features, unfinished changes, or temporary regressions.</string>
+    <string name="updates_channel_warning_artifact_unstable">Artifact builds are provided for testing and early access only.\nStability, compatibility, and functionality are not guaranteed.</string>
+    <string name="updates_channel_warning_artifact_acknowledgement">Note: downloading directly from GitHub bypasses any additional screening performed by the store you might have originally installed the app from.\nBy continuing, you acknowledge that Artifact builds may be unstable and use them at your own risk.</string>
+    <string name="updates_artifact_channel_confirmation">Switch to the Artifact channel to receive development builds.\n\nArtifact builds are fetched directly from GitHub Actions workflow runs.\nNote: downloading directly from GitHub bypasses any additional screening performed by the store you might have originally installed the app from.</string>
+    <string name="onboarding_login_title">Sync your listening</string>
+    <string name="onboarding_login_subtitle">Log in to sync your library and history across devices and get more reliable playback.</string>
+    <string name="onboarding_login_optional">Optional. You can log in later from Settings.</string>
+    <string name="onboarding_login_benefits_title">Your account helps ArchiveTune</string>
+    <string name="onboarding_login_library_title">Sync your library</string>
+    <string name="onboarding_login_library_desc">Keep your saved music and playlists available wherever you listen.</string>
+    <string name="onboarding_login_history_title">Keep your history</string>
+    <string name="onboarding_login_history_desc">Continue your listening journey across devices with synced history.</string>
+    <string name="onboarding_login_playback_title">Better playback</string>
+    <string name="onboarding_login_playback_desc">Use your account context for a more dependable playback experience.</string>
+    <string name="onboarding_login_skip">Skip for now</string>
+    <string name="local_songs_metadata_unavailable">Imported %1$d songs. Online metadata is unavailable; file tags were kept.</string>
 </resources>

@@ -383,7 +383,7 @@ object Updater {
                 latestReleaseDownloadUrl = release.downloadUrl
             }
 
-            UpdateChannel.CANARY -> {
+            UpdateChannel.ARTIFACT -> {
                 latestCanaryDownloadUrl = release.downloadUrl
             }
         }
@@ -422,16 +422,18 @@ object Updater {
     suspend fun getLatestCanaryReleaseNotes(): Result<String?> = getLatestCanaryReleaseInfo().map { it.body }
 
     suspend fun getLatestCanaryReleaseInfo(forceRefresh: Boolean = false): Result<ReleaseInfo> =
-        getAllReleases(UpdateChannel.CANARY, 1, forceRefresh).mapCatching { releases ->
+        getAllReleases(UpdateChannel.ARTIFACT, 1, forceRefresh).mapCatching { releases ->
             releases.firstOrNull() ?: throw IllegalStateException("No Canary R2 Android release found")
         }
 
-    suspend fun getCachedCanaryReleases(): List<ReleaseInfo> = getCachedReleases(UpdateChannel.CANARY)
+    suspend fun getCachedCanaryReleases(): List<ReleaseInfo> = getCachedReleases(UpdateChannel.ARTIFACT)
 
-    suspend fun getAllCanaryReleases(
-        perPage: Int = 10,
+    suspend fun getCachedArtifactReleases(): List<ReleaseInfo> = getCachedCanaryReleases()
+
+    suspend fun getAllArtifactReleases(
+        perPage: Int = 30,
         forceRefresh: Boolean = false,
-    ): Result<List<ReleaseInfo>> = getAllReleases(UpdateChannel.CANARY, perPage, forceRefresh)
+    ): Result<List<ReleaseInfo>> = getAllReleases(UpdateChannel.ARTIFACT, perPage, forceRefresh)
 
     suspend fun getAllReleases(
         perPage: Int = 30,
@@ -480,7 +482,12 @@ object Updater {
         }
 
     private val UpdateChannel.manifestKey: String
-        get() = name.lowercase()
+        get() =
+            when (this) {
+                UpdateChannel.STABLE -> "stable"
+                // R2's schema predates the upstream channel rename and continues to call this channel "canary".
+                UpdateChannel.ARTIFACT -> "canary"
+            }
 
     private val Sha256Regex = Regex("^[0-9a-f]{64}$")
 

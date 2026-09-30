@@ -74,6 +74,7 @@ include(":windows-media-integration")
 include(":desktop-downloads")
 include(":desktop-native")
 include(":core")
+include(":moriextractor")
 include(":lyrics:http")
 include(":lyrics:kugou")
 include(":lyrics:lrclib")
@@ -87,8 +88,8 @@ include(":lastfm")
 include(":canvas")
 include(":shazamkit")
 include(":spotifycore")
-include(":moriextractor")
 include(":morideobfuscator")
+include(":morideobfuscator:jvm")
 
 // Use a local copy of NewPipe Extractor by uncommenting the lines below.
 // We assume, that ArchiveTune and NewPipe Extractor have the same parent directory.

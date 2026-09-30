@@ -10,7 +10,7 @@ dependencies {
     api(project(":core"))
     implementation(project(":spotifycore"))
     implementation(project(":stream-resolver"))
-    implementation(project(":morideobfuscator"))
+    implementation(project(":morideobfuscator:jvm"))
     implementation(libs.okhttp)
     implementation(libs.ktor.client.core)
     api(project(":lyrics:betterlyrics"))

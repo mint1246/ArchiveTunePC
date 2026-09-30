@@ -32,6 +32,9 @@ data class SongEntity(
     val thumbnailUrl: String? = null,
     val albumId: String? = null,
     val albumName: String? = null,
+    val albumArtist: String? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
     @ColumnInfo(defaultValue = "0")
     val explicit: Boolean = false,
     val year: Int? = null,
@@ -44,6 +47,8 @@ data class SongEntity(
     val dateDownload: LocalDateTime? = LocalDateTime.now(),
     @ColumnInfo(name = "isMusicVideo", defaultValue = "0")
     val isMusicVideo: Boolean = false,
+    @ColumnInfo(name = "isPodcast", defaultValue = "0")
+    val isPodcast: Boolean = false,
     @ColumnInfo(name = "isLocal", defaultValue = "0")
     val isLocal: Boolean = false,
 ) {

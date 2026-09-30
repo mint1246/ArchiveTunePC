@@ -21,9 +21,12 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 internal const val NotificationArtworkSizePx = 1080
@@ -33,77 +36,56 @@ class CoilBitmapLoader(
     context: Context,
     private val scope: CoroutineScope,
 ) : BitmapLoader {
-    private val context = context.applicationContext
-    private val maximumArtworkDimensionPx = this.context.resolveMaximumArtworkDimensionPx()
+    private val applicationContext = context.applicationContext
+    private val maximumArtworkDimensionPx = applicationContext.resolveMaximumArtworkDimensionPx()
 
     override fun supportsMimeType(mimeType: String): Boolean = mimeType.startsWith("image/")
 
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> =
-        scope.future(Dispatchers.IO) {
-            try {
-                if (data.isEmpty()) {
-                    throw IllegalArgumentException("Empty image data")
-                }
-
-                val mediaSessionBitmap =
-                    decodeSampledBitmap(data, maximumArtworkDimensionPx)
-                        ?.scaleToNotificationArtwork(maximumArtworkDimensionPx)
-                        ?.toOwnedMediaSessionBitmap()
-                if (mediaSessionBitmap != null) {
-                    return@future mediaSessionBitmap
-                }
-
-                throw IllegalStateException("Could not decode image data")
-            } catch (e: Exception) {
-                reportException(e)
+        scope.future(Dispatchers.Default) {
+            require(data.isNotEmpty()) { "Empty image data" }
+            val bitmap = decodeSampledBitmap(data, maximumArtworkDimensionPx)
+            if (bitmap == null) {
                 return@future createBitmap(64, 64)
+            }
+            ensureActive()
+            runCatching {
+                bitmap.scaleToNotificationArtwork(maximumArtworkDimensionPx)
+                    .toOwnedMediaSessionBitmap()
+            }.getOrElse { exception ->
+                if (exception is CancellationException) throw exception
+                reportException(exception)
+                createBitmap(64, 64)
             }
         }
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> =
         scope.future(Dispatchers.IO) {
-            val attempts = 3
-            for (attempt in 1..attempts) {
+            val request =
+                ImageRequest
+                    .Builder(applicationContext)
+                    .data(uri)
+                    .allowHardware(false)
+                    .size(maximumArtworkDimensionPx, maximumArtworkDimensionPx)
+                    .build()
+
+            repeat(3) { attempt ->
                 try {
-                    val request =
-                        ImageRequest
-                            .Builder(context)
-                            .data(uri)
-                            .allowHardware(false)
-                            .size(maximumArtworkDimensionPx, maximumArtworkDimensionPx)
-                            .build()
-
-                    val result = context.imageLoader.execute(request)
-
-                    when (result) {
-                        is SuccessResult -> {
-                            try {
-                                val mediaSessionBitmap =
-                                    result.image
-                                        .toBitmap()
-                                        .scaleToNotificationArtwork(maximumArtworkDimensionPx)
-                                        ?.toOwnedMediaSessionBitmap()
-                                if (mediaSessionBitmap == null) {
-                                    return@future createBitmap(64, 64)
-                                }
-
-                                return@future mediaSessionBitmap
-                            } catch (e: Exception) {
-                                reportException(e)
-                            }
+                    when (val result = applicationContext.imageLoader.execute(request)) {
+                        is SuccessResult -> return@future withContext(Dispatchers.Default) {
+                            ensureActive()
+                            result.image.toBitmap()
+                                .scaleToNotificationArtwork(maximumArtworkDimensionPx)
+                                .toOwnedMediaSessionBitmap()
                         }
-
-                        is ErrorResult -> {
-                            result.throwable?.let { reportException(it) }
-                        }
+                        is ErrorResult -> throw (result.throwable ?: IllegalStateException("Could not load artwork"))
                     }
-                } catch (e: Exception) {
-                    reportException(e)
-                }
-
-                if (attempt < attempts) {
-                    delay(250L * attempt)
-                    continue
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    reportException(exception)
+                    if (attempt == 2) return@future createBitmap(64, 64)
+                    delay(250L * (attempt + 1))
                 }
             }
             createBitmap(64, 64)
@@ -135,8 +117,9 @@ private fun decodeSampledBitmap(
     )
 }
 
-private fun Bitmap.scaleToNotificationArtwork(maximumDimensionPx: Int): Bitmap? {
-    if (isRecycled || width <= 0 || height <= 0) return null
+private fun Bitmap.scaleToNotificationArtwork(maximumDimensionPx: Int): Bitmap {
+    check(!isRecycled) { "Artwork bitmap has been recycled" }
+    check(width > 0 && height > 0) { "Invalid artwork dimensions" }
     if (width <= maximumDimensionPx && height <= maximumDimensionPx) return this
 
     val scale =
@@ -149,9 +132,11 @@ private fun Bitmap.scaleToNotificationArtwork(maximumDimensionPx: Int): Bitmap? 
     return Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
 }
 
-private fun Bitmap.toOwnedMediaSessionBitmap(): Bitmap? {
-    if (isRecycled) return null
-    return copy(Bitmap.Config.ARGB_8888, false)?.takeUnless(Bitmap::isRecycled)
+private fun Bitmap.toOwnedMediaSessionBitmap(): Bitmap {
+    check(!isRecycled) { "Artwork bitmap has been recycled" }
+    return checkNotNull(copy(Bitmap.Config.ARGB_8888, false)) {
+        "Could not copy artwork bitmap"
+    }
 }
 
 @Suppress("DiscouragedApi")

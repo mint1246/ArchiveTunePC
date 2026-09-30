@@ -8,6 +8,13 @@
 package moe.rukamori.archivetune.utils
 
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ORIGIN_YOUTUBE
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ORIGIN_YOUTUBE_MOBILE
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.ORIGIN_YOUTUBE_MUSIC
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.REFERER_YOUTUBE
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.REFERER_YOUTUBE_MOBILE
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.REFERER_YOUTUBE_MUSIC
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.REFERER_YOUTUBE_TV
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
@@ -181,7 +188,11 @@ object StreamClientUtils {
                 }
             }
 
-            clientName == "TVHTML5_SIMPLY_EMBEDDED_PLAYER" || clientName == "TVHTML5_SIMPLY" -> {
+            clientName == "TVHTML5_SIMPLY" -> {
+                YouTubeClient.TVHTML5_SIMPLY
+            }
+
+            clientName == "TVHTML5_SIMPLY_EMBEDDED_PLAYER" -> {
                 YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER
             }
 
@@ -240,7 +251,7 @@ object StreamClientUtils {
     private fun resolveOriginReferer(client: YouTubeClient): OriginReferer =
         when {
             isTvClient(client) -> {
-                OriginReferer(YouTubeClient.ORIGIN_YOUTUBE, YouTubeClient.REFERER_YOUTUBE_TV)
+                OriginReferer(ORIGIN_YOUTUBE, REFERER_YOUTUBE_TV)
             }
 
             isMobileWebClient(client) -> {

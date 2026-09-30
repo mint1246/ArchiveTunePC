@@ -54,7 +54,6 @@ import moe.rukamori.archivetune.constants.ExternalDownloaderEnabledKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderPackageKey
 import moe.rukamori.archivetune.constants.HISTORY_DURATION_DEFAULT
 import moe.rukamori.archivetune.constants.HistoryDuration
-import moe.rukamori.archivetune.constants.LowDataModeKey
 import moe.rukamori.archivetune.constants.PauseOnDeviceMuteKey
 import moe.rukamori.archivetune.constants.PermanentShuffleKey
 import moe.rukamori.archivetune.constants.PersistentQueueKey
@@ -81,6 +80,8 @@ import moe.rukamori.archivetune.ui.component.TextFieldDialog
 import moe.rukamori.archivetune.ui.utils.backToMain
 import moe.rukamori.archivetune.utils.rememberEnumPreference
 import moe.rukamori.archivetune.utils.rememberPreference
+import moe.rukamori.archivetune.viewmodels.PlaybackPerformanceSettingsUiState
+import moe.rukamori.archivetune.viewmodels.PlaybackPerformanceSettingsViewModel
 import moe.rukamori.archivetune.viewmodels.SponsorBlockCategoryUiModel
 import moe.rukamori.archivetune.viewmodels.SponsorBlockSettingsScreenState
 import moe.rukamori.archivetune.viewmodels.SponsorBlockSettingsViewModel
@@ -88,6 +89,22 @@ import moe.rukamori.archivetune.viewmodels.SponsorBlockSettingsViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerSettings(navController: NavController) {
+    val playbackPerformanceSettingsViewModel: PlaybackPerformanceSettingsViewModel =
+        hiltViewModel()
+    val playbackPerformanceSettingsState by
+        playbackPerformanceSettingsViewModel.uiState.collectAsStateWithLifecycle()
+    val onLowDataModeChange =
+        remember(playbackPerformanceSettingsViewModel) {
+            playbackPerformanceSettingsViewModel::onLowDataModeChange
+        }
+    val onPreloadNextSongChange =
+        remember(playbackPerformanceSettingsViewModel) {
+            playbackPerformanceSettingsViewModel::onPreloadNextSongChange
+        }
+    val onPlaybackPerformanceRetry =
+        remember(playbackPerformanceSettingsViewModel) {
+            playbackPerformanceSettingsViewModel::retry
+        }
     val sponsorBlockSettingsViewModel: SponsorBlockSettingsViewModel = hiltViewModel()
     val sponsorBlockSettingsState by
         sponsorBlockSettingsViewModel.uiState.collectAsStateWithLifecycle()
@@ -141,11 +158,23 @@ fun PlayerSettings(navController: NavController) {
             PlayerStreamClientKey,
             defaultValue = PlayerStreamClient.WEB_REMIX,
         )
-    val (lowDataMode, onLowDataModeChange) =
-        rememberPreference(
-            LowDataModeKey,
-            defaultValue = false,
-        )
+    val isArchiveTuneExtractorEnabled = false
+    val playerStreamClients =
+        remember {
+            listOf(
+                PlayerStreamClient.WEB_REMIX,
+                PlayerStreamClient.ARCHIVETUNE_EXTRACTOR,
+            )
+        }
+    val selectedPlayerStreamClient =
+        if (playerStreamClient in playerStreamClients) playerStreamClient else PlayerStreamClient.WEB_REMIX
+    val audioQualityEnabled = selectedPlayerStreamClient != PlayerStreamClient.ARCHIVETUNE_EXTRACTOR
+    val isPlayerStreamClientEnabled =
+        remember(isArchiveTuneExtractorEnabled) {
+            { client: PlayerStreamClient ->
+                client != PlayerStreamClient.ARCHIVETUNE_EXTRACTOR || isArchiveTuneExtractorEnabled
+            }
+        }
     val (persistentQueue, onPersistentQueueChange) =
         rememberPreference(
             PersistentQueueKey,
@@ -254,43 +283,17 @@ fun PlayerSettings(navController: NavController) {
             WakelockKey,
             defaultValue = false,
         )
-    val isArchiveTuneExtractorEnabled = false
-    val playerStreamClients =
-        remember {
-            listOf(
-                PlayerStreamClient.WEB_REMIX,
-                PlayerStreamClient.ARCHIVETUNE_EXTRACTOR,
-            )
-        }
-    val selectedPlayerStreamClient =
-        if (playerStreamClient in playerStreamClients) {
-            playerStreamClient
-        } else {
-            PlayerStreamClient.WEB_REMIX
-        }
-    val audioQualityEnabled = selectedPlayerStreamClient != PlayerStreamClient.ARCHIVETUNE_EXTRACTOR
-    val isPlayerStreamClientEnabled =
-        remember(isArchiveTuneExtractorEnabled) {
-            { client: PlayerStreamClient ->
-                client != PlayerStreamClient.ARCHIVETUNE_EXTRACTOR ||
-                    isArchiveTuneExtractorEnabled
-            }
-        }
-
-    var showArtistSeparatorsDialog by remember { mutableStateOf(false) }
-    var showExternalDownloaderPackageDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(playerStreamClient, isArchiveTuneExtractorEnabled) {
         if (
             playerStreamClient !in playerStreamClients ||
-            (
-                playerStreamClient == PlayerStreamClient.ARCHIVETUNE_EXTRACTOR &&
-                    !isArchiveTuneExtractorEnabled
-            )
+            (playerStreamClient == PlayerStreamClient.ARCHIVETUNE_EXTRACTOR && !isArchiveTuneExtractorEnabled)
         ) {
             onPlayerStreamClientChange(PlayerStreamClient.WEB_REMIX)
         }
     }
+    var showArtistSeparatorsDialog by remember { mutableStateOf(false) }
+    var showExternalDownloaderPackageDialog by remember { mutableStateOf(false) }
 
     if (showArtistSeparatorsDialog) {
         ArtistSeparatorsDialog(
@@ -436,15 +439,12 @@ fun PlayerSettings(navController: NavController) {
                     )
                 }
 
-                item {
-                    SwitchPreference(
-                        title = { Text(stringResource(R.string.low_data_mode_title)) },
-                        description = stringResource(R.string.low_data_mode_description),
-                        icon = { Icon(painterResource(R.drawable.android_cell), null) },
-                        checked = lowDataMode,
-                        onCheckedChange = onLowDataModeChange,
-                    )
-                }
+                playbackPerformancePreferences(
+                    state = playbackPerformanceSettingsState,
+                    onLowDataModeChange = onLowDataModeChange,
+                    onPreloadNextSongChange = onPreloadNextSongChange,
+                    onRetry = onPlaybackPerformanceRetry,
+                )
 
                 item {
                     SliderPreference(
@@ -794,3 +794,56 @@ private fun PreferenceGroupScope.sponsorBlockPreferences(
 
 private val EMPTY_SPONSOR_BLOCK_CATEGORY_OPTIONS: ImmutableList<SponsorBlockCategoryUiModel> =
     ImmutableList.of()
+
+private fun PreferenceGroupScope.playbackPerformancePreferences(
+    state: PlaybackPerformanceSettingsUiState,
+    onLowDataModeChange: (Boolean) -> Unit,
+    onPreloadNextSongChange: (Boolean) -> Unit,
+    onRetry: () -> Unit,
+) {
+    val data = (state as? PlaybackPerformanceSettingsUiState.Success)?.data
+
+    val lowDataModeEnabled = data?.lowDataModeEnabled ?: false
+    val preloadNextSongEnabled = data?.preloadNextSongEnabled ?: false
+    val lowDataModeControlEnabled =
+        when (state) {
+            PlaybackPerformanceSettingsUiState.Loading,
+            is PlaybackPerformanceSettingsUiState.Error -> false
+            PlaybackPerformanceSettingsUiState.Empty,
+            is PlaybackPerformanceSettingsUiState.Success -> true
+        }
+    val preloadNextSongControlEnabled =
+        lowDataModeControlEnabled && (data?.preloadNextSongAvailable ?: true)
+
+    item {
+        SwitchPreference(
+            title = { Text(stringResource(R.string.low_data_mode_title)) },
+            description = stringResource(R.string.low_data_mode_description),
+            icon = { Icon(painterResource(R.drawable.android_cell), null) },
+            checked = lowDataModeEnabled,
+            onCheckedChange = onLowDataModeChange,
+            isEnabled = lowDataModeControlEnabled,
+        )
+    }
+
+    item {
+        SwitchPreference(
+            title = { Text(stringResource(R.string.preload_next_song_title)) },
+            description = stringResource(R.string.preload_next_song_warning),
+            icon = { Icon(painterResource(R.drawable.error), null) },
+            checked = preloadNextSongEnabled,
+            onCheckedChange = onPreloadNextSongChange,
+            isEnabled = preloadNextSongControlEnabled,
+        )
+    }
+
+    if (state is PlaybackPerformanceSettingsUiState.Error) {
+        item {
+            PreferenceEntry(
+                title = { Text(stringResource(R.string.retry)) },
+                description = stringResource(R.string.error_unknown),
+                onClick = onRetry,
+            )
+        }
+    }
+}

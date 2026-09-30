@@ -65,16 +65,14 @@ import moe.rukamori.archivetune.R
 fun PlaybackErrorDialog(
     error: PlaybackException,
     showLoginAction: Boolean,
-    showPoTokenLoginAction: Boolean,
     onRetry: () -> Unit,
     onClose: () -> Unit,
     onLogin: () -> Unit,
-    onPoTokenLogin: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
-    val fallbackUnknown = stringResource(R.string.error_unknown)
-    val fallbackNoInternet = stringResource(R.string.error_no_internet)
+    val fallbackUnknown = stringResource(R.string.playback_error_unknown)
+    val fallbackNoInternet = stringResource(R.string.playback_error_no_internet)
     val fallbackTimeout = stringResource(R.string.error_timeout)
     val fallbackNoStream = stringResource(R.string.error_no_stream)
     val fallbackMalformedStream = stringResource(R.string.error_malformed_stream)
@@ -83,8 +81,7 @@ fun PlaybackErrorDialog(
     val copyText = stringResource(R.string.copy)
     val copiedText = stringResource(R.string.copied)
     val loginText = stringResource(R.string.login)
-    val poTokenLoginText = stringResource(R.string.playback_login_po_token)
-    val detailsText = stringResource(R.string.details)
+    val detailsText = stringResource(R.string.playback_error_details)
     val codeLabel = stringResource(R.string.playback_error_code)
     val httpLabel = stringResource(R.string.playback_error_http)
     val messageLabel = stringResource(R.string.playback_error_message)
@@ -210,14 +207,11 @@ fun PlaybackErrorDialog(
                             closeText = closeText,
                             copyText = copyText,
                             loginText = loginText,
-                            poTokenLoginText = poTokenLoginText,
                             showLoginAction = showLoginAction,
-                            showPoTokenLoginAction = showPoTokenLoginAction,
                             onRetry = onRetry,
                             onClose = onClose,
                             onCopy = onCopyClick,
                             onLogin = onLogin,
-                            onPoTokenLogin = onPoTokenLogin,
                         )
                     } else {
                         PlaybackErrorCompactContent(
@@ -229,14 +223,11 @@ fun PlaybackErrorDialog(
                             closeText = closeText,
                             copyText = copyText,
                             loginText = loginText,
-                            poTokenLoginText = poTokenLoginText,
                             showLoginAction = showLoginAction,
-                            showPoTokenLoginAction = showPoTokenLoginAction,
                             onRetry = onRetry,
                             onClose = onClose,
                             onCopy = onCopyClick,
                             onLogin = onLogin,
-                            onPoTokenLogin = onPoTokenLogin,
                         )
                     }
                 }
@@ -255,14 +246,11 @@ private fun PlaybackErrorCompactContent(
     closeText: String,
     copyText: String,
     loginText: String,
-    poTokenLoginText: String,
     showLoginAction: Boolean,
-    showPoTokenLoginAction: Boolean,
     onRetry: () -> Unit,
     onClose: () -> Unit,
     onCopy: () -> Unit,
     onLogin: () -> Unit,
-    onPoTokenLogin: () -> Unit,
 ) {
     Column(
         modifier =
@@ -289,14 +277,11 @@ private fun PlaybackErrorCompactContent(
             closeText = closeText,
             copyText = copyText,
             loginText = loginText,
-            poTokenLoginText = poTokenLoginText,
             showLoginAction = showLoginAction,
-            showPoTokenLoginAction = showPoTokenLoginAction,
             onRetry = onRetry,
             onClose = onClose,
             onCopy = onCopy,
             onLogin = onLogin,
-            onPoTokenLogin = onPoTokenLogin,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -312,14 +297,11 @@ private fun PlaybackErrorExpandedContent(
     closeText: String,
     copyText: String,
     loginText: String,
-    poTokenLoginText: String,
     showLoginAction: Boolean,
-    showPoTokenLoginAction: Boolean,
     onRetry: () -> Unit,
     onClose: () -> Unit,
     onCopy: () -> Unit,
     onLogin: () -> Unit,
-    onPoTokenLogin: () -> Unit,
 ) {
     Row(
         modifier =
@@ -350,14 +332,11 @@ private fun PlaybackErrorExpandedContent(
                 closeText = closeText,
                 copyText = copyText,
                 loginText = loginText,
-                poTokenLoginText = poTokenLoginText,
                 showLoginAction = showLoginAction,
-                showPoTokenLoginAction = showPoTokenLoginAction,
                 onRetry = onRetry,
                 onClose = onClose,
                 onCopy = onCopy,
                 onLogin = onLogin,
-                onPoTokenLogin = onPoTokenLogin,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -478,14 +457,11 @@ private fun PlaybackErrorActions(
     closeText: String,
     copyText: String,
     loginText: String,
-    poTokenLoginText: String,
     showLoginAction: Boolean,
-    showPoTokenLoginAction: Boolean,
     onRetry: () -> Unit,
     onClose: () -> Unit,
     onCopy: () -> Unit,
     onLogin: () -> Unit,
-    onPoTokenLogin: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     FlowRow(
@@ -504,14 +480,6 @@ private fun PlaybackErrorActions(
                 PlaybackErrorActionContent(
                     icon = R.drawable.login,
                     label = loginText,
-                )
-            }
-        }
-        if (showPoTokenLoginAction) {
-            OutlinedButton(onClick = onPoTokenLogin) {
-                PlaybackErrorActionContent(
-                    icon = R.drawable.token,
-                    label = poTokenLoginText,
                 )
             }
         }

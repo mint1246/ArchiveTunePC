@@ -70,7 +70,6 @@ import androidx.navigation.NavController
 import moe.rukamori.archivetune.LocalPlayerAwareWindowInsets
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.AppFontPreference
-import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
 import moe.rukamori.archivetune.constants.BackdropBlurAmountKey
 import moe.rukamori.archivetune.constants.BackdropEnabledKey
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey
@@ -118,6 +117,7 @@ import moe.rukamori.archivetune.constants.SwipeSensitivityKey
 import moe.rukamori.archivetune.constants.SwipeThumbnailKey
 import moe.rukamori.archivetune.constants.SwipeToSongKey
 import moe.rukamori.archivetune.constants.ThumbnailCornerRadiusKey
+import moe.rukamori.archivetune.constants.WallpaperExtractionFailedKey
 import moe.rukamori.archivetune.constants.toLibraryFilterOrder
 import moe.rukamori.archivetune.constants.toLibraryFilterPreference
 import moe.rukamori.archivetune.constants.toPlaylistTagOrder
@@ -156,6 +156,11 @@ fun AppearanceSettings(navController: NavController) {
             DynamicThemeKey,
             defaultValue = true,
         )
+    val (wallpaperExtractionFailed) =
+        rememberPreference(
+            WallpaperExtractionFailedKey,
+            defaultValue = false,
+        )
     val (randomThemeOnStartup, onRandomThemeOnStartupChange) =
         rememberPreference(
             RandomThemeOnStartupKey,
@@ -179,11 +184,6 @@ fun AppearanceSettings(navController: NavController) {
     val (hidePlayerThumbnail, onHidePlayerThumbnailChange) =
         rememberPreference(
             HidePlayerThumbnailKey,
-            defaultValue = false,
-        )
-    val (archiveTuneCanvasEnabled, onArchiveTuneCanvasEnabledChange) =
-        rememberPreference(
-            ArchiveTuneCanvasKey,
             defaultValue = false,
         )
     val (beatSyncedVisualsEnabled, onBeatSyncedVisualsEnabledChange) =
@@ -380,6 +380,7 @@ fun AppearanceSettings(navController: NavController) {
             PlayerDesignStyle.V7,
             PlayerDesignStyle.V8,
             PlayerDesignStyle.V9,
+            PlayerDesignStyle.V10,
             -> false
 
             else -> true
@@ -551,7 +552,23 @@ fun AppearanceSettings(navController: NavController) {
                     )
                 }
 
-                item(visible = !dynamicTheme || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                item(visible = dynamicTheme && Build.VERSION.SDK_INT < Build.VERSION_CODES.S && wallpaperExtractionFailed) {
+                    PreferenceEntry(
+                        title = { Text(stringResource(R.string.wallpaper_permission)) },
+                        description = stringResource(R.string.wallpaper_permission_desc),
+                        icon = { Icon(painterResource(R.drawable.storage), null) },
+                        onClick = {
+                            val intent =
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts("package", context.packageName, null),
+                                )
+                            context.startActivity(intent)
+                        },
+                    )
+                }
+
+                item(visible = !dynamicTheme) {
                     SwitchPreference(
                         title = { Text(stringResource(R.string.random_theme_on_startup)) },
                         description = stringResource(R.string.random_theme_on_startup_desc),
@@ -742,6 +759,7 @@ fun AppearanceSettings(navController: NavController) {
                                 PlayerDesignStyle.V7 -> stringResource(R.string.player_design_v7)
                                 PlayerDesignStyle.V8 -> stringResource(R.string.player_design_v8)
                                 PlayerDesignStyle.V9 -> stringResource(R.string.player_design_v9)
+                                PlayerDesignStyle.V10 -> stringResource(R.string.player_design_v10)
                             }
                         },
                     )
@@ -852,16 +870,6 @@ fun AppearanceSettings(navController: NavController) {
                         icon = { Icon(painterResource(R.drawable.hide_image), null) },
                         checked = hidePlayerThumbnail,
                         onCheckedChange = onHidePlayerThumbnailChange,
-                    )
-                }
-
-                item {
-                    SwitchPreference(
-                        title = { Text(stringResource(R.string.archivetune_canvas)) },
-                        description = stringResource(R.string.archivetune_canvas_desc),
-                        icon = { Icon(painterResource(R.drawable.motion_photos_on), null) },
-                        checked = archiveTuneCanvasEnabled,
-                        onCheckedChange = onArchiveTuneCanvasEnabledChange,
                     )
                 }
 
@@ -1087,6 +1095,7 @@ fun AppearanceSettings(navController: NavController) {
                                 LibraryFilter.ARTISTS -> stringResource(R.string.artists)
                                 LibraryFilter.ALBUMS -> stringResource(R.string.albums)
                                 LibraryFilter.PLAYLISTS -> stringResource(R.string.playlists)
+                                LibraryFilter.PODCASTS -> stringResource(R.string.podcast)
                                 LibraryFilter.SPOTIFY -> stringResource(R.string.spotify_playlists)
                                 LibraryFilter.LIBRARY -> stringResource(R.string.filter_library)
                             }

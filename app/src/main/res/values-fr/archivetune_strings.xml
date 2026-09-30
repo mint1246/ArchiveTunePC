@@ -180,10 +180,6 @@
     <string name="theme_presets_title">Préréglages</string>
     <string name="copy">Copier</string>
     <string name="player_design_v5">Petit</string>
-    <string name="player_stream_client">Client de lecture</string>
-    <string name="player_stream_client_desc">Détermine la source de lecture utilisée pour récupérer les flux</string>
-    <string name="player_stream_client_web_remix">Remix Web</string>
-    <string name="player_stream_client_web_remix_desc">Prise en charge étendue des formats au détriment de la vitesse. Le décryptage des signatures JavaScript entraîne un délai de démarrage d\'environ 5 à 10 secondes.</string>
     <string name="crop_thumbnail_to_square">Recadrer les miniatures au format 1:1</string>
     <string name="crop_thumbnail_to_square_desc">Afficher les miniatures YouTube au format carré au lieu du format 16:9</string>
     <string name="backup_in_progress">Sauvegarde en cours</string>
@@ -330,7 +326,7 @@
     <string name="music_recognition_history_no_results_body">Essayez un autre morceau, un autre artiste, un autre album ou un autre code.</string>
     <string name="about_lead_developer">Développeur principal</string>
     <string name="aod_customize_text_alignment">Alignement du texte</string>
-    <string name="settings_lyrics_subtitle">Fournisseurs de paroles, préchargement et traduction</string>
+    <string name="settings_lyrics_subtitle">Fournisseurs de paroles et traduction</string>
     <string name="aod_customize_sample_artist">Koiverse Ensemble</string>
     <string name="ai_integration">Intégration de l\'IA</string>
     <plurals name="news_article_count">
@@ -412,7 +408,6 @@
     <string name="aod_background_soft_radial">Radial souple</string>
     <string name="aod_shape_cookie_9">Cookie 9</string>
     <string name="settings_storage_subtitle">Cache, téléchargements et stockage hors ligne</string>
-    <string name="settings_po_token_subtitle">Vérification de la lecture et données relatives aux visiteurs</string>
     <string name="settings_stats_subtitle">Vos titres, artistes préférés et votre historique d\'écoute</string>
     <string name="total_releases">Nombre total de publications</string>
     <string name="aod_customize_shape_rotation">Rotation de la forme</string>
@@ -574,8 +569,6 @@
     <string name="theme_creator_title">Créateur de thèmes</string>
     <string name="block_artist">Bloquer l\'artiste</string>
     <string name="unblock_artist">Débloquer l\'artiste</string>
-    <string name="player_stream_client_archivetune_extractor">Extracteur ArchiveTune</string>
-    <string name="player_stream_client_archivetune_extractor_desc">Utilise l\'extracteur ArchiveTune pour les flux de lecture. Privilégie l\'audio haute qualité automatique.</string>
     <string name="music_recognition_settings">Paramètres de reconnaissance musicale</string>
     <string name="music_recognition_background_title">Reconnaissance en arrière-plan</string>
     <string name="music_recognition_background_description">Lorsqu\'elle est activée, la vignette « Paramètres rapides » détecte la lecture audio sur cet appareil sans ouvrir ArchiveTune.</string>
@@ -602,7 +595,6 @@
     <string name="music_recognition_notification_signature_failed_text">L\'enregistrement audio ne contenait pas suffisamment de musique pour permettre une identification.</string>
     <string name="music_recognition_notification_recognition_failed_text">Le service de reconnaissance n\'a pas pu identifier cet enregistrement audio. Veuillez réessayer dans quelques instants.</string>
     <string name="show_lyrics_player_controls">Afficher les commandes du lecteur</string>
-    <string name="player_stream_client_archivetune_extractor_login_required">Pour pouvoir utiliser cette fonctionnalité, vous devez vous connecter à l\'aide de votre compte Google et de PoToken dans les paramètres.</string>
     <string name="stats_top_songs">Meilleurs Titres</string>
     <string name="stats_show_all_songs">Afficher les %1$d titres</string>
     <string name="stats_show_top_songs">Afficher les 5 meilleurs</string>
@@ -611,31 +603,6 @@
     <string name="stats_time_range">Période</string>
     <string name="stats_listening_patterns">Habitudes d\'écoute</string>
     <string name="stats_artist_breakdown">Répartition par artiste</string>
-    <string name="mori_cipher_settings_title">Décryptage YouTube</string>
-    <string name="mori_cipher_settings_description">Gérer les mises à jour automatiques de décryptage du lecteur</string>
-    <string name="mori_cipher_loading_configuration">Préparation de la configuration actuelle du lecteur…%1$d%%</string>
-    <string name="mori_cipher_next_refresh">Prochain rafraîchissement automatique</string>
-    <string name="mori_cipher_runtime_section">État du déchiffrement</string>
-    <string name="mori_cipher_update_section">Mises à jour</string>
-    <string name="mori_cipher_status">État du moteur</string>
-    <string name="mori_cipher_status_ready">Prêt</string>
-    <string name="mori_cipher_status_refreshing">Rafraîchissant</string>
-    <string name="mori_cipher_status_degraded">Utilisation de la configuration mise en cache</string>
-    <string name="mori_cipher_status_uninitialized">Non initialisé</string>
-    <string name="mori_cipher_player_id">Configuration du lecteur</string>
-    <string name="mori_cipher_last_updated">Dernière mise à jour</string>
-    <string name="mori_cipher_refresh">Actualiser la configuration</string>
-    <string name="mori_cipher_refresh_remaining">%1$d actualisations manuelles restantes</string>
-    <string name="mori_cipher_rate_limit_countdown">À nouveau disponible dans %1$s</string>
-    <string name="mori_cipher_automatic_updates">Mises à jour automatiques</string>
-    <string name="mori_cipher_automatic_updates_description">ArchiveTune actualise la configuration actuelle du lecteur YouTube toutes les six heures et après chaque échec de décryptage.</string>
-    <string name="mori_cipher_refresh_success">Mise à jour de la configuration du lecteur</string>
-    <string name="mori_cipher_refresh_failed">La configuration du lecteur n\'a pas pu être mise à jour</string>
-    <string name="mori_cipher_rate_limited">Limite d\'actualisation manuelle atteinte</string>
-    <string name="mori_cipher_empty_title">Aucune configuration de lecteur</string>
-    <string name="mori_cipher_empty_description">Connectez-vous à Internet pour charger la configuration actuelle du lecteur YouTube.</string>
-    <string name="mori_cipher_error_title">Décryptage indisponible</string>
-    <string name="mori_cipher_load_failed">La configuration actuelle du lecteur n\'a pas pu être chargée. Les solutions de secours existantes pour la lecture restent disponibles.</string>
     <string name="lyrics_background_style">Style de mise en page des paroles</string>
     <string name="lyrics_background_default">Par défaut</string>
     <string name="latest_release">Dernière version</string>
@@ -657,7 +624,6 @@
     <string name="aod_customize_screensaver_info_title">Écran de veille système (AOD en charge)</string>
     <string name="aod_customize_screensaver_info_desc">Pour activer automatiquement AOD pendant la recharge ou lorsque l\'appareil est connecté à sa station d\'accueil, accédez aux Paramètres Android &gt; Affichage &gt; Écran de veille, puis sélectionnez ArchiveTune.</string>
     <string name="aod_mode">Mode AOD</string>
-    <string name="aod_mode_exit">Quitter AOD</string>
     <string name="aod_customize_minimal_locked_view">Vue minimale verrouillée</string>
     <string name="aod_customize_touch_lock_desc">Empêche les contacts accidentels sur l\'écran AOD</string>
     <string name="aod_customize_show_clock">Afficher l\'horloge numérique</string>
@@ -731,4 +697,7 @@
     <string name="arrange_playlist_tags_desc">Choisissez l\'ordre d\'affichage des filtres par balise dans votre bibliothèque</string>
     <string name="arrange_library_chips">Trier les jetons de la bibliothèque</string>
     <string name="arrange_library_chips_desc">Choisissez l\'ordre d\'affichage des onglets dans votre bibliothèque</string>
+    <string name="aod_customize_mode_enabled">Activer le mode AOD</string>
+    <string name="aod_customize_mode_enabled_desc">Autoriser ArchiveTune à afficher l\'écran du lecteur en mode permanent</string>
+    <string name="ai_provider_openrouter">OpenRouter</string>
 </resources>

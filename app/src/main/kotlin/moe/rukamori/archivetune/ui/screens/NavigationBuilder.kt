@@ -44,6 +44,8 @@ import moe.rukamori.archivetune.ui.screens.playlist.LocalPlaylistScreen
 import moe.rukamori.archivetune.ui.screens.playlist.OnlinePlaylistScreen
 import moe.rukamori.archivetune.ui.screens.playlist.SpotifyPlaylistScreen
 import moe.rukamori.archivetune.ui.screens.playlist.TopPlaylistScreen
+import moe.rukamori.archivetune.ui.screens.podcast.PodcastRoute
+import moe.rukamori.archivetune.ui.screens.podcast.PodcastScreen
 import moe.rukamori.archivetune.ui.screens.search.OnlineSearchResult
 import moe.rukamori.archivetune.ui.screens.search.OnlineSearchResultArgument
 import moe.rukamori.archivetune.ui.screens.search.OnlineSearchResultRoute
@@ -53,10 +55,11 @@ import moe.rukamori.archivetune.ui.screens.settings.AboutScreen
 import moe.rukamori.archivetune.ui.screens.settings.AccountSettings
 import moe.rukamori.archivetune.ui.screens.settings.AiIntegrationSettings
 import moe.rukamori.archivetune.ui.screens.settings.AodCustomizedScreen
+import moe.rukamori.archivetune.ui.screens.settings.AndroidAutoSettings
+import moe.rukamori.archivetune.ui.screens.settings.CanvasSettings
 import moe.rukamori.archivetune.ui.screens.settings.AppearanceSettings
 import moe.rukamori.archivetune.ui.screens.settings.BackupAndRestore
 import moe.rukamori.archivetune.ui.screens.settings.ChangelogScreen
-import moe.rukamori.archivetune.ui.screens.settings.ChiperSettings
 import moe.rukamori.archivetune.ui.screens.settings.ContentSettings
 import moe.rukamori.archivetune.ui.screens.settings.CustomizeBackground
 import moe.rukamori.archivetune.ui.screens.settings.DebugSettings
@@ -83,12 +86,14 @@ import moe.rukamori.archivetune.ui.screens.social.androidSocialNavigation
 import moe.rukamori.archivetune.social.AndroidSocialManager
 import moe.rukamori.archivetune.playback.PlayerConnection
 import moe.rukamori.archivetune.db.MusicDatabase
+import moe.rukamori.archivetune.viewmodels.HomeViewModel
 import moe.rukamori.archivetune.viewmodels.OnlineSearchSort
 
 @OptIn(ExperimentalMaterial3Api::class)
 fun NavGraphBuilder.navigationBuilder(
     navController: NavHostController,
     scrollBehavior: TopAppBarScrollBehavior,
+    homeViewModel: HomeViewModel,
     latestVersionName: () -> String,
     social: AndroidSocialManager,
     playerConnection: () -> PlayerConnection?,
@@ -98,6 +103,7 @@ fun NavGraphBuilder.navigationBuilder(
     homeScrollConnection: NestedScrollConnection? = null,
     searchScrollConnection: NestedScrollConnection? = null,
     onlineSearchSort: OnlineSearchSort = OnlineSearchSort.DEFAULT,
+    libraryScrollBehavior: TopAppBarScrollBehavior,
 ) {
     androidSocialNavigation(
         navController = navController,
@@ -106,12 +112,16 @@ fun NavGraphBuilder.navigationBuilder(
         database = database,
     )
     composable(Screens.Home.route) {
-        HomeScreen(navController, headerScrollConnection = homeScrollConnection)
+        HomeScreen(
+            navController = navController,
+            viewModel = homeViewModel,
+            headerScrollConnection = homeScrollConnection,
+        )
     }
     composable(
         Screens.Library.route,
     ) {
-        LibraryScreen(navController)
+        LibraryScreen(navController = navController, scrollBehavior = libraryScrollBehavior)
     }
     composable(Screens.Search.route) {
         SearchScreen(
@@ -205,7 +215,6 @@ fun NavGraphBuilder.navigationBuilder(
         BrowseScreen(
             navController,
             scrollBehavior,
-            it.arguments?.getString("browseId"),
         )
     }
     composable(
@@ -264,6 +273,17 @@ fun NavGraphBuilder.navigationBuilder(
             ),
     ) {
         AlbumScreen(navController, scrollBehavior)
+    }
+    composable(
+        route = PodcastRoute,
+        arguments =
+            listOf(
+                navArgument("browseId") {
+                    type = NavType.StringType
+                },
+            ),
+    ) {
+        PodcastScreen(navController)
     }
     composable(
         route = "artist/{artistId}",
@@ -407,7 +427,11 @@ fun NavGraphBuilder.navigationBuilder(
         SettingsScreen(navController, latestVersionName())
     }
     composable("settings/account") {
-        AccountSettings(navController, latestVersionName())
+        AccountSettings(
+            navController = navController,
+            latestVersionName = latestVersionName(),
+            viewModel = homeViewModel,
+        )
     }
     composable("settings/hidden_playlists") {
         HiddenPlaylistsScreen(navController)
@@ -442,8 +466,11 @@ fun NavGraphBuilder.navigationBuilder(
     composable("settings/player") {
         PlayerSettings(navController)
     }
-    composable("settings/player/chiper") {
-        ChiperSettings(navController)
+    composable("settings/canvas") {
+        CanvasSettings(navController)
+    }
+    composable("settings/android_auto") {
+        AndroidAutoSettings(navController)
     }
     composable("settings/storage") {
         StorageSettings(navController)

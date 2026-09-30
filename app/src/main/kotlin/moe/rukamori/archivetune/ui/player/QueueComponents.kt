@@ -120,6 +120,13 @@ fun CurrentSongHeader(
 ) {
     val view = LocalView.current
     val (enableHapticFeedback) = rememberPreference(EnableHapticFeedbackKey, true)
+    val infiniteQueueAvailable = mediaMetadata?.isPodcast != true
+    val queueItemCountText =
+        if (mediaMetadata?.isPodcast == true) {
+            pluralStringResource(R.plurals.n_episode, songCount, songCount)
+        } else {
+            pluralStringResource(R.plurals.n_song, songCount, songCount)
+        }
 
     Column(
         modifier =
@@ -275,8 +282,7 @@ fun CurrentSongHeader(
 
             Text(
                 text =
-                    pluralStringResource(R.plurals.n_song, songCount, songCount) +
-                        "  •  " + makeTimeString(queueDuration * 1000L),
+                    queueItemCountText + "  •  " + makeTimeString(queueDuration * 1000L),
                 style = MaterialTheme.typography.labelMedium,
                 color = onBackgroundColor.copy(alpha = 0.55f),
                 modifier = Modifier.padding(end = 14.dp),
@@ -360,12 +366,12 @@ fun CurrentSongHeader(
             }
 
             ToggleButton(
-                checked = infiniteQueueEnabled,
+                checked = infiniteQueueAvailable && infiniteQueueEnabled,
                 onCheckedChange = { onInfiniteQueueClick() },
                 modifier = Modifier.weight(1f).size(48.dp),
                 shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
                 colors = infiniteCheckedColors,
-                enabled = !infiniteQueueLoading,
+                enabled = infiniteQueueAvailable && !infiniteQueueLoading,
             ) {
                 AnimatedContent(
                     targetState = infiniteQueueLoading,
@@ -387,24 +393,26 @@ fun CurrentSongHeader(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        if (infiniteQueueAvailable) {
+            Spacer(modifier = Modifier.height(14.dp))
 
-        Text(
-            text = stringResource(R.string.queue_continue_playing),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = onBackgroundColor,
-        )
+            Text(
+                text = stringResource(R.string.queue_continue_playing),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = onBackgroundColor,
+            )
 
-        Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
-        Text(
-            text = stringResource(R.string.queue_autoplaying_similar),
-            style = MaterialTheme.typography.bodySmall,
-            color = onBackgroundColor.copy(alpha = 0.5f),
-        )
+            Text(
+                text = stringResource(R.string.queue_autoplaying_similar),
+                style = MaterialTheme.typography.bodySmall,
+                color = onBackgroundColor.copy(alpha = 0.5f),
+            )
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         HorizontalDivider(
             color = onBackgroundColor.copy(alpha = 0.08f),
@@ -1219,6 +1227,90 @@ fun QueueCollapsedContentV4(
 
 @Composable
 fun QueueCollapsedContentV7(
+    textBackgroundColor: Color,
+    onExpandQueue: () -> Unit,
+    onShowLyrics: () -> Unit,
+    onDeviceClick: () -> Unit,
+    onMusicTogetherClick: () -> Unit,
+    device: ActiveOutputDevice,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(
+                    WindowInsets.systemBars.only(
+                        WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
+                    ),
+                ).padding(horizontal = 24.dp, vertical = 2.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            IconButton(onClick = onShowLyrics, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    painter = painterResource(R.drawable.lyrics),
+                    contentDescription = stringResource(R.string.lyrics),
+                    tint = textBackgroundColor,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = textBackgroundColor.copy(alpha = 0.12f),
+                modifier = Modifier.height(46.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDeviceClick, modifier = Modifier.size(46.dp)) {
+                        Icon(
+                            imageVector = device.type.imageVector,
+                            contentDescription = device.name,
+                            tint = textBackgroundColor,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Box(
+                        modifier =
+                            Modifier
+                                .height(24.dp)
+                                .width(1.dp)
+                                .background(textBackgroundColor.copy(alpha = 0.22f)),
+                    )
+                    IconButton(onClick = onMusicTogetherClick, modifier = Modifier.size(46.dp)) {
+                        Icon(
+                            painter = painterResource(R.drawable.person),
+                            contentDescription = stringResource(R.string.music_together),
+                            tint = textBackgroundColor,
+                            modifier = Modifier.size(23.dp),
+                        )
+                    }
+                }
+            }
+            IconButton(onClick = onExpandQueue, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    painter = painterResource(R.drawable.queue_music),
+                    contentDescription = stringResource(R.string.queue),
+                    tint = textBackgroundColor,
+                    modifier = Modifier.size(25.dp),
+                )
+            }
+        }
+        Text(
+            text = device.name,
+            style = MaterialTheme.typography.labelSmall,
+            color = textBackgroundColor.copy(alpha = 0.72f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun QueueCollapsedContentV8(
     showCodecOnPlayer: Boolean,
     currentFormat: FormatEntity?,
     textBackgroundColor: Color,

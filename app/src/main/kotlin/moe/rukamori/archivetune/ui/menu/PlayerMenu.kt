@@ -90,6 +90,7 @@ import moe.rukamori.archivetune.LocalDownloadUtil
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.R
 import moe.rukamori.archivetune.constants.ArchiveTuneCanvasKey
+import moe.rukamori.archivetune.constants.AodModeEnabledKey
 import moe.rukamori.archivetune.constants.ArtistSeparatorsKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderEnabledKey
 import moe.rukamori.archivetune.constants.ExternalDownloaderPackageKey
@@ -129,6 +130,8 @@ fun PlayerMenu(
     navController: NavController,
     playerBottomSheetState: BottomSheetState,
     isQueueTrigger: Boolean? = false,
+    sleepTimerEnabled: Boolean = false,
+    onSleepTimerClick: (() -> Unit)? = null,
     onPlayNextFromQueue: (() -> Unit)? = null,
     onRemoveFromQueue: (() -> Unit)? = null,
     onShowDetailsDialog: () -> Unit,
@@ -160,10 +163,12 @@ fun PlayerMenu(
     // Artist separators for splitting artist names
     val (artistSeparators) = rememberPreference(ArtistSeparatorsKey, defaultValue = ",;/&")
     val (externalDownloaderEnabled) = rememberPreference(ExternalDownloaderEnabledKey, defaultValue = false)
+    val (aodFeatureEnabled, onAodFeatureEnabledChange) = rememberPreference(AodModeEnabledKey, defaultValue = false)
     val (externalDownloaderPackage) = rememberPreference(ExternalDownloaderPackageKey, defaultValue = "")
     val (archiveTuneCanvasEnabled) = rememberPreference(ArchiveTuneCanvasKey, defaultValue = false)
     val playerDesignStyle by rememberEnumPreference(PlayerDesignStyleKey, defaultValue = PlayerDesignStyle.V4)
     val lowDataModeActive = rememberLowDataModeActive()
+    val canvasNetworkAllowed by playerConnection.canvasNetworkAllowed.collectAsStateWithLifecycle()
     val isCanvasArtworkRefetching by playerConnection.isCanvasArtworkRefetching.collectAsStateWithLifecycle()
     val (speedDialSongIds, onSpeedDialSongIdsChange) = rememberPreference(SpeedDialSongIdsKey, "")
     val speedDialPins = remember(speedDialSongIds) { parseSpeedDialPins(speedDialSongIds) }
@@ -436,7 +441,43 @@ fun PlayerMenu(
                     actions =
                         buildList {
                             castPlayerMenuAction?.let(::add)
-                            if (!isLocalMedia) {
+                            onSleepTimerClick?.let { onClick ->
+                                add(
+                                    NewAction(
+                                        icon = {
+                                            Icon(
+                                                painter = painterResource(R.drawable.bedtime),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(28.dp),
+                                                tint =
+                                                    if (sleepTimerEnabled) {
+                                                        MaterialTheme.colorScheme.primary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                                    },
+                                            )
+                                        },
+                                        text = stringResource(R.string.sleep_timer),
+                                        onClick = {
+                                            onDismiss()
+                                            onClick()
+                                        },
+                                        backgroundColor =
+                                            if (sleepTimerEnabled) {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            } else {
+                                                Color.Unspecified
+                                            },
+                                        contentColor =
+                                            if (sleepTimerEnabled) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                    ),
+                                )
+                            }
+                            if (!isLocalMedia && !mediaMetadata.isPodcast) {
                                 add(
                                     NewAction(
                                         icon = {
@@ -460,6 +501,7 @@ fun PlayerMenu(
                                 isQueueTrigger != true &&
                                 archiveTuneCanvasEnabled &&
                                 !lowDataModeActive &&
+                                canvasNetworkAllowed &&
                                 playerDesignStyle != PlayerDesignStyle.V5
                             ) {
                                 add(
@@ -609,13 +651,15 @@ fun PlayerMenu(
                                         text = stringResource(R.string.music_together),
                                         onClick = {
                                             onDismiss()
-                                            playerBottomSheetState.snapTo(playerBottomSheetState.collapsedBound)
+                                            playerBottomSheetState.collapseSoft()
                                             navController.navigate("settings/music_together")
                                         },
                                     ),
                                 )
                             }
                             if (isQueueTrigger != true) {
+                                val aodBgColor = if (aodFeatureEnabled) MaterialTheme.colorScheme.primary else Color.Unspecified
+                                val aodContentColor = if (aodFeatureEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                 add(
                                     NewAction(
                                         icon = {
@@ -623,14 +667,19 @@ fun PlayerMenu(
                                                 painter = painterResource(R.drawable.bedtime),
                                                 contentDescription = null,
                                                 modifier = Modifier.size(28.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                tint = aodContentColor,
                                             )
                                         },
                                         text = stringResource(R.string.aod_mode),
                                         onClick = {
+                                            if (!aodFeatureEnabled) {
+                                                onAodFeatureEnabledChange(true)
+                                            }
                                             playerConnection.aodModeEnabled.value = true
                                             onDismiss()
                                         },
+                                        backgroundColor = aodBgColor,
+                                        contentColor = aodContentColor,
                                     ),
                                 )
                             }
@@ -659,7 +708,7 @@ fun PlayerMenu(
                                     Modifier.clickable {
                                         if (splitArtists.size == 1 && splitArtists[0].originalArtist != null) {
                                             onDismiss()
-                                            playerBottomSheetState.snapTo(playerBottomSheetState.collapsedBound)
+                                            playerBottomSheetState.collapseSoft()
                                             navController.navigate("artist/${splitArtists[0].originalArtist!!.id}")
                                         } else {
                                             showSelectArtistDialog = true
@@ -688,7 +737,7 @@ fun PlayerMenu(
                                 modifier =
                                     Modifier.clickable {
                                         onDismiss()
-                                        playerBottomSheetState.snapTo(playerBottomSheetState.collapsedBound)
+                                        playerBottomSheetState.collapseSoft()
                                         navController.navigate("album/${mediaMetadata.album.id}")
                                     },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),

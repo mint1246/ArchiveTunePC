@@ -1,3 +1,10 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+
 package moe.rukamori.archivetune.mediainfo
 
 import javax.inject.Inject
@@ -32,7 +39,7 @@ class MediaInfoRepository @Inject constructor(private val database: MusicDatabas
         }.flowOn(Dispatchers.IO)
 
     suspend fun metadata(videoId: String): MediaInfoMetadata = withContext(Dispatchers.IO) {
-        val info = YouTube.getMediaInfo(videoId).getOrThrow()
+        val info = YouTube.getMediaMetadata(videoId)
         MediaInfoMetadata(
             title = info.title,
             author = info.author,
@@ -43,11 +50,11 @@ class MediaInfoRepository @Inject constructor(private val database: MusicDatabas
     }
 
     suspend fun statistics(videoId: String): MediaInfoStatistics = withContext(Dispatchers.IO) {
-        val statistics = YouTube.getMediaInfo(videoId).getOrThrow()
+        val statistics = YouTube.getMediaStatistics(videoId)
         MediaInfoStatistics(
             views = statistics.viewCount,
-            likes = statistics.like,
-            dislikes = statistics.dislike,
+            likes = statistics.likes,
+            dislikes = statistics.dislikes,
         )
     }
 }
