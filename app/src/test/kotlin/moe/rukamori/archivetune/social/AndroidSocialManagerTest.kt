@@ -76,10 +76,10 @@ class AndroidSocialManagerTest {
         val invite =
             "https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef&sid=session"
         assertTrue(manager.sendPartyInvite(friend.id, invite).isSuccess)
-        assertEquals(invite, api.lastPartyInviteUrl)
+        assertEquals("https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef", api.lastPartyInviteUrl)
 
         assertTrue(manager.sendPartyInvite(friend.id, "archivetune://together?code=legacy").isFailure)
-        assertEquals(invite, api.lastPartyInviteUrl)
+        assertEquals("https://small-cloud-name.trycloudflare.com/party?token=0123456789abcdef", api.lastPartyInviteUrl)
         manager.close()
     }
 

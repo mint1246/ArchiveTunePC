@@ -466,6 +466,8 @@ dependencies {
 
     implementation(libs.timber)
     testImplementation(libs.junit)
+    // Local JVM tests exercise JSON parsing rather than Android stub methods.
+    testImplementation(libs.json)
     testImplementation(libs.turbine)
     implementation(libs.translator)
     implementation("androidx.lifecycle:lifecycle-process:2.11.0")
