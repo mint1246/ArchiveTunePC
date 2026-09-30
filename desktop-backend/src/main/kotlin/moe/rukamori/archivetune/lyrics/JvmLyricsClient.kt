@@ -214,15 +214,30 @@ object BuiltInLyricsProviders {
     const val YOULY_PLUS = "youlyplus"
     const val LRCLIB = "lrclib"
     const val KUGOU = "kugou"
-    const val PAXSENIX = "paxsenix"
     const val SIMPMUSIC = "simpmusic"
     const val UNISON = "unison"
     const val SPICY_LYRICS = "spicylyrics"
     const val PAXSENIX_APPLE_MUSIC = "paxsenix-apple-music"
-    const val PAXSENIX_NETEASE = "paxsenix-netease"
     const val PAXSENIX_SPOTIFY = "paxsenix-spotify"
     const val PAXSENIX_MUSIXMATCH = "paxsenix-musixmatch"
-    const val PAXSENIX_YOUTUBE = "paxsenix-youtube"
+
+    /** These endpoints now require the user-configured Paxsenix API key. */
+    val paxsenixProviderIds: Set<String> = setOf(
+        PAXSENIX_APPLE_MUSIC,
+        PAXSENIX_SPOTIFY,
+        PAXSENIX_MUSIXMATCH,
+    )
+
+    /** Drops retired provider IDs from saved selections without rejecting the whole preference. */
+    fun normalizeProviderIds(providerIds: List<String>): List<String> {
+        val available = defaults.mapTo(hashSetOf()) { it.id }
+        return providerIds.asSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() }
+            .filter(available::contains)
+            .distinct()
+            .toList()
+    }
 
     /** Matches the Android fallback preference while remaining entirely plain JVM. */
     val defaults: List<NamedLyricsProvider> by lazy(LazyThreadSafetyMode.PUBLICATION) {
@@ -241,9 +256,6 @@ object BuiltInLyricsProviders {
             },
             named(KUGOU, "KuGou") { request ->
                 KuGou.getLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
-            },
-            named(PAXSENIX, "Paxsenix") { request ->
-                PaxsenixLyrics.getLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
             },
             named(SIMPMUSIC, "SimpMusic") { request ->
                 val videoId = request.videoId ?: throw IllegalArgumentException("SimpMusic requires a YouTube video ID")
@@ -266,17 +278,11 @@ object BuiltInLyricsProviders {
             named(PAXSENIX_APPLE_MUSIC, "Paxsenix: Apple Music") { request ->
                 PaxsenixLyrics.getAppleMusicLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
             },
-            named(PAXSENIX_NETEASE, "Paxsenix: NetEase") { request ->
-                PaxsenixLyrics.getNeteaseLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
-            },
             named(PAXSENIX_SPOTIFY, "Paxsenix: Spotify") { request ->
                 PaxsenixLyrics.getSpotifyLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
             },
             named(PAXSENIX_MUSIXMATCH, "Paxsenix: Musixmatch") { request ->
                 PaxsenixLyrics.getMusixmatchLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
-            },
-            named(PAXSENIX_YOUTUBE, "Paxsenix: YouTube") { request ->
-                PaxsenixLyrics.getYouTubeLyrics(request.title, request.artist, request.durationSeconds).getOrThrow()
             },
         )
     }

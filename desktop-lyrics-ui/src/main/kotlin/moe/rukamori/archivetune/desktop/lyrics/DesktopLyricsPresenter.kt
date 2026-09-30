@@ -56,19 +56,41 @@ data class DesktopLyricsSearchState(
     val message: String? = null,
 )
 
+sealed interface DesktopLyricsTranslationState {
+    data object Idle : DesktopLyricsTranslationState
+    data class Loading(val itemId: String, val targetLanguage: String) : DesktopLyricsTranslationState
+    data class Ready(val itemId: String, val targetLanguage: String, val lines: List<String>) : DesktopLyricsTranslationState
+    data class Error(val itemId: String, val message: String) : DesktopLyricsTranslationState
+}
+
+/** Implemented by the desktop composition root, which supplies current settings and secure credentials. */
+fun interface DesktopLyricsTranslator {
+    suspend fun translate(
+        itemId: String,
+        document: LyricsDocument,
+        sourceLines: List<String>,
+        targetLanguage: String,
+    ): List<String>
+}
+
 /**
  * Bridges the real playback StateFlow to JvmLyricsClient. collectLatest cancels a pending provider
  * request immediately when the track changes. Cache entries are documents from real providers only.
  */
 class DesktopLyricsPresenter(
     private val playback: PlaybackController,
-    private val lyricsClient: JvmLyricsClient,
+    lyricsClient: JvmLyricsClient,
     private val scope: CoroutineScope,
     cacheSize: Int = 24,
     initiallyActive: Boolean = true,
     private val chordClient: SongsterrChordClient = SongsterrChordClient(),
     private val localChordAnalyzer: (suspend (PlaybackItem, ChordRequest) -> Result<ChordTrack>)? = null,
+    private val lyricsTranslator: DesktopLyricsTranslator? = null,
+    private val translationTargetLanguage: () -> String = { "en" },
 ) : AutoCloseable {
+    val canTranslate: Boolean get() = lyricsTranslator != null
+    @Volatile private var lyricsClient: JvmLyricsClient = lyricsClient
+
     private val cache = object : LinkedHashMap<String, LyricsDocument>(cacheSize, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LyricsDocument>?) = size > cacheSize
     }
@@ -76,6 +98,8 @@ class DesktopLyricsPresenter(
     val state: StateFlow<DesktopLyricsState> = _state.asStateFlow()
     private val _searchState = MutableStateFlow(DesktopLyricsSearchState())
     val searchState: StateFlow<DesktopLyricsSearchState> = _searchState.asStateFlow()
+    private val _translationState = MutableStateFlow<DesktopLyricsTranslationState>(DesktopLyricsTranslationState.Idle)
+    val translationState: StateFlow<DesktopLyricsTranslationState> = _translationState.asStateFlow()
     private val chordCache = object : LinkedHashMap<String, ChordTrack>(cacheSize, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ChordTrack>?) = size > cacheSize
     }
@@ -88,8 +112,11 @@ class DesktopLyricsPresenter(
     val positionMsFlow: StateFlow<Long> = _positionMs.asStateFlow()
     private var searchJob: Job? = null
     private var chordJob: Job? = null
+    private var translationJob: Job? = null
+    private var selectedDocument: LyricsDocument? = null
     private val loadGeneration = AtomicLong()
     private val chordGeneration = AtomicLong()
+    private val translationGeneration = AtomicLong()
     private val active = MutableStateFlow(initiallyActive)
     private val itemJob: Job = scope.launch {
         active.combine(
@@ -100,6 +127,7 @@ class DesktopLyricsPresenter(
                     loadGeneration.incrementAndGet()
                     searchJob?.cancel()
                     chordJob?.cancel()
+                    cancelTranslation()
                     return@collectLatest
                 }
                 if (item == null) {
@@ -107,8 +135,22 @@ class DesktopLyricsPresenter(
                     chordGeneration.incrementAndGet()
                     searchJob?.cancel()
                     chordJob?.cancel()
+                    cancelTranslation()
+                    selectedDocument = null
                     _state.value = DesktopLyricsState.Idle
                     _searchState.value = DesktopLyricsSearchState()
+                    _chordState.value = DesktopChordState.Idle
+                    return@collectLatest
+                }
+                if (item.metadata.isPodcast) {
+                    loadGeneration.incrementAndGet()
+                    chordGeneration.incrementAndGet()
+                    searchJob?.cancel()
+                    chordJob?.cancel()
+                    cancelTranslation()
+                    selectedDocument = null
+                    _state.value = DesktopLyricsState.Idle
+                    _searchState.value = DesktopLyricsSearchState(item.metadata.id)
                     _chordState.value = DesktopChordState.Idle
                     return@collectLatest
                 }
@@ -119,6 +161,8 @@ class DesktopLyricsPresenter(
                     _chordState.value = DesktopChordState.Idle
                 }
                 searchJob?.cancel()
+                cancelTranslation()
+                selectedDocument = null
                 _searchState.value = DesktopLyricsSearchState(item.metadata.id, item.toLyricsRequestOrNull())
                 load(item, playback.state.value.positionMs, loadGeneration.incrementAndGet())
             }
@@ -176,6 +220,7 @@ class DesktopLyricsPresenter(
 
     private fun showDocument(itemId: String, document: LyricsDocument, positionMs: Long): Boolean {
         val timeline = LyricsTimelineParser.parse(document)
+        selectedDocument = document
         _state.value = if (timeline.lines.isEmpty()) {
             DesktopLyricsState.Error(itemId, "${document.providerName} returned lyrics that could not be rendered")
         } else {
@@ -197,6 +242,17 @@ class DesktopLyricsPresenter(
         scope.launch { load(item, playback.state.value.positionMs, generation) }
     }
 
+    /** Replaces the provider set after settings or secure credentials change, then reloads lyrics. */
+    fun updateLyricsClient(client: JvmLyricsClient) {
+        if (client === lyricsClient) return
+        lyricsClient = client
+        synchronized(cache) { cache.clear() }
+        searchJob?.cancel()
+        searchJob = null
+        cancelTranslation()
+        retry()
+    }
+
     /**
      * Chords are intentionally lazy: opening lyrics does not touch Songsterr. The first chord-button
      * press resolves the current track, then the result is cached for the presenter lifetime.
@@ -205,6 +261,7 @@ class DesktopLyricsPresenter(
         if (!active.value) return
         val snapshot = playback.state.value
         val item = snapshot.currentItem ?: return
+        if (item.metadata.isPodcast) return
         val itemId = item.metadata.id
         synchronized(chordCache) { chordCache[itemId] }?.let { cached ->
             _chordState.value = DesktopChordState.Ready(itemId, cached)
@@ -254,6 +311,7 @@ class DesktopLyricsPresenter(
         val analyzer = localChordAnalyzer ?: return
         val snapshot = playback.state.value
         val item = snapshot.currentItem ?: return
+        if (item.metadata.isPodcast) return
         val itemId = item.metadata.id
         val request = item.toChordRequestOrNull(snapshot.durationMs)
         if (request == null) {
@@ -328,9 +386,58 @@ class DesktopLyricsPresenter(
         val item = playback.state.value.currentItem ?: return false
         val document = result.document ?: return false
         loadGeneration.incrementAndGet()
+        cancelTranslation()
         val rendered = showDocument(item.metadata.id, document, playback.state.value.positionMs)
         if (rendered) synchronized(cache) { cache[item.metadata.id] = document }
         return rendered
+    }
+
+    /** Starts a user-requested translation for the lyrics currently displayed. */
+    fun translateCurrentLyrics() {
+        if (!active.value) return
+        val translator = lyricsTranslator ?: return
+        val current = _state.value as? DesktopLyricsState.Ready ?: return
+        val document = selectedDocument ?: return
+        val language = translationTargetLanguage().trim().ifBlank { "en" }
+        if ((_translationState.value as? DesktopLyricsTranslationState.Ready)?.let {
+                it.itemId == current.itemId && it.targetLanguage.equals(language, ignoreCase = true)
+            } == true
+        ) return
+
+        translationJob?.cancel()
+        val generation = translationGeneration.incrementAndGet()
+        _translationState.value = DesktopLyricsTranslationState.Loading(current.itemId, language)
+        translationJob = scope.launch {
+            try {
+                val translated = translator.translate(
+                    itemId = current.itemId,
+                    document = document,
+                    sourceLines = current.timeline.lines.map(TimedLyricLine::text),
+                    targetLanguage = language,
+                )
+                if (generation != translationGeneration.get() || playback.state.value.currentItem?.metadata?.id != current.itemId) return@launch
+                if (translated.size != current.timeline.lines.size || translated.any(String::isBlank)) {
+                    error("Translation service returned an incomplete translation")
+                }
+                _translationState.value = DesktopLyricsTranslationState.Ready(current.itemId, language, translated)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                if (generation == translationGeneration.get() && playback.state.value.currentItem?.metadata?.id == current.itemId) {
+                    _translationState.value = DesktopLyricsTranslationState.Error(
+                        current.itemId,
+                        failure.message?.takeIf(String::isNotBlank) ?: "Lyrics could not be translated",
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancelTranslation() {
+        translationGeneration.incrementAndGet()
+        translationJob?.cancel()
+        translationJob = null
+        _translationState.value = DesktopLyricsTranslationState.Idle
     }
 
     /** Seeks the current track to a timed lyric line. Unsynchronised lines are intentionally inert. */
@@ -359,6 +466,7 @@ class DesktopLyricsPresenter(
     override fun close() {
         searchJob?.cancel()
         chordJob?.cancel()
+        cancelTranslation()
         itemJob.cancel()
         positionJob.cancel()
     }

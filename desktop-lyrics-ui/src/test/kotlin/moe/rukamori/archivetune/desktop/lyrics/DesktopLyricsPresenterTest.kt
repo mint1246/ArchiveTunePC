@@ -236,6 +236,124 @@ class DesktopLyricsPresenterTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `replacing lyrics providers reloads the current track`() = runTest {
+        val playback = FakePlaybackController()
+        val initialClient = JvmLyricsClient(listOf(NamedLyricsProvider("old", "Old", JvmLyricsProvider { "Old lyrics" })))
+        val presenter = DesktopLyricsPresenter(playback, initialClient, this)
+        playback.state.value = PlaybackSnapshot(
+            queue = listOf(PlaybackItem(PlaybackMetadata("id", "Song", artists = listOf(PlaybackArtist(name = "Artist"))))),
+            currentIndex = 0,
+        )
+        advanceUntilIdle()
+        assertEquals("Old lyrics", (presenter.state.value as DesktopLyricsState.Ready).timeline.lines.single().text)
+
+        presenter.updateLyricsClient(JvmLyricsClient(listOf(NamedLyricsProvider("new", "New", JvmLyricsProvider { "New lyrics" }))))
+        advanceUntilIdle()
+
+        assertEquals("New", (presenter.state.value as DesktopLyricsState.Ready).providerName)
+        assertEquals("New lyrics", (presenter.state.value as DesktopLyricsState.Ready).timeline.lines.single().text)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `podcast playback does not start lyric or chord lookups`() = runTest {
+        var lyricCalls = 0
+        var chordCalls = 0
+        val playback = FakePlaybackController()
+        val presenter = DesktopLyricsPresenter(
+            playback = playback,
+            lyricsClient = JvmLyricsClient(listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider { lyricCalls++; "Lyrics" }))),
+            scope = this,
+            localChordAnalyzer = { _, _ -> chordCalls++; Result.failure(IllegalStateException("not expected")) },
+        )
+        val podcast = PlaybackItem(PlaybackMetadata(
+            id = "podcast",
+            title = "Episode",
+            artists = listOf(PlaybackArtist(name = "Show")),
+            isPodcast = true,
+        ))
+        playback.state.value = PlaybackSnapshot(queue = listOf(podcast), currentIndex = 0)
+        advanceUntilIdle()
+        presenter.loadChords()
+        presenter.loadChordsFromLocalModel()
+        advanceUntilIdle()
+
+        assertEquals(0, lyricCalls)
+        assertEquals(0, chordCalls)
+        assertTrue(presenter.state.value is DesktopLyricsState.Idle)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `translation is user-triggered and preserves source timing`() = runTest {
+        var translationCalls = 0
+        var requestedLanguage: String? = null
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider { "[00:00]Hello\n[00:02]World" })))
+        val presenter = DesktopLyricsPresenter(
+            playback = playback,
+            lyricsClient = client,
+            scope = this,
+            lyricsTranslator = DesktopLyricsTranslator { _, _, sourceLines, targetLanguage ->
+                translationCalls++
+                requestedLanguage = targetLanguage
+                assertEquals(listOf("Hello", "World"), sourceLines)
+                listOf("Bonjour", "Monde")
+            },
+            translationTargetLanguage = { "fr" },
+        )
+        val item = PlaybackItem(PlaybackMetadata(id = "translated-track", title = "Song", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(item), currentIndex = 0)
+        advanceUntilIdle()
+
+        assertEquals(0, translationCalls)
+        presenter.translateCurrentLyrics()
+        advanceUntilIdle()
+
+        val original = presenter.state.value as DesktopLyricsState.Ready
+        val translated = presenter.translationState.value as DesktopLyricsTranslationState.Ready
+        assertEquals("fr", requestedLanguage)
+        assertEquals(listOf("Bonjour", "Monde"), translated.lines)
+        assertEquals(listOf(0L, 2_000L), original.timeline.lines.map { it.startTimeMs })
+        assertEquals(1, translationCalls)
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `changing tracks cancels an in-flight translation and drops stale output`() = runTest {
+        var cancelled = false
+        val playback = FakePlaybackController()
+        val client = JvmLyricsClient(listOf(NamedLyricsProvider("test", "Test", JvmLyricsProvider { "[00:00]Hello" })))
+        val presenter = DesktopLyricsPresenter(
+            playback = playback,
+            lyricsClient = client,
+            scope = this,
+            lyricsTranslator = DesktopLyricsTranslator { _, _, _, _ ->
+                try {
+                    delay(Long.MAX_VALUE)
+                    listOf("stale")
+                } finally {
+                    cancelled = true
+                }
+            },
+        )
+        val first = PlaybackItem(PlaybackMetadata(id = "first", title = "First", artists = listOf(PlaybackArtist(name = "Artist"))))
+        val second = PlaybackItem(PlaybackMetadata(id = "second", title = "Second", artists = listOf(PlaybackArtist(name = "Artist"))))
+        playback.state.value = PlaybackSnapshot(queue = listOf(first, second), currentIndex = 0)
+        advanceUntilIdle()
+
+        presenter.translateCurrentLyrics()
+        runCurrent()
+        playback.state.value = PlaybackSnapshot(queue = listOf(first, second), currentIndex = 1)
+        runCurrent()
+
+        assertTrue(cancelled)
+        assertTrue(presenter.translationState.value is DesktopLyricsTranslationState.Idle)
+        assertTrue((presenter.state.value as DesktopLyricsState.Ready).itemId == "second")
+        presenter.close()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun `local model action bypasses Songsterr and publishes neural chords`() = runTest {
         var modelCalls = 0
         val playback = FakePlaybackController()

@@ -90,9 +90,11 @@ fun DesktopLyricsPane(
     val state by presenter.state.collectAsState()
     val searchState by presenter.searchState.collectAsState()
     val chordState by presenter.chordState.collectAsState()
+    val translationState by presenter.translationState.collectAsState()
     val playback by presenter.playbackState.collectAsState()
     var showSearch by remember(searchState.itemId) { mutableStateOf(false) }
     var showChords by remember(searchState.itemId) { mutableStateOf(false) }
+    var showTranslation by remember(searchState.itemId) { mutableStateOf(false) }
     var openChordsWhenReady by remember(searchState.itemId) { mutableStateOf(false) }
     var title by remember(searchState.itemId) { mutableStateOf(searchState.request?.title.orEmpty()) }
     var artist by remember(searchState.itemId) { mutableStateOf(searchState.request?.artist.orEmpty()) }
@@ -112,6 +114,9 @@ fun DesktopLyricsPane(
             is DesktopChordState.Empty, is DesktopChordState.Error -> openChordsWhenReady = false
             else -> Unit
         }
+    }
+    LaunchedEffect(translationState) {
+        if (translationState is DesktopLyricsTranslationState.Ready) showTranslation = true
     }
 
     Box(modifier.fillMaxSize()) {
@@ -140,7 +145,29 @@ fun DesktopLyricsPane(
                     }
                 },
                 onUseLocalChordModel = presenter::loadChordsFromLocalModel,
+                translationState = translationState,
+                showTranslation = showTranslation,
+                showTranslationToggle = presenter.canTranslate && ready != null,
+                onToggleTranslation = {
+                    if (showTranslation && translationState is DesktopLyricsTranslationState.Ready) {
+                        showTranslation = false
+                    } else {
+                        showTranslation = true
+                        presenter.translateCurrentLyrics()
+                    }
+                },
+                onCancelTranslation = presenter::cancelTranslation,
             )
+            (translationState as? DesktopLyricsTranslationState.Error)
+                ?.takeIf { it.itemId == searchState.itemId }
+                ?.let { error ->
+                    Text(
+                        error.message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp),
+                    )
+                }
             if (showSearch && searchState.request != null) {
                 SearchPanel(
                     title = title,
@@ -201,9 +228,23 @@ fun DesktopLyricsPane(
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (val current = state) {
                             is DesktopLyricsState.Ready -> {
+                                val translated = translationState as? DesktopLyricsTranslationState.Ready
+                                val translatedTimeline = remember(current.itemId, current.timeline, translated, showTranslation) {
+                                    if (!showTranslation || translated?.itemId != current.itemId ||
+                                        translated.lines.size != current.timeline.lines.size
+                                    ) {
+                                        current.timeline
+                                    } else {
+                                        current.timeline.copy(
+                                            lines = current.timeline.lines.mapIndexed { index, line ->
+                                                line.copy(translation = translated.lines[index])
+                                            },
+                                        )
+                                    }
+                                }
                                 if (current.timeline.synchronized) {
-                                    val built = remember(current.itemId, current.timeline) {
-                                        CharTimelineBuilder.build(current.timeline)
+                                    val built = remember(current.itemId, translatedTimeline) {
+                                        CharTimelineBuilder.build(translatedTimeline)
                                     }
                                     SpicyLyricsView(
                                         lyrics = built,
@@ -218,7 +259,7 @@ fun DesktopLyricsPane(
                                     )
                                 } else {
                                     SimpleLyricsView(
-                                        timeline = current.timeline,
+                                        timeline = translatedTimeline,
                                         modifier = Modifier.fillMaxSize(),
                                         onSeek = {
                                             if (seekEnabled) {
@@ -261,6 +302,11 @@ private fun HeaderRow(
     showChordToggle: Boolean,
     onToggleChords: () -> Unit,
     onUseLocalChordModel: () -> Unit,
+    translationState: DesktopLyricsTranslationState,
+    showTranslation: Boolean,
+    showTranslationToggle: Boolean,
+    onToggleTranslation: () -> Unit,
+    onCancelTranslation: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 14.dp),
@@ -283,6 +329,33 @@ private fun HeaderRow(
         if (showSearchToggle) {
             TextButton(onClick = onToggleSearch) {
                 Text(if (showSearch) "Hide search" else "Find another version")
+            }
+        }
+        if (showTranslationToggle) {
+            when (val translation = translationState) {
+                is DesktopLyricsTranslationState.Loading -> {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                        Text("Translating to ${translation.targetLanguage}…", style = MaterialTheme.typography.labelMedium)
+                        TextButton(onClick = onCancelTranslation) { Text("Cancel") }
+                    }
+                }
+                else -> {
+                    TextButton(onClick = onToggleTranslation) {
+                        Text(
+                            when {
+                                showTranslation -> "Hide translation"
+                                translation is DesktopLyricsTranslationState.Ready -> "Show translation"
+                                translation is DesktopLyricsTranslationState.Error -> "Retry translation"
+                                else -> "Translate lyrics"
+                            },
+                        )
+                    }
+                }
             }
         }
         if (showChordToggle) when (chordState) {
@@ -360,21 +433,32 @@ private fun SimpleLyricsView(timeline: LyricsTimeline, modifier: Modifier, onSee
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             itemsIndexed(timeline.lines, key = { i, _ -> i }) { i, line ->
-                Text(
-                    text = line.text,
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 26.sp,
-                    ),
-                    color = Color.White.copy(alpha = 0.78f),
-                    modifier = Modifier
+                Column(
+                    Modifier
                         .fillMaxWidth()
                         .clip(MaterialTheme.shapes.small)
                         .clickable(enabled = line.startTimeMs != null) {
                             line.startTimeMs?.let(onSeek)
                         }
                         .padding(horizontal = 8.dp, vertical = 6.dp),
-                )
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = line.text,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 26.sp,
+                        ),
+                        color = Color.White.copy(alpha = 0.78f),
+                    )
+                    line.translation?.let { translation ->
+                        Text(
+                            text = translation,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White.copy(alpha = 0.58f),
+                        )
+                    }
+                }
             }
         }
     }

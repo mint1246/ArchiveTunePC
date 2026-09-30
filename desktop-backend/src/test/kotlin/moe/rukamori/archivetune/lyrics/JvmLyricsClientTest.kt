@@ -111,6 +111,29 @@ class JvmLyricsClientTest {
         assertEquals("found", results.first().document?.providerId)
     }
 
+    @Test
+    fun retiredPaxsenixProviderIdsAreExcludedAndSavedSelectionsAreSanitized() {
+        val providerIds = BuiltInLyricsProviders.defaults.map { it.id }
+
+        assertTrue("paxsenix-netease" !in providerIds)
+        assertTrue("paxsenix-youtube" !in providerIds)
+        assertTrue("paxsenix" !in providerIds)
+        assertEquals(
+            listOf("lrclib", BuiltInLyricsProviders.PAXSENIX_SPOTIFY),
+            BuiltInLyricsProviders.normalizeProviderIds(
+                listOf("lrclib", "paxsenix", "paxsenix-netease", "paxsenix-youtube", BuiltInLyricsProviders.PAXSENIX_SPOTIFY),
+            ),
+        )
+        assertEquals(
+            setOf(
+                BuiltInLyricsProviders.PAXSENIX_APPLE_MUSIC,
+                BuiltInLyricsProviders.PAXSENIX_SPOTIFY,
+                BuiltInLyricsProviders.PAXSENIX_MUSIXMATCH,
+            ),
+            BuiltInLyricsProviders.paxsenixProviderIds,
+        )
+    }
+
     private fun provider(
         id: String,
         block: suspend (LyricsRequest) -> String,
