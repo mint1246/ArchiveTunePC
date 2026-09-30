@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ArchiveTune upstream sync · v15 series</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10141b;
+      --surface: #171e28;
+      --surface-2: #1e2835;
+      --ink: #eef3fb;
+      --muted: #a9b6c8;
+      --line: #2d3948;
+      --cyan: #67d7d2;
+      --blue: #89b9ff;
+      --green: #72d6a3;
+      --amber: #ffca77;
+      --red: #ff8d96;
+      --shadow: 0 18px 50px #05080d66;
+      font: 15px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(80rem 40rem at 92% -12%, #194a5470, transparent 60%),
+        radial-gradient(60rem 35rem at -10% 12%, #3b2c6850, transparent 55%),
+        var(--bg);
+    }
+    a { color: var(--cyan); text-underline-offset: 3px; }
+    a:hover { color: white; }
+    .wrap { width: min(1180px, calc(100% - 36px)); margin: 0 auto; }
+    .hero { padding: 58px 0 34px; }
+    .eyebrow { color: var(--cyan); font-size: .78rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { max-width: 850px; margin: 10px 0 12px; font-size: clamp(2.25rem, 6vw, 4.35rem); line-height: 1.04; letter-spacing: -.045em; }
+    .lede { max-width: 830px; color: var(--muted); font-size: 1.12rem; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+    .pill, .tag { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: #171e28d9; color: var(--muted); font-size: .8rem; }
+    .pill strong { color: var(--ink); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 12px currentColor; }
+    .layout { display: grid; grid-template-columns: 235px minmax(0, 1fr); gap: 28px; align-items: start; padding-bottom: 70px; }
+    nav { position: sticky; top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: #151c26e8; box-shadow: var(--shadow); }
+    nav strong { display: block; margin-bottom: 10px; color: var(--muted); font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; }
+    nav a { display: block; padding: 7px 0; color: var(--ink); font-size: .9rem; text-decoration: none; }
+    nav a:hover { color: var(--cyan); }
+    main { min-width: 0; }
+    section { margin: 0 0 22px; padding: 26px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(145deg, #1a222d, #151b24); box-shadow: var(--shadow); scroll-margin-top: 20px; }
+    h2 { margin: 0 0 15px; font-size: 1.42rem; letter-spacing: -.02em; }
+    h3 { margin: 20px 0 8px; font-size: 1rem; }
+    p { margin: 8px 0 12px; }
+    .muted { color: var(--muted); }
+    .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .status-card { padding: 16px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+    .status-card .state { display: block; margin-bottom: 7px; font-size: .75rem; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+    .state.pending { color: var(--amber); }
+    .state.partial { color: var(--blue); }
+    .state.reported { color: var(--green); }
+    .state.known { color: var(--cyan); }
+    .table-wrap { overflow-x: auto; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 650px; }
+    th, td { padding: 12px 13px; vertical-align: top; text-align: left; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    td:first-child { width: 145px; font-weight: 750; }
+    tr:last-child td { border-bottom: 0; }
+    .tag { padding: 2px 8px; font-size: .72rem; white-space: nowrap; }
+    .tag.good { color: var(--green); border-color: #39785c; background: #173528; }
+    .tag.pending { color: var(--amber); border-color: #806233; background: #392d18; }
+    .tag.platform { color: var(--blue); border-color: #405f8d; background: #202f46; }
+    .callout { padding: 14px 16px; border-left: 3px solid var(--cyan); border-radius: 0 12px 12px 0; background: #102a30; color: #d5f1ef; }
+    .callout.warning { border-color: var(--amber); background: #312719; color: #ffe6b8; }
+    .mono { font-family: Consolas, "Cascadia Code", monospace; font-size: .88em; overflow-wrap: anywhere; }
+    .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .check { padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+    .check b { display: block; margin-bottom: 3px; }
+    .toolbar { display: flex; justify-content: flex-end; gap: 10px; margin: 0 0 14px; }
+    button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); font: inherit; cursor: pointer; }
+    button:hover { border-color: var(--cyan); }
+    footer { padding: 8px 0 36px; color: var(--muted); font-size: .86rem; }
+    @media (max-width: 850px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; display: flex; flex-wrap: wrap; gap: 5px 18px; }
+      nav strong { flex-basis: 100%; }
+      nav a { padding: 3px 0; }
+      .status-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .wrap { width: min(100% - 22px, 1180px); }
+      .hero { padding-top: 36px; }
+      section { padding: 19px; border-radius: 16px; }
+      .checks { grid-template-columns: 1fr; }
+    }
+    @media print {
+      :root { color-scheme: light; --bg: white; --surface: white; --surface-2: #f4f6f8; --ink: #17212d; --muted: #4f5b68; --line: #c8d0d8; --shadow: none; --cyan: #176b73; --blue: #315f99; --green: #176b45; --amber: #8b5a00; }
+      body { background: white; }
+      .wrap { width: 100%; }
+      .hero { padding-top: 0; }
+      .layout { display: block; }
+      nav, .toolbar { display: none; }
+      section, .status-card, .check { break-inside: avoid; box-shadow: none; background: white; }
+      a { color: inherit; text-decoration: none; }
+      footer { padding-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="eyebrow">ArchiveTune · upstream integration</div>
+      <h1>v15 synced across Android and Desktop</h1>
+      <p class="lede">The manual sync from upstream <span class="mono">v15.1.0</span> onto the local v15.00 base is complete and integrated on <span class="mono">main</span>. Android uses <span class="mono">15.1.0</span> (version code 151); Desktop uses <span class="mono">15.10</span> (Windows package 15.10.0). Android tests and FOSS/GMS Automotive Kotlin compiles pass. Desktop tests, production Native MSI startup, Canvas playback, and the final main-checkout integration tests pass.</p>
+      <div class="hero-meta">
+        <span class="pill"><span class="dot" style="background:var(--green)"></span><strong>Sync complete · builds verified</strong></span>
+        <span class="pill">Local base <strong class="mono">127a8857</strong></span>
+        <span class="pill">Upstream <strong class="mono">2f48b815 · v15.1.0</strong></span>
+        <span class="pill">Android <strong>15.1.0</strong></span>
+        <span class="pill">Desktop <strong>15.10</strong></span>
+        <span class="pill">Snapshot <strong>30 Sep 2026</strong></span>
+      </div>
+    </header>
+
+    <div class="toolbar"><button type="button" onclick="window.print()" aria-label="Print or save this report as PDF">Print / Save PDF</button></div>
+
+    <div class="layout">
+      <nav aria-label="Report sections">
+        <strong>On this page</strong>
+        <a href="#status">Current status</a>
+        <a href="#android">Android</a>
+        <a href="#desktop">Desktop</a>
+        <a href="#boundaries">Platform boundaries</a>
+        <a href="#invariants">Preserved behavior</a>
+        <a href="#toolchain">Build and CI choices</a>
+        <a href="#validation">Validation</a>
+        <a href="#source">Source and commits</a>
+        <a href="#next">Validation limits</a>
+      </nav>
+
+      <main>
+        <section id="status">
+          <h2>Current status</h2>
+          <p>The sync and platform feature work are complete and integrated on main. Android reports 239 passing tests, a GMS Mobile Arm64 debug APK, and successful FOSS Mobile plus GMS Automotive Kotlin compiles. Desktop reports 375 passing tests and a successful focused CanvasSurface compile. Desktop Last.fm auth/scrobbling is complete. The production-size Native MSI built successfully; isolated normal startup ran cleanly for 30 seconds, public Home and continuation loading succeeded, and the NativeCanvas red-frame/player lifecycle check passed. The final main-checkout compile and 307 integration tests also passed with the original unfinished edits restored. The original checkout's 10 unrelated dirty files were restored uncommitted with their line endings preserved; recovery autostash <span class="mono">c8adeaed654c393ff99b5cdd493c4ae4977a09ca</span> and backups under <span class="mono">.validation/preexisting</span> remain available. No upstream release was published and nothing was pushed.</p>
+          <div class="status-grid">
+            <div class="status-card"><span class="state reported">Android · compile and tests passed</span><strong>Manual feature merges and custom Home/auth resolutions are landed.</strong><br><span class="muted">239 tests pass; GMS Mobile Arm64 APK and FOSS Mobile/GMS Automotive Kotlin compiles pass. Device and vehicle runs remain unavailable.</span></div>
+            <div class="status-card"><span class="state reported">Desktop · build verified</span><strong>375 tests, focused compilation, and production Native MSI verification pass.</strong><br><span class="muted">Last.fm auth and audible-time scrobbling are complete. The main checkout with restored unfinished edits also compiled and passed 307 tests.</span></div>
+            <div class="status-card"><span class="state reported">Commits · recorded</span><strong>Feature work has individual commits.</strong><br><span class="muted">Submodule pointers match the committed submodule revisions; the HTML report is committed separately.</span></div>
+          </div>
+          <p class="callout" style="margin-top:16px"><strong>Version labels are resolved:</strong> the inspected upstream ref is <span class="mono">2f48b8159ecca45ae39394e2eb0d0b946e6b06f9</span>, tagged <span class="mono">v15.1.0</span>. Android's upstream build metadata is <span class="mono">15.1.0</span>; Desktop's user-visible/build metadata intentionally remains <span class="mono">15.10</span>. These are platform-specific labels for the requested v15.00 → v15.10 sync, not an unresolved release choice.</p>
+        </section>
+
+        <section id="android">
+          <h2>Android work</h2>
+          <p>Upstream Android modules and screens have been merged into the existing product flow, while the local AI provider and R2 updater contracts were retained.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Area</th><th>Integrated work</th><th>Evidence / state</th></tr></thead>
+            <tbody>
+              <tr><td>Backup</td><td>Google Drive backup and restore for GMS builds, a FOSS-facing section, scheduled local backup settings, and restore concurrency protection alongside the existing archive backup flow.</td><td><span class="tag good">FOSS/GMS compile passed</span> Runtime and cloud-account workflows not exercised.</td></tr>
+              <tr><td>Canvas</td><td>New settings and repositories for source selection, network policy, cache controls, and artwork playback support.</td><td><span class="tag platform">Android</span> Automated tests pass; device playback not exercised.</td></tr>
+              <tr><td>Android Auto</td><td>Automotive flavor, app settings, permission handling, and Android Auto preference model.</td><td><span class="tag good">GMS Automotive compile passed</span> Vehicle validation unavailable; no connected device.</td></tr>
+              <tr><td>Podcasts</td><td>Podcast models, database/library state, browse and search navigation, saved show/episode handling, and queue events are integrated with the app's playback flow.</td><td><span class="tag platform">Android</span> 239 tests pass; real device/account playback not exercised.</td></tr>
+              <tr><td>Library metadata</td><td>Local metadata parsing and reconciliation now preserve stable aliases and artist mappings while updating the database schema for podcast/local-media identity.</td><td><span class="tag platform">Android</span> Automated tests pass; real library rescans/migrations not exercised on device.</td></tr>
+              <tr><td>Home and playlists</td><td>Community playlist previews and podcast Home routes are merged with local recommendation feedback and personalized/friends shelves; local playlist suggestions retain cached pages, duplicate exclusions, add order, and page navigation.</td><td><span class="tag good">Manual conflict resolution</span> Fork-local Home and like-sync behavior is retained; 239 tests pass, live account behavior untested.</td></tr>
+              <tr><td>Last.fm</td><td>Android account authentication and scrobbling settings remain integrated with Android's settings flow; Desktop has a separate DPAPI-backed auth service and audible-playback-gated scrobbling.</td><td><span class="tag good">Both platforms integrated</span> Real account workflows remain untested.</td></tr>
+              <tr><td>AI settings</td><td>State-driven settings editor with provider/model selection, custom endpoint/model/prompt, API testing, OpenRouter, and readable error details.</td><td><span class="tag good">Local compatibility kept</span> Automated tests pass; external API credentials/workflows not exercised.</td></tr>
+              <tr><td>Playback settings</td><td>Upstream low-data and preload controls are joined with the local audio output, stream-client, extractor, and Mori Cipher settings.</td><td><span class="tag good">Both sides retained</span> Automated tests pass; full real-device playback smoke test not performed.</td></tr>
+              <tr><td>Updates</td><td>Periodic update-check scheduler, persistent update settings, channel controls, and notification preferences are integrated with the existing R2 manifest/hash update path.</td><td><span class="tag good">R2 compatibility preserved</span> APK built; install and live update workflow not exercised.</td></tr>
+              <tr><td>Listening stats</td><td>Reset now clears database totals and the authoritative Android statistics store.</td><td><span class="tag good">Reset path merged</span> Automated tests pass; device reset workflow not exercised.</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="desktop">
+          <h2>Desktop parity work</h2>
+          <p>The desktop app remains a native Kotlin/JVM + Compose Desktop product. The changes extend its existing repositories, settings, playback, and presentation layers instead of introducing a web wrapper. Desktop feature tests, focused compilation, and production Native packaging/startup verification pass; live account workflows remain untested.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Feature cluster</th><th>Integrated Desktop behavior</th><th>Validation scope</th></tr></thead>
+            <tbody>
+              <tr><td>SponsorBlock</td><td>Coordinator/repository and settings for categories and API URL; automatic seeks are owner-only, with bounded caching and cancellation.</td><td><span class="tag good">Integrated</span> Desktop tests pass; external service workflow untested.</td></tr>
+              <tr><td>Lyrics translation</td><td>Google and OpenAI-compatible providers, target-language/model configuration, translated overlay that preserves synchronized timing, chords, and artwork-driven glow styling; credentials use DPAPI and results use a hashed bounded cache with cancellation.</td><td><span class="tag good">Integrated</span> Desktop lyrics tests pass; external provider workflow untested.</td></tr>
+              <tr><td>Podcasts</td><td>Cached browse/search and episode filtering, persistent account-scoped saved library, exact clicked episode identity in queues, and correct handling of failed remote mutations.</td><td><span class="tag good">Integrated</span> Desktop tests pass; real account/playback flow untested.</td></tr>
+              <tr><td>Canvas video</td><td>ALL/Spotify/Tidal/Apple lookup and bounded local MP4 cache, rendered in a separate muted VLC video pane. A real bundled-VLC red-frame JVM playback test passes after restoring the official 3.0.21 swscale plugin and regenerating the plugin cache; decoded dimensions are capped at 256 pixels and VLC uses bundled memory support.</td><td><span class="tag good">JVM + Native Canvas smoke passed</span> Packaged red 64×64 frame and paint/pause/stop/release checks passed.</td></tr>
+              <tr><td>Local metadata</td><td>Year, album artist, disc, and track metadata support richer sorting, queue entries, and SMTC fields; CSV export can reconcile local tags with remote playlist songs.</td><td><span class="tag good">Integrated</span> Desktop test set passes; local-file behavior not exercised on a user library.</td></tr>
+              <tr><td>Community Home</td><td>Featured playlist cards preserve the server playlist identity; cached Home shelves retain local recommendation feedback and account-scoped browsing state.</td><td><span class="tag good">Integrated</span> Desktop test set passes; live account behavior untested.</td></tr>
+              <tr><td>Playlist discovery</td><td>Editable remote playlists now have a bounded persistent cache (8 playlists per account, 48 total), previous/next query navigation, continuation loading, duplicate/current-playlist and podcast exclusions, and ordered batch Add with cache and detail refresh.</td><td><span class="tag good">Implemented + tests pass</span> Included in the 375 passing Desktop tests.</td></tr>
+              <tr><td>Playlist CSV</td><td>CSV export preserves playlist occurrence order and duplicates, reconciles available local tags, quotes fields safely, guards spreadsheet formula prefixes, and writes UTF-8 with BOM.</td><td><span class="tag good">Completed + tests pass</span> Exporter tests included in Desktop's passing set.</td></tr>
+              <tr><td>Last.fm</td><td>Desktop service includes DPAPI-backed credential persistence, browser authorization, now-playing/scrobble tracking gated by audible playback, and integrated settings state.</td><td><span class="tag good">Complete</span> Real account authorization/scrobble flow remains untested.</td></tr>
+              <tr><td>Next-track prefetch</td><td>Existing immediate-next-only prefetch was audited for stale work. Queue occurrence changes invalidate cache writes, and stream-source cache insertion checks the captured auth/session fingerprint to prevent old-account resolutions from contaminating the new session.</td><td><span class="tag good">Audited and guarded</span> Focused tests are included in the passing Desktop set.</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="boundaries">
+          <h2>Platform boundaries and shared code</h2>
+          <p>Features that depend on platform services stay on the platform that can support them. The sync does not claim feature parity where credentials, operating-system services, or native runtimes differ.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Boundary</th><th>Implementation decision</th><th>Practical effect</th></tr></thead>
+            <tbody>
+              <tr><td>Mori Cipher</td><td>Keep Android's QuickJS-backed Android library separate from the JVM implementation under <span class="mono">morideobfuscator/jvm</span>, which uses the JVM-compatible Rhino/Ktor path.</td><td>Android and Desktop can share the playback contract while using the runtime suited to each platform, including the Desktop Native Image constraint.</td></tr>
+              <tr><td>Android Auto</td><td>Uses the Android automotive flavor and car app APIs.</td><td>It is an Android-only surface.</td></tr>
+              <tr><td>Google Drive</td><td>Cloud backup uses Google authorization in GMS builds; FOSS gets its own compatible settings entry.</td><td>FOSS does not claim Google account integration.</td></tr>
+              <tr><td>AOD</td><td>Android's DreamService/tile behavior stays in Android sources.</td><td>No Desktop equivalent is claimed.</td></tr>
+              <tr><td>Last.fm</td><td>Android uses its native settings/auth flow; Desktop uses DPAPI-backed credentials and its own audible-time scrobble lifecycle.</td><td>Credentials/scrobbling state is platform-owned; both integrations are implemented, while real account workflows remain untested.</td></tr>
+              <tr><td>Desktop native package</td><td>Desktop additions continue through Graal/Nucleus Native Image and bundled VLC/runtime conventions.</td><td>Production-size MSI built; isolated 30-second normal startup passed without JNA/native errors, and public Home plus continuation loading succeeded.</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="invariants">
+          <h2>Existing behavior kept during the merge</h2>
+          <ul>
+            <li><strong>Android R2 updater:</strong> retains the custom R2 manifest, artifact key selection, SHA-256 verification, version-code identity, and existing <span class="mono">mint1246/ArchiveTunePC</span> source ownership. Upstream's channel label <span class="mono">ARTIFACT</span> maps to the R2 manifest's legacy <span class="mono">canary</span> property so clients keep reading the current schema.</li>
+            <li><strong>AI provider compatibility:</strong> OpenRouter, custom endpoint/model/prompt support, and detailed API test errors remain available in the merged settings design.</li>
+            <li><strong>Home/social behavior:</strong> manual Home merges retain local friends and personalized recommendations, like-state synchronization, dismissal/undo behavior, and upstream remote feedback only for items with valid feedback tokens.</li>
+            <li><strong>Clicked media identity:</strong> Desktop podcast queues preserve the explicitly selected episode ID; upstream playlist IDs are used for community cards.</li>
+            <li><strong>Statistics:</strong> Android reset clears both database aggregates and the authoritative statistics store. Desktop keeps its separate audible-time tracker and does not derive official listening time from recommendation play history.</li>
+            <li><strong>STEM playback:</strong> Desktop retains the six-source STEM order and the existing ONNX/DirectML runner plus live renderer path; this sync does not replace the audio engine or trim the packaged VLC/runtime support.</li>
+            <li><strong>Lyrics presentation:</strong> translation remains an overlay on synchronized lyrics and preserves chord presentation, artwork-driven background, and glow effects rather than flattening the lyrics view.</li>
+            <li><strong>Native Windows packaging:</strong> Desktop additions remain on the Graal/Nucleus Native Image and bundled VLC packaging path; JVM compile success alone is not treated as MSI verification.</li>
+            <li><strong>Local worktree safety:</strong> unrelated original dirty changes were preserved, with recovery snapshots under <span class="mono">.validation</span>.</li>
+            <li><strong>R2 and release operations:</strong> the custom manifest/hash updater contract remains intact, with release MSIs placed directly at <span class="mono">/releases/ArchiveTune-&lt;version&gt;.msi</span>. No R2 upload, GitHub release, push, or publish operation has been performed.</li>
+          </ul>
+        </section>
+
+        <section id="toolchain">
+          <h2>Build, resource, and CI decisions</h2>
+          <ul>
+            <li>Android compile SDK is 37.2 with NDK <span class="mono">30.0.16248370</span>; the upstream automotive device flavor sets its own minimum SDK.</li>
+            <li>Android release metadata is version code <span class="mono">151</span>, version name <span class="mono">15.1.0</span>; Desktop display/build metadata is <span class="mono">15.10</span>. Nightly Android builds can receive a CI-provided version name.</li>
+            <li>Desktop source and tests use JVM JDK 21 HotSpot; Native Image uses GraalVM CE 25.1.3 (Java 25.0.3) with MSVC 19.51. A command-scoped MSVC Rust toolchain fixed the GNU/MSVC <span class="mono">opus.lib</span> mismatch without changing global environment settings.</li>
+            <li>The Windows native dependency checkout now enables Git long paths so the generated Essentia/Eigen source tree can build; this fix is recorded in <span class="mono">b056bbd</span>, and the audio DLL build passed.</li>
+            <li>Build, PR, and release workflows provision Python 3.11 to generate translation-contributor credits before building.</li>
+            <li>Android uses AGP 9.4.0, Gradle 9.7.1, and Android Compose 1.12.1; Desktop retains Compose Multiplatform 1.11. Android QuickJS and the existing JVM cipher occupy separate platform modules. The existing ONNX/DirectML model runner is retained.</li>
+            <li>The requested R2 release object layout remains a direct <span class="mono">/releases/ArchiveTune-&lt;version&gt;.msi</span> key when publishing is later authorized; no release object has been uploaded.</li>
+          </ul>
+        </section>
+
+        <section id="validation">
+          <h2>Validation record</h2>
+          <div class="checks">
+            <div class="check"><b>Android · passed</b><span class="muted">239 Android tests pass. FOSS Mobile and GMS Automotive Kotlin compile passed serially in 6m49; log <span class="mono">.validation/sync-android-flavors.log</span>. GMS Mobile Arm64 debug APK: <span class="mono">C:\Users\mint\Documents\ArchiveTunePC\.worktrees\sync-v15-10\app\build\outputs\apk\gmsMobileArm64\debug\app-gms-mobile-arm64-debug.apk</span>; size 150,661,825 bytes; SHA-256 <span class="mono">AC453CE83152C58C3FA4A68C5ADC679C9DDD32704E47FA9EF0044F902EA588D8</span>. No Android device was connected for runtime validation.</span></div>
+            <div class="check"><b>Desktop · passed</b><span class="muted">375 tests pass: app 142, backend 70, playback 44, library 8, settings 17, lyrics 47, playback-core 22, Windows integration 22, shared core 3. Focused CanvasSurface compile passed in 32 seconds; log <span class="mono">sync-desktop-compile-focused.log</span>.</span></div>
+            <div class="check"><b>VLC Canvas · passed</b><span class="muted">Real bundled VLC 3.0.21 red-frame JVM playback test passed after restoring the official swscale plugin and regenerating the plugin cache. Video size is capped at 256 pixels with bundled vmem support.</span></div>
+            <div class="check"><b>Native MSI · passed</b><span class="muted">Final production-size MSI build passed in 4m58; clean log <span class="mono">.validation/sync-native-msi-final.log</span>. Artifact: <span class="mono">C:\Users\mint\Documents\ArchiveTunePC\.worktrees\sync-v15-10\desktopApp\build\compose\binaries\main-native\msi\ArchiveTune-15.10.0.msi</span>. MSI size: 86,865,889 bytes; SHA-256 <span class="mono">9C546E1A0AD6D533EDAD7427EBCA1CA200BD4934939D317FA1F7743F548D4106</span>. Packaged EXE size: 160,923,648 bytes; SHA-256 <span class="mono">243DBAAF7DF085C6AF5FF9D7D86582C5DCA33C8136CA19B0C27C5FD92155477B</span>. GraalCE 25.1.3, source JVM JDK 21, MSVC 19.51, MSVC Rust stable. Fresh isolated startup ran cleanly for 30 seconds with no JNA/native errors; public Home and continuation load succeeded. NativeCanvas produced the red 64×64 PNG (186 bytes) and passed frame, pause, stop, and release checks.</span></div>
+            <div class="check"><b>Main checkout coexistence · passed</b><span class="muted">The final checkout with the restored original tab/model edits compiled and passed 307 tests: app 143, lyrics 50, backend 70, playback 44; zero failures/errors/skips. Command: <span class="mono">:desktopApp:compileKotlin :desktopApp:test :desktop-lyrics-ui:test :desktop-backend:test :desktop-playback:test --no-daemon --no-parallel --max-workers=1</span>, with HotSpot 21, 8 GiB compiler heaps, and formatting excluded. Build successful in 3m57; log <span class="mono">.validation/sync-main-integration.log</span>. All ten original tracked edits match the reviewed merge previews and remain unstaged.</span></div>
+            <div class="check"><b>Release operations</b><span class="muted">No R2 upload, GitHub release, push, or publish action has occurred.</span></div>
+          </div>
+          <p class="callout" style="margin-top:16px">Automated tests, compiles, and the Native package verification passed. Real Android device/vehicle use and real account authorization, scrobbling, and cloud-backup workflows remain untested because those devices/accounts were unavailable.</p>
+          <h3>Build commands and evidence</h3>
+          <p>Gradle validation used HotSpot JDK 21, serial workers, 8 GiB compiler heaps, and <span class="mono">-x spotlessApply -x spotlessKotlinApply</span> to preserve unrelated formatting. Native builds additionally used the Visual Studio x64 environment and command-scoped <span class="mono">RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc</span>.</p>
+          <ul>
+            <li><span class="mono">:app:testGmsMobileArm64DebugUnitTest :app:assembleGmsMobileArm64Debug</span> — <span class="mono">.validation/sync-android-serial2.log</span>, successful in 5m29.</li>
+            <li><span class="mono">:app:compileFossMobileArm64DebugKotlin :app:compileGmsAutomotiveArm64DebugKotlin</span> — <span class="mono">.validation/sync-android-flavors.log</span>.</li>
+            <li>Desktop suites across the nine modules above — <span class="mono">.validation/sync-desktop-final4.log</span> followed by the settings/app correction pass <span class="mono">.validation/sync-settings-final.log</span>. Final zero-failure XML results are retained in <span class="mono">.validation/full-suite-results/</span>.</li>
+            <li><span class="mono">msiNative --no-daemon --no-parallel --max-workers=1</span>, default SIZE optimization — <span class="mono">.validation/sync-native-msi-final.log</span>. The packaged command <span class="mono">ArchiveTune.exe --canvas-smoke &lt;local-red-fixture.mkv&gt; &lt;output.png&gt;</span> passed; evidence is in <span class="mono">.validation/native-canvas-smoke.stdout.log</span> and <span class="mono">.validation/native-canvas-smoke.png</span>.</li>
+            <li>Normal packaged startup used a fresh <span class="mono">ARCHIVETUNE_HOME</span> under the sync worktree, leaving the user's app data untouched — <span class="mono">.validation/native-startup-final.stderr.log</span>.</li>
+          </ul>
+        </section>
+
+        <section id="source">
+          <h2>Source revisions and submodules</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Repository / change</th><th>Committed revision</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Local starting point</td><td class="mono">127a885736cad1116204e7ec0aabd4af5e34ce3e</td><td>Current integration branch base in this worktree.</td></tr>
+              <tr><td>Upstream</td><td class="mono">2f48b8159ecca45ae39394e2eb0d0b946e6b06f9</td><td><span class="mono">upstream/main</span>, tagged <span class="mono">v15.1.0</span>.</td></tr>
+              <tr><td>Android merge</td><td class="mono">dda1723ed6418e5edb13938799a6e5e978a820f5</td><td>Merge ArchiveTune v15.1 Android and shared upstream updates.</td></tr>
+              <tr><td>Desktop local media</td><td class="mono">b6791edcf125269f0ba78145c3bc12b2b8d2825a</td><td>Podcast identity and richer local track metadata.</td></tr>
+              <tr><td>Desktop Home</td><td class="mono">d84116532b8d1827d6ab9c3a0febb2edc3fb3efb</td><td>V15 content APIs and featured Home cache.</td></tr>
+              <tr><td>Desktop lyrics</td><td class="mono">78968645842eb8c8f84239bd9af0bebe6f54afaf</td><td>Timed translation and protected provider credentials.</td></tr>
+              <tr><td>Desktop SponsorBlock</td><td class="mono">799bd12d443f4b8df13d66a1c8a123625561f49b</td><td>Configurable segments and guarded automatic seeks.</td></tr>
+              <tr><td>Desktop Canvas</td><td class="mono">683e3685ade4fccf2ee377bb39b871d4e1e1c2e9</td><td>Canvas video with bundled VLC support.</td></tr>
+              <tr><td>Desktop Last.fm</td><td class="mono">a82a1ac06e5c2e7b15d354f2f5dec9b9d9cf20d7</td><td>Protected auth and audible-playback scrobbling.</td></tr>
+              <tr><td>Desktop services/features</td><td class="mono">af5bf38b785b4f25e1697bfdbbb87ae4948d71d6</td><td>Podcasts, playlist discovery, and CSV export.</td></tr>
+              <tr><td>Desktop wiring</td><td class="mono">333896e19b92f77b20e4ec82c1746b15b14ac9b5</td><td>V15 service composition and backward-compatible settings.</td></tr>
+              <tr><td>Android validation fixes</td><td class="mono">448282c18bf638b93872bf2c0c0ad20aa61a3d9c</td><td>Canonical party links and real JSON test fixtures.</td></tr>
+              <tr><td>Desktop Canvas identity</td><td class="mono">248027d7a6140a492915dbeb5f46382d1be2629d</td><td>Per-player Canvas panel identity and safe release of cancelled creation.</td></tr>
+              <tr><td>core history merge</td><td class="mono">e0da0e6c8fd80e94bd90c77186479dc7bee6c452</td><td>Preserves local core Home-fallback commit <span class="mono">3300f43</span> alongside upstream podcast/featured-renderer work; the submodule tree is unchanged from <span class="mono">e33a207</span>.</td></tr>
+              <tr><td>Native dependency checkout</td><td class="mono">b056bbd94847f275a9145a0411fdd162bc4a0547</td><td>Enables long paths for Windows native dependency source checkouts; audio DLL build passed.</td></tr>
+              <tr><td>Native smoke fixes</td><td class="mono">b2e113627713afd918d11c07200b9fead7c87c04</td><td>Fixes Kernel32 proxy calls and registers the libVLC audio output device <span class="mono">ByReference</span> constructor for Native Image.</td></tr>
+              <tr><td>Native CLI and smoke fixture / code HEAD</td><td class="mono">e0f00ed82b7fe2f62df2f2ef50fd0370e3b2c444</td><td>Updates Native CLI and fixture; all code commits are fast-forwarded on main. Original unfinished work remains uncommitted and preserved; it is excluded from the isolated build artifacts. This report is committed separately.</td></tr>
+              <tr><td>core submodule</td><td class="mono">08a7e820a99e8aeb0db0447ae5c5de3f77f4bbe8</td><td>Parent gitlink points here; tree matches prior <span class="mono">e33a207</span> exactly.</td></tr>
+              <tr><td>lyrics submodule</td><td class="mono">86792f9497dba016c5fdef1f12d203f75f46baf4</td><td>Parent gitlink points to this revision.</td></tr>
+              <tr><td>morideobfuscator submodule</td><td class="mono">387706fb24876d7da4a0a3a00e10ad9752abbda4</td><td>Parent gitlink points to this revision.</td></tr>
+              <tr><td>IconPack submodule</td><td class="mono">950d41259ef32b8f3ffef5651e6bf668c5790e15</td><td>Upstream icon pack fast-forwarded; parent pointer matches.</td></tr>
+              <tr><td>moriextractor submodule</td><td class="mono">7abc1d7379e779589e619bfcc7d9d7cb14df4df1</td><td>Fork extractor retained; original untracked build work remains untouched.</td></tr>
+            </tbody>
+          </table></div>
+          <p class="muted">The parent gitlinks match the submodule revisions shown, including core, cipher, and IconPack. Feature work is recorded in individual commits. Recovery autostash <span class="mono">c8adeaed654c393ff99b5cdd493c4ae4977a09ca</span> and the <span class="mono">.validation/preexisting</span> backups were retained for the original dirty work.</p>
+          <p class="muted">Separate core commits: <span class="mono">7c642b2</span> (v15.1 merge), <span class="mono">7873fd9</span> (podcast helpers/JVM cipher), <span class="mono">e33a207</span> (podcast flag/extractor compatibility), and <span class="mono">08a7e82</span> (preserved local ancestry). Separate cipher commits: <span class="mono">334aed0</span> (Android/JVM runtime merge) and <span class="mono">387706f</span> (generated JVM build-output ignore).</p>
+        </section>
+
+        <section id="next">
+          <h2>Validation limits</h2>
+          <p>Automated validation and the requested integration are complete. No Android device was connected, so installation, vehicle use, database migration on an existing device, and on-device playback were not exercised. Real Google/YouTube authentication, Last.fm authorization/scrobbling, Drive backup/restore, and external lyrics/Canvas-provider account workflows require those environments and remain unverified.</p>
+          <p>The Windows MSI was built and its packaged executable tested directly; the installer was not installed over the user's existing app. The native smoke checks decoded video, audio-device enumeration/startup, public Home requests, and clean shutdown. It does not establish every live audio/party/device interaction.</p>
+          <p class="muted">No R2 upload, release publication, or push was performed. The sync worktree is retained with the APK, MSI, logs, and recovery snapshots. The main checkout keeps the user's unfinished edits uncommitted.</p>
+        </section>
+      </main>
+    </div>
+    <footer>Prepared in the ArchiveTune sync worktree · self-contained HTML · no external assets or network requests.</footer>
+  </div>
+</body>
+</html>
