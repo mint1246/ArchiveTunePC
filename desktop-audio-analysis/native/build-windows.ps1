@@ -68,24 +68,29 @@ $Gxx = Find-Tool 'g++.exe' @('C:\msys64\ucrt64\bin\g++.exe', 'C:\msys64\mingw64\
 $PkgConfig = Find-Tool 'pkg-config.exe' @('C:\msys64\ucrt64\bin\pkg-config.exe', 'C:\msys64\mingw64\bin\pkg-config.exe')
 $Strip = Find-Tool 'strip.exe' @('C:\msys64\ucrt64\bin\strip.exe', 'C:\msys64\mingw64\bin\strip.exe')
 
+# Essentia contains tracked paths longer than the traditional Win32 MAX_PATH
+# limit. Scope long-path handling to these dependency checkouts so native builds
+# work from managed worktree directories without changing global Git settings.
+$GitLongPaths = @('-c', 'core.longpaths=true')
+
 New-Item -ItemType Directory -Force -Path $BuildRoot, $OutputDir, $PkgConfigDir | Out-Null
 
 if (-not (Test-Path (Join-Path $EssentiaDir '.git'))) {
-    & $Git clone --filter=blob:none --no-checkout https://github.com/MTG/essentia.git $EssentiaDir
+    & $Git @GitLongPaths clone --filter=blob:none --no-checkout https://github.com/MTG/essentia.git $EssentiaDir
     if ($LASTEXITCODE -ne 0) { throw 'Failed to clone Essentia.' }
 }
-& $Git -C $EssentiaDir fetch --depth 1 origin $EssentiaCommit
+& $Git @GitLongPaths -C $EssentiaDir fetch --depth 1 origin $EssentiaCommit
 if ($LASTEXITCODE -ne 0) { throw 'Failed to fetch pinned Essentia revision.' }
-& $Git -C $EssentiaDir checkout --force $EssentiaCommit
+& $Git @GitLongPaths -C $EssentiaDir checkout --force $EssentiaCommit
 if ($LASTEXITCODE -ne 0) { throw 'Failed to checkout pinned Essentia revision.' }
 
 if (-not (Test-Path (Join-Path $EigenDir '.git'))) {
-    & $Git clone --filter=blob:none --no-checkout https://gitlab.com/libeigen/eigen.git $EigenDir
+    & $Git @GitLongPaths clone --filter=blob:none --no-checkout https://gitlab.com/libeigen/eigen.git $EigenDir
     if ($LASTEXITCODE -ne 0) { throw 'Failed to clone Eigen.' }
 }
-& $Git -C $EigenDir fetch --depth 1 origin $EigenCommit
+& $Git @GitLongPaths -C $EigenDir fetch --depth 1 origin $EigenCommit
 if ($LASTEXITCODE -ne 0) { throw 'Failed to fetch pinned Eigen revision.' }
-& $Git -C $EigenDir checkout --force $EigenCommit
+& $Git @GitLongPaths -C $EigenDir checkout --force $EigenCommit
 if ($LASTEXITCODE -ne 0) { throw 'Failed to checkout pinned Eigen revision.' }
 
 # Essentia's current Windows waf branch assumes MSVC and accesses old private
