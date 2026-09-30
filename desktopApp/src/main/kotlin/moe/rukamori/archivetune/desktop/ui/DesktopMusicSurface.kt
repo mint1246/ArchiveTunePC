@@ -56,6 +56,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -105,13 +106,16 @@ import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopAlbumIndex
 import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRoute
+import moe.rukamori.archivetune.desktop.platform.DesktopPodcastRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopStemQueueState
+import moe.rukamori.archivetune.desktop.platform.DesktopPlaylistSuggestionsRepository
 import moe.rukamori.archivetune.desktop.party.PartyMode
 import moe.rukamori.archivetune.desktop.party.PartyPhase
 import moe.rukamori.archivetune.desktop.party.PartyTransport
 import moe.rukamori.archivetune.desktop.party.PlayTogetherManager
 import moe.rukamori.archivetune.desktop.social.DesktopSocialManager
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPane
+import moe.rukamori.archivetune.desktop.ui.DesktopPlaylistSuggestionsSection
 import moe.rukamori.archivetune.desktop.state.DesktopBrowseHistory
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import java.awt.Toolkit
@@ -121,6 +125,8 @@ import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.BrowseEndpoint
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
+import moe.rukamori.archivetune.innertube.models.PodcastItem
+import moe.rukamori.archivetune.innertube.models.EpisodeItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.pages.AlbumPage
@@ -129,6 +135,7 @@ import moe.rukamori.archivetune.innertube.pages.ArtistItemsPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.ArtistSectionLayout
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
+import moe.rukamori.archivetune.innertube.pages.PodcastPage
 import moe.rukamori.archivetune.playback.api.PlaybackAlbum
 import moe.rukamori.archivetune.playback.api.PlaybackArtist
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -143,6 +150,7 @@ internal sealed interface Detail {
     data class Artist(val page: ArtistPage) : Detail
     data class ArtistItems(val page: ArtistItemsPage, val parent: ArtistPage) : Detail
     data class Playlist(val page: PlaylistPage) : Detail
+    data class Podcast(val page: PodcastPage) : Detail
 }
 
 /**
@@ -151,6 +159,7 @@ internal sealed interface Detail {
  */
 internal class DesktopBrowseController(
     private val repository: DesktopBrowseRepository,
+    private val podcasts: DesktopPodcastRepository,
     initialDestination: DesktopDestination = DesktopDestination.HOME,
 ) {
     private val history = DesktopBrowseHistory(initialDestination)
@@ -233,8 +242,19 @@ internal class DesktopBrowseController(
         }
     }
 
+    fun openPodcast(browseId: String, scope: CoroutineScope, forceRefresh: Boolean = false) {
+        val route = DesktopBrowseRoute.Podcast(browseId)
+        open(route, scope, forceRefresh, repository::cachedPodcast) {
+            repository.podcast(route, podcasts, forceRefresh).map { Detail.Podcast(it) }
+        }
+    }
+
     fun invalidatePlaylist(id: String) {
         repository.invalidate(DesktopBrowseRoute.Playlist(id))
+    }
+
+    fun invalidatePodcast(browseId: String) {
+        repository.invalidate(DesktopBrowseRoute.Podcast(browseId))
     }
 
     fun refreshPlaylist(id: String, scope: CoroutineScope) {
@@ -257,6 +277,7 @@ internal class DesktopBrowseController(
                     is DesktopBrowseRoute.Album -> Detail.Album(page as AlbumPage)
                     is DesktopBrowseRoute.Artist -> Detail.Artist(page as ArtistPage)
                     is DesktopBrowseRoute.Playlist -> Detail.Playlist(page as PlaylistPage)
+                    is DesktopBrowseRoute.Podcast -> Detail.Podcast(page as PodcastPage)
                     is DesktopBrowseRoute.ArtistItems -> {
                         val parent = repository.cachedArtist(DesktopBrowseRoute.Artist(route.parentArtistId))
                         if (parent == null) null else Detail.ArtistItems(page as ArtistItemsPage, parent)
@@ -303,6 +324,7 @@ internal class DesktopBrowseController(
                 is DesktopBrowseRoute.Album -> repository.cachedAlbum(route)?.let(Detail::Album)
                 is DesktopBrowseRoute.Artist -> repository.cachedArtist(route)?.let(Detail::Artist)
                 is DesktopBrowseRoute.Playlist -> repository.cachedPlaylist(route)?.let(Detail::Playlist)
+                is DesktopBrowseRoute.Podcast -> repository.cachedPodcast(route)?.let(Detail::Podcast)
                 is DesktopBrowseRoute.ArtistItems -> {
                     val page = repository.cachedArtistItems(route)
                     val parent = repository.cachedArtist(DesktopBrowseRoute.Artist(route.parentArtistId))
@@ -330,6 +352,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     val homeSnapshot by services.homeStore.snapshot.collectAsState()
     val remoteLibraryState by services.libraryRepository.state.collectAsState()
     val searchState by services.searchRepository.state.collectAsState()
+    val podcastLibrary by services.podcastRepository.library.collectAsState()
     val localTracks by services.library.tracksFlow.collectAsState()
     val stemQueueState by services.stems.queueState.collectAsState()
     val stemReadyTrackIds by services.stems.readyTrackIds.collectAsState()
@@ -388,6 +411,12 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         if (state.destination != moe.rukamori.archivetune.desktop.state.DesktopDestination.SEARCH) return@LaunchedEffect
         if (state.searchQuery.isNotBlank()) delay(250)
         services.searchRepository.activate(state.searchQuery)
+    }
+    fun playEpisode(episode: EpisodeItem) {
+        if (guestInParty && !partyState.canChangeSong) return
+        scope.launch {
+            playTogether.playQueue(listOf(toPlaybackItem(episode)), title = episode.podcast?.name ?: "Podcast")
+        }
     }
     fun open(item: YTItem) {
         when (item) {
@@ -454,13 +483,22 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             is AlbumItem -> browse.openAlbum(item.browseId, scope)
             is ArtistItem -> browse.openArtist(item.id, scope)
             is PlaylistItem -> browse.openPlaylist(item.id, scope)
+            is PodcastItem -> browse.openPodcast(item.browseId, scope)
+            is EpisodeItem -> playEpisode(item)
         }
+    }
+    fun playPodcastEpisodes(episodes: List<EpisodeItem>, requestedId: String, title: String) {
+        if (episodes.isEmpty() || (guestInParty && !partyState.canChangeSong)) return
+        val startIndex = requestedEpisodeQueueIndex(episodes.map(EpisodeItem::id), requestedId) ?: return
+        scope.launch { playTogether.playQueue(episodes.map(::toPlaybackItem), startIndex, title = title) }
     }
     fun openBrowseItem(item: YTItem) {
         when (item) {
             is AlbumItem -> browse.openAlbum(item.browseId, scope)
             is ArtistItem -> browse.openArtist(item.id, scope)
             is PlaylistItem -> browse.openPlaylist(item.id, scope)
+            is PodcastItem -> browse.openPodcast(item.browseId, scope)
+            is EpisodeItem -> playEpisode(item)
             is SongItem -> Unit
         }
     }
@@ -598,6 +636,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 openLocal = ::playLocal,
                 onPlayNextLocal = ::playNextLocal,
                 onAddToQueueLocal = ::enqueueLocal,
+                searchPodcasts = services.podcastRepository::search,
                 modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.DOWNLOADS -> DesktopDownloadsSurface(
@@ -615,19 +654,28 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.LIBRARY -> LocalLibrary(
-                localTracks, onlinePlaylists, services.library.folders,
-                libraryLoading || remoteLibraryState.isInitialLoading || browse.loading,
-                browse.failure ?: libraryError ?: remoteLibraryState.error,
+                tracks = localTracks,
+                onlinePlaylists = onlinePlaylists,
+                folders = services.library.folders,
+                savedPodcasts = podcastLibrary.podcasts,
+                savedEpisodes = podcastLibrary.episodes,
+                loading = libraryLoading || remoteLibraryState.isInitialLoading || browse.loading,
+                error = browse.failure ?: libraryError ?: remoteLibraryState.error,
                 onAddFolder = { scope.launch { chooseLibraryFolder()?.let { services.library.setFolders(services.library.folders + it); rescanLibrary() } } },
                 onRescan = { scope.launch { rescanLibrary() } },
                 spotifyImportEnabled = accountState is DesktopAccountState.SignedIn,
                 onImportSpotify = { showSpotifyImport = true },
                 onCreatePlaylist = { createPlaylist() },
                 onOpenPlaylist = ::open,
+                onOpenPodcast = { browse.openPodcast(it.browseId, scope) },
+                onRefreshPodcastLibrary = { scope.launch {
+                    services.podcastRepository.refreshLibrary().onFailure { browse.failure = it.message ?: "Could not refresh podcast library" }
+                } },
+                onPlayEpisode = ::playEpisode,
                 onPlay = ::playLocal,
                 onPlayNext = ::playNextLocal,
                 onAddToQueue = ::enqueueLocal,
-                modifier,
+                modifier = modifier,
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.HOME -> DesktopHomeSurface(
                 services,
@@ -692,6 +740,17 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 audioEffects = services.playback.audioEffects,
                 audioOutput = services.playback,
                 downloads = downloadServices,
+                paxsenixApiKeyConfigured = services::hasPaxsenixApiKey,
+                onPaxsenixApiKeyChanged = services::updatePaxsenixApiKey,
+                lyricsTranslationApiKeyConfigured = services.lyricsTranslationService::hasApiKey,
+                onLyricsTranslationApiKeyChanged = services.lyricsTranslationService::setApiKey,
+                lastFmStateFlow = services.lastFm.state,
+                onLastFmCredentialsChanged = services.lastFm::saveCredentials,
+                onLastFmStartAuthorization = services.lastFm::startAuthorization,
+                onLastFmFinishAuthorization = services.lastFm::finishAuthorization,
+                onLastFmDisconnect = services.lastFm::disconnect,
+                onLastFmScrobblingChanged = services.lastFm::setScrobblingEnabled,
+                onLastFmNowPlayingChanged = services.lastFm::setNowPlayingEnabled,
                 libraryFolders = services.library.folders,
                 libraryTrackCount = localTracks.size,
                 libraryScanning = libraryLoading,
@@ -711,6 +770,8 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         }
         is Detail.Playlist -> PlaylistDetailPage(
             page.page,
+            suggestionsRepository = services.playlistSuggestions,
+            onRefreshPlaylist = { browse.refreshPlaylist(it, scope) },
             error = browse.failure,
             onPlay = { songs, index, title -> playQueue(songs, index, title) },
             onDownload = ::downloadSong,
@@ -756,6 +817,26 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                         .onFailure { browse.failure = it.message ?: "Could not delete playlist" }
                 }
             },
+            onExportCsv = {
+                browse.failure = null
+                scope.launch {
+                    if (page.page.songs.isEmpty()) {
+                        browse.failure = "Playlist has no songs"
+                        return@launch
+                    }
+                    val destination = choosePlaylistCsvFile(page.page.playlist.title) ?: return@launch
+                    try {
+                        withContext(Dispatchers.IO) {
+                            val csv = PlaylistCsvExporter.encode(PlaylistCsvExporter.records(page.page.songs, localTracks))
+                            java.nio.file.Files.write(destination, csv)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        browse.failure = failure.message ?: "Could not export playlist CSV"
+                    }
+                }
+            },
             modifier = modifier,
         )
         is Detail.ArtistItems -> ArtistItemsDetailPage(
@@ -768,6 +849,23 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onSetLiked = ::setLiked,
             isLiked = ::isLiked,
             loadMore = services.browseRepository::artistItemsContinuation,
+            modifier = modifier,
+        )
+        is Detail.Podcast -> PodcastDetailPage(
+            page = page.page,
+            isSaved = services.podcastRepository.isPodcastSaved(page.page.podcast.browseId),
+            isEpisodeSaved = services.podcastRepository::isEpisodeSaved,
+            onTogglePodcastSaved = { saved -> scope.launch {
+                services.podcastRepository.setPodcastSaved(page.page.podcast, saved)
+                    .onSuccess { browse.invalidatePodcast(page.page.podcast.browseId) }
+                    .onFailure { browse.failure = it.message ?: "Could not update podcast library" }
+            } },
+            onToggleEpisodeSaved = { episode, saved -> scope.launch {
+                services.podcastRepository.setEpisodeSaved(episode, saved)
+                    .onFailure { browse.failure = it.message ?: "Could not update episode library" }
+            } },
+            onPlayEpisodes = ::playPodcastEpisodes,
+            loadMore = services.podcastRepository::continuation,
             modifier = modifier,
         )
         else -> DetailPage(
@@ -900,12 +998,18 @@ internal fun filterLocalLibrary(
     )
 }
 
-@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
+@Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, savedPodcasts: List<PodcastItem>, savedEpisodes: List<EpisodeItem>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onOpenPodcast: (PodcastItem) -> Unit, onRefreshPodcastLibrary: () -> Unit, onPlayEpisode: (EpisodeItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
     val listState = rememberPersistedLazyListState("library")
     var filterQuery by remember { mutableStateOf("") }
     var songSort by remember { mutableStateOf(DesktopSongSort.ORIGINAL) }
     val filtered = remember(onlinePlaylists, tracks, filterQuery) {
         filterLocalLibrary(onlinePlaylists, tracks, filterQuery)
+    }
+    val filteredPodcasts = remember(savedPodcasts, filterQuery) {
+        savedPodcasts.filter { filterQuery.isBlank() || it.title.contains(filterQuery, ignoreCase = true) || it.author?.name?.contains(filterQuery, ignoreCase = true) == true }
+    }
+    val filteredEpisodes = remember(savedEpisodes, filterQuery) {
+        savedEpisodes.filter { filterQuery.isBlank() || it.title.contains(filterQuery, ignoreCase = true) || it.podcast?.name?.contains(filterQuery, ignoreCase = true) == true }
     }
     val sortedTracks = remember(filtered.tracks, songSort) { sortLocalTracks(filtered.tracks, songSort) }
     val filtering = filterQuery.isNotBlank()
@@ -923,15 +1027,34 @@ internal fun filterLocalLibrary(
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 label = { Text("Filter library") },
-                placeholder = { Text("Playlists, artists, albums, tracks") },
+                placeholder = { Text("Podcasts, playlists, artists, albums, tracks") },
             )
         }
-        if (filtering && filtered.playlists.isEmpty() && filtered.tracks.isEmpty()) {
+        if (filtering && filtered.playlists.isEmpty() && filtered.tracks.isEmpty() && filteredPodcasts.isEmpty() && filteredEpisodes.isEmpty()) {
             item {
                 Text(
-                    "No playlists or local tracks match “${filterQuery.trim()}”.",
+                    "No library items match “${filterQuery.trim()}”.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Saved podcasts • ${filteredPodcasts.size}", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onRefreshPodcastLibrary) { Text("Refresh") }
+            }
+        }
+        if (filteredPodcasts.isEmpty()) {
+            item { Text(if (filtering) "No saved podcasts match this filter." else "Save podcasts to find them here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        } else {
+            items(filteredPodcasts, key = { "saved-podcast:${it.browseId}" }) { podcast ->
+                ResultCard(podcast, { onOpenPodcast(podcast) })
+            }
+        }
+        if (savedEpisodes.isNotEmpty()) {
+            item { Text("Saved podcast episodes • ${filteredEpisodes.size}", style = MaterialTheme.typography.headlineSmall) }
+            items(filteredEpisodes, key = { "saved-episode:${it.id}" }) { episode ->
+                ResultCard(episode, { onPlayEpisode(episode) })
             }
         }
         item {
@@ -1229,6 +1352,24 @@ private suspend fun chooseLibraryFolder(): java.nio.file.Path? = withContext(Dis
     selected?.toPath()
 }
 
+private suspend fun choosePlaylistCsvFile(playlistName: String): java.nio.file.Path? = withContext(Dispatchers.IO) {
+    var selected: java.io.File? = null
+    javax.swing.SwingUtilities.invokeAndWait {
+        javax.swing.JFileChooser().apply {
+            dialogTitle = "Export playlist as CSV"
+            fileSelectionMode = javax.swing.JFileChooser.FILES_ONLY
+            isAcceptAllFileFilterUsed = false
+            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("CSV files", "csv")
+            selectedFile = java.io.File(PlaylistCsvExporter.suggestedFileName(playlistName))
+            if (showSaveDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) selected = selectedFile
+        }
+    }
+    selected?.toPath()?.let { chosen ->
+        if (chosen.fileName.toString().substringAfterLast('.', "").equals("csv", ignoreCase = true)) chosen
+        else chosen.resolveSibling("${chosen.fileName}.csv")
+    }
+}
+
 internal fun localSearchMatches(
     query: String,
     tracks: List<LocalTrack>,
@@ -1275,6 +1416,11 @@ internal fun requestedSongQueueIndex(
     requestedVideoId: String,
 ): Int? = songIds.indexOf(requestedVideoId).takeIf { it >= 0 }
 
+internal fun requestedEpisodeQueueIndex(
+    episodeIds: List<String>,
+    requestedEpisodeId: String,
+): Int? = episodeIds.indexOf(requestedEpisodeId).takeIf { it >= 0 }
+
 @Composable
 private fun SearchResults(
     query: String,
@@ -1298,8 +1444,27 @@ private fun SearchResults(
     openLocal: (LocalTrack) -> Unit,
     onPlayNextLocal: (LocalTrack) -> Unit,
     onAddToQueueLocal: (LocalTrack) -> Unit,
+    searchPodcasts: suspend (String) -> Result<List<YTItem>>,
     modifier: Modifier,
 ) {
+    var podcastFilter by remember { mutableStateOf(false) }
+    var podcastItems by remember { mutableStateOf<List<YTItem>>(emptyList()) }
+    var podcastLoading by remember { mutableStateOf(false) }
+    var podcastError by remember { mutableStateOf<String?>(null) }
+    val podcastScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(query, podcastFilter) {
+        if (!podcastFilter || query.isBlank()) {
+            podcastItems = emptyList()
+            podcastLoading = false
+            podcastError = null
+        } else {
+            podcastLoading = true
+            podcastError = null
+            searchPodcasts(query).onSuccess { podcastItems = it }.onFailure { podcastError = it.message ?: "Podcast search failed" }
+            podcastLoading = false
+        }
+    }
+    val displayedItems = if (podcastFilter) podcastItems else items
     val listState = rememberPersistedLazyListState("search:${query.trim().lowercase(java.util.Locale.ROOT)}")
     LazyColumn(
         state = listState,
@@ -1312,6 +1477,14 @@ private fun SearchResults(
                 if (query.isBlank()) "Search YouTube Music + local library" else "Results for “$query”",
                 style = MaterialTheme.typography.headlineMedium,
             )
+        }
+        if (query.isNotBlank()) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !podcastFilter, onClick = { podcastFilter = false }, label = { Text("Songs") })
+                    FilterChip(selected = podcastFilter, onClick = { podcastFilter = true }, label = { Text("Podcasts") })
+                }
+            }
         }
         if (query.isBlank()) {
             if (history.isEmpty()) {
@@ -1333,7 +1506,7 @@ private fun SearchResults(
                 }
             }
         }
-        if (localItems.isNotEmpty()) {
+        if (!podcastFilter && localItems.isNotEmpty()) {
             item { Text("Local library", style = MaterialTheme.typography.titleLarge) }
             items(localItems, key = { "local:${it.id}" }) { track ->
                 LocalTrackCard(
@@ -1344,32 +1517,35 @@ private fun SearchResults(
                 )
             }
             item { Text("YouTube Music", style = MaterialTheme.typography.titleLarge) }
-        } else if (query.isNotBlank()) {
+        } else if (!podcastFilter && query.isNotBlank()) {
             item { Text("YouTube Music", style = MaterialTheme.typography.titleLarge) }
         }
-        if (refreshing && items.isNotEmpty()) {
+        if (!podcastFilter && refreshing && items.isNotEmpty()) {
             item { Text("Refreshing results…", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         item {
             AnimatedVisibility(
-                visible = loading,
+                visible = if (podcastFilter) podcastLoading else loading,
                 enter = fadeIn(tween(180)) + expandVertically(tween(180)),
                 exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
                 label = "search-loading",
             ) { Loading() }
         }
-        error?.let { message ->
+        (if (podcastFilter) podcastError else error)?.let { message ->
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Error(message)
-                    OutlinedButton(onClick = onRetry, enabled = !loading && !refreshing) { Text("Retry") }
+                    OutlinedButton(
+                        onClick = { if (podcastFilter) podcastScope.launch { searchPodcasts(query).onSuccess { podcastItems = it }.onFailure { podcastError = it.message } } else onRetry() },
+                        enabled = !loading && !refreshing && !podcastLoading,
+                    ) { Text("Retry") }
                 }
             }
         }
-        if (!loading && error == null && query.isNotBlank() && items.isEmpty() && localItems.isEmpty()) {
-            item { Text("No music results found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (!(if (podcastFilter) podcastLoading else loading) && (if (podcastFilter) podcastError else error) == null && query.isNotBlank() && displayedItems.isEmpty() && (podcastFilter || localItems.isEmpty())) {
+            item { Text(if (podcastFilter) "No podcasts found." else "No music results found.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        items(items, key = { item -> item::class to item.id }) { item ->
+        items(displayedItems, key = { item -> item::class to item.id }) { item ->
             ResultCard(
                 item,
                 { open(item) },
@@ -1385,15 +1561,16 @@ private fun SearchResults(
 }
 
 @Composable private fun DetailPage(page: Detail, loading: Boolean, error: String?, onOpen: (YTItem) -> Unit, onOpenArtistItems: (BrowseEndpoint) -> Unit, onPlay: (List<SongItem>, String, Int) -> Unit, onDownload: (SongItem) -> Unit, onDownloadAll: (List<SongItem>) -> Unit, onCreateStems: (List<SongItem>) -> Unit, stemQueueState: DesktopStemQueueState, onPlayNext: (SongItem) -> Unit, onAddToQueue: (SongItem) -> Unit, onAddToPlaylist: (SongItem) -> Unit, onAddAlbumToPlaylist: (List<SongItem>) -> Unit, onSetLiked: (SongItem, Boolean) -> Unit, isLiked: (SongItem) -> Boolean, isArtistSubscribed: (ArtistItem) -> Boolean, onSetArtistSubscribed: (ArtistItem, Boolean) -> Unit, modifier: Modifier) {
-    val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title; is Detail.ArtistItems -> page.page.title }
-    val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail }
-    val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist" }
-    val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist, is Detail.ArtistItems -> emptyList() }
+    val title = when (page) { is Detail.Album -> page.page.album.title; is Detail.Playlist -> page.page.playlist.title; is Detail.Artist -> page.page.artist.title; is Detail.ArtistItems -> page.page.title; is Detail.Podcast -> page.page.podcast.title }
+    val image = when (page) { is Detail.Album -> page.page.album.thumbnail; is Detail.Playlist -> page.page.playlist.thumbnail; is Detail.Artist -> page.page.artist.thumbnail; is Detail.ArtistItems -> page.parent.artist.thumbnail; is Detail.Podcast -> page.page.podcast.thumbnail }
+    val extra = when (page) { is Detail.Album -> "Album"; is Detail.Playlist -> page.page.playlist.author?.name ?: "Playlist"; is Detail.Artist -> page.page.description ?: "Artist"; is Detail.ArtistItems -> "Artist"; is Detail.Podcast -> "Podcast" }
+    val tracks = when (page) { is Detail.Album -> page.page.songs; is Detail.Playlist -> page.page.songs; is Detail.Artist, is Detail.ArtistItems, is Detail.Podcast -> emptyList() }
     val detailKey = when (page) {
         is Detail.Album -> "album:${page.page.album.browseId}"
         is Detail.Playlist -> "playlist:${page.page.playlist.id}"
         is Detail.Artist -> "artist:${page.page.artist.id}"
         is Detail.ArtistItems -> "artist-items:${page.parent.artist.id}:${page.page.title}"
+        is Detail.Podcast -> "podcast:${page.page.podcast.browseId}"
     }
     var songSort by remember(detailKey) { mutableStateOf(DesktopSongSort.ORIGINAL) }
     val sortedTracks = remember(tracks, songSort) { sortSongs(tracks, songSort) }
@@ -1403,6 +1580,7 @@ private fun SearchResults(
             is Detail.Playlist -> "detail:playlist:${page.page.playlist.id}"
             is Detail.Artist -> "detail:artist:${page.page.artist.id}"
             is Detail.ArtistItems -> "detail:artist-items:${page.parent.artist.id}:${page.page.title}"
+            is Detail.Podcast -> "detail:podcast:${page.page.podcast.browseId}"
         },
     )
     LazyColumn(
@@ -1599,6 +1777,106 @@ private fun ArtistItemsDetailPage(
     }
 }
 
+@Composable
+private fun PodcastDetailPage(
+    page: PodcastPage,
+    isSaved: Boolean,
+    isEpisodeSaved: (String) -> Boolean,
+    onTogglePodcastSaved: (Boolean) -> Unit,
+    onToggleEpisodeSaved: (EpisodeItem, Boolean) -> Unit,
+    onPlayEpisodes: (List<EpisodeItem>, String, String) -> Unit,
+    loadMore: suspend (String) -> Result<PodcastPage.Continuation>,
+    modifier: Modifier,
+) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var episodes by remember(page.podcast.browseId) { mutableStateOf(page.episodes.distinctBy(EpisodeItem::id)) }
+    var continuation by remember(page.podcast.browseId) { mutableStateOf(page.continuation) }
+    var query by remember(page.podcast.browseId) { mutableStateOf("") }
+    var loadingMore by remember(page.podcast.browseId) { mutableStateOf(false) }
+    var loadError by remember(page.podcast.browseId) { mutableStateOf<String?>(null) }
+    val visible = remember(episodes, query) {
+        val terms = query.trim().split(Regex("\\s+")).filter(String::isNotBlank)
+        if (terms.isEmpty()) episodes else episodes.filter { episode ->
+            terms.all { term -> episode.title.contains(term, ignoreCase = true) || episode.description?.contains(term, ignoreCase = true) == true }
+        }
+    }
+    val listState = rememberPersistedLazyListState("detail:podcast:${page.podcast.browseId}")
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Artwork(page.podcast.thumbnail, Modifier.size(120.dp))
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(page.podcast.author?.name ?: "Podcast", color = MaterialTheme.colorScheme.primary)
+                    Text(page.podcast.title, style = MaterialTheme.typography.headlineMedium)
+                    Text("${episodes.size} episodes", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (episodes.isNotEmpty()) FilledIconButton(onClick = { onPlayEpisodes(visible, visible.firstOrNull()?.id.orEmpty(), page.podcast.title) }, enabled = visible.isNotEmpty()) {
+                        Icon(Icons.Rounded.PlayArrow, "Play episodes")
+                    }
+                    OutlinedButton(onClick = { onTogglePodcastSaved(!isSaved) }) { Text(if (isSaved) "Remove from library" else "Save podcast") }
+                }
+            }
+        }
+        page.description?.takeIf(String::isNotBlank)?.let { description -> item { Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        item {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                label = { Text("Search episodes") },
+            )
+        }
+        item { Text("Episodes • ${visible.size}", style = MaterialTheme.typography.headlineSmall) }
+        if (visible.isEmpty()) {
+            item { Text(if (episodes.isEmpty()) "No episodes are available." else "No episodes match this search.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        itemsIndexed(visible, key = { _, episode -> "podcast-episode:${episode.id}" }) { _, episode ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onPlayEpisodes(visible, episode.id, page.podcast.title) }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Artwork(episode.thumbnail, Modifier.size(68.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(episode.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(episode.dateText, episode.durationText).joinToString(" • ").ifBlank { page.podcast.title }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(onClick = { onToggleEpisodeSaved(episode, !isEpisodeSaved(episode.id)) }) {
+                    Text(if (isEpisodeSaved(episode.id)) "Saved" else "Save")
+                }
+            }
+        }
+        loadError?.let { message -> item { Error(message) } }
+        continuation?.let { token ->
+            item {
+                TextButton(enabled = !loadingMore, onClick = {
+                    loadingMore = true
+                    loadError = null
+                    scope.launch {
+                        loadMore(token).onSuccess { next ->
+                            episodes = (episodes + next.episodes).distinctBy(EpisodeItem::id)
+                            continuation = next.continuation
+                        }.onFailure { loadError = it.message ?: "Could not load more episodes" }
+                        loadingMore = false
+                    }
+                }) {
+                    if (loadingMore) { CircularProgressIndicator(Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
+                    Text(if (loadingMore) "Loading…" else "Load more episodes")
+                }
+            }
+        }
+    }
+}
+
 internal data class PlaylistSongOccurrence(
     val song: SongItem,
     val originalIndex: Int,
@@ -1650,6 +1928,8 @@ internal fun sortPlaylistSongOccurrences(
 @Composable
 private fun PlaylistDetailPage(
     page: PlaylistPage,
+    suggestionsRepository: DesktopPlaylistSuggestionsRepository,
+    onRefreshPlaylist: (String) -> Unit,
     error: String?,
     onPlay: (List<SongItem>, Int, String) -> Unit,
     onDownload: (SongItem) -> Unit,
@@ -1664,6 +1944,7 @@ private fun PlaylistDetailPage(
     onRemoveFromPlaylist: (SongItem) -> Unit,
     onRenamePlaylist: (String) -> Unit,
     onDeletePlaylist: () -> Unit,
+    onExportCsv: () -> Unit,
     modifier: Modifier,
 ) {
     var query by remember(page.playlist.id) { mutableStateOf("") }
@@ -1702,13 +1983,13 @@ private fun PlaylistDetailPage(
                     if (narrow) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Artwork(page.playlist.thumbnail, Modifier.size(140.dp))
-                            PlaylistHeroDetails(page, subtitle, sortedAll.map { it.song }, onPlay, onDownloadAll, onCreateStems, onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
+                            PlaylistHeroDetails(page, subtitle, sortedAll.map { it.song }, onPlay, onDownloadAll, onCreateStems, onRename = { showRename = true }, onDelete = { showDeleteConfirm = true }, onExportCsv = onExportCsv)
                         }
                     } else {
                         Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
                             Artwork(page.playlist.thumbnail, Modifier.size(180.dp))
                             Spacer(Modifier.width(24.dp))
-                            PlaylistHeroDetails(page, subtitle, sortedAll.map { it.song }, onPlay, onDownloadAll, onCreateStems, Modifier.weight(1f), onRename = { showRename = true }, onDelete = { showDeleteConfirm = true })
+                            PlaylistHeroDetails(page, subtitle, sortedAll.map { it.song }, onPlay, onDownloadAll, onCreateStems, Modifier.weight(1f), onRename = { showRename = true }, onDelete = { showDeleteConfirm = true }, onExportCsv = onExportCsv)
                         }
                     }
                 }
@@ -1752,6 +2033,17 @@ private fun PlaylistDetailPage(
                 isLiked(song),
                 if (page.playlist.isEditable) ({ onRemoveFromPlaylist(song) }) else null,
             )
+        }
+        if (page.playlist.isEditable) {
+            item(key = "playlist-suggestions:${page.playlist.id}") {
+                DesktopPlaylistSuggestionsSection(
+                    repository = suggestionsRepository,
+                    playlistId = page.playlist.id,
+                    title = page.playlist.title,
+                    playlistSongs = page.songs,
+                    onAdded = { onRefreshPlaylist(page.playlist.id) },
+                )
+            }
         }
     }
 
@@ -1800,6 +2092,7 @@ private fun PlaylistHeroDetails(
     modifier: Modifier = Modifier,
     onRename: () -> Unit = {},
     onDelete: () -> Unit = {},
+    onExportCsv: () -> Unit = {},
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("PLAYLIST", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
@@ -1833,11 +2126,12 @@ private fun PlaylistHeroDetails(
                     onClick = { onCreateStems(page.songs) },
                     enabled = page.songs.isNotEmpty(),
                 ) { Icon(Icons.Rounded.GraphicEq, null); Spacer(Modifier.width(8.dp)); Text("Create stems") }
-                if (page.playlist.isEditable) {
-                    var menuOpen by remember(page.playlist.id) { mutableStateOf(false) }
-                    Box {
-                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, "Playlist actions") }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                var menuOpen by remember(page.playlist.id) { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, "Playlist actions") }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Export as CSV") }, onClick = { menuOpen = false; onExportCsv() })
+                        if (page.playlist.isEditable) {
                             DropdownMenuItem(text = { Text("Rename playlist") }, onClick = { menuOpen = false; onRename() })
                             DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { menuOpen = false; onDelete() })
                         }
@@ -1880,7 +2174,7 @@ private fun SongQueueMenu(onPlayNext: (() -> Unit)? = null, onAddToQueue: (() ->
         }
     }
 }
-private fun itemSubtitle(item: YTItem) = when (item) { is SongItem -> item.artists.joinToString { it.name } + (item.album?.let { " • ${it.name}" } ?: "") + (item.duration?.let { " • ${format(it * 1000L)}" } ?: ""); is AlbumItem -> "Album • " + item.artists.orEmpty().joinToString { it.name }; is ArtistItem -> "Artist"; is PlaylistItem -> listOfNotNull("Playlist", item.author?.name, item.songCountText).joinToString(" • ") }
+private fun itemSubtitle(item: YTItem) = when (item) { is SongItem -> item.artists.joinToString { it.name } + (item.album?.let { " • ${it.name}" } ?: "") + (item.duration?.let { " • ${format(it * 1000L)}" } ?: ""); is AlbumItem -> "Album • " + item.artists.orEmpty().joinToString { it.name }; is ArtistItem -> "Artist"; is PlaylistItem -> listOfNotNull("Playlist", item.author?.name, item.songCountText).joinToString(" • "); is PodcastItem -> listOfNotNull("Podcast", item.author?.name).joinToString(" • "); is EpisodeItem -> listOfNotNull("Episode", item.podcast?.name, item.dateText, item.durationText).joinToString(" • ") }
 @Composable private fun Artwork(url: String?, modifier: Modifier) { if (!url.isNullOrBlank()) AsyncImage(url, null, modifier.clip(MaterialTheme.shapes.medium), contentScale = ContentScale.Crop) else Box(modifier.clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.MusicNote, null) } }
 @Composable private fun Loading() = Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 @Composable private fun Error(message: String) = Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) { Text(message, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer) }
@@ -2190,6 +2484,7 @@ internal fun DesktopLyricsView(
     useShellDynamicBackdrop: Boolean = false,
 ) {
     val snapshot by services.playback.state.collectAsState()
+    val canvasState by services.canvas.state.collectAsState()
     val partyState by playTogether.state.collectAsState()
     val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -2203,7 +2498,18 @@ internal fun DesktopLyricsView(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BeatSyncedArtwork(item?.metadata?.artworkUri, Modifier.size(42.dp), beatSync)
+                    val canvasVideo = canvasState.videoUri.takeIf { canvasState.mediaId == item?.metadata?.id }
+                    DesktopCanvasSurface(
+                        mediaId = item?.metadata?.id,
+                        videoUri = canvasVideo,
+                        artworkUri = canvasState.artwork?.static ?: item?.metadata?.artworkUri,
+                        isPlaying = snapshot.isPlaying,
+                        modifier = Modifier.size(64.dp).graphicsLayer {
+                            val scale = 1f + 0.030f * beatSync.visualPulse
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                    )
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope, onOpened = onBrowseOpened) }, Modifier.fillMaxWidth())
@@ -2268,6 +2574,18 @@ private fun toPlaybackItem(song: SongItem, albumIndex: DesktopAlbumIndex) = Play
         artworkUri = song.thumbnail,
         durationHintMs = song.duration?.times(1000L),
         explicit = song.explicit,
+        isPodcast = song.isPodcast,
+    ),
+)
+private fun toPlaybackItem(episode: EpisodeItem): PlaybackItem = PlaybackItem(
+    PlaybackMetadata(
+        id = episode.id,
+        title = episode.title,
+        artists = listOf(PlaybackArtist(episode.podcast?.id, episode.podcast?.name ?: "Podcast")),
+        album = PlaybackAlbum(episode.podcast?.id ?: episode.browseId, episode.podcast?.name ?: "Podcast"),
+        artworkUri = episode.thumbnail,
+        durationHintMs = episode.duration?.times(1000L),
+        isPodcast = true,
     ),
 )
 internal fun toPlaybackItem(track: LocalTrack) = PlaybackItem(
@@ -2275,6 +2593,10 @@ internal fun toPlaybackItem(track: LocalTrack) = PlaybackItem(
         id = track.id,
         title = track.title,
         artists = listOf(PlaybackArtist(name = track.artist)),
+        albumArtist = track.albumArtist,
+        trackNumber = track.trackNumber,
+        discNumber = track.discNumber,
+        year = track.year,
         album = track.album?.let { PlaybackAlbum(title = it) },
         durationHintMs = track.durationMs,
     ),

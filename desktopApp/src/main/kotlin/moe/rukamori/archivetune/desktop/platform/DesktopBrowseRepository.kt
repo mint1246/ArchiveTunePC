@@ -16,6 +16,7 @@ import moe.rukamori.archivetune.innertube.pages.ArtistItemsContinuationPage
 import moe.rukamori.archivetune.innertube.pages.ArtistItemsPage
 import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
+import moe.rukamori.archivetune.innertube.pages.PodcastPage
 
 internal sealed interface DesktopBrowseRoute {
     val cacheId: String
@@ -30,6 +31,10 @@ internal sealed interface DesktopBrowseRoute {
 
     data class Playlist(val id: String) : DesktopBrowseRoute {
         override val cacheId = "playlist:$id"
+    }
+
+    data class Podcast(val browseId: String) : DesktopBrowseRoute {
+        override val cacheId = "podcast:$browseId"
     }
 
     data class ArtistItems(
@@ -121,6 +126,9 @@ internal class DesktopBrowseRepository(
     suspend fun playlist(route: DesktopBrowseRoute.Playlist, forceRefresh: Boolean = false): Result<PlaylistPage> =
         load(route, forceRefresh) { backend.playlist(route.id) }
 
+    suspend fun podcast(route: DesktopBrowseRoute.Podcast, podcasts: DesktopPodcastRepository, forceRefresh: Boolean = false): Result<PodcastPage> =
+        load(route, forceRefresh) { podcasts.podcast(route.browseId) }
+
     suspend fun artistItems(route: DesktopBrowseRoute.ArtistItems, forceRefresh: Boolean = false): Result<ArtistItemsPage> =
         load(route, forceRefresh) { backend.artistItems(route.endpoint) }
 
@@ -133,6 +141,7 @@ internal class DesktopBrowseRepository(
     fun cachedAlbum(route: DesktopBrowseRoute.Album): AlbumPage? = cache.get(route)
     fun cachedArtist(route: DesktopBrowseRoute.Artist): ArtistPage? = cache.get(route)
     fun cachedPlaylist(route: DesktopBrowseRoute.Playlist): PlaylistPage? = cache.get(route)
+    fun cachedPodcast(route: DesktopBrowseRoute.Podcast): PodcastPage? = cache.get(route)
     fun cachedArtistItems(route: DesktopBrowseRoute.ArtistItems): ArtistItemsPage? = cache.get(route)
 
     fun invalidate(route: DesktopBrowseRoute) = cache.invalidate(route)

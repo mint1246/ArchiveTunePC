@@ -62,7 +62,9 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.ArtistItem
+import moe.rukamori.archivetune.innertube.models.EpisodeItem
 import moe.rukamori.archivetune.innertube.models.PlaylistItem
+import moe.rukamori.archivetune.innertube.models.PodcastItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 
@@ -509,6 +511,8 @@ internal fun desktopItemSubtitle(item: YTItem): String =
         is AlbumItem -> listOfNotNull("Album", item.artists?.joinToString { it.name }).joinToString(" • ")
         is ArtistItem -> "Artist"
         is PlaylistItem -> listOfNotNull("Playlist", item.author?.name, item.songCountText).joinToString(" • ")
+        is PodcastItem -> listOfNotNull("Podcast", item.author?.name).joinToString(" • ")
+        is EpisodeItem -> listOfNotNull("Episode", item.podcast?.name, item.dateText, item.durationText).joinToString(" • ")
     }
 
 internal fun desktopFormatDuration(ms: Long): String = "%d:%02d".format(ms / 60000, (ms / 1000) % 60)
