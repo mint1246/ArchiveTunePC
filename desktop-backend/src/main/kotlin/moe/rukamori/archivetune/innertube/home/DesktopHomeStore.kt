@@ -23,6 +23,8 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import moe.rukamori.archivetune.innertube.cache.ytItemFromJson
+import moe.rukamori.archivetune.innertube.cache.ytItemToJson
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -374,19 +376,12 @@ private fun artistFromJson(json: JSONObject): ArtistItem? {
 
 private fun itemToJson(item: YTItem): JSONObject =
     JSONObject()
-        .put("type", item::class.simpleName)
-        .put(
-            "value",
-            when (item) {
-                is SongItem -> songToJson(item)
-                is AlbumItem -> albumToJson(item)
-                is ArtistItem -> artistToJson(item)
-                is PlaylistItem -> playlistToJson(item)
-            },
-        )
+        .put("type", "ytItem")
+        .put("value", ytItemToJson(item))
 
 private fun itemFromJson(json: JSONObject): YTItem? =
     json.optJSONObject("value")?.let { value ->
+        if (json.optString("type") == "ytItem") return ytItemFromJson(value)
         when (json.optString("type")) {
             "SongItem" -> songFromJson(value)
             "AlbumItem" -> albumFromJson(value)

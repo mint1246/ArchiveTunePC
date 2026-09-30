@@ -152,7 +152,7 @@ fun DesktopHomeSurface(
     val sections = remember(homePage?.sections, feedbackHiddenItems) {
         homePage?.sections.orEmpty()
             .map { section -> section.copy(items = section.items.filter(::visible)) }
-            .filter { it.items.isNotEmpty() }
+            .filter { it.items.isNotEmpty() || it.featuredCards.isNotEmpty() }
     }
     val visibleHeroSongs = remember(remoteQuickPicks, feedbackHiddenItems) {
         remoteQuickPicks?.items.orEmpty()
@@ -811,8 +811,41 @@ private fun HomeSectionBlock(
     modifier: Modifier = Modifier,
 ) {
     val sectionSongs = remember(section) { section.items.filterIsInstance<SongItem>().distinctBy { it.id } }
+    val featuredItems = remember(section.featuredCards) {
+        section.featuredCards.map { card -> card to card.asDesktopPlaylist() }
+    }
     Column(modifier) {
         DesktopSectionHeader(title = section.title, label = section.label)
+        if (featuredItems.isNotEmpty()) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                items(featuredItems, key = { it.first.id }) { (card, playlist) ->
+                    Surface(
+                        modifier = Modifier.width(300.dp).clickable { onOpenItem(playlist) },
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                    ) {
+                        Column {
+                            DesktopMediaArtwork(card.thumbnail, card.title, Modifier.fillMaxWidth().aspectRatio(1.8f))
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(card.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                card.subtitle?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                }
+                                val previews = card.itemIds.mapNotNull { id -> sectionSongs.firstOrNull { it.id == id } }
+                                previews.forEach { song ->
+                                    TextButton(onClick = { onPlayQueue(previews, previews.indexOf(song), card.title) }) {
+                                        Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),

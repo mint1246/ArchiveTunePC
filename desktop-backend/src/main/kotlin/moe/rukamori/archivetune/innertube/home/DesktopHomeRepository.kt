@@ -16,6 +16,11 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.cache.DesktopRequestPriority
 import moe.rukamori.archivetune.innertube.cache.DesktopResourceCoordinator
+import moe.rukamori.archivetune.innertube.cache.ytItemToJson
+import moe.rukamori.archivetune.innertube.cache.ytItemFromJson
+import moe.rukamori.archivetune.innertube.cache.watchEndpointToCacheJson
+import moe.rukamori.archivetune.innertube.cache.watchEndpointFromCacheJson
+import moe.rukamori.archivetune.innertube.cache.optionalCacheString
 import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.Artist
@@ -289,160 +294,58 @@ private fun browseEndpointToJson(endpoint: BrowseEndpoint): JSONObject =
 private fun browseEndpointFromJson(json: JSONObject): BrowseEndpoint? =
     json.optString("browseId").takeIf(String::isNotBlank)?.let { BrowseEndpoint(it, json.optString("params").takeIf(String::isNotBlank)) }
 
-private fun sectionToJson(section: HomePage.Section): JSONObject =
+internal fun sectionToJson(section: HomePage.Section): JSONObject =
     JSONObject()
         .put("title", section.title)
         .put("label", section.label ?: JSONObject.NULL)
         .put("thumbnail", section.thumbnail ?: JSONObject.NULL)
         .put("endpoint", section.endpoint?.let(::browseEndpointToJson) ?: JSONObject.NULL)
         .put("items", JSONArray().apply { section.items.forEach { itemToJson(it)?.let(::put) } })
+        .put("featuredCards", JSONArray().apply {
+            section.featuredCards.forEach { card ->
+                put(JSONObject()
+                    .put("id", card.id).put("title", card.title)
+                    .put("subtitle", card.subtitle ?: JSONObject.NULL)
+                    .put("thumbnail", card.thumbnail ?: JSONObject.NULL)
+                    .put("endpoint", card.endpoint?.let(::browseEndpointToJson) ?: JSONObject.NULL)
+                    .put("playEndpoint", card.playEndpoint?.let(::watchEndpointToCacheJson) ?: JSONObject.NULL)
+                    .put("shuffleEndpoint", card.shuffleEndpoint?.let(::watchEndpointToCacheJson) ?: JSONObject.NULL)
+                    .put("radioEndpoint", card.radioEndpoint?.let(::watchEndpointToCacheJson) ?: JSONObject.NULL)
+                    .put("itemIds", JSONArray(card.itemIds)))
+            }
+        })
 
-private fun sectionFromJson(json: JSONObject): HomePage.Section? {
+internal fun sectionFromJson(json: JSONObject): HomePage.Section? {
     val title = json.optString("title").takeIf(String::isNotBlank) ?: return null
     val items = json.optJSONArray("items").objects().mapNotNull(::itemFromJson)
-    if (items.isEmpty()) return null
+    val cards = json.optJSONArray("featuredCards").objects().mapNotNull { card ->
+        val id = card.optionalCacheString("id") ?: return@mapNotNull null
+        val cardTitle = card.optionalCacheString("title") ?: return@mapNotNull null
+        val ids = card.optJSONArray("itemIds")
+        HomePage.Section.FeaturedCard(
+            id = id, title = cardTitle,
+            subtitle = card.optionalCacheString("subtitle"), thumbnail = card.optionalCacheString("thumbnail"),
+            endpoint = card.optJSONObject("endpoint")?.let(::browseEndpointFromJson),
+            playEndpoint = card.optJSONObject("playEndpoint")?.let(::watchEndpointFromCacheJson),
+            shuffleEndpoint = card.optJSONObject("shuffleEndpoint")?.let(::watchEndpointFromCacheJson),
+            radioEndpoint = card.optJSONObject("radioEndpoint")?.let(::watchEndpointFromCacheJson),
+            itemIds = if (ids == null) emptyList() else (0 until ids.length()).mapNotNull { ids.optString(it).takeIf(String::isNotBlank) },
+        )
+    }
+    if (items.isEmpty() && cards.isEmpty()) return null
     return HomePage.Section(
         title = title,
         label = json.optString("label").takeIf(String::isNotBlank),
         thumbnail = json.optString("thumbnail").takeIf(String::isNotBlank),
         endpoint = json.optJSONObject("endpoint")?.let(::browseEndpointFromJson),
         items = items,
+        featuredCards = cards,
     )
 }
 
-private fun itemToJson(item: YTItem): JSONObject? = when (item) {
-    is SongItem -> JSONObject()
-        .put("type", "song")
-        .put("id", item.id)
-        .put("title", item.title)
-        .put("artists", artistsToJson(item.artists))
-        .put("albumName", item.album?.name ?: JSONObject.NULL)
-        .put("albumId", item.album?.id ?: JSONObject.NULL)
-        .put("duration", item.duration ?: JSONObject.NULL)
-        .put("thumbnail", item.thumbnail)
-        .put("thumbnailWidth", item.thumbnailWidth ?: JSONObject.NULL)
-        .put("thumbnailHeight", item.thumbnailHeight ?: JSONObject.NULL)
-        .put("explicit", item.explicit)
-        .put("feedbackToken", item.feedbackToken ?: JSONObject.NULL)
-    is AlbumItem -> JSONObject()
-        .put("type", "album")
-        .put("browseId", item.browseId)
-        .put("playlistId", item.playlistId)
-        .put("title", item.title)
-        .put("artists", artistsToJson(item.artists.orEmpty()))
-        .put("year", item.year ?: JSONObject.NULL)
-        .put("thumbnail", item.thumbnail)
-        .put("thumbnailWidth", item.thumbnailWidth ?: JSONObject.NULL)
-        .put("thumbnailHeight", item.thumbnailHeight ?: JSONObject.NULL)
-        .put("explicit", item.explicit)
-        .put("releaseType", item.releaseType.name)
-        .put("feedbackToken", item.feedbackToken ?: JSONObject.NULL)
-    is ArtistItem -> JSONObject()
-        .put("type", "artist")
-        .put("id", item.id)
-        .put("title", item.title)
-        .put("thumbnail", item.thumbnail ?: JSONObject.NULL)
-        .put("channelId", item.channelId ?: JSONObject.NULL)
-        .put("thumbnailWidth", item.thumbnailWidth ?: JSONObject.NULL)
-        .put("thumbnailHeight", item.thumbnailHeight ?: JSONObject.NULL)
-        .put("feedbackToken", item.feedbackToken ?: JSONObject.NULL)
-    is PlaylistItem -> JSONObject()
-        .put("type", "playlist")
-        .put("id", item.id)
-        .put("title", item.title)
-        .put("authorName", item.author?.name ?: JSONObject.NULL)
-        .put("authorId", item.author?.id ?: JSONObject.NULL)
-        .put("songCountText", item.songCountText ?: JSONObject.NULL)
-        .put("thumbnail", item.thumbnail ?: JSONObject.NULL)
-        .put("thumbnailWidth", item.thumbnailWidth ?: JSONObject.NULL)
-        .put("thumbnailHeight", item.thumbnailHeight ?: JSONObject.NULL)
-        .put("editable", item.isEditable)
-        .put("description", item.description ?: JSONObject.NULL)
-        .put("feedbackToken", item.feedbackToken ?: JSONObject.NULL)
-}
+private fun itemToJson(item: YTItem): JSONObject = ytItemToJson(item)
 
-private fun itemFromJson(json: JSONObject): YTItem? = when (json.optString("type")) {
-    "song" -> {
-        val id = json.optString("id").takeIf(String::isNotBlank) ?: return null
-        val title = json.optString("title").takeIf(String::isNotBlank) ?: return null
-        val thumbnail = json.optString("thumbnail")
-        SongItem(
-            id = id,
-            title = title,
-            artists = json.optJSONArray("artists").objects().mapNotNull(::artistFromJson),
-            album = json.optString("albumId").takeIf(String::isNotBlank)?.let { albumId ->
-                Album(json.optString("albumName"), albumId)
-            },
-            duration = json.optInt("duration", -1).takeIf { it >= 0 },
-            thumbnail = thumbnail,
-            explicit = json.optBoolean("explicit"),
-            thumbnailWidth = json.optInt("thumbnailWidth", -1).takeIf { it >= 0 },
-            thumbnailHeight = json.optInt("thumbnailHeight", -1).takeIf { it >= 0 },
-            feedbackToken = json.optString("feedbackToken").takeIf(String::isNotBlank),
-        )
-    }
-    "album" -> {
-        val browseId = json.optString("browseId").takeIf(String::isNotBlank) ?: return null
-        val playlistId = json.optString("playlistId")
-        val title = json.optString("title").takeIf(String::isNotBlank) ?: return null
-        val thumbnail = json.optString("thumbnail")
-        AlbumItem(
-            browseId = browseId,
-            playlistId = playlistId,
-            title = title,
-            artists = json.optJSONArray("artists").objects().mapNotNull(::artistFromJson),
-            year = json.optInt("year", -1).takeIf { it >= 0 },
-            thumbnail = thumbnail,
-            explicit = json.optBoolean("explicit"),
-            releaseType = runCatching { moe.rukamori.archivetune.innertube.models.AlbumReleaseType.valueOf(json.optString("releaseType")) }.getOrDefault(moe.rukamori.archivetune.innertube.models.AlbumReleaseType.ALBUM),
-            thumbnailWidth = json.optInt("thumbnailWidth", -1).takeIf { it >= 0 },
-            thumbnailHeight = json.optInt("thumbnailHeight", -1).takeIf { it >= 0 },
-            feedbackToken = json.optString("feedbackToken").takeIf(String::isNotBlank),
-        )
-    }
-    "artist" -> {
-        val id = json.optString("id").takeIf(String::isNotBlank) ?: return null
-        val title = json.optString("title").takeIf(String::isNotBlank) ?: return null
-        ArtistItem(
-            id = id,
-            title = title,
-            thumbnail = json.optString("thumbnail").takeIf(String::isNotBlank),
-            channelId = json.optString("channelId").takeIf(String::isNotBlank),
-            shuffleEndpoint = null,
-            radioEndpoint = null,
-            thumbnailWidth = json.optInt("thumbnailWidth", -1).takeIf { it >= 0 },
-            thumbnailHeight = json.optInt("thumbnailHeight", -1).takeIf { it >= 0 },
-            feedbackToken = json.optString("feedbackToken").takeIf(String::isNotBlank),
-        )
-    }
-    "playlist" -> {
-        val id = json.optString("id").takeIf(String::isNotBlank) ?: return null
-        val title = json.optString("title").takeIf(String::isNotBlank) ?: return null
-        PlaylistItem(
-            id = id,
-            title = title,
-            author = json.optString("authorName").takeIf(String::isNotBlank)?.let { Artist(it, json.optString("authorId").takeIf(String::isNotBlank)) },
-            songCountText = json.optString("songCountText").takeIf(String::isNotBlank),
-            thumbnail = json.optString("thumbnail").takeIf(String::isNotBlank),
-            playEndpoint = null,
-            shuffleEndpoint = null,
-            radioEndpoint = null,
-            isEditable = json.optBoolean("editable"),
-            description = json.optString("description").takeIf(String::isNotBlank),
-            thumbnailWidth = json.optInt("thumbnailWidth", -1).takeIf { it >= 0 },
-            thumbnailHeight = json.optInt("thumbnailHeight", -1).takeIf { it >= 0 },
-            feedbackToken = json.optString("feedbackToken").takeIf(String::isNotBlank),
-        )
-    }
-    else -> null
-}
-
-private fun artistsToJson(artists: List<Artist>): JSONArray = JSONArray().apply {
-    artists.forEach { put(JSONObject().put("name", it.name).put("id", it.id ?: JSONObject.NULL)) }
-}
-
-private fun artistFromJson(json: JSONObject): Artist? =
-    json.optString("name").takeIf(String::isNotBlank)?.let { Artist(it, json.optString("id").takeIf(String::isNotBlank)) }
+private fun itemFromJson(json: JSONObject): YTItem? = ytItemFromJson(json)
 
 private fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else buildList(length()) { for (index in 0 until length()) optJSONObject(index)?.let(::add) }

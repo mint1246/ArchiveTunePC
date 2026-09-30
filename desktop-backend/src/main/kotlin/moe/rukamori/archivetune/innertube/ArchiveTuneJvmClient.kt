@@ -31,6 +31,7 @@ import moe.rukamori.archivetune.innertube.pages.HomePage
 import moe.rukamori.archivetune.innertube.pages.LibraryPage
 import moe.rukamori.archivetune.innertube.pages.NextResult
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
+import moe.rukamori.archivetune.innertube.pages.PodcastPage
 import moe.rukamori.archivetune.innertube.pages.RelatedPage
 import moe.rukamori.archivetune.innertube.pages.SearchResult
 import moe.rukamori.archivetune.innertube.pages.SearchSummaryPage
@@ -129,6 +130,25 @@ class ArchiveTuneJvmClient(
                 YouTube.search(normalized, YouTube.SearchFilter.FILTER_SONG)
                     .map { page -> page.items.filterIsInstance<SongItem>().distinctBy(SongItem::id) }
             },
+            onFailure = { Result.failure(it) },
+        )
+    }
+
+    /** Loads another song-search page without account-specific recommendation context. */
+    suspend fun searchContinuation(continuation: String): Result<SearchResult> = run {
+        prepareProvidedSession()
+        val normalizedContinuation = continuation.trim()
+        if (normalizedContinuation.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Search continuation is required"))
+        }
+        YouTube.searchContinuation(normalizedContinuation, useAccountContext = false)
+    }
+
+    /** Account-neutral song search used to build playlist recommendations. */
+    suspend fun searchSuggestionSongs(query: String): Result<SearchResult> = run {
+        prepareProvidedSession()
+        normalizedQuery(query).fold(
+            onSuccess = { YouTube.search(it, YouTube.SearchFilter.FILTER_SONG, useAccountContext = false) },
             onFailure = { Result.failure(it) },
         )
     }
@@ -361,6 +381,27 @@ class ArchiveTuneJvmClient(
             onFailure = { Result.failure(it) },
             )
         }
+
+    suspend fun podcast(browseId: String): Result<PodcastPage> = run {
+        prepareProvidedSession()
+        val normalizedBrowseId = browseId.trim()
+        if (normalizedBrowseId.isEmpty()) return Result.failure(IllegalArgumentException("Podcast ID is required"))
+        YouTube.podcast(normalizedBrowseId)
+    }
+
+    suspend fun podcastContinuation(continuation: String): Result<PodcastPage.Continuation> = run {
+        prepareProvidedSession()
+        val normalizedContinuation = continuation.trim()
+        if (normalizedContinuation.isEmpty()) return Result.failure(IllegalArgumentException("Podcast continuation is required"))
+        YouTube.podcastContinuation(normalizedContinuation)
+    }
+
+    suspend fun setPodcastSaved(playlistId: String, saved: Boolean): Result<Unit> = run {
+        prepareProvidedSession()
+        val normalizedPlaylistId = playlistId.trim().removePrefix("VL")
+        if (normalizedPlaylistId.isEmpty()) return Result.failure(IllegalArgumentException("Podcast playlist ID is required"))
+        YouTube.likePlaylist(normalizedPlaylistId, saved).map { Unit }
+    }
 
     /** Returns one account-scoped YouTube Music library page for the supplied browse id. */
     suspend fun library(browseId: String): Result<LibraryPage> = run {
