@@ -144,18 +144,27 @@ abstract class VerifyBundledVlcRuntimeTask : DefaultTask() {
             "mux/libmux_wav_plugin.dll",
             "mux/libmux_ogg_plugin.dll",
         )
+        val requiredVideoPlugins = listOf(
+            "video_output/libvmem_plugin.dll",
+            "video_chroma/libswscale_plugin.dll",
+            "codec/libavcodec_plugin.dll",
+            "demux/libmp4_plugin.dll",
+        )
         val missingStemPlugins = requiredStemPlugins.filterNot { plugins.resolve(it).isFile }
+        val missingVideoPlugins = requiredVideoPlugins.filterNot { plugins.resolve(it).isFile }
         if (
             !libVlc.isFile ||
             !libVlcCore.isFile ||
             !hasPluginDlls ||
             !hasUsablePluginCache ||
-            missingStemPlugins.isNotEmpty()
+            missingStemPlugins.isNotEmpty() ||
+            missingVideoPlugins.isNotEmpty()
         ) {
             throw GradleException(
                 "Incomplete libVLC runtime at ${root.absolutePath}; expected libVLC DLLs, plugin DLLs, " +
                     "a generated plugins/plugins.dat cache, and stem stream-output plugins. " +
-                    "Missing stem plugins: ${missingStemPlugins.joinToString()}",
+                    "Missing stem plugins: ${missingStemPlugins.joinToString()}. " +
+                    "Missing Canvas plugins: ${missingVideoPlugins.joinToString()}",
             )
         }
         if (accidentalNestedPlugins.exists()) {
@@ -203,6 +212,30 @@ abstract class StageBundledVlcRuntimeTask : DefaultTask() {
                     )
                 }
             }
+        }
+        // Git checkouts change DLL timestamps. Rebuild after staging rather than shipping a
+        // cache that describes a different checkout and forces a full scan at every cold start.
+        val generator = destination.resolve("vlc-cache-gen.exe")
+        if (!Files.isRegularFile(generator)) {
+            throw GradleException("The pinned VLC cache generator is missing at $generator")
+        }
+        val log = Files.createTempFile(destination, "vlc-cache-", ".log")
+        try {
+            val process = ProcessBuilder(generator.toString(), destination.resolve("plugins").toString())
+                .directory(destinationFile)
+                .redirectErrorStream(true)
+                .redirectOutput(log.toFile())
+                .start()
+            if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                throw GradleException("Timed out generating the staged VLC plugin cache")
+            }
+            if (process.exitValue() != 0) {
+                throw GradleException("VLC cache generation failed: ${Files.readString(log).take(3000)}")
+            }
+        } finally {
+            Files.deleteIfExists(log)
+            Files.deleteIfExists(generator)
         }
     }
 }
