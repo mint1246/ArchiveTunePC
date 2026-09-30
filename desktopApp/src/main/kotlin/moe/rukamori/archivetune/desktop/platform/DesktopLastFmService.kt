@@ -46,6 +46,8 @@ class DesktopLastFmService(
     private val openBrowser: (URI) -> Result<Unit> = DesktopSystemBrowserLauncher::open,
     private val scrobbleClient: DesktopLastFmClient = SharedLastFmClient,
     private val clock: DesktopLastFmClock = SystemDesktopLastFmClock,
+    private val defaultApiKey: String = DesktopLastFmBuildCredentials.API_KEY,
+    private val defaultSecret: String = DesktopLastFmBuildCredentials.SECRET,
 ) : AutoCloseable {
     private val serviceJob = SupervisorJob(parentScope.coroutineContext[Job])
     private val scope = CoroutineScope(parentScope.coroutineContext + serviceJob)
@@ -71,20 +73,41 @@ class DesktopLastFmService(
     private var nowPlayingSent = false
     private var networkJob: Job? = null
 
+    init {
+        applyBuildCredentialsLocked()
+        updateStateLocked()
+    }
+
     fun restore() {
         try {
-            val bytes = credentialStore.read() ?: return
-            try {
-            val payload = JSONObject(bytes.toString(StandardCharsets.UTF_8))
-            synchronized(lock) {
-                endpoint = payload.optString("endpoint", endpoint)
-                apiKey = payload.optString("apiKey")
-                secret = payload.optString("secret")
-                sessionKey = payload.optString("sessionKey").takeIf(String::isNotBlank)
-                username = payload.optString("username").takeIf(String::isNotBlank)
-                configureClientLocked()
-                updateStateLocked()
+            val bytes = credentialStore.read()
+            if (bytes == null) {
+                synchronized(lock) {
+                    configureClientLocked()
+                    updateStateLocked()
+                }
+                return
             }
+            try {
+                val payload = JSONObject(bytes.toString(StandardCharsets.UTF_8))
+                synchronized(lock) {
+                    endpoint = payload.optString("endpoint", endpoint)
+                    val savedKey = payload.optString("apiKey").trim()
+                    val savedSecret = payload.optString("secret").trim()
+                    if (savedKey.isNotBlank() && savedSecret.isNotBlank()) {
+                        apiKey = savedKey
+                        secret = savedSecret
+                        sessionKey = payload.optString("sessionKey").takeIf(String::isNotBlank)
+                        username = payload.optString("username").takeIf(String::isNotBlank)
+                    } else {
+                        applyBuildCredentialsLocked()
+                        // A session without its original API identity cannot be reused safely.
+                        sessionKey = null
+                        username = null
+                    }
+                    configureClientLocked()
+                    updateStateLocked()
+                }
             } finally {
                 bytes.fill(0)
             }
@@ -92,15 +115,22 @@ class DesktopLastFmService(
             if (failure is CancellationException) throw failure
             synchronized(lock) {
                 endpoint = settings.snapshot().lastFmEndpoint
-                apiKey = ""
-                secret = ""
+                applyBuildCredentialsLocked()
                 sessionKey = null
                 username = null
                 pendingToken = null
                 configureClientLocked()
-                updateStateLocked(error = "Saved Last.fm credentials could not be restored: ${failure.userMessage()}")
+                updateStateLocked(error = "Saved Last.fm credentials could not be restored. Link your account again.")
             }
         }
+    }
+
+    private fun applyBuildCredentialsLocked() {
+        // Application credentials belong to Last.fm, never to an alternate service endpoint.
+        val useDefaults = defaultApiKey.isNotBlank() && defaultSecret.isNotBlank() &&
+            runCatching { LastFM.normalizeEndpoint(endpoint) }.getOrNull() == LastFM.DEFAULT_API_ENDPOINT
+        apiKey = if (useDefaults) defaultApiKey.trim() else ""
+        secret = if (useDefaults) defaultSecret.trim() else ""
     }
 
     /** Stores API credentials only in the existing DPAPI-backed secure-store format. */

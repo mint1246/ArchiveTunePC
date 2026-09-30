@@ -852,7 +852,7 @@ fun DesktopSettingsPanel(
                 Text(
                     when {
                         lastFm.connected -> "Linked as ${lastFm.username}"
-                        lastFm.credentialsConfigured -> "API credentials are saved with Windows DPAPI; link your account to enable scrobbling."
+                        lastFm.credentialsConfigured -> "API credentials are configured; link your account to enable scrobbling."
                         else -> "Link Last.fm-compatible services and scrobble songs played on Desktop."
                     },
                     style = MaterialTheme.typography.bodyMedium,

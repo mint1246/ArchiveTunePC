@@ -41,6 +41,8 @@ class DesktopLastFmServiceTest {
             },
             scrobbleClient = client,
             clock = clock,
+            defaultApiKey = "",
+            defaultSecret = "",
         )
 
         service.saveCredentials("https://ws.audioscrobbler.com/2.0/", "api-key", "shared-secret")
@@ -85,7 +87,7 @@ class DesktopLastFmServiceTest {
         val settings = DesktopSettingsStore(Files.createTempDirectory("lastfm-party-test").resolve("settings.properties"))
         val client = FakeLastFmClient()
         val clock = FakeClock()
-        val service = DesktopLastFmService(settings, MemorySecureStore(), this, { Result.success(Unit) }, client, clock)
+        val service = DesktopLastFmService(settings, MemorySecureStore(), this, { Result.success(Unit) }, client, clock, defaultApiKey = "", defaultSecret = "")
         service.saveCredentials("https://ws.audioscrobbler.com/2.0/", "api", "secret")
         service.startAuthorization()
         withTimeout(5_000) { service.state.first { !it.busy } }
@@ -122,7 +124,7 @@ class DesktopLastFmServiceTest {
             }
         }
         val secure = MemorySecureStore()
-        val service = DesktopLastFmService(settings, secure, this, { Result.success(Unit) }, client)
+        val service = DesktopLastFmService(settings, secure, this, { Result.success(Unit) }, client, defaultApiKey = "", defaultSecret = "")
         try {
             service.saveCredentials(LastFM.DEFAULT_API_ENDPOINT, "api", "secret")
             service.startAuthorization()
@@ -141,12 +143,92 @@ class DesktopLastFmServiceTest {
     fun `corrupt protected credentials do not fail startup`() = runBlocking {
         val settings = DesktopSettingsStore(Files.createTempDirectory("lastfm-corrupt").resolve("settings.properties"))
         val secure = MemorySecureStore().apply { value = "invalid json".toByteArray() }
-        val service = DesktopLastFmService(settings, secure, this, { Result.success(Unit) }, FakeLastFmClient())
+        val service = DesktopLastFmService(settings, secure, this, { Result.success(Unit) }, FakeLastFmClient(), defaultApiKey = "", defaultSecret = "")
         try {
             service.restore()
             assertFalse(service.state.value.connected)
             assertFalse(service.state.value.credentialsConfigured)
             assertTrue(service.state.value.error != null)
+        } finally { service.close(); settings.close() }
+    }
+
+    @Test
+    fun `build credentials allow linking without entering developer keys`() = runBlocking {
+        val settings = DesktopSettingsStore(Files.createTempDirectory("lastfm-defaults").resolve("settings.properties"))
+        val secure = MemorySecureStore()
+        val service = DesktopLastFmService(
+            settings, secure, this, { Result.success(Unit) }, FakeLastFmClient(),
+            defaultApiKey = "build-api", defaultSecret = "build-secret",
+        )
+        try {
+            service.restore()
+            assertTrue(service.state.value.credentialsConfigured)
+            assertEquals("build-api", LastFM.currentConfig().apiKey)
+            assertEquals("build-secret", LastFM.currentConfig().secret)
+            assertTrue(secure.value == null, "restore must not persist application defaults in a plain settings file")
+            service.startAuthorization()
+            withTimeout(5_000) { service.state.first { !it.busy } }
+            assertTrue(service.state.value.pendingAuthorization)
+            service.finishAuthorization()
+            withTimeout(5_000) { service.state.first { !it.busy } }
+            assertTrue(service.state.value.connected)
+            service.disconnect()
+            assertTrue(service.state.value.credentialsConfigured)
+            assertFalse(service.state.value.connected)
+        } finally { service.close(); settings.close() }
+    }
+
+    @Test
+    fun `saved overrides and their session take priority over build credentials`() = runBlocking {
+        val settings = DesktopSettingsStore(Files.createTempDirectory("lastfm-override").resolve("settings.properties"))
+        val secure = MemorySecureStore().apply {
+            value = """{"apiKey":"saved-api","secret":"saved-secret","sessionKey":"saved-session","username":"saved-user"}""".toByteArray()
+        }
+        val service = DesktopLastFmService(
+            settings, secure, this, { Result.success(Unit) }, FakeLastFmClient(),
+            defaultApiKey = "build-api", defaultSecret = "build-secret",
+        )
+        try {
+            service.restore()
+            assertEquals("saved-api", LastFM.currentConfig().apiKey)
+            assertEquals("saved-secret", LastFM.currentConfig().secret)
+            assertEquals("saved-session", LastFM.currentConfig().sessionKey)
+            assertEquals("saved-user", service.state.value.username)
+        } finally { service.close(); settings.close() }
+    }
+
+    @Test
+    fun `empty or corrupt stored credentials fall back without reusing an unrelated session`() = runBlocking {
+        for (payload in listOf("invalid json", """{"apiKey":"","secret":"","sessionKey":"stale","username":"stale"}""")) {
+            val settings = DesktopSettingsStore(Files.createTempDirectory("lastfm-default-recovery").resolve("settings.properties"))
+            val secure = MemorySecureStore().apply { value = payload.toByteArray() }
+            val service = DesktopLastFmService(
+                settings, secure, this, { Result.success(Unit) }, FakeLastFmClient(),
+                defaultApiKey = "build-api", defaultSecret = "build-secret",
+            )
+            try {
+                service.restore()
+                assertTrue(service.state.value.credentialsConfigured)
+                assertFalse(service.state.value.connected)
+                assertEquals("build-api", LastFM.currentConfig().apiKey)
+                assertTrue(LastFM.currentConfig().sessionKey == null)
+            } finally { service.close(); settings.close() }
+        }
+    }
+
+    @Test
+    fun `Lastfm build credentials are not sent to alternate endpoints`() = runBlocking {
+        val settings = DesktopSettingsStore(Files.createTempDirectory("lastfm-alternate").resolve("settings.properties"))
+        settings.update { it.copy(lastFmEndpoint = LastFM.LIBREFM_API_ENDPOINT) }
+        val service = DesktopLastFmService(
+            settings, MemorySecureStore(), this, { Result.success(Unit) }, FakeLastFmClient(),
+            defaultApiKey = "build-api", defaultSecret = "build-secret",
+        )
+        try {
+            service.restore()
+            assertFalse(service.state.value.credentialsConfigured)
+            assertEquals("", LastFM.currentConfig().apiKey)
+            assertEquals("", LastFM.currentConfig().secret)
         } finally { service.close(); settings.close() }
     }
 

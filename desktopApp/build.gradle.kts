@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+import java.util.Properties
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -52,6 +54,95 @@ dependencies {
     implementation(libs.json)
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+}
+
+val desktopLastFmLocalPropertiesFile = rootProject.file("local.properties")
+val desktopLastFmLocalProperties = Properties().apply {
+    if (desktopLastFmLocalPropertiesFile.isFile) {
+        desktopLastFmLocalPropertiesFile.inputStream().use(::load)
+    }
+}
+val desktopLastFmApiKey =
+    desktopLastFmLocalProperties.getProperty("LASTFM_API_KEY")
+        ?: System.getenv("LASTFM_API_KEY")
+        ?: ""
+val desktopLastFmSecret =
+    desktopLastFmLocalProperties.getProperty("LASTFM_SECRET")
+        ?: System.getenv("LASTFM_SECRET")
+        ?: ""
+
+fun String.asKotlinStringLiteral(): String = buildString {
+    append('"')
+    this@asKotlinStringLiteral.forEach { character ->
+        when (character) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '$' -> {
+                append('\\')
+                append('$')
+            }
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            '\b' -> append("\\b")
+            '\u000C' -> append("\\u000c")
+            else -> {
+                if (character.code < 0x20 || character.code == 0x7f) {
+                    append("\\u")
+                    append(character.code.toString(16).padStart(4, '0'))
+                } else {
+                    append(character)
+                }
+            }
+        }
+    }
+    append('"')
+}
+
+fun desktopLastFmCredentialFingerprint(value: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { byte -> "%02x".format(byte) }
+
+val desktopLastFmGeneratedSourceRoot =
+    layout.buildDirectory.dir("generated/sources/desktopLastFm/main/kotlin")
+val desktopLastFmGeneratedSourceFile =
+    layout.buildDirectory.file(
+        "generated/sources/desktopLastFm/main/kotlin/moe/rukamori/archivetune/desktop/platform/DesktopLastFmBuildCredentials.kt",
+    )
+val generateDesktopLastFmBuildCredentials = tasks.register("generateDesktopLastFmBuildCredentials") {
+    group = "build"
+    description = "Generates the desktop Last.fm credential constants from local build configuration."
+    inputs.files(provider {
+        listOfNotNull(desktopLastFmLocalPropertiesFile.takeIf { it.isFile })
+    })
+    inputs.property("lastfmApiKeyFingerprint", desktopLastFmCredentialFingerprint(desktopLastFmApiKey))
+    inputs.property("lastfmSecretFingerprint", desktopLastFmCredentialFingerprint(desktopLastFmSecret))
+    outputs.file(desktopLastFmGeneratedSourceFile)
+
+    doLast {
+        val outputFile = desktopLastFmGeneratedSourceFile.get().asFile
+        outputFile.parentFile.mkdirs()
+        outputFile.writeText(
+            """
+            package moe.rukamori.archivetune.desktop.platform
+
+            internal object DesktopLastFmBuildCredentials {
+                const val API_KEY = ${desktopLastFmApiKey.asKotlinStringLiteral()}
+                const val SECRET = ${desktopLastFmSecret.asKotlinStringLiteral()}
+            }
+            """.trimIndent() + "\n",
+            Charsets.UTF_8,
+        )
+    }
+}
+
+kotlin.sourceSets.named("main") {
+    kotlin.srcDir(desktopLastFmGeneratedSourceRoot)
+}
+
+tasks.named("compileKotlin") {
+    dependsOn(generateDesktopLastFmBuildCredentials)
 }
 
 val desktopIconPng = rootProject.file("app/src/main/res/mipmap-xxxhdpi/ic_launcher.png")
