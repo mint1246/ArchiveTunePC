@@ -751,6 +751,17 @@ fun FoundationDestinationContent(
     onStatisticsPreferenceChanged: () -> Unit = {},
     onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> },
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>? = null,
+    paxsenixApiKeyConfigured: () -> Boolean = { false },
+    onPaxsenixApiKeyChanged: (String?) -> Unit = {},
+    lyricsTranslationApiKeyConfigured: () -> Boolean = { false },
+    onLyricsTranslationApiKeyChanged: (String?) -> Unit = {},
+    lastFmStateFlow: kotlinx.coroutines.flow.StateFlow<moe.rukamori.archivetune.desktop.platform.DesktopLastFmState>? = null,
+    onLastFmCredentialsChanged: (String, String, String) -> Unit = { _, _, _ -> },
+    onLastFmStartAuthorization: () -> Unit = {},
+    onLastFmFinishAuthorization: () -> Unit = {},
+    onLastFmDisconnect: () -> Unit = {},
+    onLastFmScrobblingChanged: (Boolean) -> Unit = {},
+    onLastFmNowPlayingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (state.destination) {
@@ -778,6 +789,17 @@ fun FoundationDestinationContent(
             onStatisticsPreferenceChanged,
             onBeatVisualPreferencesChanged,
             keybindPressedKeys,
+            paxsenixApiKeyConfigured,
+            onPaxsenixApiKeyChanged,
+            lyricsTranslationApiKeyConfigured,
+            onLyricsTranslationApiKeyChanged,
+            lastFmStateFlow,
+            onLastFmCredentialsChanged,
+            onLastFmStartAuthorization,
+            onLastFmFinishAuthorization,
+            onLastFmDisconnect,
+            onLastFmScrobblingChanged,
+            onLastFmNowPlayingChanged,
             modifier,
         )
         else -> FoundationEmptyState(state.destination, state.searchQuery, modifier)
@@ -934,12 +956,25 @@ private fun FoundationSettings(
     onStatisticsPreferenceChanged: () -> Unit,
     onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit,
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>?,
+    paxsenixApiKeyConfigured: () -> Boolean,
+    onPaxsenixApiKeyChanged: (String?) -> Unit,
+    lyricsTranslationApiKeyConfigured: () -> Boolean,
+    onLyricsTranslationApiKeyChanged: (String?) -> Unit,
+    lastFmStateFlow: kotlinx.coroutines.flow.StateFlow<moe.rukamori.archivetune.desktop.platform.DesktopLastFmState>?,
+    onLastFmCredentialsChanged: (String, String, String) -> Unit,
+    onLastFmStartAuthorization: () -> Unit,
+    onLastFmFinishAuthorization: () -> Unit,
+    onLastFmDisconnect: () -> Unit,
+    onLastFmScrobblingChanged: (Boolean) -> Unit,
+    onLastFmNowPlayingChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (settingsStore == null) {
         Text("Desktop settings are unavailable in this host.", modifier.padding(24.dp))
         return
     }
+    var paxsenixKeyConfigured by remember { mutableStateOf(paxsenixApiKeyConfigured()) }
+    var translationKeyConfigured by remember { mutableStateOf(lyricsTranslationApiKeyConfigured()) }
     DesktopSettingsPanel(
         state = state,
         paths = paths,
@@ -962,6 +997,23 @@ private fun FoundationSettings(
         onStatisticsPreferenceChanged = onStatisticsPreferenceChanged,
         onBeatVisualPreferencesChanged = onBeatVisualPreferencesChanged,
         keybindPressedKeys = keybindPressedKeys,
+        paxsenixApiKeyConfigured = paxsenixKeyConfigured,
+        onPaxsenixApiKeyChanged = { value ->
+            onPaxsenixApiKeyChanged(value)
+            paxsenixKeyConfigured = paxsenixApiKeyConfigured()
+        },
+        lyricsTranslationApiKeyConfigured = translationKeyConfigured,
+        onLyricsTranslationApiKeyChanged = { value ->
+            onLyricsTranslationApiKeyChanged(value)
+            translationKeyConfigured = lyricsTranslationApiKeyConfigured()
+        },
+        lastFmStateFlow = lastFmStateFlow,
+        onLastFmCredentialsChanged = onLastFmCredentialsChanged,
+        onLastFmStartAuthorization = onLastFmStartAuthorization,
+        onLastFmFinishAuthorization = onLastFmFinishAuthorization,
+        onLastFmDisconnect = onLastFmDisconnect,
+        onLastFmScrobblingChanged = onLastFmScrobblingChanged,
+        onLastFmNowPlayingChanged = onLastFmNowPlayingChanged,
         account = account,
         accountContent = { if (account != null) DesktopAccountCard(account) else AnonymousAccountCard() },
         modifier = modifier,

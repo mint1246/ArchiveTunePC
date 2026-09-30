@@ -12,6 +12,7 @@ import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
 import moe.rukamori.archivetune.desktopauth.ManagedChromiumLoginSource
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
+import moe.rukamori.archivetune.lyrics.JvmLyricsTranslationCache
 import moe.rukamori.archivetune.desktop.lyrics.DesktopLyricsPresenter
 import moe.rukamori.archivetune.desktop.library.DesktopLibrary
 import moe.rukamori.archivetune.desktop.library.DesktopLibraryFolderStore
@@ -121,6 +122,15 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         scope = runtime.applicationScope,
         accountScopeProvider = ::accountCacheScope,
     )
+    internal val podcastRepository = DesktopPodcastRepository(
+        backend = backend,
+        coordinator = contentCoordinator,
+        scope = runtime.applicationScope,
+        accountScopeProvider = ::accountCacheScope,
+    )
+    internal val playlistSuggestions = DesktopPlaylistSuggestionsRepository(
+        backend, contentCoordinator, runtime.applicationScope, ::accountCacheScope,
+    )
     internal val browseRepository = DesktopBrowseRepository(
         backend = backend,
         coordinator = contentCoordinator,
@@ -145,12 +155,26 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         initialPitchSemitones = settings.snapshot().pitchSemitones,
     )
     val stems = DesktopStemCoordinator(runtime, playback)
+    val canvas = DesktopCanvasRepository(settings, runtime.paths.cache.resolve("canvas"), runtime.applicationScope)
     private val nextTrackPrefetcher = NextTrackPrefetcher(runtime.applicationScope) { item, cacheAllowed ->
         resolve(item, cacheResolvedRemote = cacheAllowed, reportFailure = false)
     }
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     private val neuralChordAnalyzer = DesktopNeuralChordAnalyzer(runtime, playback)
+    val paxsenixCredentialService = DesktopPaxsenixCredentialService(
+        DpapiFileSessionStore(runtime.paths.data.resolve("paxsenix-lyrics.dpapi")),
+    )
+    val lyricsTranslationService = DesktopLyricsTranslationService(
+        settings,
+        DpapiFileSessionStore(runtime.paths.data.resolve("lyrics-translation.dpapi")),
+        JvmLyricsTranslationCache(runtime.paths.cache.resolve("lyrics-translations.json")),
+    )
+    val lastFm = DesktopLastFmService(
+        settings = settings,
+        credentialStore = DpapiFileSessionStore(runtime.paths.data.resolve("lastfm.dpapi")),
+        parentScope = runtime.applicationScope,
+    )
     private val lyricsPresenter = lazy {
         DesktopLyricsPresenter(
             playback,
@@ -158,6 +182,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             lyricsScope.value,
             initiallyActive = false,
             localChordAnalyzer = neuralChordAnalyzer::analyze,
+            lyricsTranslator = lyricsTranslationService,
+            translationTargetLanguage = { settings.snapshot().lyricsTranslationTargetLanguage },
         )
     }
     val lyrics: DesktopLyricsPresenter
@@ -264,7 +290,32 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private fun statisticsListeningEligible(): Boolean =
         settings.snapshot().countPartyListeningInStatistics || !statisticsPartyActive
 
+    private val sponsorBlock = DesktopSponsorBlockCoordinator(
+        playback = playback,
+        settingsProvider = settings::snapshot,
+        canAutoSeek = { partyPlaybackPolicy().automaticSeekingAllowed },
+    )
+
     init {
+        sponsorBlock.start()
+        runCatching { lastFm.restore() }
+            .onFailure { failure -> runtime.logger.warning("Last.fm credentials restore failed (${failure.javaClass.simpleName})") }
+        runCatching { paxsenixCredentialService.restore() }
+            .onFailure { failure -> runtime.logger.warning("Paxsenix API key restore failed (${failure.javaClass.simpleName})") }
+        runtime.applicationScope.launch {
+            var previousCanvasKey: List<Any?>? = null
+            while (true) {
+                val item = playback.state.value.currentItem
+                val configuration = settings.snapshot()
+                val key = listOf(item?.metadata, configuration.desktopCanvasEnabled, configuration.desktopCanvasSource, configuration.desktopCanvasCacheLimitMb)
+                if (key != previousCanvasKey) {
+                    previousCanvasKey = key
+                    if (item == null || item.metadata.isPodcast || item.source is PlaybackSource.LocalFile) canvas.clear()
+                    else canvas.load(item.metadata.id, item.metadata.title, item.metadata.artists.firstOrNull()?.name.orEmpty(), item.metadata.artworkUri)
+                }
+                delay(500L)
+            }
+        }
         backend.bindSessionProvider(account)
         // Restore the DPAPI session synchronously before the first UI-driven backend call can race
         // ahead of it. Network revalidation stays asynchronous so startup is not blocked on it.
@@ -283,6 +334,10 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         runtime.applicationScope.launch {
             playback.state.collect { snapshot ->
                 statisticsTracker.onSnapshot(snapshot, statisticsListeningEligible())
+                lastFm.onSnapshot(
+                    snapshot = snapshot,
+                    eligible = statisticsListeningEligible() && snapshot.currentItem?.metadata?.isPodcast != true,
+                )
             }
         }
         runtime.applicationScope.launch {
@@ -606,6 +661,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     libraryRepository.onAccountScopeChanged()
                     homeRepository.onAccountScopeChanged()
                     searchRepository.onAccountScopeChanged()
+                    podcastRepository.onAccountScopeChanged()
+                    playlistSuggestions.onAccountScopeChanged()
                     browseRepository.clearAccountCache()
                     exploreRepository.onAccountScopeChanged()
                     if (signedInScope != null) {
@@ -656,7 +713,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             playback.events.collect { event ->
                 if (event !is PlaybackEvent.MediaTransition) return@collect
                 statisticsTracker.onMediaTransition()
-                statisticsTracker.onSnapshot(playback.state.value, statisticsListeningEligible())
+                val snapshot = playback.state.value
+                statisticsTracker.onSnapshot(snapshot, statisticsListeningEligible())
+                lastFm.onMediaTransition(
+                    snapshot = snapshot,
+                    eligible = statisticsListeningEligible() && snapshot.currentItem?.metadata?.isPodcast != true,
+                    previousTrackId = event.previous?.metadata?.id,
+                )
                 val now = System.currentTimeMillis()
                 flushPlayHistoryCurrent(now)
                 playHistoryCurrent =
@@ -715,52 +778,63 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         cacheResolvedRemote: () -> Boolean = { true },
         reportFailure: Boolean = true,
     ): Result<ResolvedPlaybackSource> = when (val source = item.source) {
-        is PlaybackSource.Deferred -> resolveDeferredPreferCompletedDownload(
-            item = item,
-            completedDownloadLookup = completedDownloadLookup,
-        ) {
-            cachedSourceFor(source.key)?.let { Result.success(it) }
-                ?: backend.resolveAudioStreamWithMetadataFallback(
-                    videoId = source.key,
-                    title = item.metadata.title,
-                    artistNames = item.metadata.artists.map { it.name },
-                    albumTitle = item.metadata.album?.title,
-                    durationHintMs = item.metadata.durationHintMs,
-                )
-                    .fold(
-                        onSuccess = {
-                            runtime.logger.info(
-                                "stream_resolution event=resolved videoId=${source.key} resolvedVideoId=${it.videoId} client=${it.clientKey} " +
-                                    "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
-                                    "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
-                            )
-                            val resolved = ResolvedPlaybackSource(
-                                uri = it.url,
-                                mimeType = it.mimeType,
-                                headers = it.requestHeaders,
-                                expiresAtEpochMs = it.expiresAtEpochMillis,
-                                loudnessDb = it.audioConfig?.loudnessDb,
-                                perceptualLoudnessDb = it.audioConfig?.perceptualLoudnessDb,
-                            )
-                            if (cacheResolvedRemote()) {
-                                cacheSource(
-                                    key = source.key,
-                                    source = resolved,
-                                    resolvedVideoId = it.videoId,
-                                    streamClientKey = it.clientKey,
-                                    streamAuthFingerprint = it.authFingerprint,
-                                )
-                            }
-                            Result.success(resolved)
-                        },
-                        onFailure = { failure ->
-                            val classification = classifyStreamResolutionFailure(failure)
-                            if (reportFailure) {
-                                runtime.logger.warning("stream_resolution event=player_handoff result=${classification.name}")
-                            }
-                            Result.failure(DesktopStreamResolutionException(classification, failure))
-                        },
+        is PlaybackSource.Deferred -> {
+            // Capture the account scope before network resolution. If the account changes while
+            // the request is in flight, the resulting signed URL must never be stamped as belonging
+            // to the new account when it is inserted into the in-memory cache.
+            val requestSessionFingerprint = account.currentAuthState().streamCacheSessionFingerprint()
+            resolveDeferredPreferCompletedDownload(
+                item = item,
+                completedDownloadLookup = completedDownloadLookup,
+            ) {
+                cachedSourceFor(source.key)?.let { Result.success(it) }
+                    ?: backend.resolveAudioStreamWithMetadataFallback(
+                        videoId = source.key,
+                        title = item.metadata.title,
+                        artistNames = item.metadata.artists.map { it.name },
+                        albumTitle = item.metadata.album?.title,
+                        durationHintMs = item.metadata.durationHintMs,
                     )
+                        .fold(
+                            onSuccess = {
+                                runtime.logger.info(
+                                    "stream_resolution event=resolved videoId=${source.key} resolvedVideoId=${it.videoId} client=${it.clientKey} " +
+                                        "itag=${it.format.itag} mime=${it.mimeType.substringBefore(';')} bitrate=${it.bitrate} " +
+                                        "hasPot=${it.url.hasQueryParameter("pot")} hasN=${it.url.hasQueryParameter("n")}",
+                                )
+                                val resolved = ResolvedPlaybackSource(
+                                    uri = it.url,
+                                    mimeType = it.mimeType,
+                                    headers = it.requestHeaders,
+                                    expiresAtEpochMs = it.expiresAtEpochMillis,
+                                    loudnessDb = it.audioConfig?.loudnessDb,
+                                    perceptualLoudnessDb = it.audioConfig?.perceptualLoudnessDb,
+                                )
+                                if (cacheResolvedRemote() && isSameStreamCacheSession(
+                                        requestSessionFingerprint,
+                                        account.currentAuthState().streamCacheSessionFingerprint(),
+                                    )
+                                ) {
+                                    cacheSource(
+                                        key = source.key,
+                                        source = resolved,
+                                        resolvedVideoId = it.videoId,
+                                        streamClientKey = it.clientKey,
+                                        streamAuthFingerprint = it.authFingerprint,
+                                        sessionFingerprint = requestSessionFingerprint,
+                                    )
+                                }
+                                Result.success(resolved)
+                            },
+                            onFailure = { failure ->
+                                val classification = classifyStreamResolutionFailure(failure)
+                                if (reportFailure) {
+                                    runtime.logger.warning("stream_resolution event=player_handoff result=${classification.name}")
+                                }
+                                Result.failure(DesktopStreamResolutionException(classification, failure))
+                            }
+                        )
+            }
         }
         is PlaybackSource.Remote, is PlaybackSource.LocalFile -> DesktopConcretePlaybackSourceResolver.resolve(item)
     }
@@ -834,8 +908,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         resolvedVideoId: String,
         streamClientKey: String,
         streamAuthFingerprint: String,
+        sessionFingerprint: String,
     ) {
         val expiresAt = source.expiresAtEpochMs ?: return
+        // Defend against a session change between the caller's check and this cache write.
+        if (!isSameStreamCacheSession(sessionFingerprint, account.currentAuthState().streamCacheSessionFingerprint())) return
         if (resolvedSourceCache.size >= MAX_RESOLVED_SOURCE_CACHE_ENTRIES) {
             resolvedSourceCache.entries.removeIf { (_, value) ->
                 value.source.expiresAtEpochMs?.let { it <= System.currentTimeMillis() + STREAM_CACHE_EXPIRY_LEAD_MILLIS } != false
@@ -847,7 +924,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             // Per-video PoTokens rotate every time another song is prepared. They must not evict a
             // still-valid signed source for the previous song; only stable account/session context
             // determines whether a cached URL belongs to the current login.
-            sessionFingerprint = account.currentAuthState().streamCacheSessionFingerprint(),
+            sessionFingerprint = sessionFingerprint,
             resolvedVideoId = resolvedVideoId,
             streamClientKey = streamClientKey,
             streamAuthFingerprint = streamAuthFingerprint,
@@ -872,6 +949,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             lyricsScope.value.cancel()
         }
         nextTrackPrefetcher.close()
+        sponsorBlock.close()
+        lastFm.close()
+        canvas.close()
         statisticsTracker.flush()
         statistics.close()
         globalKeyBindings?.close()
@@ -885,12 +965,26 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     }
 
     private fun configuredLyricsClient(): JvmLyricsClient {
-        val defaults = BuiltInLyricsProviders.defaults
-        val selected = settings.snapshot().lyricsProviderIds
+        val allProviders = BuiltInLyricsProviders.defaults
+        val defaults = if (paxsenixCredentialService.hasApiKey()) {
+            allProviders
+        } else {
+            allProviders.filterNot { it.id in BuiltInLyricsProviders.paxsenixProviderIds }
+        }
+        val selected = BuiltInLyricsProviders.normalizeProviderIds(settings.snapshot().lyricsProviderIds)
         if (selected.isEmpty()) return JvmLyricsClient(defaults)
         val byId = defaults.associateBy { it.id }
         val configured = selected.mapNotNull(byId::get)
         return JvmLyricsClient(configured.ifEmpty { defaults })
+    }
+
+    fun hasPaxsenixApiKey(): Boolean = paxsenixCredentialService.hasApiKey()
+
+    fun updatePaxsenixApiKey(value: String?) {
+        paxsenixCredentialService.setApiKey(value)
+        if (lyricsPresenter.isInitialized()) {
+            lyricsPresenter.value.updateLyricsClient(configuredLyricsClient())
+        }
     }
 
     private fun songFromPlaybackItem(item: PlaybackItem): SongItem =
@@ -923,6 +1017,7 @@ internal data class DesktopPartyPlaybackPolicy(
     val localTransportAllowed: Boolean = true,
     val persistSpeedAndRepeat: Boolean = true,
     val persistShuffle: Boolean = true,
+    val automaticSeekingAllowed: Boolean = true,
 )
 
 /**
@@ -1011,6 +1106,9 @@ private data class CachedResolvedSource(
     val streamClientKey: String,
     val streamAuthFingerprint: String?,
 )
+
+internal fun isSameStreamCacheSession(requestSessionFingerprint: String, currentSessionFingerprint: String): Boolean =
+    requestSessionFingerprint == currentSessionFingerprint
 
 private fun PlaybackAuthState.streamCacheSessionFingerprint(): String =
     sha1(

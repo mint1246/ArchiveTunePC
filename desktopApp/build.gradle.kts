@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "moe.rukamori.archivetune"
-version = "15.0"
+version = "15.10"
 val windowsPackageVersion = version.toString().let { value ->
     if (value.count { it == '.' } == 1) "$value.0" else value
 }
@@ -29,6 +29,8 @@ kotlin {
 
 dependencies {
     implementation(project(":desktop-backend"))
+    implementation(project(":canvas"))
+    implementation(project(":spotifycore"))
     implementation(project(":desktop-auth"))
     implementation(project(":desktop-social"))
     implementation(project(":desktop-playback"))
@@ -40,6 +42,7 @@ dependencies {
     implementation(project(":desktop-lyrics-ui"))
     implementation(project(":windows-media-integration"))
     implementation(project(":desktop-downloads"))
+    implementation(project(":lastfm"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)

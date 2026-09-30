@@ -99,6 +99,7 @@ fun main() {
             localTransportAllowed = party.localTransportCommandsAllowed,
             persistSpeedAndRepeat = party.persistSpeedAndRepeat,
             persistShuffle = party.persistShuffle,
+            automaticSeekingAllowed = playTogether.state.value.mode != PartyMode.GUEST,
         )
     }
     musicServices.attachPartyPlayPauseHandler(playTogether::togglePlayback)
@@ -303,6 +304,7 @@ fun main() {
                 val browse = remember(musicServices) {
                     moe.rukamori.archivetune.desktop.ui.DesktopBrowseController(
                         repository = musicServices.browseRepository,
+                        podcasts = musicServices.podcastRepository,
                         initialDestination = latestDestination,
                     )
                 }

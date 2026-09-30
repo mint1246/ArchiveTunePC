@@ -152,6 +152,29 @@ class DesktopSettingsStoreTest {
     }
 
     @Test
+    fun migratesRetiredPaxsenixProviderSelectionsWithoutRejectingSettings() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        Files.writeString(
+            file,
+            """
+                lyrics.provider.0=paxsenix
+                lyrics.provider.1=paxsenix-netease
+                lyrics.provider.2=paxsenix-youtube
+                lyrics.provider.3=lrclib
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("lrclib"), DesktopSettingsStore(file).snapshot().lyricsProviderIds)
+
+        val retiredOnlyFile = file.resolveSibling("retired-only.properties")
+        Files.writeString(
+            retiredOnlyFile,
+            "lyrics.provider.0=paxsenix-netease\nlyrics.provider.1=paxsenix-youtube\n",
+        )
+        assertEquals(emptyList<String>(), DesktopSettingsStore(retiredOnlyFile).snapshot().lyricsProviderIds)
+    }
+
+    @Test
     fun sanitizesAudioOutputDeviceId() {
         val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
         val store = DesktopSettingsStore(file)
@@ -212,6 +235,89 @@ class DesktopSettingsStoreTest {
         val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
         assertEquals("false", persisted.getProperty("statistics.countPartyListening"))
         assertEquals(false, DesktopSettingsStore(file).snapshot().countPartyListeningInStatistics)
+    }
+
+    @Test
+    fun sponsorBlockAndCanvasSettingsPersistAndOlderFilesKeepCompatibleDefaults() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        Files.writeString(file, "playback.volume=0.5\n")
+        val migrated = DesktopSettingsStore(file).snapshot()
+        assertEquals(true, migrated.sponsorBlockEnabled)
+        assertEquals(DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES, migrated.sponsorBlockCategories)
+        assertEquals(DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL, migrated.sponsorBlockApiUrl)
+        assertEquals(false, migrated.desktopCanvasEnabled)
+        assertEquals(DesktopCanvasSource.ALL, migrated.desktopCanvasSource)
+        assertEquals(256, migrated.desktopCanvasCacheLimitMb)
+
+        val store = DesktopSettingsStore(file)
+        store.save(
+            migrated.copy(
+                sponsorBlockEnabled = false,
+                sponsorBlockCategories = setOf("sponsor", "intro"),
+                sponsorBlockApiUrl = "https://example.test/sb/",
+                desktopCanvasEnabled = true,
+                desktopCanvasSource = DesktopCanvasSource.SPOTIFY,
+                desktopCanvasCacheLimitMb = 8_192,
+            ),
+        )
+        val saved = DesktopSettingsStore(file).snapshot()
+        assertEquals(false, saved.sponsorBlockEnabled)
+        assertEquals(setOf("intro", "sponsor"), saved.sponsorBlockCategories)
+        assertEquals("https://example.test/sb", saved.sponsorBlockApiUrl)
+        assertEquals(true, saved.desktopCanvasEnabled)
+        assertEquals(DesktopCanvasSource.SPOTIFY, saved.desktopCanvasSource)
+        assertEquals(8_192, saved.desktopCanvasCacheLimitMb)
+    }
+
+    @Test
+    fun sponsorBlockRejectsUnknownCategoryIdsAndUnsafeUrlsAndCanvasLimitIsBounded() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        val store = DesktopSettingsStore(file)
+        store.save(
+            DesktopSettings(
+                sponsorBlockCategories = setOf("sponsor", "unknown"),
+                sponsorBlockApiUrl = "http://example.test",
+                desktopCanvasCacheLimitMb = 100_000,
+            ),
+        )
+        val settings = store.snapshot()
+        assertEquals(setOf("sponsor"), settings.sponsorBlockCategories)
+        assertEquals(DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL, settings.sponsorBlockApiUrl)
+        assertEquals(8_192, settings.desktopCanvasCacheLimitMb)
+
+        store.save(settings.copy(desktopCanvasCacheLimitMb = -1))
+        assertEquals(64, store.snapshot().desktopCanvasCacheLimitMb)
+    }
+
+    @Test
+    fun lyricsTranslationDefaultsMigrateAndPersistWithoutApiKeyField() {
+        val file = Files.createTempDirectory("archivetune-settings-").resolve("settings.properties")
+        Files.writeString(file, "playback.volume=0.5\n")
+        val store = DesktopSettingsStore(file)
+        assertEquals(DesktopLyricsTranslationProvider.GOOGLE, store.snapshot().lyricsTranslationProvider)
+        assertEquals("en", store.snapshot().lyricsTranslationTargetLanguage)
+        assertEquals("https://api.openai.com/v1/chat/completions", store.snapshot().lyricsTranslationEndpoint)
+        assertEquals("gpt-4o-mini", store.snapshot().lyricsTranslationModel)
+        assertEquals("", store.snapshot().lyricsTranslationCustomPrompt)
+
+        store.update {
+            it.copy(
+                lyricsTranslationProvider = DesktopLyricsTranslationProvider.OPENAI_COMPATIBLE,
+                lyricsTranslationTargetLanguage = "ja",
+                lyricsTranslationEndpoint = "https://translator.example/v1/chat/completions",
+                lyricsTranslationModel = "custom-model",
+                lyricsTranslationCustomPrompt = "Keep line breaks",
+            )
+        }
+        store.close()
+        val restored = DesktopSettingsStore(file).snapshot()
+        assertEquals(DesktopLyricsTranslationProvider.OPENAI_COMPATIBLE, restored.lyricsTranslationProvider)
+        assertEquals("ja", restored.lyricsTranslationTargetLanguage)
+        assertEquals("https://translator.example/v1/chat/completions", restored.lyricsTranslationEndpoint)
+        assertEquals("custom-model", restored.lyricsTranslationModel)
+        assertEquals("Keep line breaks", restored.lyricsTranslationCustomPrompt)
+        val persisted = Properties().also { values -> Files.newInputStream(file).use(values::load) }
+        assertFalse(persisted.stringPropertyNames().any { "apiKey" in it || "api.key" in it })
     }
 
     @Test

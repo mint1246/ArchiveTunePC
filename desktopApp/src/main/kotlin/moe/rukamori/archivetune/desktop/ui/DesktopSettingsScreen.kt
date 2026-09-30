@@ -31,9 +31,11 @@ import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +48,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -61,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +74,7 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.DesktopPlatform
+import moe.rukamori.archivetune.desktop.platform.DesktopLastFmState
 import moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy
 import moe.rukamori.archivetune.desktop.settings.DesktopKeybind
 import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
@@ -77,7 +82,11 @@ import moe.rukamori.archivetune.desktop.settings.DesktopEqualizerSettings
 import moe.rukamori.archivetune.desktop.settings.DesktopRepeatMode
 import moe.rukamori.archivetune.desktop.settings.DesktopSettings
 import moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore
+import moe.rukamori.archivetune.desktop.settings.DesktopLyricsTranslationProvider
+import moe.rukamori.archivetune.desktop.settings.DesktopCanvasSource
 import moe.rukamori.archivetune.desktop.settings.supportsHoldRepeat
+import moe.rukamori.archivetune.desktop.sponsorblock.DesktopSponsorBlockCategory
+import moe.rukamori.archivetune.desktop.sponsorblock.normalizeDesktopSponsorBlockApiUrl
 import moe.rukamori.archivetune.desktop.state.DesktopThemePreference
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
@@ -118,6 +127,17 @@ fun DesktopSettingsPanel(
     onKeybindCaptureChanged: (Boolean) -> Unit = {},
     onStatisticsPreferenceChanged: () -> Unit = {},
     onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> },
+    paxsenixApiKeyConfigured: Boolean = false,
+    onPaxsenixApiKeyChanged: (String?) -> Unit = {},
+    lyricsTranslationApiKeyConfigured: Boolean = false,
+    onLyricsTranslationApiKeyChanged: (String?) -> Unit = {},
+    lastFmStateFlow: StateFlow<DesktopLastFmState>? = null,
+    onLastFmCredentialsChanged: (String, String, String) -> Unit = { _, _, _ -> },
+    onLastFmStartAuthorization: () -> Unit = {},
+    onLastFmFinishAuthorization: () -> Unit = {},
+    onLastFmDisconnect: () -> Unit = {},
+    onLastFmScrobblingChanged: (Boolean) -> Unit = {},
+    onLastFmNowPlayingChanged: (Boolean) -> Unit = {},
     keybindPressedKeys: StateFlow<List<Int>>? = null,
     account: DesktopSessionManager?,
     accountContent: @Composable () -> Unit,
@@ -127,6 +147,8 @@ fun DesktopSettingsPanel(
     val emptyKeybindPressedKeys = remember { MutableStateFlow<List<Int>>(emptyList()) }
     val observedKeybindKeys by (keybindPressedKeys ?: emptyKeybindPressedKeys).collectAsState()
     var settings by remember(settingsStore) { mutableStateOf(settingsStore.snapshot()) }
+    val emptyLastFmState = remember { MutableStateFlow(DesktopLastFmState()) }
+    val lastFm by (lastFmStateFlow ?: emptyLastFmState).collectAsState()
     // Keep this mirror in sync when the host reloads/migrates its folder list while this
     // settings surface remains mounted. Without the key, a successful external update leaves
     // the rows showing stale folders until the whole screen is recreated.
@@ -134,6 +156,20 @@ fun DesktopSettingsPanel(
     var notice by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var recordingKeybindAction by remember { mutableStateOf<DesktopKeybindAction?>(null) }
+    var showLyricsApiKeyDialog by remember { mutableStateOf(false) }
+    var lyricsApiKeyDraft by remember { mutableStateOf("") }
+    var showPaxsenixApiKeyDialog by remember { mutableStateOf(false) }
+    var paxsenixApiKeyDraft by remember { mutableStateOf("") }
+    var sponsorApiDraft by remember { mutableStateOf(settings.sponsorBlockApiUrl) }
+    var lyricsLanguageDraft by remember { mutableStateOf(settings.lyricsTranslationTargetLanguage) }
+    var lyricsEndpointDraft by remember { mutableStateOf(settings.lyricsTranslationEndpoint) }
+    var lyricsModelDraft by remember { mutableStateOf(settings.lyricsTranslationModel) }
+    var lyricsPromptDraft by remember { mutableStateOf(settings.lyricsTranslationCustomPrompt) }
+    var lastFmEndpointDraft by remember(settingsStore) { mutableStateOf(settings.lastFmEndpoint) }
+    var lastFmApiKeyDraft by remember { mutableStateOf("") }
+    var lastFmSecretDraft by remember { mutableStateOf("") }
+    var canvasSourceMenuOpen by remember { mutableStateOf(false) }
+    var canvasCacheMenuOpen by remember { mutableStateOf(false) }
     var equalizerCapabilities by remember(audioEffects) { mutableStateOf<DesktopEqualizerCapabilities?>(null) }
     var equalizerUnavailable by remember(audioEffects) { mutableStateOf(audioEffects == null) }
     val libraryFeedback = localLibraryScanFeedback(
@@ -400,6 +436,115 @@ fun DesktopSettingsPanel(
             }
         }
 
+        Text("Canvas videos", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ToggleRow("Show Canvas videos in the lyrics player", settings.desktopCanvasEnabled, Icons.Rounded.Lyrics) { enabled ->
+                    update { it.copy(desktopCanvasEnabled = enabled) }
+                }
+                Text(
+                    "Fetches matching animated artwork from Better Lyrics, Apple Music, Tidal, or Spotify. Videos are muted and fall back to the normal artwork when unavailable.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Provider", modifier = Modifier.weight(1f))
+                    Box {
+                        OutlinedButton(onClick = { canvasSourceMenuOpen = true }) {
+                            Text(settings.desktopCanvasSource.displayName)
+                        }
+                        DropdownMenu(
+                            expanded = canvasSourceMenuOpen,
+                            onDismissRequest = { canvasSourceMenuOpen = false },
+                        ) {
+                            DesktopCanvasSource.entries.forEach { source ->
+                                DropdownMenuItem(
+                                    text = { Text(if (settings.desktopCanvasSource == source) "✓ ${source.displayName}" else source.displayName) },
+                                    onClick = {
+                                        canvasSourceMenuOpen = false
+                                        update { it.copy(desktopCanvasSource = source) }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Video cache", modifier = Modifier.weight(1f))
+                    Box {
+                        OutlinedButton(onClick = { canvasCacheMenuOpen = true }) {
+                            Text(settings.desktopCanvasCacheLimitMb.canvasCacheLabel)
+                        }
+                        DropdownMenu(
+                            expanded = canvasCacheMenuOpen,
+                            onDismissRequest = { canvasCacheMenuOpen = false },
+                        ) {
+                            listOf(0, 64, 128, 256, 512, 1024, 2048, 4096, 8192).forEach { limit ->
+                                DropdownMenuItem(
+                                    text = { Text(if (settings.desktopCanvasCacheLimitMb == limit) "✓ ${limit.canvasCacheLabel}" else limit.canvasCacheLabel) },
+                                    onClick = {
+                                        canvasCacheMenuOpen = false
+                                        update { it.copy(desktopCanvasCacheLimitMb = limit) }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    "Choose Off to stream videos without saving them. Cached videos are capped at 128 MB each.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Text("SponsorBlock", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ToggleRow("Skip selected SponsorBlock segments", settings.sponsorBlockEnabled, Icons.Rounded.SkipNext) { enabled ->
+                    update { it.copy(sponsorBlockEnabled = enabled) }
+                }
+                Text(
+                    "SponsorBlock uses community-submitted timestamps for YouTube tracks. Local files and party guests are left untouched.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                DesktopSponsorBlockCategory.entries.forEach { category ->
+                    val selected = category.apiValue in settings.sponsorBlockCategories
+                    Row(Modifier.fillMaxWidth().clickable {
+                        val next = if (selected) settings.sponsorBlockCategories - category.apiValue else settings.sponsorBlockCategories + category.apiValue
+                        update { it.copy(sponsorBlockCategories = next) }
+                    }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(selected, null)
+                        Text(category.displayName)
+                    }
+                }
+                HorizontalDivider()
+                Text("API server", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextField(
+                        value = sponsorApiDraft,
+                        onValueChange = { sponsorApiDraft = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("HTTPS base URL") },
+                    )
+                    Button(onClick = {
+                        val normalized = normalizeDesktopSponsorBlockApiUrl(sponsorApiDraft)
+                        if (normalized == null) {
+                            error = "SponsorBlock API URLs must use HTTPS and omit query parameters."
+                        } else {
+                            error = null
+                            settings = settingsStore.update { it.copy(sponsorBlockApiUrl = normalized) }
+                            sponsorApiDraft = normalized
+                        }
+                    }) { Text("Save") }
+                }
+            }
+        }
+
         Text("Equalizer", style = MaterialTheme.typography.headlineMedium)
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -558,6 +703,20 @@ fun DesktopSettingsPanel(
                     Text("Enabled providers", style = MaterialTheme.typography.titleMedium)
                 }
                 Text("Provider changes apply after restarting the desktop app. Disabled providers are skipped during fallback search.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (paxsenixApiKeyConfigured) "Paxsenix key saved with Windows DPAPI" else "Paxsenix providers need an API key",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(onClick = {
+                        paxsenixApiKeyDraft = ""
+                        showPaxsenixApiKeyDialog = true
+                    }) { Text(if (paxsenixApiKeyConfigured) "Replace key" else "Set API key") }
+                    if (paxsenixApiKeyConfigured) {
+                        TextButton(onClick = { onPaxsenixApiKeyChanged(null) }) { Text("Clear") }
+                    }
+                }
                 BuiltInLyricsProviders.defaults.forEach { provider ->
                     val enabled = settings.lyricsProviderIds.isEmpty() || provider.id in settings.lyricsProviderIds
                     Row(Modifier.fillMaxWidth().clickable {
@@ -574,6 +733,206 @@ fun DesktopSettingsPanel(
                         Text(provider.name)
                     }
                 }
+            }
+        }
+
+        Text("Lyrics translation", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Translation provider", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DesktopLyricsTranslationProvider.entries.forEach { provider ->
+                        TextButton(onClick = { update { it.copy(lyricsTranslationProvider = provider) } }) {
+                            Text(if (settings.lyricsTranslationProvider == provider) "✓ ${provider.label}" else provider.label)
+                        }
+                    }
+                }
+                TextField(
+                    value = lyricsLanguageDraft,
+                    onValueChange = { value -> lyricsLanguageDraft = value; update { it.copy(lyricsTranslationTargetLanguage = value) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Target language") },
+                )
+                if (settings.lyricsTranslationProvider == DesktopLyricsTranslationProvider.OPENAI_COMPATIBLE) {
+                    TextField(
+                        value = lyricsEndpointDraft,
+                        onValueChange = { value -> lyricsEndpointDraft = value; update { it.copy(lyricsTranslationEndpoint = value) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Chat completions endpoint") },
+                    )
+                    TextField(
+                        value = lyricsModelDraft,
+                        onValueChange = { value -> lyricsModelDraft = value; update { it.copy(lyricsTranslationModel = value) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Model") },
+                    )
+                    TextField(
+                        value = lyricsPromptDraft,
+                        onValueChange = { value -> lyricsPromptDraft = value; update { it.copy(lyricsTranslationCustomPrompt = value) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Custom translation instructions") },
+                        minLines = 2,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (lyricsTranslationApiKeyConfigured) "API key saved with Windows DPAPI" else "No API key saved", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = {
+                            lyricsApiKeyDraft = ""
+                            showLyricsApiKeyDialog = true
+                        }) { Text(if (lyricsTranslationApiKeyConfigured) "Replace key" else "Set key") }
+                        if (lyricsTranslationApiKeyConfigured) {
+                            TextButton(onClick = { onLyricsTranslationApiKeyChanged(null) }) { Text("Clear") }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showLyricsApiKeyDialog) {
+            AlertDialog(
+                onDismissRequest = { showLyricsApiKeyDialog = false },
+                title = { Text("Lyrics translation API key") },
+                text = {
+                    TextField(
+                        value = lyricsApiKeyDraft,
+                        onValueChange = { lyricsApiKeyDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        label = { Text("API key") },
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = lyricsApiKeyDraft.isNotBlank(),
+                        onClick = {
+                            onLyricsTranslationApiKeyChanged(lyricsApiKeyDraft.trim())
+                            lyricsApiKeyDraft = ""
+                            showLyricsApiKeyDialog = false
+                        },
+                    ) { Text("Save key") }
+                },
+                dismissButton = { TextButton(onClick = { showLyricsApiKeyDialog = false }) { Text("Cancel") } },
+            )
+        }
+
+        if (showPaxsenixApiKeyDialog) {
+            AlertDialog(
+                onDismissRequest = { showPaxsenixApiKeyDialog = false },
+                title = { Text("Paxsenix lyrics API key") },
+                text = {
+                    TextField(
+                        value = paxsenixApiKeyDraft,
+                        onValueChange = { paxsenixApiKeyDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        label = { Text("API key") },
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = paxsenixApiKeyDraft.isNotBlank(),
+                        onClick = {
+                            onPaxsenixApiKeyChanged(paxsenixApiKeyDraft.trim())
+                            paxsenixApiKeyDraft = ""
+                            showPaxsenixApiKeyDialog = false
+                        },
+                    ) { Text("Save key") }
+                },
+                dismissButton = { TextButton(onClick = { showPaxsenixApiKeyDialog = false }) { Text("Cancel") } },
+            )
+        }
+
+        Text("Last.fm scrobbling", style = MaterialTheme.typography.headlineMedium)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    when {
+                        lastFm.connected -> "Linked as ${lastFm.username}"
+                        lastFm.credentialsConfigured -> "API credentials are saved with Windows DPAPI; link your account to enable scrobbling."
+                        else -> "Link Last.fm-compatible services and scrobble songs played on Desktop."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                TextField(
+                    value = lastFmEndpointDraft,
+                    onValueChange = { lastFmEndpointDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("API endpoint") },
+                )
+                TextField(
+                    value = lastFmApiKeyDraft,
+                    onValueChange = { lastFmApiKeyDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("API key") },
+                )
+                TextField(
+                    value = lastFmSecretDraft,
+                    onValueChange = { lastFmSecretDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("Shared secret") },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        enabled = lastFmApiKeyDraft.isNotBlank() && lastFmSecretDraft.isNotBlank(),
+                        onClick = {
+                            onLastFmCredentialsChanged(lastFmEndpointDraft, lastFmApiKeyDraft, lastFmSecretDraft)
+                            lastFmApiKeyDraft = ""
+                            lastFmSecretDraft = ""
+                        },
+                    ) { Text("Save securely") }
+                    OutlinedButton(
+                        enabled = lastFm.credentialsConfigured && !lastFm.busy,
+                        onClick = onLastFmStartAuthorization,
+                    ) { Text(if (lastFm.busy) "Connecting…" else "Link account") }
+                    if (lastFm.pendingAuthorization) {
+                        Button(enabled = !lastFm.busy, onClick = onLastFmFinishAuthorization) { Text("Finish linking") }
+                    }
+                    if (lastFm.connected) TextButton(onClick = onLastFmDisconnect) { Text("Disconnect") }
+                }
+                lastFm.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
+                lastFm.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                ToggleRow("Scrobble eligible listening", settings.lastFmEnabled, Icons.Rounded.BarChart, enabled = lastFm.connected) { enabled ->
+                    update { it.copy(lastFmEnabled = enabled && lastFm.connected) }
+                    onLastFmScrobblingChanged(enabled)
+                }
+                ToggleRow("Send now-playing updates", settings.lastFmNowPlayingEnabled, Icons.Rounded.Lyrics, enabled = lastFm.connected) { enabled ->
+                    update { it.copy(lastFmNowPlayingEnabled = enabled) }
+                    onLastFmNowPlayingChanged(enabled)
+                }
+                Text("Minimum track length: ${settings.lastFmMinTrackDurationSeconds}s", style = MaterialTheme.typography.bodySmall)
+                Slider(
+                    value = settings.lastFmMinTrackDurationSeconds.toFloat(),
+                    onValueChange = { value -> update { it.copy(lastFmMinTrackDurationSeconds = value.roundToInt()) } },
+                    valueRange = 0f..600f,
+                    steps = 59,
+                )
+                Text("Scrobble after ${"%.0f".format(settings.lastFmScrobbleDelayPercent * 100)}% or ${settings.lastFmScrobbleDelaySeconds}s, whichever comes first", style = MaterialTheme.typography.bodySmall)
+                Slider(
+                    value = settings.lastFmScrobbleDelayPercent,
+                    onValueChange = { value -> update { it.copy(lastFmScrobbleDelayPercent = value) } },
+                    valueRange = 0.1f..1f,
+                    steps = 17,
+                )
+                Slider(
+                    value = settings.lastFmScrobbleDelaySeconds.toFloat(),
+                    onValueChange = { value -> update { it.copy(lastFmScrobbleDelaySeconds = value.roundToInt()) } },
+                    valueRange = 1f..600f,
+                    steps = 59,
+                )
+                Text(
+                    "Only READY playback time counts. Pauses, buffering and seeks add no time; downloads and local music are supported. Podcast episodes and ineligible party listening are skipped.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
@@ -1102,3 +1461,18 @@ private suspend fun chooseDirectory(title: String): Path? = withContext(Dispatch
 
 private fun DesktopRepeatMode.toPlaybackMode() = moe.rukamori.archivetune.playback.api.RepeatMode.valueOf(name)
 private val DesktopRepeatMode.label: String get() = name.lowercase().replaceFirstChar(Char::uppercase)
+private val DesktopCanvasSource.displayName: String
+    get() = when (this) {
+        DesktopCanvasSource.ALL -> "All providers"
+        DesktopCanvasSource.BETTER_LYRICS -> "Better Lyrics"
+        DesktopCanvasSource.APPLE_MUSIC -> "Apple Music"
+        DesktopCanvasSource.TIDAL -> "Tidal"
+        DesktopCanvasSource.SPOTIFY -> "Spotify"
+    }
+private val Int.canvasCacheLabel: String
+    get() = if (this == 0) "Off" else "$this MB"
+private val DesktopLyricsTranslationProvider.label: String
+    get() = when (this) {
+        DesktopLyricsTranslationProvider.GOOGLE -> "Google Translate"
+        DesktopLyricsTranslationProvider.OPENAI_COMPATIBLE -> "OpenAI compatible"
+    }

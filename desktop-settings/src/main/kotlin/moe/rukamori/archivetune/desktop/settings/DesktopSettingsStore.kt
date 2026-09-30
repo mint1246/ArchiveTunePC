@@ -6,6 +6,7 @@
 
 package moe.rukamori.archivetune.desktop.settings
 
+import java.net.URI
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -50,6 +51,24 @@ enum class DesktopPartialCleanupPolicy {
     DELETE_ON_CANCEL,
     KEEP_ON_CANCEL,
 }
+
+enum class DesktopLyricsTranslationProvider {
+    GOOGLE,
+    OPENAI_COMPATIBLE,
+}
+
+enum class DesktopCanvasSource {
+    ALL,
+    BETTER_LYRICS,
+    APPLE_MUSIC,
+    TIDAL,
+    SPOTIFY,
+}
+
+const val DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL = "https://sponsor.ajay.app"
+val DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES = setOf(
+    "music_offtopic", "sponsor", "intro", "outro", "selfpromo", "preview", "filler", "interaction", "hook",
+)
 
 enum class DesktopKeybindAction {
     PLAY_PAUSE,
@@ -130,6 +149,23 @@ data class DesktopSettings(
     val partialCleanupPolicy: DesktopPartialCleanupPolicy = DesktopPartialCleanupPolicy.DELETE_ON_CANCEL,
     /** Empty means all built-in lyrics providers, preserving the Android fallback behavior. */
     val lyricsProviderIds: List<String> = emptyList(),
+    val lyricsTranslationProvider: DesktopLyricsTranslationProvider = DesktopLyricsTranslationProvider.GOOGLE,
+    val lyricsTranslationTargetLanguage: String = "en",
+    val lyricsTranslationEndpoint: String = "https://api.openai.com/v1/chat/completions",
+    val lyricsTranslationModel: String = "gpt-4o-mini",
+    val lyricsTranslationCustomPrompt: String = "",
+    val sponsorBlockEnabled: Boolean = true,
+    val sponsorBlockCategories: Set<String> = DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES,
+    val sponsorBlockApiUrl: String = DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL,
+    val desktopCanvasEnabled: Boolean = false,
+    val desktopCanvasSource: DesktopCanvasSource = DesktopCanvasSource.ALL,
+    val desktopCanvasCacheLimitMb: Int = 256,
+    val lastFmEnabled: Boolean = false,
+    val lastFmNowPlayingEnabled: Boolean = true,
+    val lastFmMinTrackDurationSeconds: Int = 30,
+    val lastFmScrobbleDelayPercent: Float = 0.5f,
+    val lastFmScrobbleDelaySeconds: Int = 180,
+    val lastFmEndpoint: String = "https://ws.audioscrobbler.com/2.0/",
     val countPartyListeningInStatistics: Boolean = true,
     val keybinds: List<DesktopKeybind> = emptyList(),
 )
@@ -227,6 +263,28 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                 downloadConcurrency = values.getProperty("downloads.concurrency")?.toIntOrNull() ?: 2,
                 partialCleanupPolicy = values.enumValue("downloads.partialCleanup", DesktopPartialCleanupPolicy.DELETE_ON_CANCEL),
                 lyricsProviderIds = readStrings(values, "lyrics.provider"),
+                lyricsTranslationProvider = values.enumValue("lyrics.translation.provider", DesktopLyricsTranslationProvider.GOOGLE),
+                lyricsTranslationTargetLanguage = values.getProperty("lyrics.translation.targetLanguage") ?: "en",
+                lyricsTranslationEndpoint = values.getProperty("lyrics.translation.endpoint") ?: "https://api.openai.com/v1/chat/completions",
+                lyricsTranslationModel = values.getProperty("lyrics.translation.model") ?: "gpt-4o-mini",
+                lyricsTranslationCustomPrompt = values.getProperty("lyrics.translation.customPrompt") ?: "",
+                sponsorBlockEnabled = values.getProperty("playback.sponsorBlock.enabled")?.toBooleanStrictOrNull() ?: true,
+                sponsorBlockCategories = values.getProperty("playback.sponsorBlock.categories")
+                    ?.split(',')
+                    ?.map(String::trim)
+                    ?.filter(DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES::contains)
+                    ?.toSet()
+                    ?: DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES,
+                sponsorBlockApiUrl = values.getProperty("playback.sponsorBlock.apiUrl") ?: DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL,
+                desktopCanvasEnabled = values.getProperty("playback.canvas.enabled")?.toBooleanStrictOrNull() ?: false,
+                desktopCanvasSource = values.enumValue("playback.canvas.source", DesktopCanvasSource.ALL),
+                desktopCanvasCacheLimitMb = values.getProperty("playback.canvas.cacheLimitMb")?.toIntOrNull() ?: 256,
+                lastFmEnabled = values.getProperty("integrations.lastfm.enabled")?.toBooleanStrictOrNull() ?: false,
+                lastFmNowPlayingEnabled = values.getProperty("integrations.lastfm.nowPlaying")?.toBooleanStrictOrNull() ?: true,
+                lastFmMinTrackDurationSeconds = values.getProperty("integrations.lastfm.minTrackDurationSeconds")?.toIntOrNull() ?: 30,
+                lastFmScrobbleDelayPercent = values.getProperty("integrations.lastfm.scrobbleDelayPercent")?.toFloatOrNull() ?: 0.5f,
+                lastFmScrobbleDelaySeconds = values.getProperty("integrations.lastfm.scrobbleDelaySeconds")?.toIntOrNull() ?: 180,
+                lastFmEndpoint = values.getProperty("integrations.lastfm.endpoint") ?: "https://ws.audioscrobbler.com/2.0/",
                 countPartyListeningInStatistics = values.getProperty("statistics.countPartyListening")
                     ?.toBooleanStrictOrNull()
                     ?: true,
@@ -270,6 +328,23 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
             setProperty("downloads.concurrency", settings.downloadConcurrency.toString())
             setProperty("downloads.partialCleanup", settings.partialCleanupPolicy.name)
             settings.lyricsProviderIds.forEachIndexed { index, id -> setProperty("lyrics.provider.$index", id) }
+            setProperty("lyrics.translation.provider", settings.lyricsTranslationProvider.name)
+            setProperty("lyrics.translation.targetLanguage", settings.lyricsTranslationTargetLanguage)
+            setProperty("lyrics.translation.endpoint", settings.lyricsTranslationEndpoint)
+            setProperty("lyrics.translation.model", settings.lyricsTranslationModel)
+            setProperty("lyrics.translation.customPrompt", settings.lyricsTranslationCustomPrompt)
+            setProperty("playback.sponsorBlock.enabled", settings.sponsorBlockEnabled.toString())
+            setProperty("playback.sponsorBlock.categories", settings.sponsorBlockCategories.sorted().joinToString(","))
+            setProperty("playback.sponsorBlock.apiUrl", settings.sponsorBlockApiUrl)
+            setProperty("playback.canvas.enabled", settings.desktopCanvasEnabled.toString())
+            setProperty("playback.canvas.source", settings.desktopCanvasSource.name)
+            setProperty("playback.canvas.cacheLimitMb", settings.desktopCanvasCacheLimitMb.toString())
+            setProperty("integrations.lastfm.enabled", settings.lastFmEnabled.toString())
+            setProperty("integrations.lastfm.nowPlaying", settings.lastFmNowPlayingEnabled.toString())
+            setProperty("integrations.lastfm.minTrackDurationSeconds", settings.lastFmMinTrackDurationSeconds.toString())
+            setProperty("integrations.lastfm.scrobbleDelayPercent", settings.lastFmScrobbleDelayPercent.toString())
+            setProperty("integrations.lastfm.scrobbleDelaySeconds", settings.lastFmScrobbleDelaySeconds.toString())
+            setProperty("integrations.lastfm.endpoint", settings.lastFmEndpoint)
             setProperty("statistics.countPartyListening", settings.countPartyListeningInStatistics.toString())
             settings.keybinds.forEachIndexed { index, binding ->
                 setProperty("keybind.$index.action", binding.action.name)
@@ -303,7 +378,24 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         windowPlacement = windowPlacement.sanitized(),
         libraryFolders = libraryFolders.map(Path::absolute).map(Path::normalize).distinct().take(MAX_LIBRARY_FOLDERS),
         downloadLocation = downloadLocation?.absolute()?.normalize(),
-        lyricsProviderIds = lyricsProviderIds.map(String::trim).filter(String::isNotEmpty).distinct().take(MAX_LYRICS_PROVIDERS),
+        lyricsProviderIds = lyricsProviderIds.map(String::trim)
+            .filter(String::isNotEmpty)
+            .filterNot(LEGACY_REMOVED_LYRICS_PROVIDER_IDS::contains)
+            .distinct()
+            .take(MAX_LYRICS_PROVIDERS),
+        lyricsTranslationTargetLanguage = lyricsTranslationTargetLanguage.trim().takeIf(String::isNotEmpty)?.take(MAX_TRANSLATION_LANGUAGE_LENGTH) ?: "en",
+        lyricsTranslationEndpoint = normalizeSettingsHttpsUrl(lyricsTranslationEndpoint) ?: DEFAULT_TRANSLATION_ENDPOINT,
+        lyricsTranslationModel = lyricsTranslationModel.trim().takeIf(String::isNotEmpty)?.take(MAX_TRANSLATION_MODEL_LENGTH) ?: "gpt-4o-mini",
+        lyricsTranslationCustomPrompt = lyricsTranslationCustomPrompt.take(MAX_TRANSLATION_PROMPT_LENGTH),
+        sponsorBlockCategories = sponsorBlockCategories.filterTo(linkedSetOf(), DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES::contains),
+        sponsorBlockApiUrl = normalizeSettingsHttpsUrl(sponsorBlockApiUrl) ?: DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL,
+        desktopCanvasCacheLimitMb = sanitizeDesktopCanvasCacheLimit(desktopCanvasCacheLimitMb),
+        lastFmMinTrackDurationSeconds = lastFmMinTrackDurationSeconds.coerceIn(0, 600),
+        lastFmScrobbleDelayPercent = lastFmScrobbleDelayPercent.finiteOr(0.5f).coerceIn(0.1f, 1f),
+        lastFmScrobbleDelaySeconds = lastFmScrobbleDelaySeconds.coerceIn(1, 600),
+        lastFmEndpoint = normalizeSettingsHttpsUrl(lastFmEndpoint)?.let { endpoint ->
+            if (lastFmEndpoint.trim().endsWith("/")) "$endpoint/" else endpoint
+        } ?: "https://ws.audioscrobbler.com/2.0/",
         keybinds = keybinds
             .mapNotNull { it.sanitizedOrNull() }
             .distinctBy { it.action },
@@ -373,10 +465,30 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
 
     private fun String.toPathOrNull(): Path? = runCatching { Path.of(this).absolute().normalize() }.getOrNull()
 
+    private fun normalizeSettingsHttpsUrl(value: String): String? {
+        val candidate = value.trim()
+        val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
+        if (uri.userInfo != null || uri.query != null || uri.fragment != null) return null
+        if (candidate.length > MAX_SETTINGS_URL_LENGTH) return null
+        return candidate.trimEnd('/')
+    }
+
+    private fun sanitizeDesktopCanvasCacheLimit(value: Int): Int = when {
+        value == 0 -> 0
+        else -> value.coerceIn(64, 8_192)
+    }
+
     private companion object {
         const val ARGB_MAX = 0xFFFF_FFFFL
         const val MAX_LIBRARY_FOLDERS = 64
         const val MAX_LYRICS_PROVIDERS = 32
+        val LEGACY_REMOVED_LYRICS_PROVIDER_IDS = setOf("paxsenix", "paxsenix-netease", "paxsenix-youtube")
+        const val MAX_TRANSLATION_LANGUAGE_LENGTH = 64
+        const val MAX_TRANSLATION_MODEL_LENGTH = 128
+        const val MAX_TRANSLATION_PROMPT_LENGTH = 4_000
+        const val MAX_SETTINGS_URL_LENGTH = 2_048
+        const val DEFAULT_TRANSLATION_ENDPOINT = "https://api.openai.com/v1/chat/completions"
         const val MAX_EQUALIZER_BANDS = 32
         const val MAX_EQUALIZER_PRESET_LENGTH = 80
         const val MIN_EQUALIZER_GAIN_DB = -20f
