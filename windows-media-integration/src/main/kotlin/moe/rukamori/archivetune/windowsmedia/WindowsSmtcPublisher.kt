@@ -124,6 +124,10 @@ private class SmtcSession private constructor(
             album = source.album?.title?.takeIf(String::isNotBlank),
             artworkUri = source.artworkUri,
             durationMs = source.durationHintMs?.coerceAtLeast(0L),
+            albumArtist = source.albumArtist,
+            trackNumber = source.trackNumber,
+            discNumber = source.discNumber,
+            year = source.year,
         )
 
         api.callHr(smtc, SMTC_PUT_IS_ENABLED, WINRT_TRUE)
@@ -154,7 +158,9 @@ private class SmtcSession private constructor(
         try {
             api.withHString(metadata.title) { title -> api.callHr(music, MUSIC_PUT_TITLE, title) }
             api.withHString(metadata.artist) { artist -> api.callHr(music, MUSIC_PUT_ARTIST, artist) }
-            api.withHString(metadata.artist) { artist -> api.callHr(music, MUSIC_PUT_ALBUM_ARTIST, artist) }
+            api.withHString(metadata.albumArtist?.takeIf(String::isNotBlank) ?: metadata.artist) { artist ->
+                api.callHr(music, MUSIC_PUT_ALBUM_ARTIST, artist)
+            }
             api.queryInterface(music, IID_MUSIC_DISPLAY_PROPERTIES_2)?.let { music2 ->
                 try {
                     api.withHString(metadata.album.orEmpty()) { albumTitle ->

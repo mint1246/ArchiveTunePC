@@ -18,6 +18,11 @@ data class PlaybackMetadata(
     val explicit: Boolean = false,
     val isMusicVideo: Boolean = false,
     val extras: Map<String, String> = emptyMap(),
+    val isPodcast: Boolean = false,
+    val albumArtist: String? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
+    val year: Int? = null,
 ) {
     val artistText: String
         get() = artists.joinToString { it.name }

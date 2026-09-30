@@ -29,6 +29,7 @@ data class LocalTrack(
     val trackNumber: Int? = null,
     val discNumber: Int? = null,
     val durationMs: Long? = null,
+    val year: Int? = null,
 )
 
 data class LocalMetadata(
@@ -39,9 +40,12 @@ data class LocalMetadata(
     val trackNumber: Int? = null,
     val discNumber: Int? = null,
     val durationMs: Long? = null,
+    val year: Int? = null,
 )
 
 fun interface AudioMetadataReader { fun read(file: Path): LocalMetadata? }
+
+private val Id3YearPattern = Regex("(?<!\\d)\\d{4}(?!\\d)")
 
 /** Persistence boundary for the user-selected library roots. */
 interface DesktopLibraryFolderStore {
@@ -86,10 +90,14 @@ object JaudiotaggerMetadataReader : AudioMetadataReader {
             trackNumber = tag.getFirst(FieldKey.TRACK).toPositiveIntOrNull(),
             discNumber = tag.getFirst(FieldKey.DISC_NO).toPositiveIntOrNull(),
             durationMs = audio.audioHeader.trackLength.toLong().takeIf { it > 0 }?.times(1_000),
+            year = tag.getFirst(FieldKey.YEAR).parseYearOrNull(),
         )
     }
 
     private fun String.toPositiveIntOrNull() = substringBefore('/').trim().toIntOrNull()?.takeIf { it > 0 }
+
+    private fun String.parseYearOrNull(): Int? =
+        Id3YearPattern.find(this)?.value?.toIntOrNull()?.takeIf { it in 1..9999 }
 }
 
 /** Filesystem-backed local library. The index is rebuilt transactionally on each explicit scan. */
@@ -127,7 +135,7 @@ class DesktopLibrary(
                 }
             }
         }
-        indexed = discovered.values.sortedWith(compareBy<LocalTrack> { it.artist }.thenBy { it.title })
+        indexed = sortTracks(discovered.values.toList())
         mutableTracks.value = indexed
         persistIndex(indexed)
         indexed
@@ -144,6 +152,7 @@ class DesktopLibrary(
             trackNumber = metadata?.trackNumber,
             discNumber = metadata?.discNumber,
             durationMs = metadata?.durationMs,
+            year = metadata?.year,
         )
     }
 
@@ -151,7 +160,7 @@ class DesktopLibrary(
         if (!Files.isRegularFile(storageFile)) return@runCatching emptyList()
         val properties = Properties().also { Files.newInputStream(storageFile).use(it::load) }
         val count = properties.getProperty(INDEX_COUNT_KEY)?.toIntOrNull() ?: return@runCatching emptyList()
-        buildList(count) {
+        sortTracks(buildList(count) {
             repeat(count) { index ->
                 val prefix = "track.$index"
                 val path = properties.getProperty("$prefix.path")?.takeIf(String::isNotBlank)?.let(Path::of) ?: return@repeat
@@ -171,11 +180,22 @@ class DesktopLibrary(
                         trackNumber = properties.getProperty("$prefix.trackNumber")?.toIntOrNull(),
                         discNumber = properties.getProperty("$prefix.discNumber")?.toIntOrNull(),
                         durationMs = properties.getProperty("$prefix.durationMs")?.toLongOrNull(),
+                        year = properties.getProperty("$prefix.year")?.toIntOrNull(),
                     ),
                 )
             }
-        }
+        })
     }.getOrDefault(emptyList())
+
+    private fun sortTracks(tracks: List<LocalTrack>): List<LocalTrack> =
+        tracks.sortedWith(
+            compareBy<LocalTrack, String>(String.CASE_INSENSITIVE_ORDER) { it.albumArtist ?: it.artist }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.album.orEmpty() }
+                .thenBy { it.discNumber ?: Int.MAX_VALUE }
+                .thenBy { it.trackNumber ?: Int.MAX_VALUE }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+                .thenBy { it.path.toString() },
+        )
 
     private fun persistIndex(tracks: List<LocalTrack>) {
         Files.createDirectories(storageFile.parent)
@@ -200,6 +220,7 @@ class DesktopLibrary(
             properties["$prefix.trackNumber"] = track.trackNumber?.toString().orEmpty()
             properties["$prefix.discNumber"] = track.discNumber?.toString().orEmpty()
             properties["$prefix.durationMs"] = track.durationMs?.toString().orEmpty()
+            properties["$prefix.year"] = track.year?.toString().orEmpty()
         }
         val temporary = Files.createTempFile(storageFile.parent, ".library-index.", ".tmp")
         try {

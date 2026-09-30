@@ -1321,6 +1321,7 @@ class VlcjPlaybackController(
                 config.durationMs < MIN_CROSSFADE_DURATION_MS ||
                 !snapshot.isPlaying ||
                 snapshot.durationMs <= 0L ||
+                snapshot.currentItem?.metadata?.isPodcast == true ||
                 activeGeneration != generation ||
                 activeCrossfadeRunId != null
             ) {
@@ -1328,6 +1329,7 @@ class VlcjPlaybackController(
             }
 
             val target = crossfadeTargetLocked(config) ?: return@withLock
+            if (target.item.metadata.isPodcast) return@withLock
             if (crossfadeAttemptedOccurrenceId == target.outgoingOccurrenceId) return@withLock
 
             val remainingMs =

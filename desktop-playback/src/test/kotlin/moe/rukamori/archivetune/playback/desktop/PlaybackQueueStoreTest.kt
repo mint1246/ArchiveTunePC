@@ -35,6 +35,11 @@ class PlaybackQueueStoreTest {
                         artworkUri = "https://example.com/art.jpg",
                         durationHintMs = 123_000L,
                         explicit = true,
+                        isPodcast = true,
+                        albumArtist = "Album Artist",
+                        trackNumber = 7,
+                        discNumber = 2,
+                        year = 2024,
                     ),
                 ),
                 PlaybackItem(
@@ -64,6 +69,11 @@ class PlaybackQueueStoreTest {
         assertEquals("https://example.com/art.jpg", restored?.items?.get(0)?.metadata?.artworkUri)
         assertEquals(123_000L, restored?.items?.get(0)?.metadata?.durationHintMs)
         assertTrue(restored?.items?.get(0)?.metadata?.explicit == true)
+        assertTrue(restored?.items?.get(0)?.metadata?.isPodcast == true)
+        assertEquals("Album Artist", restored?.items?.get(0)?.metadata?.albumArtist)
+        assertEquals(7, restored?.items?.get(0)?.metadata?.trackNumber)
+        assertEquals(2, restored?.items?.get(0)?.metadata?.discNumber)
+        assertEquals(2024, restored?.items?.get(0)?.metadata?.year)
         assertEquals("/tmp/a.mp3", (restored?.items?.get(1)?.source as? PlaybackSource.LocalFile)?.path)
     }
 

@@ -93,4 +93,45 @@ class DesktopLibraryTest {
         restored.rescan()
         assertEquals(1, metadataReads)
     }
+
+    @Test fun `rich album tags persist and tracks sort by disc then track`() = runTest {
+        val root = Files.createTempDirectory("archivetune-library-album-order")
+        val files = listOf("03.flac", "01-disc2.flac", "02.flac").associateWith { name ->
+            root.resolve(name).also { Files.writeString(it, "audio") }
+        }
+        var metadataReads = 0
+        val reader = AudioMetadataReader { file ->
+            metadataReads++
+            val name = file.fileName.toString()
+            val (track, disc) = when (name) {
+                "01-disc2.flac" -> 1 to 2
+                "02.flac" -> 2 to 1
+                else -> 3 to 1
+            }
+            LocalMetadata(
+                title = "Track $track",
+                artist = "Guest artist",
+                album = "Concept Album",
+                albumArtist = "Primary artist",
+                trackNumber = track,
+                discNumber = disc,
+                durationMs = 180_000,
+                year = 2024,
+            )
+        }
+        val state = root.resolve("state.properties")
+        val library = DesktopLibrary(state, metadataReader = reader)
+        library.setFolders(listOf(root))
+
+        val scanned = library.rescan()
+
+        assertEquals(listOf("Track 2", "Track 3", "Track 1"), scanned.map(LocalTrack::title))
+        val restored = DesktopLibrary(state, metadataReader = reader)
+        assertEquals("Primary artist", restored.tracks.first().albumArtist)
+        assertEquals(2, restored.tracks.first().trackNumber)
+        assertEquals(1, restored.tracks.first().discNumber)
+        assertEquals(2024, restored.tracks.first().year)
+        restored.rescan()
+        assertEquals(files.size, metadataReads)
+    }
 }

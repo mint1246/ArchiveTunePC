@@ -30,6 +30,10 @@ data class NowPlayingMetadata(
     val album: String?,
     val artworkUri: String?,
     val durationMs: Long?,
+    val albumArtist: String? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
+    val year: Int? = null,
 )
 
 data class WindowsMediaPresentation(
@@ -155,6 +159,10 @@ class WindowsMediaControls(
                     album = it.album?.title?.takeIf(String::isNotBlank),
                     artworkUri = it.artworkUri,
                     durationMs = it.durationHintMs?.coerceAtLeast(0L),
+                    albumArtist = it.albumArtist,
+                    trackNumber = it.trackNumber,
+                    discNumber = it.discNumber,
+                    year = it.year,
                 )
             },
             isPlaying = snapshot.isPlaying,

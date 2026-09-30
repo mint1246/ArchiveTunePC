@@ -74,6 +74,20 @@ class WindowsMediaControlsTest {
     }
 
     @Test
+    fun `presentation carries local album credits and release ordering`() {
+        val controls = WindowsMediaControls(FakeHotKeys())
+
+        controls.update(presentationSnapshot())
+
+        val metadata = requireNotNull(controls.presentation.value.metadata)
+        assertEquals("Album Artist", metadata.albumArtist)
+        assertEquals(7, metadata.trackNumber)
+        assertEquals(2, metadata.discNumber)
+        assertEquals(2024, metadata.year)
+        controls.close()
+    }
+
+    @Test
     fun `start and close are idempotent and cleanup registration`() {
         val keys = FakeHotKeys()
         val controls = WindowsMediaControls(keys)
@@ -141,6 +155,10 @@ class WindowsMediaControlsTest {
                         artists = listOf(PlaybackArtist(name = "Artist")),
                         album = PlaybackAlbum(title = "Album"),
                         durationHintMs = 180_000L,
+                        albumArtist = "Album Artist",
+                        trackNumber = 7,
+                        discNumber = 2,
+                        year = 2024,
                     ),
                 ),
             ),

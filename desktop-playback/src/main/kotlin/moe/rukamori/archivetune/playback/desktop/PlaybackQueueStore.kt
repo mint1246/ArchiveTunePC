@@ -119,7 +119,12 @@ class PlaybackQueueStore(private val file: Path) {
             .put("durationHintMs", metadata.durationHintMs ?: JSONObject.NULL)
             .put("explicit", metadata.explicit)
             .put("isMusicVideo", metadata.isMusicVideo)
+            .put("isPodcast", metadata.isPodcast)
             .put("extras", JSONObject(metadata.extras))
+            .put("albumArtist", metadata.albumArtist ?: JSONObject.NULL)
+            .put("trackNumber", metadata.trackNumber ?: JSONObject.NULL)
+            .put("discNumber", metadata.discNumber ?: JSONObject.NULL)
+            .put("year", metadata.year ?: JSONObject.NULL)
 
     private fun parseMetadata(json: JSONObject): PlaybackMetadata =
         PlaybackMetadata(
@@ -135,7 +140,12 @@ class PlaybackQueueStore(private val file: Path) {
             durationHintMs = json.optLong("durationHintMs", -1L).takeIf { it >= 0L },
             explicit = json.optBoolean("explicit"),
             isMusicVideo = json.optBoolean("isMusicVideo"),
+            isPodcast = json.optBoolean("isPodcast"),
             extras = json.optJSONObject("extras").orEmptyMap(),
+            albumArtist = json.optString("albumArtist").takeIf(String::isNotBlank),
+            trackNumber = json.optInt("trackNumber", -1).takeIf { it > 0 },
+            discNumber = json.optInt("discNumber", -1).takeIf { it > 0 },
+            year = json.optInt("year", -1).takeIf { it in 1..9999 },
         )
 
     private fun sourceToJson(source: PlaybackSource): JSONObject =
