@@ -18,6 +18,11 @@
                            "allPublicFields":  true
                        },
                        {
+                           "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_device_t$ByReference",
+                           "allDeclaredConstructors":  true,
+                           "allPublicFields":  true
+                       },
+                       {
                            "type":  "uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_t",
                            "allDeclaredConstructors":  true,
                            "allPublicFields":  true

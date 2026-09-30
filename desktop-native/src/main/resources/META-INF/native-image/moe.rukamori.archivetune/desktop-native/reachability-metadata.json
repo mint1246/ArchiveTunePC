@@ -8,6 +8,13 @@
       }
     },
     {
+      "type": {
+        "proxy": [
+          "uk.co.caprica.vlcj.binding.lib.Kernel32"
+        ]
+      }
+    },
+    {
       "type": "uk.co.caprica.vlcj.binding.lib.LibVlc",
       "jniAccessible": true,
       "allDeclaredMethods": true
