@@ -83,6 +83,11 @@ RESOLVER_FLAGS: Tuple[str, ...] = (
     "bestaudio[protocol=https]/bestaudio[protocol=http]",
 )
 
+# Harness-only flag. yt-dlp writes its diagnostics to stderr, so the JSON on
+# stdout stays clean. It is what makes the per-run JS challenge evidence
+# ("Solving JS challenges using quickjs") observable.
+DIAGNOSTIC_FLAGS: Tuple[str, ...] = ("-v",)
+
 # Player clients that are known to require the YouTube "n" challenge solver.
 # The default client currently answers without one, so the challenge proof needs
 # a client that is actually challenged.
@@ -478,6 +483,12 @@ class ExtractionRun:
     title: Optional[str] = None
     url_has_n_param: bool = False
     url_has_sig_param: bool = False
+    js_challenge_solved: bool = False
+    js_challenge_attempted: bool = False
+    js_challenge_failed: bool = False
+    js_runtime_reported: Optional[str] = None
+    ejs_version_reported: Optional[str] = None
+    js_solver_source: Optional[str] = None
     header_names: List[str] = field(default_factory=list)
     http_probe: HttpProbe = field(default_factory=HttpProbe)
     live_playback: LivePlayback = field(default_factory=LivePlayback)
@@ -506,6 +517,12 @@ class ExtractionRun:
             "title": self.title,
             "url_has_n_param": self.url_has_n_param,
             "url_has_sig_param": self.url_has_sig_param,
+            "js_challenge_solved": self.js_challenge_solved,
+            "js_challenge_attempted": self.js_challenge_attempted,
+            "js_challenge_failed": self.js_challenge_failed,
+            "js_runtime_reported": self.js_runtime_reported,
+            "ejs_version_reported": self.ejs_version_reported,
+            "js_solver_source": self.js_solver_source,
             "header_names": sorted(self.header_names),
             "http_probe": vars(self.http_probe),
             "live_playback": vars(self.live_playback),
@@ -544,6 +561,7 @@ def extract(
         argv.append("--js-runtimes")
         argv.append("quickjs:%s" % (qjs_override or qjs))
     argv.extend(extra_args)
+    argv.extend(DIAGNOSTIC_FLAGS)
     argv.append(target)
     result = run_command(argv, timeout=timeout, env=env)
     payload: Optional[Dict[str, Any]] = None
@@ -565,8 +583,23 @@ def summarize(run: ExtractionRun, payload: Optional[Dict[str, Any]], result: Com
     run.rss_samples = result.rss_samples
     run.peak_process_count = result.peak_process_count
     run.failure_class = classify_failure(result.exit_code, result.stderr, result.timed_out)
-    if result.stderr.strip():
-        run.stderr_excerpt = redact(result.stderr)
+    stderr = result.stderr or ""
+    # Per-run evidence that the JS runtime actually did the work.
+    run.js_challenge_solved = "Solving JS challenges using quickjs" in stderr
+    run.js_challenge_attempted = ("jsc:quickjs" in stderr
+                                  or "Error solving n challenge" in stderr
+                                  or "n challenge solving failed" in stderr)
+    run.js_challenge_failed = ("Error solving n challenge" in stderr
+                               or "n challenge solving failed" in stderr)
+    runtime_match = re.search(r"JS runtimes:.*?quickjs-ng-([0-9.]+)", stderr)
+    run.js_runtime_reported = runtime_match.group(1) if runtime_match else None
+    ejs_match = re.search(r"yt_dlp_ejs-([0-9.]+)", stderr)
+    run.ejs_version_reported = ejs_match.group(1) if ejs_match else None
+    source_match = re.search(
+        r"challenge solver (?:lib|core) script v?[0-9.]+ \(source: ([a-z ]+)", stderr)
+    run.js_solver_source = source_match.group(1).strip() if source_match else None
+    if stderr.strip():
+        run.stderr_excerpt = redact(stderr)
     if not payload:
         run.ok = False
         return
@@ -1051,6 +1084,8 @@ CSV_COLUMNS = [
     "latency_ms", "peak_tree_rss_bytes", "rss_samples", "peak_process_count",
     "format_id", "format_count", "protocol", "vcodec", "acodec", "abr", "ext",
     "duration_s", "url_has_n_param", "url_has_sig_param",
+    "js_challenge_solved", "js_challenge_attempted", "js_challenge_failed",
+    "js_runtime_reported", "ejs_version_reported", "js_solver_source",
     "http_probe_status", "http_probe_bytes", "http_probe_ranged",
     "http_probe_tail_status", "http_probe_tail_bytes",
     "live_verdict", "vlc_reached_playing", "vlc_position_advanced", "vlc_attempts",
@@ -1092,6 +1127,12 @@ def write_reports(report: Dict[str, Any], runs: List[ExtractionRun], out_dir: st
                 "duration_s": run.duration_s,
                 "url_has_n_param": run.url_has_n_param,
                 "url_has_sig_param": run.url_has_sig_param,
+                "js_challenge_solved": run.js_challenge_solved,
+                "js_challenge_attempted": run.js_challenge_attempted,
+                "js_challenge_failed": run.js_challenge_failed,
+                "js_runtime_reported": run.js_runtime_reported,
+                "ejs_version_reported": run.ejs_version_reported,
+                "js_solver_source": run.js_solver_source,
                 "http_probe_status": probe.status,
                 "http_probe_bytes": probe.bytes_read,
                 "http_probe_ranged": probe.ranged_response,
@@ -1265,6 +1306,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "distinct_videos_ok": len(videos_ok),
             "videos_ok": videos_ok,
             "failure_classes": sorted({run.failure_class for run in runs if not run.ok}),
+            "js_challenge_runs_solved": sum(1 for run in runs if run.js_challenge_solved),
+            "js_challenge_runs_failed": sum(1 for run in runs if run.js_challenge_failed),
+            "videos_with_js_challenge": sorted({run.video_id for run in runs if run.js_challenge_solved}),
+            "js_runtime_reported": sorted({run.js_runtime_reported for run in runs if run.js_runtime_reported}),
+            "ejs_version_reported": sorted({run.ejs_version_reported for run in runs if run.ejs_version_reported}),
+            "js_solver_sources": sorted({run.js_solver_source for run in runs if run.js_solver_source}),
             "latency_ms_min": latencies[0] if latencies else None,
             "latency_ms_p50": percentile(latencies, 0.5),
             "latency_ms_p95": percentile(latencies, 0.95),

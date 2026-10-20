@@ -45,6 +45,10 @@ The validated flag set is exactly:
 absolute: yt-dlp resolves a bare `quickjs` name against `PATH`, which is not something a
 packaged desktop app can rely on.
 
+(The harness additionally passes `-v`. That is a harness-only diagnostic flag: yt-dlp
+writes it to stderr, so the JSON on stdout stays clean, and it is what makes the
+per-run JS challenge evidence in section 3.3 observable.)
+
 Verified debug output from the pinned binary:
 
 ```
@@ -63,6 +67,34 @@ GitHub, and it still works, because the solver ships inside the executable.
 
 No `yt_dlp_ejs` wheel needs to be installed into a Python environment. There is no
 system Python dependency at all in the desktop app.
+
+### 2.1 The desktop resolver's own flag set was validated verbatim
+
+The resolver implementation in the parent branch
+(`stream-resolver/.../YtDlpStreamResolver.kt`) builds this argument vector:
+
+```
+<yt-dlp> --ignore-config --no-plugin-dirs --no-remote-components
+         --no-js-runtimes --js-runtimes quickjs:<ABSOLUTE>/qjs
+         --no-playlist --no-progress --no-cache-dir --socket-timeout 12
+         --retries 1 --extractor-retries 1 --skip-download --dump-single-json
+         --format <selector> -- https://www.youtube.com/watch?v=<id>
+```
+
+That exact vector was executed against the pinned binaries and it works: exit code 0,
+24 formats for `jNQXAC9IVRw`, format `251` present with the four `http_headers`, and a
+usable media URL. The `--` separator before the URL is accepted by yt-dlp's option parser.
+
+Two additional measurements on that vector:
+
+* `--no-cache-dir` has **no** measurable latency cost (2069 / 2104 / 1934 ms with it
+  versus 1941 / 2034 ms without it, each with a fresh `HOME`). The flag is safe to keep.
+* The `--` separator, `--retries 1 --extractor-retries 1` and `--socket-timeout 12` all
+  behave as intended.
+
+The `--format` selector used by the resolver (`bestaudio[protocol=https][abr<=N]/...` for
+the capped qualities, plain `bestaudio[protocol=https]/bestaudio[protocol=http]` otherwise)
+is the selector validated throughout this document.
 
 ---
 
@@ -108,17 +140,58 @@ genuinely executing the challenge script, and the bundled `yt_dlp_ejs-0.8.0` is 
 solving the challenge. `scripts/benchmark-ytdlp.py` automates exactly this proof
 (`--skip-challenge-proof` turns it off).
 
-### 3.3 Important nuance: the default client is currently *not* challenged
+### 3.3 The challenge hits the *default* client too — it is video dependent
 
-With the default player client the resolved format URLs contain `sig=` but **no `n=`
-parameter** and no `signatureCipher`, so no JS challenge is executed for those requests
-(`quickjs_script_invocations == 0`). The runtime is therefore *insurance* for the clients
-that do get challenged (`web_embedded`, `mweb`, `tv_simply`) rather than a hard
-requirement for the default path.
+This is the most important finding, and it was initially wrong.
 
-Consequence for the runtime implementation: **do not make the QuickJS runtime optional
-in the shipped resolver.** The moment YouTube applies the `n` challenge to the default
-client, or the resolver switches to a challenged client, every extraction fails without it.
+The resolved format URLs for the default player client contain `sig=` but no `n=`
+parameter, so a first look suggests that no JS challenge is executed on the default path.
+That is **not** the general case: the challenge is applied **per video**.
+
+`dQw4w9WgXcQ` (Rick Astley, 4K remaster) is challenged on the default client:
+
+```
+[debug] [youtube] [jsc:quickjs] Solving JS challenges using quickjs
+[debug] [youtube] [jsc:quickjs] Using challenge solver lib script v0.8.0 (source: python package, variant: minified)
+[debug] [youtube] [jsc:quickjs] Using challenge solver core script v0.8.0 (source: python package, variant: minified)
+[debug] [youtube] [jsc:quickjs] Running QuickJS: <abs>/qjs --script /tmp/tmpys1esyyd.js
+```
+
+Measured over the six benchmark videos, with the **default** client:
+
+| Video | Challenge solved | Latency | Source of the solver |
+| --- | --- | --- | --- |
+| `dQw4w9WgXcQ` | **yes** | 7.5-7.9 s | `python package` (bundled `yt_dlp_ejs-0.8.0`) |
+| `jNQXAC9IVRw` | no | ~2.1 s | - |
+| `kJQP7kiw5Fk` | no | ~2.2 s | - |
+| `9bZkp7q19f0` | no | ~2.2-3.3 s | - |
+| `fJ9rUzIMcZQ` | no | ~2.8-2.9 s | - |
+| `YQHsXMglC9A` | no | ~2.4-2.9 s | - |
+
+Measured effect of **removing** the runtime, per client, on the challenged video
+`dQw4w9WgXcQ`:
+
+| Client | Without the QuickJS runtime |
+| --- | --- |
+| default (visionos) | extraction still succeeds, but the warning `No supported JavaScript runtime could be found ... some formats may be missing` appears and **format `18` (AAC audio) is silently dropped**: 49 -> 48 usable formats, audio set `{139, 140, 18, 249, 250, 251}` -> `{139, 140, 249, 250, 251}` |
+| `web_embedded` / `mweb` / `tv_simply` | **hard failure**: `n challenge solving failed` -> `ERROR: No video formats found!` (exit 1) |
+
+`source: python package` is the direct proof that the solver script came from the
+**bundled `yt_dlp_ejs-0.8.0`** inside the official executable and not from a remote
+component fetch, which is what makes `--no-remote-components` safe.
+
+Consequence for the runtime implementation: **the QuickJS runtime is a required
+dependency, not optional insurance.** Without it the resolver does not fail loudly and
+consistently; it *silently degrades* on the default client (losing formats) and fails
+catastrophically on the challenged clients. Because the trigger is **per video**, this
+presents in production as an intermittent, video-dependent bug rather than as a missing
+dependency. The runtime must be validated at startup (the resolver already parses
+`JS runtimes: ... quickjs-ng-<version>` and `yt_dlp_ejs-<version>` out of the yt-dlp
+diagnostics) and it must never be silently skipped.
+
+The harness reports this per run: `js_challenge_solved`, `js_challenge_attempted`,
+`js_challenge_failed`, `js_runtime_reported`, `ejs_version_reported` and
+`js_solver_source`.
 
 ---
 
@@ -178,18 +251,28 @@ Host: `Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44`, 16 CPUs, Python 3.14.8.
 | --- | --- |
 | Success rate | 12/12 runs, 6/6 videos |
 | Failure classes observed | none |
-| Latency min / p50 / p95 / max | 1640 / 2173 / 7077 / 7527 ms |
-| Peak process-tree RSS median | 86.7 MiB |
-| Peak process-tree RSS max | 361.0 MiB |
+| Latency min / p50 / p95 / max | 2037 / 2842 / 7482 / 7881 ms |
+| Peak process-tree RSS median | 97.9 MiB |
+| Peak process-tree RSS max | 382.3 MiB |
+| JS challenge runs solved / failed | 2 / 0 (both on `dQw4w9WgXcQ`) |
+| JS runtime reported by yt-dlp | `quickjs-ng-0.17.0` (all runs) |
+| Bundled EJS solver reported by yt-dlp | `yt_dlp_ejs-0.8.0` (all runs) |
+| Solver source | `python package` (never a remote fetch) |
 | Live playback verdicts | `LIVE_PLAYBACK_CONFIRMED` x12 |
 | Format selected | `251` (webm / opus, `https` protocol) |
 
-Two latency clusters are visible and are not noise:
+Two latency clusters are visible and are **not** noise. They track the JS challenge
+exactly:
 
-* **~1.6-2.7 s** — the normal path.
-* **~7.1-7.5 s and ~360 MiB** — runs where yt-dlp additionally downloaded the YouTube
-  player JS and executed the challenge path. The extra ~5 s and ~275 MiB are the player JS
-  fetch plus the QuickJS interpreter, not a regression in the resolver.
+* **~2.0-3.3 s / ~85-110 MiB** — no challenge, normal path.
+* **~7.5-7.9 s / ~350-365 MiB** — the challenged path (`dQw4w9WgXcQ`). The extra ~5 s
+  and ~270 MiB are the YouTube **player JS download plus the QuickJS interpreter**
+  running the EJS solver, not a regression in the resolver.
+
+The peak RSS is therefore bimodal for a structural reason: the challenge path pulls in
+the player JS (~1.7 MB of JavaScript) and parses/executes it in the QuickJS interpreter.
+A resolver that has to survive both paths needs a budget for **~380 MiB** of transient
+process-tree RSS, not ~90 MiB.
 
 ### Memory measurement method and its limits
 
@@ -225,6 +308,11 @@ the whole invocation, which is a packaging concern rather than a harness concern
 * `youtube:player_client=tv` -> "The page needs to be reloaded"; `web` / `ios` ->
   "No video formats found" (SABR / missing PO token). These are client-side issues and
   are unrelated to the JS runtime.
+* `--no-js-runtimes` with no `--js-runtimes` -> `JS_RUNTIME_MISSING`. On the default
+  client this is a **warning, not an error** ("some formats may be missing"), which is
+  exactly why it is dangerous: the resolver can look healthy while quietly returning
+  fewer formats. The failure taxonomy should treat "runtime reported as unavailable" as
+  fatal for the resolver, not as a per-request warning.
 
 ---
 
@@ -346,18 +434,42 @@ Useful flags: `--live-playback off|on|first`, `--live-retries N`,
 
 ## 9. Open items for the runtime and packaging work
 
-1. **`VlcRuntimeLocator` needs a Linux (`.so`) branch.** Until it exists, no desktop
+1. **The QuickJS runtime must not be optional** (section 3.3). The YouTube `n` challenge
+   is applied **per video** and hits the **default** client. Without the runtime the
+   default client silently drops formats (measured: `18` lost on `dQw4w9WgXcQ`) and the
+   challenged clients (`web_embedded`, `mweb`, `tv_simply`) fail outright with
+   "No video formats found". Because the trigger is video dependent, this presents in
+   production as an intermittent bug rather than a missing dependency. Validate
+   `quickjs-ng-<version>` and `yt_dlp_ejs-<version>` at startup and refuse to run the
+   resolver without them.
+2. **Budget for the challenged path.** It costs ~7.5-7.9 s and ~380 MiB of transient
+   process-tree RSS versus ~2-3 s and ~90 MiB on the normal path. The total resolver
+   timeout must cover the slow path, and the transient memory spike has to be acceptable
+   next to the rest of the desktop process.
+3. **`VlcRuntimeLocator` needs a Linux (`.so`) branch.** Until it exists, no desktop
    playback path can run on Linux, and `VlcjLocalPlaybackIntegrationTest` is a no-op.
-2. **`--aout=directsound` must become platform-conditional.**
-3. **The QuickJS runtime must not be optional** in the shipped resolver (section 3.3).
-4. **Forward the full `http_headers` set** from yt-dlp to the player, not only
-   `User-Agent`/`Referer` (section 7.3).
-5. **Reuse `probeResolvedAudioStream`** rather than adding a second range probe.
-6. **Pin and stage the upstream binaries** with the SHA256 values in section 1, and keep
+4. **`--aout=directsound` must become platform-conditional.**
+5. **Forward the full `http_headers` set** from yt-dlp to the player, not only
+   `User-Agent`/`Referer` (section 7.3). The resolver already carries the whole map into
+   `ResolvedAudioStream.requestHeaders`; the remaining gap is
+   `VlcjPlaybackController.toVlcMediaOptions()`, which only maps two of the four headers.
+6. **Reuse `probeResolvedAudioStream`** rather than adding a second range probe.
+7. **Pin and stage the upstream binaries** with the SHA256 values in section 1, and keep
    them out of version control. Note that the parent worktree's `.tools/` directory is
    currently *not* matched by `.gitignore` (`build/` and `docs/` are), so the packaging
    side should either ignore `.tools/` or stage the binaries under `build/`.
-7. **Decide on the extraction timeout budget.** The slow path (player JS + challenge)
-   takes ~7.5 s; a desktop resolver that blocks the UI thread on that would stall
+8. **Decide on the extraction timeout budget.** The slow path (player JS + challenge)
+   takes ~7.9 s; a desktop resolver that blocks the UI thread on that would stall
    playback start. The Android code path already models a per-client resolution race,
    and the same race is the right shape here.
+
+### Things that turned out to be fine
+
+* The `--` separator and the full desktop argument vector (section 2.1).
+* `--no-cache-dir` (no latency cost).
+* The four yt-dlp `http_headers` are accepted by the googlevideo CDN even when reduced to
+  `User-Agent` only, or sent with no headers at all. Forwarding the full set is still
+  the right default, but it is not currently a blocker.
+* The googlevideo URLs are bound to an `spc` streaming-context parameter, but that does
+  not translate into a header whitelist at the CDN: measured `206` with the full header
+  set, with `User-Agent` only, and with no headers.
