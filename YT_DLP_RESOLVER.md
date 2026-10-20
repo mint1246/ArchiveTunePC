@@ -27,8 +27,11 @@ Probe errors are network failures rather than unavailable-video failures. Downlo
 reuse this validation instead of probing the same yt-dlp URL again.
 
 A parallel, best-effort player metadata request supplies YouTube loudness metadata to
-the existing normalization controls. It has a 1.5-second limit and performs no stream
-extraction or deciphering; audio extraction remains solely yt-dlp. This probe now has an asynchronous cancellable
+the existing normalization controls. It has a two-second limit and performs no stream
+extraction or deciphering; audio extraction remains solely yt-dlp. Anonymous metadata
+uses the native client first, while signed-in metadata prefers the cookie-capable web
+client. A live check for `dQw4w9WgXcQ` returned perceptual loudness **−13.01 dB**
+through both old and new paths, preserving the existing gain calculation. This probe now has an asynchronous cancellable
 variant: cancelling a queue load also cancels the HTTP call. The original synchronous
 probe API remains available to its existing callers. Probes, Googlevideo callback
 playback and downloads now share the same dynamic application proxy, proxy credentials
@@ -116,7 +119,7 @@ export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/Archiv
 export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/qjs"
 ```
 
-## Comparative measurements (2026-10-21)
+## Initial resolver-only measurements (2026-10-21, candidate c5cb2e578)
 
 The actual Kotlin `ArchiveTuneJvmClient` API was measured in separate Java 21 JVMs
 (`-Xms32m -Xmx512m`), anonymous, HIGH quality, two sequential requests per video.

@@ -41,7 +41,7 @@ class YtDlpDesktopStreamExtractor(
         // This metadata request never extracts/deciphers a stream. Keep the existing gain controls
         // useful without delaying resolution when metadata is absent or its endpoint is unhealthy.
         val audioConfig = async {
-            withTimeoutOrNull(1_500) {
+            withTimeoutOrNull(2_000) {
                 try { audioConfigProvider(videoId, authState) }
                 catch (cancellation: CancellationException) { throw cancellation }
                 catch (_: Exception) { null }
@@ -99,7 +99,14 @@ internal fun streamProxyUrl(proxy: Proxy?, username: String?, password: String?)
     return "$scheme://$credentials$authority"
 }
 
-private suspend fun loadAudioConfig(videoId: String, authState: PlaybackAuthState): PlayerResponse.PlayerConfig.AudioConfig? =
-    YouTube.player(videoId = videoId, client = YouTubeClient.WEB_REMIX,
-        setLogin = authState.hasLoginCookie, authState = authState)
-        .getOrNull()?.playerConfig?.audioConfig
+private suspend fun loadAudioConfig(videoId: String, authState: PlaybackAuthState): PlayerResponse.PlayerConfig.AudioConfig? {
+    val clients = if (authState.hasLoginCookie) listOf(YouTubeClient.WEB_REMIX, YouTubeClient.VISIONOS)
+        else listOf(YouTubeClient.VISIONOS, YouTubeClient.WEB_REMIX)
+    for (client in clients) {
+        val config = YouTube.player(videoId = videoId, client = client,
+            setLogin = authState.hasLoginCookie && client.supportsCookieAuthentication, authState = authState)
+            .getOrNull()?.playerConfig?.audioConfig
+        if (config != null && (config.loudnessDb?.isFinite() == true || config.perceptualLoudnessDb?.isFinite() == true)) return config
+    }
+    return null
+}
