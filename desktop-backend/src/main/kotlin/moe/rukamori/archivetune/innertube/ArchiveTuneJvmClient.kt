@@ -995,6 +995,9 @@ class ArchiveTuneJvmClient(
 
         prepareProvidedSession()
         val normalizedClientKey = PlaybackStreamResolver.normalizeClientKey(clientKey)
+        // yt-dlp owns its client selection. A new extraction is the retry; a synthetic YT_DLP
+        // key must not enter the legacy YouTube-client backoff/proof-refresh machinery.
+        if (normalizedClientKey.startsWith("YT_DLP@")) return StreamHttpRecoveryAction.RETRY_ONLY
         val currentAuth = YouTube.currentPlaybackAuthState()
         val sameAuthGeneration = currentAuth.fingerprint == authFingerprint
         val failedClient =

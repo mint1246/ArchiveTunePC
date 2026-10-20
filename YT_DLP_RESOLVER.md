@@ -31,7 +31,9 @@ are excluded from media requests. No extractor is embedded in the playback contr
 
 Explicitly supplying `audioStreamExtractor = null` retains the legacy backend for
 controlled comparisons. Existing custom `StreamUrlResolver` injections also retain
-their legacy behavior. Production defaults do not silently fall back to NewPipe.
+their legacy behavior. Production defaults do not silently fall back to NewPipe. After a media HTTP failure,
+the existing transparent retry starts a fresh extraction; yt-dlp client selection
+does not enter the legacy client-key backoff/proof-refresh machinery.
 NewPipe remains a transitive shared-core dependency for Android and the comparison
 path; this experiment does not modify submodule source or remove unrelated core APIs.
 
@@ -158,7 +160,7 @@ headers and cancellable probes. POSIX process fixtures explicitly skip on non-PO
 hosts; JSON/policy/backend contract tests remain portable.
 
 The resolver suite passes 23 tests (16 new process/policy tests plus 7 shared-policy
-tests); the backend suite passes 76 tests. Targeted caller tests for queue preloading,
+tests); the backend suite passes 77 tests. Targeted caller tests for queue preloading,
 cache-session changes, completed-download preference, download attempts and queue
 persistence pass 24 tests; the download manager suite passes 14. The existing
 playback-core (22 tests) and

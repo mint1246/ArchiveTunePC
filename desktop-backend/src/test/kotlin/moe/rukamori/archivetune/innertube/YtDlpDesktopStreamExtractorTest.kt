@@ -73,6 +73,14 @@ class YtDlpDesktopStreamExtractorTest {
             streamProxyUrl(Proxy(Proxy.Type.SOCKS, InetSocketAddress.createUnresolved("localhost", 1080)), null, null))
     }
 
+    @Test fun `yt-dlp media failures request fresh extraction without legacy client backoff`() = runBlocking {
+        val client = ArchiveTuneJvmClient(Files.createTempDirectory("backend-retry-").toFile(),
+            audioStreamExtractor = DesktopAudioStreamExtractor { _, _, _ -> sampleStream() })
+        assertEquals(StreamHttpRecoveryAction.RETRY_ONLY, client.prepareStreamHttpRecovery(
+            "jNQXAC9IVRw", "YT_DLP@2026.08.19", 403, PlaybackAuthState().fingerprint, false,
+        ))
+    }
+
     @Test fun `new extractor validates first and tail CDN ranges using returned headers`() = runBlocking {
         org.junit.Assume.assumeTrue("POSIX subprocess fixture requires /bin/sh", Files.isExecutable(Path.of("/bin/sh")))
         val requests = CopyOnWriteArrayList<String>()
