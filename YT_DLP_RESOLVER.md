@@ -143,8 +143,9 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew :desktop-backend:writeResolverB
 python3 scripts/benchmark-desktop-resolver.py
 ```
 
-The JSON report under `build/resolver-validation/` contains only safe metadata and
-measurements. The Python scripts are developer tools and are not shipped with the app.
+The [committed Linux comparison](packaging/resolver/validation/linux-desktop-comparison.json)
+contains safe metadata and measurements; new runs write reports under
+`build/resolver-validation/`. The Python scripts are developer tools and are not shipped with the app.
 
 ## Verification and remaining acceptance work
 
@@ -156,10 +157,17 @@ session snapshots, failure classification, proxy encoding, exact head/tail probe
 headers and cancellable probes. POSIX process fixtures explicitly skip on non-POSIX
 hosts; JSON/policy/backend contract tests remain portable.
 
-The existing playback-core and desktop-playback suites pass on Linux. Their old native
+The resolver suite passes 23 tests (16 new process/policy tests plus 7 shared-policy
+tests); the backend suite passes 76 tests. The existing playback-core (22 tests) and
+desktop-playback (44 tests) suites pass on Linux. Their old native
 controller tests silently return when the Windows-only runtime locator finds no runtime;
 that is **not** evidence of full Linux application playback. This branch deliberately
 leaves the Linux port's runtime discovery/audio-output work to its own worktree.
+
+Independent final live tests also passed for `jNQXAC9IVRw`, `dQw4w9WgXcQ` and
+`aqz-KE-bpKQ`: all three returned head/tail HTTP 206, reached Playing in system
+libVLC with advancing time, and decoded 240,000 non-silent PCM frames. One run
+explicitly reported a QuickJS challenge and the bundled EJS source.
 
 Merge remains deferred until the application is exercised on its supported desktop
 runtime: local playback, resolved YouTube playback, seek/pause/resume, next-track
