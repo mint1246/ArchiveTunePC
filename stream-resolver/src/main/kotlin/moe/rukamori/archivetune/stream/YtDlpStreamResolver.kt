@@ -46,6 +46,8 @@ data class YtDlpConfiguration(
     val quickJsExecutable: String = resolverExecutable("qjs", "ARCHIVETUNE_QUICKJS"),
     val timeoutMs: Long = 45_000,
     val temporaryRoot: Path = Path.of(System.getProperty("java.io.tmpdir")),
+    /** Public signature/player cache managed by yt-dlp; cookies and signed URLs stay request-local. */
+    val cacheDirectory: Path? = null,
 ) {
     init { require(timeoutMs > 0) }
 }
@@ -88,6 +90,10 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
         verifyToolchain()
         inTemporaryDirectory { directory ->
             val arguments = commonArguments().toMutableList()
+            configuration.cacheDirectory?.let { cache ->
+                Files.createDirectories(cache)
+                arguments += listOf("--cache-dir", cache.toAbsolutePath().toString())
+            }
             if (!cookie.isNullOrBlank()) {
                 val cookieFile = directory.resolve("cookies.txt")
                 Files.writeString(cookieFile, netscapeCookies(cookie))
@@ -101,7 +107,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
                 arguments += listOf("--config-locations", configFile.toString())
             }
             arguments += listOf(
-                "--no-playlist", "--no-progress", "--no-cache-dir", "--socket-timeout", "12",
+                "--no-playlist", "--no-progress", "--socket-timeout", "12",
                 "--retries", "1", "--extractor-retries", "1", "--skip-download", "--dump-single-json",
                 "--format", formatSelector(quality), "--", "https://www.youtube.com/watch?v=$videoId",
             )
@@ -114,6 +120,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
     private fun commonArguments() = listOf(
         configuration.executable, "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
         "--no-js-runtimes", "--js-runtimes", "quickjs:${configuration.quickJsExecutable}",
+        "--no-cache-dir",
     )
 
     private suspend fun <T> bounded(block: suspend () -> T): T =

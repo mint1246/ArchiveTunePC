@@ -8,6 +8,8 @@ package moe.rukamori.archivetune.innertube
 
 import moe.rukamori.archivetune.stream.StreamAudioQuality
 import moe.rukamori.archivetune.stream.YtDlpStreamResolver
+import moe.rukamori.archivetune.stream.YtDlpConfiguration
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
@@ -19,8 +21,12 @@ fun interface DesktopAudioStreamExtractor {
 }
 
 class YtDlpDesktopStreamExtractor(
-    private val resolver: YtDlpStreamResolver = YtDlpStreamResolver(),
+    private val resolver: YtDlpStreamResolver,
 ) : DesktopAudioStreamExtractor {
+    constructor(cacheDirectory: File? = null) : this(YtDlpStreamResolver(
+        YtDlpConfiguration(cacheDirectory = cacheDirectory?.toPath()?.resolve("yt-dlp")),
+    ))
+
     override suspend fun resolve(videoId: String, quality: JvmAudioQuality, authState: PlaybackAuthState): ResolvedAudioStream {
         val extracted = resolver.resolve(
             videoId = videoId,

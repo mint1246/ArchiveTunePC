@@ -74,7 +74,7 @@ class YtDlpDesktopStreamExtractorTest {
     }
 
     @Test fun `new extractor validates first and tail CDN ranges using returned headers`() = runBlocking {
-        if (!Files.isExecutable(Path.of("/bin/sh"))) return@runBlocking
+        org.junit.Assume.assumeTrue("POSIX subprocess fixture requires /bin/sh", Files.isExecutable(Path.of("/bin/sh")))
         val requests = CopyOnWriteArrayList<String>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/audio") { exchange ->

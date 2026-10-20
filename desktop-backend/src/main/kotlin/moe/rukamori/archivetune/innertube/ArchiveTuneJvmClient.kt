@@ -63,7 +63,8 @@ class ArchiveTuneJvmClient(
     private val streamUrlResolver: StreamUrlResolver = NewPipeStreamUrlResolver,
     networkPolicy: DesktopNetworkPolicy = DesktopNetworkPolicy(),
     sessionProvider: DesktopSessionProvider? = null,
-    private val audioStreamExtractor: DesktopAudioStreamExtractor? = YtDlpDesktopStreamExtractor(),
+    private val audioStreamExtractor: DesktopAudioStreamExtractor? =
+        if (streamUrlResolver === NewPipeStreamUrlResolver) YtDlpDesktopStreamExtractor(cacheDirectory) else null,
 ) {
     @Volatile
     private var sessionProvider: DesktopSessionProvider? = sessionProvider

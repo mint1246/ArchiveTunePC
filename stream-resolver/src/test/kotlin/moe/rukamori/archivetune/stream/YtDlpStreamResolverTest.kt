@@ -106,8 +106,8 @@ class YtDlpStreamResolverTest {
         }
     }
 
-    @Test fun `caller cancellation kills extraction and descendants and removes temporary cookies`() = runBlocking {
-        if (!Files.isExecutable(Path.of("/bin/sh"))) return@runBlocking
+    @Test fun `caller cancellation kills extraction and descendants and removes temporary cookies`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
         val root = Files.createTempDirectory("resolver-cancel-test-")
         try {
             val fixture = createFixture(root, "sleep")
@@ -122,8 +122,8 @@ class YtDlpStreamResolverTest {
         } finally { root.toFile().deleteRecursively() }
     }
 
-    @Test fun `own deadline reports timeout while external deadline stays cancellation`() = runBlocking {
-        if (!Files.isExecutable(Path.of("/bin/sh"))) return@runBlocking
+    @Test fun `own deadline reports timeout while external deadline stays cancellation`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
         val root = Files.createTempDirectory("resolver-timeout-test-")
         try {
             val fixture = createFixture(root, "sleep")
@@ -135,25 +135,27 @@ class YtDlpStreamResolverTest {
         } finally { root.toFile().deleteRecursively() }
     }
 
-    @Test fun `subprocess invocation handles spaces ignores configs and deletes cookies on success`() = runBlocking {
-        if (!Files.isExecutable(Path.of("/bin/sh"))) return@runBlocking
+    @Test fun `subprocess invocation handles spaces ignores configs and deletes cookies on success`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
         val root = Files.createTempDirectory("resolver space test ")
         try {
             val fixture = createFixture(root, "success")
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs path with spaces", 5000, root))
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs path with spaces", 5000, root, root.resolve("player cache")))
             val result = resolver.resolve(videoId, cookie = "SID=private-value")
             assertEquals(videoId, result.videoId)
             val args = Files.readString(root.resolve("args"))
             assertTrue(args.contains("--ignore-config\n--no-plugin-dirs\n--no-remote-components\n--no-js-runtimes\n"))
             assertTrue(args.contains("quickjs:qjs path with spaces\n"))
+            assertTrue(args.contains("--cache-dir\n${root.resolve("player cache")}\n"))
+            assertTrue(Files.isDirectory(root.resolve("player cache")))
             assertFalse(args.contains("private-value"))
             assertTrue(Files.exists(root.resolve("cookie-checked")))
             assertFalse(Files.list(root).use { paths -> paths.anyMatch { it.fileName.toString().startsWith("archivetune-resolver-") } })
         } finally { root.toFile().deleteRecursively() }
     }
 
-    @Test fun `concurrent extraction keeps cookie files isolated and capability check single flight`() = runBlocking {
-        if (!Files.isExecutable(Path.of("/bin/sh"))) return@runBlocking
+    @Test fun `concurrent extraction keeps cookie files isolated and capability check single flight`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
         val root = Files.createTempDirectory("resolver-parallel-test-")
         try {
             val fixture = createFixture(root, "success")
