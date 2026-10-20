@@ -1970,6 +1970,7 @@ def main(argv: list[str] | None = None) -> int:
         pss_interval_ms=args.pss_interval_ms,
         xvfb_version=xvfb_server_version,
         repo_root=repo_root,
+        candidate_label=args.candidate_label,
     )
 
     report["candidate_ref"] = args.candidate_ref

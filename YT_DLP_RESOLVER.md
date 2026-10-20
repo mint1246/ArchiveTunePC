@@ -128,7 +128,7 @@ export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/Archiv
 export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/qjs"
 ```
 
-## Whole-application comparison (final runtime candidate `dedcb8aa7`)
+## Whole-application comparison (final runtime candidate `5e5ecb786`)
 
 The [full-application benchmark](YT_DLP_APPLICATION_BENCHMARK.md) compares the exact
 legacy baseline with the integrated Compose desktop app in isolated profiles. It
@@ -136,9 +136,9 @@ counts the JVM and every observed app-created helper, including yt-dlp's embedde
 CPython worker, QuickJS, ffmpeg/ffprobe, and detached resolver process groups.
 
 The candidate resolved **6/6** requests; baseline **0/6**. Candidate idle / extraction
-peak / post-extraction RSS were **321.54 / 670.42 / 321.00 MiB**, compared with
-**314.78 / 318.64 / 312.72 MiB** for baseline. Extraction peak PSS was **632.59 MiB**.
-Candidate median / maximum latency was **2.361 / 7.778 seconds**. Baseline failed
+peak / post-extraction RSS were **319.01 / 654.47 / 310.54 MiB**, compared with
+**314.20 / 319.75 / 319.88 MiB** for baseline. Extraction peak PSS was **599.13 MiB**.
+Candidate median / maximum latency was **2.508 / 7.678 seconds**. Baseline failed
 attempts cannot establish latency or memory for successful legacy extraction.
 
 No browser was launched during these anonymous runs, and no tracked process remained

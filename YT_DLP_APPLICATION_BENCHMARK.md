@@ -233,8 +233,9 @@ checkout. The hook emits
 The committed harness at `5e5ecb786` contains a report-assembly bug: `main()`
 calls `build_report()` without its required `candidate_label` argument. This run
 used a temporary copy with only that one-line call-site argument added; the
-committed script, runtime code, Kotlin sources, and Gradle files were not
-modified. The measured application behavior is unaffected.
+runtime code, Kotlin sources, and Gradle files were not modified. The same
+one-line harness fix is now committed on the feature branch, so the reproduction
+command needs no temporary patch. The measured application behavior is unaffected.
 
 ### Environment
 
@@ -295,9 +296,7 @@ identical temporary hook to each, builds both, and runs both. Use a fresh
 `--work-root` for a clean run. If a verified instrumented baseline checkout
 already exists, add `--baseline-dir /path/to/disposable/baseline` to reuse it.
 Do not use `--skip-build` for a fresh checkout; its classpath file will not
-exist yet. Until the committed `build_report()` call-site bug is fixed, add
-`candidate_label=args.candidate_label` to the temporary harness copy before
-running.
+exist yet. The committed harness includes the report-assembly fix described above.
 
 To reproduce the older labeled interim result, pin the older commit and write a
 separate output:
