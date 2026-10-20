@@ -158,7 +158,10 @@ headers and cancellable probes. POSIX process fixtures explicitly skip on non-PO
 hosts; JSON/policy/backend contract tests remain portable.
 
 The resolver suite passes 23 tests (16 new process/policy tests plus 7 shared-policy
-tests); the backend suite passes 76 tests. The existing playback-core (22 tests) and
+tests); the backend suite passes 76 tests. Targeted caller tests for queue preloading,
+cache-session changes, completed-download preference, download attempts and queue
+persistence pass 24 tests; the download manager suite passes 14. The existing
+playback-core (22 tests) and
 desktop-playback (44 tests) suites pass on Linux. Their old native
 controller tests silently return when the Windows-only runtime locator finds no runtime;
 that is **not** evidence of full Linux application playback. This branch deliberately
