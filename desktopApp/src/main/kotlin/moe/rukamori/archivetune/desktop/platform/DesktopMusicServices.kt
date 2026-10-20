@@ -147,6 +147,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private val resolvedSourceCache = ConcurrentHashMap<String, CachedResolvedSource>()
     private val relatedSongFetches = ConcurrentHashMap.newKeySet<String>()
     val playback = VlcjPlaybackController(
+        mediaHttpClient = moe.rukamori.archivetune.innertube.desktopStreamHttpClient(),
         sourceResolver = PlaybackSourceResolver { item -> resolve(item) },
         onStreamHttpFailure = { item, source, httpStatus ->
             recoverFromStreamHttpFailure(item, source, httpStatus)

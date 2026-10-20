@@ -141,7 +141,7 @@ private fun probeRange(
 private const val MAX_PROBE_BYTES = 1_024
 
 private val PROBE_CLIENT: OkHttpClient =
-    OkHttpClient.Builder()
+    desktopStreamHttpClient().newBuilder()
         .followRedirects(false)
         .followSslRedirects(false)
         // This probe runs inside the per-client resolver race. A CDN that cannot serve the first

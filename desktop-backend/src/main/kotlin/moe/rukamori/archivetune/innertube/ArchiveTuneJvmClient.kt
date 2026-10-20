@@ -1173,10 +1173,11 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
             YtDlpFailure.TOOLCHAIN, YtDlpFailure.INVALID_OUTPUT, YtDlpFailure.EXTRACTION, YtDlpFailure.NO_AUDIO -> StreamResolutionFailureKind.EXTRACTOR_INCOMPATIBLE
             YtDlpFailure.TIMEOUT -> StreamResolutionFailureKind.NETWORK_TIMEOUT
             YtDlpFailure.AUTH_REQUIRED -> StreamResolutionFailureKind.AUTH_REQUIRED
-            YtDlpFailure.NETWORK -> StreamResolutionFailureKind.NETWORK
+            YtDlpFailure.NETWORK, YtDlpFailure.EXPIRED_STREAM -> StreamResolutionFailureKind.NETWORK
             YtDlpFailure.UNAVAILABLE -> StreamResolutionFailureKind.UNAVAILABLE
         }
     }
+    if (all.any { it is AudioStreamProbeHttpException }) return StreamResolutionFailureKind.NETWORK
     if (all.any { it is StreamResolutionTimeoutException }) {
         return StreamResolutionFailureKind.NETWORK_TIMEOUT
     }

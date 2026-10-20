@@ -60,11 +60,12 @@ include `:desktop-backend`, which the test needs:
 
 ```bash
 ./gradlew :desktop-playback:test        # root build (required)
-./gradlew -p desktop-playback test       # standalone: no :desktop-backend module
+./gradlew -p desktop-playback test       # standalone: core tests; live class excluded
 ```
 
 The hermetic test only needs a system libVLC (`/usr/lib/libvlc.so` and friends) and is skipped
-with an assumption when no libVLC is installed.
+with an assumption when no libVLC is installed. Once live mode is explicitly enabled,
+missing executable paths fail the live test instead of silently skipping it.
 
 ## Linux notes
 
@@ -72,7 +73,7 @@ with an assumption when no libVLC is installed.
   is **not** used here. The test creates a plain `MediaPlayerFactory("--no-video", "--quiet",
   "--aout=dummy")` that binds the system libVLC through JNA/ldconfig.
 * `VlcjRangeCallbackMedia` and `VlcjRangeHttpTransport` are used exactly as production uses them;
-  no production file is modified.
+  the test does not patch production runtime discovery.
 * The test never touches an account session: the client is created with an empty
   `PlaybackAuthState()` and no cookie is written or forwarded.
 

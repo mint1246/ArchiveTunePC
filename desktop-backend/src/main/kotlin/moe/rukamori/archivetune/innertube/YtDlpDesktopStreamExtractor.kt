@@ -10,6 +10,15 @@ import moe.rukamori.archivetune.stream.StreamAudioQuality
 import moe.rukamori.archivetune.stream.YtDlpStreamResolver
 import moe.rukamori.archivetune.stream.YtDlpConfiguration
 import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
+import moe.rukamori.archivetune.innertube.models.YouTubeClient
+import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
+import moe.rukamori.archivetune.stream.YtDlpException
+import moe.rukamori.archivetune.stream.YtDlpFailure
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
@@ -22,29 +31,61 @@ fun interface DesktopAudioStreamExtractor {
 
 class YtDlpDesktopStreamExtractor(
     private val resolver: YtDlpStreamResolver,
+    private val audioConfigProvider: suspend (String, PlaybackAuthState) -> PlayerResponse.PlayerConfig.AudioConfig? = ::loadAudioConfig,
 ) : DesktopAudioStreamExtractor {
     constructor(cacheDirectory: File? = null) : this(YtDlpStreamResolver(
         YtDlpConfiguration(cacheDirectory = cacheDirectory?.toPath()?.resolve("yt-dlp")),
     ))
 
-    override suspend fun resolve(videoId: String, quality: JvmAudioQuality, authState: PlaybackAuthState): ResolvedAudioStream {
-        val extracted = resolver.resolve(
-            videoId = videoId,
-            quality = StreamAudioQuality.valueOf(quality.name),
-            cookie = authState.cookie,
-            dataSyncId = authState.dataSyncId,
-            proxyUrl = streamProxyUrl(YouTube.streamProxy, YouTube.proxyUsername, YouTube.proxyPassword),
-        )
-        val stream = ResolvedAudioStream(
-            videoId = extracted.videoId, url = extracted.url, format = extracted.format,
-            videoDetails = extracted.videoDetails, playbackTracking = null, audioConfig = null,
-            clientName = "YT_DLP", clientVersion = resolver.verifyToolchain().ytDlpVersion,
-            requestHeaders = extracted.headers, expiresAtEpochMillis = extracted.expiresAtEpochMillis,
-            authFingerprint = authState.fingerprint,
-        )
-        probeResolvedAudioStreamCancellable(stream).getOrThrow()
-        return stream
+    override suspend fun resolve(videoId: String, quality: JvmAudioQuality, authState: PlaybackAuthState): ResolvedAudioStream = coroutineScope {
+        // This metadata request never extracts/deciphers a stream. Keep the existing gain controls
+        // useful without delaying resolution when metadata is absent or its endpoint is unhealthy.
+        val audioConfig = async {
+            withTimeoutOrNull(1_500) {
+                try { audioConfigProvider(videoId, authState) }
+                catch (cancellation: CancellationException) { throw cancellation }
+                catch (_: Exception) { null }
+            }
+        }
+        val excluded = mutableSetOf<String>()
+        var probeFailure: Throwable? = null
+        repeat(2) { attempt ->
+            val extracted = try {
+                resolver.resolve(
+                    videoId = videoId,
+                    quality = when (quality) {
+                        JvmAudioQuality.LOW -> StreamAudioQuality.LOW
+                        JvmAudioQuality.HIGH -> StreamAudioQuality.HIGH
+                        JvmAudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
+                    },
+                    cookie = authState.cookie, dataSyncId = authState.dataSyncId,
+                    proxyUrl = streamProxyUrl(YouTube.streamProxy, YouTube.proxyUsername, YouTube.proxyPassword),
+                    excludedFormatIds = excluded,
+                )
+            } catch (failure: YtDlpException) {
+                if (failure.kind == YtDlpFailure.EXPIRED_STREAM && attempt == 0) return@repeat
+                if (failure.kind == YtDlpFailure.NO_AUDIO && probeFailure != null) throw probeFailure!!
+                throw failure
+            }
+            val stream = ResolvedAudioStream(
+                videoId = extracted.videoId, url = extracted.url, format = extracted.format,
+                videoDetails = extracted.videoDetails, playbackTracking = null, audioConfig = audioConfig.await(),
+                clientName = "YT_DLP", clientVersion = resolver.verifyToolchain().ytDlpVersion,
+                requestHeaders = extracted.headers, expiresAtEpochMillis = extracted.expiresAtEpochMillis,
+                authFingerprint = authState.fingerprint,
+            )
+            val failure = probeResolvedAudioStreamCancellable(stream).exceptionOrNull()
+            if (failure == null) return@coroutineScope stream
+            val retryable = failure is IOException ||
+                (failure is AudioStreamProbeHttpException && failure.httpStatus in setOf(403, 404, 410, 416, 429, 500, 502, 503))
+            if (!retryable || attempt == 1) throw failure
+            probeFailure = failure
+            // A transient CDN error gets a fresh extraction; a rejected format gets an alternative.
+            if (failure is AudioStreamProbeHttpException) excluded += extracted.formatId
+        }
+        error("No extraction attempt completed")
     }
+
 }
 
 /** An explicit empty proxy prevents ambient proxy variables from overriding the application's route. */
@@ -57,3 +98,8 @@ internal fun streamProxyUrl(proxy: Proxy?, username: String?, password: String?)
     val credentials = username?.takeIf { it.isNotBlank() }?.let { "${encode(it)}:${encode(password.orEmpty())}@" }.orEmpty()
     return "$scheme://$credentials$authority"
 }
+
+private suspend fun loadAudioConfig(videoId: String, authState: PlaybackAuthState): PlayerResponse.PlayerConfig.AudioConfig? =
+    YouTube.player(videoId = videoId, client = YouTubeClient.WEB_REMIX,
+        setLogin = authState.hasLoginCookie, authState = authState)
+        .getOrNull()?.playerConfig?.audioConfig

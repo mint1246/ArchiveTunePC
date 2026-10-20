@@ -22,8 +22,12 @@ internal data class ResolverProcessOutput(val exitCode: Int, val stdout: String,
 /** No shell, inherited stdin, persistent worker, or unbounded diagnostic buffer. */
 internal suspend fun runResolverProcess(command: List<String>, temporaryDirectory: Path): ResolverProcessOutput =
     withContext(Dispatchers.IO) {
+        val linux = System.getProperty("os.name").startsWith("Linux", true)
+        val setsid = if (linux) listOf("/usr/bin/setsid", "/bin/setsid").firstOrNull { java.io.File(it).canExecute() } else null
+        val kill = if (setsid != null) listOf("/usr/bin/kill", "/bin/kill").firstOrNull { java.io.File(it).canExecute() } else null
+        val grouped = setsid != null && kill != null
         val process = try {
-            ProcessBuilder(command).apply {
+            ProcessBuilder(if (grouped) listOf(setsid!!, "--") + command else command).apply {
                 // QuickJS's temporary JS files and PyInstaller's unpack directory are request-local too.
                 environment()["TMPDIR"] = temporaryDirectory.toString()
                 environment()["TMP"] = temporaryDirectory.toString()
@@ -35,6 +39,19 @@ internal suspend fun runResolverProcess(command: List<String>, temporaryDirector
         }
         process.outputStream.close()
         val descendants = linkedMapOf<Long, ProcessHandle>()
+        var childrenStopped = false
+        fun terminateDescendants() {
+            if (childrenStopped) return
+            childrenStopped = true
+            runCatching { process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } } }
+            if (grouped) runCatching {
+                // Session/process-group ownership survives a parent exiting before discovery.
+                ProcessBuilder(kill!!, "-KILL", "--", "-${process.pid()}")
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start().waitFor(1, TimeUnit.SECONDS)
+            }
+            descendants.values.toList().asReversed().forEach { child -> runCatching { child.destroyForcibly() } }
+        }
         coroutineScope {
             val stdout = async { readProcessPipe(process.inputStream, 16 * 1024 * 1024) }
             val stderr = async { readProcessPipe(process.errorStream, 1024 * 1024) }
@@ -43,13 +60,19 @@ internal suspend fun runResolverProcess(command: List<String>, temporaryDirector
                     process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
                     delay(25) // Cancellable even while the child or a pipe reader blocks.
                 }
+                // A crashed/exited parent must not leave a child holding our stdout pipe open.
+                terminateDescendants()
                 ResolverProcessOutput(process.exitValue(), stdout.await(), stderr.await())
             } finally {
                 // PyInstaller and QuickJS can be grandchildren. Snapshot before killing their parent.
-                runCatching { process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } } }
-                descendants.values.toList().asReversed().forEach { child -> runCatching { child.destroyForcibly() } }
+                terminateDescendants()
                 if (process.isAlive) process.destroyForcibly()
                 process.waitFor(2, TimeUnit.SECONDS) // Reap before removing cookies and temporary EJS files.
+                val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(500)
+                descendants.values.forEach { child ->
+                    val remaining = deadline - System.nanoTime()
+                    if (child.isAlive && remaining > 0) runCatching { child.onExit().get(remaining, TimeUnit.NANOSECONDS) }
+                }
                 runCatching { process.inputStream.close() }
                 runCatching { process.errorStream.close() }
             }

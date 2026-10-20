@@ -485,8 +485,8 @@ internal class VlcjRangeHttpTransport(
     }
 }
 
-private fun newRangeHttpClient(): OkHttpClient =
-    OkHttpClient.Builder()
+internal fun newRangeHttpClient(base: OkHttpClient = OkHttpClient()): OkHttpClient =
+    base.newBuilder()
         .followRedirects(true)
         .followSslRedirects(true)
         .connectTimeout(15, TimeUnit.SECONDS)

@@ -21,9 +21,18 @@ mismatched video IDs are rejected. URLs without an `expire` parameter receive a
 conservative five-minute lifetime.
 
 The backend validates a small head range and, when size is available, a tail range
-before handing the stream to playback. This probe now has an asynchronous cancellable
+before handing the stream to playback. Retryable CDN rejections trigger one fresh
+extraction that excludes the rejected format; transient probe I/O also gets one retry.
+Probe errors are network failures rather than unavailable-video failures. Downloads
+reuse this validation instead of probing the same yt-dlp URL again.
+
+A parallel, best-effort player metadata request supplies YouTube loudness metadata to
+the existing normalization controls. It has a 1.5-second limit and performs no stream
+extraction or deciphering; audio extraction remains solely yt-dlp. This probe now has an asynchronous cancellable
 variant: cancelling a queue load also cancels the HTTP call. The original synchronous
-probe API remains available to its existing callers.
+probe API remains available to its existing callers. Probes, Googlevideo callback
+playback and downloads now share the same dynamic application proxy, proxy credentials
+and DNS routing policy.
 
 The existing libVLC Googlevideo callback transport receives the complete required
 header map. Cookie, Authorization, Proxy-Authorization and transport-controlled headers
@@ -52,8 +61,12 @@ User configuration, plugins and remote solver downloads are disabled. Official f
 binaries bundle their own transient Python interpreter and EJS; system Python, Node
 and Deno are unnecessary. No Python or JS worker stays alive after a request.
 
-The request has a 45-second deadline. Cancellation, timeout, failure and success all
+The resolver has a 35-second extraction deadline inside the existing 45-second backend
+budget, reserving time for CDN validation and cleanup. Cancellation, timeout, failure and success all
 terminate/reap the tracked child process tree and remove request temporary files.
+Linux uses a dedicated process group when `setsid` and `kill` are available, including
+children whose parent exits before discovery. Other platforms track process handles
+and await their termination; Windows Job Object containment is still unverified.
 Stdout and stderr drain concurrently with 16 MiB / 1 MiB limits. Raw JSON, diagnostic
 text, URLs and cookie values are never attached to exceptions or logs. The successful
 capability check is the only process-related state retained in memory.
@@ -63,7 +76,10 @@ is converted to a secure `.youtube.com` Netscape cookie jar in an owner-only tem
 directory (POSIX 0700; Windows user-temp inherited ACLs). Selected account `dataSyncId`
 is passed with yt-dlp's existing `youtube:data_sync_id` option. Cookies, account context
 and proxy credentials stay out of argv. Cookie-jar mutations by yt-dlp are discarded;
-login storage, login UI and session refresh logic are unchanged. Signed-in live tests
+login storage, login UI and session refresh logic are unchanged. Request directories
+hold a live-JVM file lock. On startup, unlocked abandoned directories from the same
+user are swept; active requests and recent directories from older versions are retained.
+Cleanup failure has a redacted I/O error rather than an unavailable-video classification. Signed-in live tests
 were not run: no existing account session was accessed.
 
 Public signature-cache data may be stored under the application's supplied cache
@@ -159,12 +175,14 @@ session snapshots, failure classification, proxy encoding, exact head/tail probe
 headers and cancellable probes. POSIX process fixtures explicitly skip on non-POSIX
 hosts; JSON/policy/backend contract tests remain portable.
 
-The resolver suite passes 23 tests (16 new process/policy tests plus 7 shared-policy
-tests); the backend suite passes 77 tests. Targeted caller tests for queue preloading,
+The resolver suite passes 26 tests (19 new process/policy tests plus 7 shared-policy
+tests); the backend suite passes 80 tests. Targeted caller tests for queue preloading,
 cache-session changes, completed-download preference, download attempts and queue
 persistence pass 24 tests; the download manager suite passes 14. The existing
 playback-core (22 tests) and
-desktop-playback (44 tests) suites pass on Linux. Their old native
+desktop-playback (46 tests, including the opt-in live callback test) suites pass on
+Linux. The live test also checks a deep seek, pause/resume and exact header delivery;
+see [the test notes](docs/YTDLP_VLC_TEST.md). Their old native
 controller tests silently return when the Windows-only runtime locator finds no runtime;
 that is **not** evidence of full Linux application playback. This branch deliberately
 leaves the Linux port's runtime discovery/audio-output work to its own worktree.

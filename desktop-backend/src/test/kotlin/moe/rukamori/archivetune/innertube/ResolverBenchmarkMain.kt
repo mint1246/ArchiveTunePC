@@ -29,6 +29,8 @@ fun main(arguments: Array<String>) {
                 if (stream != null) {
                     record.put("format", stream.format.itag).put("bitrate", stream.bitrate)
                         .put("mime", stream.mimeType).put("header_names", stream.requestHeaders.keys.sorted())
+                        .put("loudness_db", stream.audioConfig?.loudnessDb ?: JSONObject.NULL)
+                        .put("perceptual_loudness_db", stream.audioConfig?.perceptualLoudnessDb ?: JSONObject.NULL)
                         .put("expiry_seconds", (stream.expiresAtEpochMillis - System.currentTimeMillis()) / 1000)
                 } else {
                     record.put("failure", classifyStreamResolutionFailure(result.exceptionOrNull()!!).name)

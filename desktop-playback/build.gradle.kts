@@ -19,7 +19,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     // The live yt-dlp playback integration test resolves a real stream through the desktop
     // backend and feeds it to the existing ranged callback transport.
-    testImplementation(project(":desktop-backend"))
+    if (findProject(":desktop-backend") != null) testImplementation(project(":desktop-backend"))
 }
 
 tasks.test {
@@ -42,5 +42,12 @@ tasks.test {
             systemProperty(propertyName, forwarded)
         }
         inputs.property(environmentName, forwarded.orEmpty())
+    }
+}
+
+// Keep the established standalone playback-core build usable without the full backend graph.
+if (findProject(":desktop-backend") == null) {
+    kotlin.sourceSets.named("test") {
+        kotlin.exclude("**/YtDlpPlaybackIntegrationTest.kt")
     }
 }

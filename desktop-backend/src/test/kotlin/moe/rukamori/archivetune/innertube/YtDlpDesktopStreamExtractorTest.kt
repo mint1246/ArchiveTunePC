@@ -111,7 +111,7 @@ class YtDlpDesktopStreamExtractorTest {
                 cat "${'$'}(dirname "${'$'}0")/response.json"
             """.trimIndent())
             fixture.toFile().setExecutable(true)
-            val extractor = YtDlpDesktopStreamExtractor(YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)))
+            val extractor = YtDlpDesktopStreamExtractor(YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)), audioConfigProvider = { _, _ -> null })
             val result = extractor.resolve("jNQXAC9IVRw", JvmAudioQuality.HIGHEST, PlaybackAuthState())
             assertEquals("YT_DLP", result.clientName)
             assertEquals("2026.08.19", result.clientVersion)
@@ -132,6 +132,96 @@ class YtDlpDesktopStreamExtractorTest {
             withTimeout(1000) { probe.cancelAndJoin() }
             assertTrue(probe.isCancelled)
         } finally { release.countDown(); server.stop(0) }
+    }
+
+    @Test fun `CDN rejection is a network failure rather than unavailable video`() {
+        for (code in listOf(403, 404, 410, 416, 429)) {
+            assertEquals(StreamResolutionFailureKind.NETWORK, classifyStreamResolutionFailure(AudioStreamProbeHttpException(code)))
+        }
+        assertEquals(StreamResolutionFailureKind.NETWORK,
+            classifyStreamResolutionFailure(moe.rukamori.archivetune.stream.ResolverTemporaryFileException()))
+    }
+
+    @Test fun `CDN rejection selects another format and preserves loudness metadata`() = runBlocking {
+        org.junit.Assume.assumeTrue("POSIX subprocess fixture requires /bin/sh", Files.isExecutable(Path.of("/bin/sh")))
+        val root = Files.createTempDirectory("extractor-retry-")
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val requests = CopyOnWriteArrayList<String>()
+        fun response(path: String, format: String) = JSONObject().put("id", "jNQXAC9IVRw")
+            .put("url", "http://127.0.0.1:${server.address.port}/$path")
+            .put("protocol", "http").put("vcodec", "none").put("acodec", "opus").put("ext", "webm")
+            .put("format_id", format).put("abr", 128)
+        server.createContext("/rejected") { exchange ->
+            requests += "rejected"
+            Files.writeString(root.resolve("response.json"), response("audio", "140").toString())
+            exchange.sendResponseHeaders(403, -1); exchange.close()
+        }
+        server.createContext("/audio") { exchange ->
+            requests += exchange.requestHeaders.getFirst("Range")
+            exchange.responseHeaders.add("Content-Range", "bytes 0-1023/8192")
+            exchange.sendResponseHeaders(206, 1024)
+            exchange.responseBody.use { it.write(ByteArray(1024) { 1 }) }
+        }
+        server.start()
+        try {
+            Files.writeString(root.resolve("response.json"), response("rejected", "251-drc").toString())
+            val fixture = root.resolve("yt-dlp")
+            Files.writeString(fixture, """
+                #!/bin/sh
+                root=${'$'}(dirname "${'$'}0")
+                case "${'$'}*" in
+                  *archivetune-runtime-check:*)
+                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n' >&2
+                    exit 1 ;;
+                esac
+                printf '%s\n' "${'$'}@" >> "${'$'}root/arguments"
+                cat "${'$'}root/response.json"
+            """.trimIndent())
+            fixture.toFile().setExecutable(true)
+            val audioConfig = moe.rukamori.archivetune.innertube.models.response.PlayerResponse.PlayerConfig.AudioConfig(6.5, 7.0)
+            val extractor = YtDlpDesktopStreamExtractor(
+                YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)),
+                audioConfigProvider = { _, _ -> audioConfig })
+            val stream = extractor.resolve("jNQXAC9IVRw", JvmAudioQuality.HIGHEST, PlaybackAuthState())
+            assertEquals(140, stream.format.itag)
+            assertEquals(audioConfig, stream.audioConfig)
+            assertEquals(listOf("rejected", "bytes=0-1023", "bytes=7168-8191"), requests.toList())
+            assertTrue(Files.readString(root.resolve("arguments")).contains("[format_id!=251-drc]"))
+        } finally { root.toFile().deleteRecursively(); server.stop(0) }
+    }
+
+    @Test fun `probe and media client follow the current authenticated proxy route`() = runBlocking {
+        val savedProxy = YouTube.proxy
+        val savedUsername = YouTube.proxyUsername
+        val savedPassword = YouTube.proxyPassword
+        val proxy = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val requests = CopyOnWriteArrayList<String>()
+        proxy.createContext("/") { exchange ->
+            if (exchange.requestHeaders.getFirst("Proxy-Authorization") == null) {
+                exchange.responseHeaders.add("Proxy-Authenticate", "Basic realm=benchmark")
+                exchange.sendResponseHeaders(407, -1); exchange.close()
+            } else {
+                requests += exchange.requestURI.host
+                exchange.responseHeaders.add("Content-Range", "bytes 0-1023/8192")
+                exchange.sendResponseHeaders(206, 1024)
+                exchange.responseBody.use { it.write(ByteArray(1024) { 1 }) }
+            }
+        }
+        proxy.start()
+        try {
+            val mediaClient = desktopStreamHttpClient() // Created before the route changes.
+            YouTube.proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", proxy.address.port))
+            YouTube.proxyUsername = "test-user"; YouTube.proxyPassword = "test-pass"
+            val url = "http://unresolvable.invalid/audio"
+            probeResolvedAudioStreamCancellable(sampleStream().copy(url = url)).getOrThrow()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                mediaClient.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { assertEquals(206, it.code) }
+            }
+            assertEquals(listOf("unresolvable.invalid", "unresolvable.invalid", "unresolvable.invalid"), requests.toList())
+        } finally {
+            YouTube.proxy = savedProxy; YouTube.proxyUsername = savedUsername; YouTube.proxyPassword = savedPassword
+            proxy.stop(0)
+        }
     }
 
     private fun sampleStream(): ResolvedAudioStream {

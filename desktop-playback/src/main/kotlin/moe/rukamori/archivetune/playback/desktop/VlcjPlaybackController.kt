@@ -73,6 +73,7 @@ class VlcjPlaybackController(
     private val onStreamHttpFailure: suspend (PlaybackItem, ResolvedPlaybackSource, Int) -> Boolean = { _, _, _ -> false },
     initialAudioOutputDeviceId: String? = null,
     initialPitchSemitones: Float = 0f,
+    mediaHttpClient: okhttp3.OkHttpClient? = null,
 ) : PlaybackController, DesktopAudioOutputControl, DesktopCrossfadeControl {
     private data class LoadRequest(
         val generation: Long,
@@ -96,7 +97,7 @@ class VlcjPlaybackController(
     private val nativeLifecycleLock = Any()
     private val queue = PlaybackQueue()
     private val logger = Logger.getLogger("moe.rukamori.archivetune.desktop.playback")
-    private val rangeHttpTransport = VlcjRangeHttpTransport()
+    private val rangeHttpTransport = VlcjRangeHttpTransport(newRangeHttpClient(mediaHttpClient ?: okhttp3.OkHttpClient()))
     private val initialSafePitchSemitones =
         initialPitchSemitones.takeIf(Float::isFinite)?.coerceIn(MIN_PITCH, MAX_PITCH) ?: 0f
     internal var applicationHttpTransportPredicate: (ResolvedPlaybackSource) -> Boolean =

@@ -20,12 +20,18 @@ import java.io.File
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.LinkOption
+import java.nio.file.StandardOpenOption
+import java.nio.channels.FileChannel
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+
+class ResolverTemporaryFileException : java.io.IOException("Could not manage resolver temporary files")
 
 /** Error messages intentionally carry no subprocess output, URLs, headers, cookies or proxy credentials. */
 enum class YtDlpFailure {
-    TOOLCHAIN, TIMEOUT, AUTH_REQUIRED, UNAVAILABLE, NETWORK, NO_AUDIO, INVALID_OUTPUT, EXTRACTION,
+    TOOLCHAIN, TIMEOUT, AUTH_REQUIRED, UNAVAILABLE, NETWORK, NO_AUDIO, INVALID_OUTPUT, EXTRACTION, EXPIRED_STREAM,
 }
 
 class YtDlpException(val kind: YtDlpFailure) : IllegalStateException(
@@ -38,6 +44,7 @@ class YtDlpException(val kind: YtDlpFailure) : IllegalStateException(
         YtDlpFailure.NO_AUDIO -> "YouTube returned no direct audio format"
         YtDlpFailure.INVALID_OUTPUT -> "yt-dlp returned an invalid audio response"
         YtDlpFailure.EXTRACTION -> "yt-dlp could not resolve this YouTube track"
+        YtDlpFailure.EXPIRED_STREAM -> "The resolved YouTube stream expired before playback"
     },
 )
 
@@ -46,7 +53,7 @@ data class YtDlpToolchain(val ytDlpVersion: String, val quickJsVersion: String, 
 data class YtDlpConfiguration(
     val executable: String = resolverExecutable("yt-dlp", "ARCHIVETUNE_YTDLP"),
     val quickJsExecutable: String = resolverExecutable("qjs", "ARCHIVETUNE_QUICKJS"),
-    val timeoutMs: Long = 45_000,
+    val timeoutMs: Long = 35_000,
     val temporaryRoot: Path = Path.of(System.getProperty("java.io.tmpdir")),
     /** Public signature/player cache managed by yt-dlp; cookies and signed URLs stay request-local. */
     val cacheDirectory: Path? = null,
@@ -61,12 +68,14 @@ data class YtDlpAudioStream(
     val videoDetails: PlayerResponse.VideoDetails,
     val headers: Map<String, String>,
     val expiresAtEpochMillis: Long,
+    val formatId: String = format.itag.toString(),
 )
 
 /** One yt-dlp process per request. Only the successful capability check is retained in memory. */
 class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpConfiguration()) {
     private val verificationMutex = Mutex()
     @Volatile private var toolchain: YtDlpToolchain? = null
+    private val hasSweptTemporaryFiles = AtomicBoolean(false)
 
     suspend fun verifyToolchain(): YtDlpToolchain = verificationMutex.withLock {
         toolchain ?: bounded {
@@ -88,6 +97,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
         cookie: String? = null,
         proxyUrl: String? = null,
         dataSyncId: String? = null,
+        excludedFormatIds: Set<String> = emptySet(),
     ): YtDlpAudioStream = bounded {
         require(VIDEO_ID.matches(videoId)) { "A YouTube video ID is required" }
         verifyToolchain()
@@ -109,7 +119,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
                     add("--proxy ${quoteConfigValue(proxyUrl)}")
                 }
                 if (!cookie.isNullOrBlank() && !dataSyncId.isNullOrBlank()) {
-                    require(dataSyncId.none { it in "\r\n\u0000;,=" }) { "Invalid session context" }
+                    if (dataSyncId.any { it in "\r\n\u0000;,=" }) throw YtDlpException(YtDlpFailure.AUTH_REQUIRED)
                     add("--extractor-args ${quoteConfigValue("youtube:data_sync_id=$dataSyncId")}")
                 }
             }
@@ -121,7 +131,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
             arguments += listOf(
                 "--no-playlist", "--no-progress", "--socket-timeout", "12",
                 "--retries", "1", "--extractor-retries", "1", "--skip-download", "--dump-single-json",
-                "--format", formatSelector(quality), "--", "https://www.youtube.com/watch?v=$videoId",
+                "--format", formatSelector(quality, excludedFormatIds), "--", "https://www.youtube.com/watch?v=$videoId",
             )
             val output = runResolverProcess(arguments, directory)
             // yt-dlp may exit successfully with fewer formats when a previously verified runtime
@@ -152,6 +162,9 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
             arrayOf(PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         } else emptyArray()
         val directory = Files.createTempDirectory(configuration.temporaryRoot, "archivetune-resolver-", *attributes)
+        if (hasSweptTemporaryFiles.compareAndSet(false, true)) sweepAbandonedRequests(configuration.temporaryRoot, directory)
+        val ownerChannel = FileChannel.open(directory.resolve(".owner.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+        val ownerLock = ownerChannel.lock()
         var requestFailure: Throwable? = null
         try {
             block(directory)
@@ -159,6 +172,8 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
             requestFailure = failure
             throw failure
         } finally {
+            ownerLock.release()
+            ownerChannel.close()
             // Windows uses the user temp directory's inherited ACL. No credentials go into shared caches.
             val removed = withContext(NonCancellable) {
                 var deleted = deleteRequestDirectory(directory)
@@ -171,7 +186,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
                 deleted
             }
             if (!removed) {
-                val cleanupFailure = IllegalStateException("Could not remove resolver temporary files")
+                val cleanupFailure = ResolverTemporaryFileException()
                 requestFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure
             }
         }
@@ -186,11 +201,14 @@ internal fun parseToolchain(diagnostics: String): YtDlpToolchain {
     return YtDlpToolchain(version, quickJs, ejs)
 }
 
-internal fun formatSelector(quality: StreamAudioQuality): String {
+internal fun formatSelector(quality: StreamAudioQuality, excludedFormatIds: Set<String> = emptySet()): String {
     // Progressive HTTP audio only: downloads/cache range requests cannot consume HLS/DASH manifests.
     val direct = "bestaudio[protocol=https]/bestaudio[protocol=http]"
-    val cap = when (quality) { StreamAudioQuality.LOW -> 70; StreamAudioQuality.HIGH -> 160; else -> return direct }
-    return "bestaudio[protocol=https][abr<=$cap]/bestaudio[protocol=http][abr<=$cap]/$direct"
+    val cap = when (quality) { StreamAudioQuality.LOW -> 70; StreamAudioQuality.HIGH -> 160; else -> null }
+    val preferred = if (cap == null) direct else "bestaudio[protocol=https][abr<=$cap]/bestaudio[protocol=http][abr<=$cap]/$direct"
+    require(excludedFormatIds.all { it.matches(Regex("[A-Za-z0-9_.-]{1,64}")) }) { "Invalid excluded format" }
+    val exclusions = excludedFormatIds.sorted().joinToString("") { "[format_id!=$it]" }
+    return preferred.split('/').joinToString("/") { it + exclusions }
 }
 
 internal fun netscapeCookies(cookie: String): String = buildString {
@@ -198,21 +216,24 @@ internal fun netscapeCookies(cookie: String): String = buildString {
     cookie.split(';').forEach { pair ->
         val name = pair.substringBefore('=').trim()
         val value = pair.substringAfter('=', "").trim()
-        require(name.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) && '=' in pair &&
-            value.none { it == '\t' || it == '\r' || it == '\n' || it == '\u0000' }) { "Invalid session cookie" }
+        if (!(name.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) && '=' in pair &&
+            value.none { it == '\t' || it == '\r' || it == '\n' || it == '\u0000' })) throw YtDlpException(YtDlpFailure.AUTH_REQUIRED)
         append(".youtube.com\tTRUE\t/\tTRUE\t0\t$name\t$value\n")
     }
 }
 
 internal fun classifyYtDlpError(diagnostic: String): YtDlpFailure {
-    val text = diagnostic.lowercase(Locale.ROOT)
+    val text = diagnostic.lowercase(Locale.ROOT).replace('’', '\'')
     return when {
-        "sign in" in text || "login required" in text || "private video" in text || "confirm your age" in text -> YtDlpFailure.AUTH_REQUIRED
-        "video unavailable" in text || "video is unavailable" in text || "has been removed" in text || "not available in your country" in text -> YtDlpFailure.UNAVAILABLE
+        listOf("sign in to", "sign-in required", "login required", "private video", "confirm your age", "members-only",
+            "join this channel", "not a bot", "age-restricted").any { it in text } -> YtDlpFailure.AUTH_REQUIRED
+        listOf("video unavailable", "video is unavailable", "has been removed", "not available in your country",
+            "content isn't available", "content is not available").any { it in text } -> YtDlpFailure.UNAVAILABLE
         "timed out" in text || "timeout" in text -> YtDlpFailure.TIMEOUT
+        Regex("""http error\s+\d{3}""").containsMatchIn(text) -> YtDlpFailure.NETWORK
         "unable to download" in text || "name resolution" in text || "connection refused" in text -> YtDlpFailure.NETWORK
         "requested format is not available" in text -> YtDlpFailure.NO_AUDIO
-        "javascript runtime" in text || "ejs" in text || "no such option" in text -> YtDlpFailure.TOOLCHAIN
+        hasYtDlpToolchainFailure(text) || "no module named 'yt_dlp_ejs'" in text || "no such option" in text -> YtDlpFailure.TOOLCHAIN
         else -> YtDlpFailure.EXTRACTION
     }
 }
@@ -254,7 +275,7 @@ internal fun parseYtDlpAudio(json: String, videoId: String, nowMs: Long = System
     val durationMs = info.numberOrNull("duration")?.times(1000)?.toLong()
     val bitrate = ((info.numberOrNull("abr") ?: info.numberOrNull("tbr") ?: 0.0) * 1000).toInt().coerceAtLeast(0)
     val format = PlayerResponse.StreamingData.Format(
-        itag = info.getString("format_id").toIntOrNull() ?: 0, url = url, mimeType = "$mime; codecs=\"$codec\"",
+        itag = info.getString("format_id").substringBefore('-').toIntOrNull() ?: 0, url = url, mimeType = "$mime; codecs=\"$codec\"",
         bitrate = bitrate, width = null, height = null, contentLength = info.numberOrNull("filesize")?.toLong(),
         quality = info.optString("format_note", "audio"), fps = null, qualityLabel = null, averageBitrate = bitrate,
         audioQuality = null, approxDurationMs = durationMs?.toString(), audioSampleRate = info.numberOrNull("asr")?.toInt(),
@@ -262,12 +283,12 @@ internal fun parseYtDlpAudio(json: String, videoId: String, nowMs: Long = System
         lastModified = null, signatureCipher = null, cipher = null,
     )
     val expiry = PlaybackStreamResolver.extractExpiryTimestampMs(url) ?: (nowMs + 300_000)
-    require(expiry > nowMs + PlaybackStreamResolver.STREAM_URL_EXPIRY_SAFETY_MS)
+    if (expiry <= nowMs + PlaybackStreamResolver.STREAM_URL_EXPIRY_SAFETY_MS) throw YtDlpException(YtDlpFailure.EXPIRED_STREAM)
     YtDlpAudioStream(
         videoId, url, format,
         PlayerResponse.VideoDetails(videoId = videoId, title = info.optString("title"), author = info.optString("uploader"),
             channelId = info.optString("channel_id"), lengthSeconds = durationMs?.div(1000)?.toString()),
-        headers, expiry,
+        headers, expiry, info.getString("format_id"),
     )
 } catch (cancellation: CancellationException) {
     throw cancellation
@@ -284,6 +305,30 @@ private fun deleteRequestDirectory(directory: Path): Boolean = runCatching {
     Files.walk(directory).use { entries -> entries.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } }
     true
 }.getOrDefault(false)
+
+private fun sweepAbandonedRequests(root: Path, current: Path) {
+    runCatching {
+        val owner = Files.getOwner(current, LinkOption.NOFOLLOW_LINKS)
+        Files.list(root).use { paths -> paths.forEach { directory ->
+            if (directory != current && directory.fileName.toString().startsWith("archivetune-resolver-") &&
+                Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) runCatching {
+                if (Files.getOwner(directory, LinkOption.NOFOLLOW_LINKS) != owner) return@runCatching
+                val lockPath = directory.resolve(".owner.lock")
+                if (Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)) {
+                    // A live JVM holds this lock across extraction. A crash releases it, allowing
+                    // the next resolver instance to discard cookies without touching active peers.
+                    val abandoned = FileChannel.open(lockPath, StandardOpenOption.WRITE).use { channel ->
+                        channel.tryLock()?.use { true } ?: false
+                    }
+                    if (abandoned) deleteRequestDirectory(directory)
+                } else if (Files.getLastModifiedTime(directory).toMillis() < System.currentTimeMillis() - 86_400_000) {
+                    // Older versions had no lock. Do not race a just-created request directory.
+                    deleteRequestDirectory(directory)
+                }
+            }
+        } }
+    }
+}
 private val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
 
 private fun resolverExecutable(name: String, environmentKey: String): String {

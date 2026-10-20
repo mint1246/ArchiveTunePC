@@ -552,9 +552,8 @@ class YtDlpPlaybackIntegrationTest {
         fun requireExecutable(environmentName: String, propertyName: String): Path {
             val configured = System.getenv(environmentName)?.trim()?.takeIf { it.isNotBlank() }
                 ?: System.getProperty(propertyName)?.trim()?.takeIf { it.isNotBlank() }
-            assumeTrue(configured != null, "$environmentName must point at a resolver executable")
-            val path = Path.of(configured!!)
-            assumeTrue(
+            val path = Path.of(configured ?: throw AssertionError("$environmentName must point at a resolver executable"))
+            assertTrue(
                 Files.isRegularFile(path) && Files.isExecutable(path),
                 "$environmentName does not point at an executable file",
             )
