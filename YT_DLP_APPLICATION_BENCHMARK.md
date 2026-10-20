@@ -9,29 +9,28 @@ process.
 
 ## Result summary
 
-| Metric | Baseline `8e4bfb314` (legacy) | Final `dedcb8aa7` (yt-dlp) | Interim `87e4e1446` (yt-dlp) |
-| --- | ---: | ---: | ---: |
-| Successful resolutions | 0 / 6 | **6 / 6** | **6 / 6** |
-| Idle max RSS (MiB) | 314.78 | 321.54 | 312.27 |
-| Extraction peak, simultaneous tree RSS (MiB) | 318.64 | **670.42** | 664.30 |
-| Extraction peak PSS (MiB) | 290.29 | **632.59** | 612.06 |
-| Post-idle max RSS (MiB) | 312.72 | 321.00 | 310.55 |
-| Median resolution latency (ms) | 888.0 | 2361.0 | 2543.5 |
-| Max resolution latency (ms) | 1095 | 7778 | 7461 |
-| Max simultaneous processes | 1 | 4 | 4 |
+| Metric | Baseline `8e4bfb314` (legacy) | Final `dedcb8aa7` (yt-dlp) |
+| --- | ---: | ---: |
+| Successful resolutions | 0 / 6 | **6 / 6** |
+| Idle max RSS (MiB) | 314.78 | 321.54 |
+| Extraction peak, simultaneous tree RSS (MiB) | 318.64 | **670.42** |
+| Extraction peak PSS (MiB) | 290.29 | **632.59** |
+| Post-idle max RSS (MiB) | 312.72 | 321.00 |
+| Median resolution latency (ms) | 888.0 (failed attempts) | 2361.0 |
+| Max resolution latency (ms) | 1095 (failed attempt) | 7778 |
+| Max simultaneous processes | 1 | 4 |
 
 The extraction number is the maximum of **simultaneous process-tree totals**,
-not a sum of per-process peak maxima. Each candidate row was compared with its
-own baseline run, so the baseline values differ slightly between the final and
-interim runs because of host/network variance; compare each candidate to its
-same-run baseline rather than across rows. The final candidate's peak sample
-decomposed as:
+not a sum of per-process peak maxima. Baseline failures are not evidence of faster
+successful extraction or lower memory for successful playback. The labeled interim
+run is retained in a separate artifact; the table uses the final run's paired baseline.
+The final candidate's peak sample decomposed as:
 
 | Process | Category | RSS at peak sample (MiB) |
 | --- | --- | ---: |
 | app JVM (`java`) | jvm | 320.25 |
 | `yt-dlp` (session leader) | yt_dlp | 2.41 |
-| `yt-dlp` (worker) | yt_dlp | 102.69 |
+| `yt-dlp` (embedded CPython worker) | yt_dlp | 102.69 |
 | `qjs` (QuickJS) | quickjs | 245.07 |
 | **Simultaneous total** | | **670.42** |
 
@@ -66,7 +65,7 @@ Final candidate categories observed across the whole run:
 | quickjs | `qjs` | 245.07 |
 | media | `ffmpeg`, `ffprobe` | 14.87 |
 | browser | **none** | — |
-| python | **none** | — |
+| separately named Python executable | **none** | — |
 
 Baseline observed only the app JVM:
 
@@ -74,13 +73,15 @@ Baseline observed only the app JVM:
 | --- | --- |
 | jvm | `java` |
 | browser | **none** |
-| python | **none** |
+| separately named Python executable | **none** |
 
 Both the baseline and the final candidate observed **zero browser processes**
 for the anonymous run. No sign-in flow or browser-backed authentication was
-started. Python was also zero in both runs. The interim candidate observed the
-same categories as the final candidate (`java`, `yt-dlp`, `qjs`, `ffmpeg`,
-`ffprobe`) and likewise zero browser and Python processes.
+started. No separately named `python` executable appeared. The standalone yt-dlp
+worker **does embed CPython**, and its entire RSS is included under `yt_dlp`;
+this is not a Python-free extraction. The benchmark's own Python supervisor and
+Xvfb are external measurement infrastructure, not app-created processes. The
+interim candidate observed the same executable categories as the final candidate.
 
 The per-category RSS values above are maxima observed for individual processes
 in each category across the run. They are not simultaneous totals and must not
@@ -146,7 +147,10 @@ whole-application worst case.
 This benchmark measures stream resolution, not playback. The candidate's
 separate backend tests covered loudness metadata; this run does not claim a
 loudness value because the application instrumentation did not record it.
-libVLC is unavailable on this Linux host, so playback was not exercised.
+The production VLC runtime locator requires a Windows layout and did not initialize
+playback on this Linux host. System libVLC is installed and passed the separate
+backend-to-callback integration test, including seek and pause/resume. Full desktop
+application playback was not exercised here.
 
 ## Method
 
@@ -228,10 +232,11 @@ counted, but they can affect scheduling and page-cache pressure.
   a signed-in session.
 - No sign-in flow was triggered. Browser/WebView memory for authentication is
   unmeasured, and anonymous runs observed zero browser processes.
-- libVLC is unavailable on this Linux host (the Linux playback locator is
-  Windows-only), so audio playback was not exercised. This is a
-  resolution-and-application benchmark, not a playback benchmark.
-- PSS sums can miss processes that exit between reads, especially short-lived
+- The production VLC runtime locator is Windows-only and did not initialize the
+  installed system libVLC. Full application playback was not exercised; separate
+  live libVLC integration tests passed. This is a resolution-and-application benchmark.
+- Polling can miss processes that start and exit between samples. RSS can count
+  shared pages more than once; PSS reduces that duplication. PSS sums can miss processes that exit between reads, especially short-lived
   `ffmpeg`/`ffprobe` helpers. RSS is the primary reported number.
 - The benchmark is offscreen with software Skia; GPU-backed rendering may
   differ.

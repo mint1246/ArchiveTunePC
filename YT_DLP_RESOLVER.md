@@ -119,6 +119,27 @@ export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/Archiv
 export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/qjs"
 ```
 
+## Whole-application comparison (final runtime candidate `dedcb8aa7`)
+
+The [full-application benchmark](YT_DLP_APPLICATION_BENCHMARK.md) compares the exact
+legacy baseline with the integrated Compose desktop app in isolated profiles. It
+counts the JVM and every observed app-created helper, including yt-dlp's embedded
+CPython worker, QuickJS, ffmpeg/ffprobe, and detached resolver process groups.
+
+The candidate resolved **6/6** requests; baseline **0/6**. Candidate idle / extraction
+peak / post-extraction RSS were **321.54 / 670.42 / 321.00 MiB**, compared with
+**314.78 / 318.64 / 312.72 MiB** for baseline. Extraction peak PSS was **632.59 MiB**.
+Candidate median / maximum latency was **2.361 / 7.778 seconds**. Baseline failed
+attempts cannot establish latency or memory for successful legacy extraction.
+
+No browser was launched during these anonymous runs, and no tracked process remained
+after shutdown. The temporary helpers account for most of the extraction peak;
+post-extraction memory returns near idle. Full application playback, authentication
+browser memory, and signed-in browsing were not measured. The production VLC locator
+is Windows-only, although the installed system libVLC passed independent live callback
+tests. Anonymous home/library requests returned HTTP 400. See the report for the
+sampling limits, process breakdown, exact revisions, raw artifacts and repeat command.
+
 ## Initial resolver-only measurements (2026-10-21, candidate c5cb2e578)
 
 The actual Kotlin `ArchiveTuneJvmClient` API was measured in separate Java 21 JVMs
@@ -157,7 +178,7 @@ Python or JavaScript worker resident. In particular, a resident Python worker wo
 not by itself remove the separate QuickJS solver cost. Future optimization should
 measure that distinction rather than infer it from process startup overhead.
 
-Reproduce the application comparison:
+Reproduce the initial resolver-only comparison:
 
 ```bash
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew :desktop-backend:writeResolverBenchmarkClasspath

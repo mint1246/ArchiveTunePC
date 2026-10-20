@@ -605,15 +605,6 @@ class ProcessTreeSampler:
                 session_members.add(pid)
                 tracked.add(pid)
 
-        # Descendant closure from the app and from any session/process-group member.
-        changed = True
-        while changed:
-            changed = False
-            for pid, info in table.items():
-                if pid not in tracked and info.ppid in tracked:
-                    tracked.add(pid)
-                    changed = True
-
         # Persistent registry catches children that called setsid()/double-forked
         # and were reparented.  (pid, starttime) prevents PID-reuse confusion.
         registry_members: set[int] = set()
@@ -624,6 +615,16 @@ class ProcessTreeSampler:
                     registry_members.add(pid)
                 tracked.add(pid)
                 known.last_wall_ms = wall_ms
+
+        # Include new children of already-observed detached/reparented processes,
+        # as well as children of the app's original session/process group.
+        changed = True
+        while changed:
+            changed = False
+            for pid, info in table.items():
+                if pid not in tracked and info.ppid in tracked:
+                    tracked.add(pid)
+                    changed = True
 
         tracked.discard(0)
         tracked = {pid for pid in tracked if pid in table}
@@ -1650,11 +1651,11 @@ def build_report(
         (
             "Observed resolver helper processes: yt-dlp "
             f"{candidate['process_inventory']['ytdlp_processes_observed']}, QuickJS "
-            f"{candidate['process_inventory']['quickjs_processes_observed']}, Python "
+            f"{candidate['process_inventory']['quickjs_processes_observed']}, separately named Python executables "
             f"{candidate['process_inventory']['python_processes_observed']}, browser "
             f"{candidate['process_inventory']['browser_processes_observed']}, media helpers "
             f"{candidate['process_inventory']['categories'].get('media', {}).get('names', [])}. "
-            "Anonymous startup did not open a sign-in browser; auth-specific browser RAM is unmeasured."
+            "The yt-dlp category includes its embedded CPython worker. Anonymous startup did not open a sign-in browser; auth-specific browser RAM is unmeasured."
         ),
         (
             "Transient media helpers observed during candidate extraction: "
@@ -1675,9 +1676,11 @@ def build_report(
             "number for baseline reflects failed legacy attempts with no resolver child processes. "
             "The candidate peak includes the transient yt-dlp/QuickJS processes and is the relevant "
             "whole-application worst case."
+            if baseline["resolution"]["successes"] == 0 else
+            "The baseline completed at least one resolution; interpret latency alongside the recorded success counts."
         ),
         (
-            "libVLC was not available on this Linux host (the locator is Windows-only), so the app's "
+            "The production Windows-only VLC locator did not find the installed system libVLC, so the app's "
             "playback engine could not be initialized. The measurement covers the real UI, services, "
             "home loads and stream resolution, but not audio playback."
         ),

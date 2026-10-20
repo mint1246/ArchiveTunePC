@@ -2022,10 +2022,10 @@
     "Whole-application idle max RSS: baseline 306.96 MiB, candidate 312.27 MiB (candidate delta 5.31 MiB).",
     "Whole-application extraction-phase peak of simultaneous total RSS: baseline 316.21 MiB, candidate 664.3 MiB (candidate delta 348.09 MiB). This is a measured process-tree total at one instant, not a sum of per-process maxima.",
     "Candidate post-extraction idle max RSS: 310.55 MiB; baseline post-extraction idle max RSS: 316.21 MiB.",
-    "Observed resolver helper processes: yt-dlp ['yt-dlp'], QuickJS ['qjs'], Python [], browser [], media helpers ['ffmpeg', 'ffprobe']. Anonymous startup did not open a sign-in browser; auth-specific browser RAM is unmeasured.",
+    "Observed resolver helper processes: yt-dlp ['yt-dlp'], QuickJS ['qjs'], separately named Python executables [], browser [], media helpers ['ffmpeg', 'ffprobe']. Anonymous startup did not open a sign-in browser; auth-specific browser RAM is unmeasured. The yt-dlp category includes its embedded CPython worker.",
     "Transient media helpers observed during candidate extraction: ['ffmpeg', 'ffprobe']. Their RSS is included in the simultaneous process-tree totals; short-lived ffprobe/ffmpeg processes can be missed by the PSS sampling pass.",
     "The baseline legacy path failed every request in this whole-app run, so the peak extraction number for baseline reflects failed legacy attempts with no resolver child processes. The candidate peak includes the transient yt-dlp/QuickJS processes and is the relevant whole-application worst case.",
-    "libVLC was not available on this Linux host (the locator is Windows-only), so the app's playback engine could not be initialized. The measurement covers the real UI, services, home loads and stream resolution, but not audio playback."
+    "The production Windows-only VLC locator did not find the installed system libVLC, so the app's playback engine could not be initialized. The measurement covers the real UI, services, home loads and stream resolution, but not audio playback."
   ],
   "limitations": [
     "One run per version, three public video IDs and two sequential repeats each; this is a small sample.",
