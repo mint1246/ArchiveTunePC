@@ -136,3 +136,6 @@ core.*
 /packaging/resolver/**/*.dll
 /packaging/resolver/**/*.so
 /packaging/resolver/**/*.part
+
+# Local resolver development tools (official binaries are provisioned for packages by Gradle).
+/.tools/

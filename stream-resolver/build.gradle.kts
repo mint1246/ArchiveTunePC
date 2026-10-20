@@ -8,6 +8,8 @@ kotlin {
 
 dependencies {
     api(project(":core"))
+    implementation(libs.coroutines.core)
+    implementation(libs.json)
     testImplementation(kotlin("test"))
     testImplementation(libs.coroutines.core)
 }
