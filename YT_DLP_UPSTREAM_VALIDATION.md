@@ -357,21 +357,16 @@ left to VLC's default `auto` selection) before the desktop player can open audio
 For reference, libVLC on this machine selected `alsa_output` on its own and produced
 48 kHz stereo output without any explicit `--aout`.
 
-### 7.3 Only `User-Agent` and `Referer` are forwarded to VLC
+### 7.3 Preserve the full header map through ArchiveTune's callback transport
 
-`VlcjPlaybackController.toVlcMediaOptions()` maps just those two headers to
-`:http-user-agent=` / `:http-referrer=`, while yt-dlp returns
-`Accept`, `Accept-Language`, `Sec-Fetch-Mode`, `User-Agent`.
+The generic libVLC HTTP option mapping (`toVlcMediaOptions`) supports User-Agent and
+Referer. For Googlevideo, ArchiveTune already uses `VlcjRangeHttpTransport` callback
+media, which receives the full `ResolvedPlaybackSource.headers` map. The integrated
+resolver uses that existing path; additional VLC options are unnecessary.
 
-Measured on the live CDN: the googlevideo URL served `206` with the **full** header set,
-with `User-Agent` only, and with **no** headers at all, so this is **not currently a
-blocker**. It is still worth forwarding the whole set, because the googlevideo URL
-carries an `spc` (streaming playback context) parameter that is bound to the request
-context; forwarding exactly what yt-dlp asked for is the safe default.
-
-The plumbing already exists: `PlaybackSource.Remote` carries
-`headers: Map<String, String>`, so the resolver can hand yt-dlp's `http_headers` straight
-through to the player.
+The live upstream probe measured HTTP 206 with the full four-header set and with
+reduced headers. The runtime still forwards the full required set and filters login
+credentials rather than relying on the CDN's current acceptance of reduced headers.
 
 ### 7.4 The desktop-backend already has the right probe
 
@@ -432,36 +427,20 @@ Useful flags: `--live-playback off|on|first`, `--live-retries N`,
 
 ---
 
-## 9. Open items for the runtime and packaging work
+## 9. Integration status after the upstream validation
 
-1. **The QuickJS runtime must not be optional** (section 3.3). The YouTube `n` challenge
-   is applied **per video** and hits the **default** client. Without the runtime the
-   default client silently drops formats (measured: `18` lost on `dQw4w9WgXcQ`) and the
-   challenged clients (`web_embedded`, `mweb`, `tv_simply`) fail outright with
-   "No video formats found". Because the trigger is video dependent, this presents in
-   production as an intermittent bug rather than a missing dependency. Validate
-   `quickjs-ng-<version>` and `yt_dlp_ejs-<version>` at startup and refuse to run the
-   resolver without them.
-2. **Budget for the challenged path.** It costs ~7.5-7.9 s and ~380 MiB of transient
-   process-tree RSS versus ~2-3 s and ~90 MiB on the normal path. The total resolver
-   timeout must cover the slow path, and the transient memory spike has to be acceptable
-   next to the rest of the desktop process.
-3. **`VlcRuntimeLocator` needs a Linux (`.so`) branch.** Until it exists, no desktop
-   playback path can run on Linux, and `VlcjLocalPlaybackIntegrationTest` is a no-op.
-4. **`--aout=directsound` must become platform-conditional.**
-5. **Forward the full `http_headers` set** from yt-dlp to the player, not only
-   `User-Agent`/`Referer` (section 7.3). The resolver already carries the whole map into
-   `ResolvedAudioStream.requestHeaders`; the remaining gap is
-   `VlcjPlaybackController.toVlcMediaOptions()`, which only maps two of the four headers.
-6. **Reuse `probeResolvedAudioStream`** rather than adding a second range probe.
-7. **Pin and stage the upstream binaries** with the SHA256 values in section 1, and keep
-   them out of version control. Note that the parent worktree's `.tools/` directory is
-   currently *not* matched by `.gitignore` (`build/` and `docs/` are), so the packaging
-   side should either ignore `.tools/` or stage the binaries under `build/`.
-8. **Decide on the extraction timeout budget.** The slow path (player JS + challenge)
-   takes ~7.9 s; a desktop resolver that blocks the UI thread on that would stall
-   playback start. The Android code path already models a per-client resolution race,
-   and the same race is the right shape here.
+1. `VlcRuntimeLocator` and the DirectSound option remain Linux port acceptance items;
+   this resolver branch does not modify that agent's playback implementation.
+2. quickjs-ng and bundled EJS are required and checked by the runtime resolver.
+3. Per-video challenge solving has been proven with negative controls. Missing runtime
+   diagnostics are rejected even if yt-dlp otherwise exits successfully.
+4. The full required `http_headers` set goes through ArchiveTune's Googlevideo callback
+   transport. Credential headers are filtered before media handoff.
+5. The backend retains head/tail CDN validation and adds cancellation to that probe.
+6. Windows/Linux sidecars are pinned, staged and verified by Gradle. `.tools/` is ignored.
+7. The resolver uses a 45-second deadline, IO dispatchers and short-lived processes.
+   See [YT_DLP_RESOLVER.md](YT_DLP_RESOLVER.md) for actual application API benchmarks,
+   authentication lifecycle and remaining platform acceptance work.
 
 ### Things that turned out to be fine
 

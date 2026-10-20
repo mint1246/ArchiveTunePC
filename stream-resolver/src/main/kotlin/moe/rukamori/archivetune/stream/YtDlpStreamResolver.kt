@@ -8,6 +8,8 @@ package moe.rukamori.archivetune.stream
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -85,6 +87,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
         quality: StreamAudioQuality = StreamAudioQuality.HIGH,
         cookie: String? = null,
         proxyUrl: String? = null,
+        dataSyncId: String? = null,
     ): YtDlpAudioStream = bounded {
         require(VIDEO_ID.matches(videoId)) { "A YouTube video ID is required" }
         verifyToolchain()
@@ -99,11 +102,20 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
                 Files.writeString(cookieFile, netscapeCookies(cookie))
                 arguments += listOf("--cookies", cookieFile.toString())
             }
-            // Keep proxy credentials out of argv/process listings as well as logs.
-            if (proxyUrl != null) {
-                require(proxyUrl.none { it == '\r' || it == '\n' || it == '\u0000' }) { "Invalid proxy" }
+            // Keep proxy credentials and the selected account context out of argv/process listings.
+            val requestOptions = buildList {
+                if (proxyUrl != null) {
+                    require(proxyUrl.none { it == '\r' || it == '\n' || it == '\u0000' }) { "Invalid proxy" }
+                    add("--proxy ${quoteConfigValue(proxyUrl)}")
+                }
+                if (!cookie.isNullOrBlank() && !dataSyncId.isNullOrBlank()) {
+                    require(dataSyncId.none { it in "\r\n\u0000;,=" }) { "Invalid session context" }
+                    add("--extractor-args ${quoteConfigValue("youtube:data_sync_id=$dataSyncId")}")
+                }
+            }
+            if (requestOptions.isNotEmpty()) {
                 val configFile = directory.resolve("request.conf")
-                Files.writeString(configFile, "--proxy '" + proxyUrl.replace("'", "'\"'\"'") + "'\n")
+                Files.writeString(configFile, requestOptions.joinToString("\n", postfix = "\n"))
                 arguments += listOf("--config-locations", configFile.toString())
             }
             arguments += listOf(
@@ -112,6 +124,12 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
                 "--format", formatSelector(quality), "--", "https://www.youtube.com/watch?v=$videoId",
             )
             val output = runResolverProcess(arguments, directory)
+            // yt-dlp may exit successfully with fewer formats when a previously verified runtime
+            // disappears or its EJS components become unusable. Do not accept that silent downgrade.
+            if (hasYtDlpToolchainFailure(output.stderr)) {
+                toolchain = null
+                throw YtDlpException(YtDlpFailure.TOOLCHAIN)
+            }
             if (output.exitCode != 0) throw YtDlpException(classifyYtDlpError(output.stderr))
             parseYtDlpAudio(output.stdout, videoId)
         }
@@ -134,11 +152,28 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
             arrayOf(PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         } else emptyArray()
         val directory = Files.createTempDirectory(configuration.temporaryRoot, "archivetune-resolver-", *attributes)
+        var requestFailure: Throwable? = null
         try {
             block(directory)
+        } catch (failure: Throwable) {
+            requestFailure = failure
+            throw failure
         } finally {
             // Windows uses the user temp directory's inherited ACL. No credentials go into shared caches.
-            directory.toFile().deleteRecursively()
+            val removed = withContext(NonCancellable) {
+                var deleted = deleteRequestDirectory(directory)
+                repeat(5) {
+                    if (!deleted) {
+                        delay(50) // A forcibly stopped Windows child can briefly retain a file handle.
+                        deleted = deleteRequestDirectory(directory)
+                    }
+                }
+                deleted
+            }
+            if (!removed) {
+                val cleanupFailure = IllegalStateException("Could not remove resolver temporary files")
+                requestFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure
+            }
         }
     }
 }
@@ -180,6 +215,12 @@ internal fun classifyYtDlpError(diagnostic: String): YtDlpFailure {
         "javascript runtime" in text || "ejs" in text || "no such option" in text -> YtDlpFailure.TOOLCHAIN
         else -> YtDlpFailure.EXTRACTION
     }
+}
+
+internal fun hasYtDlpToolchainFailure(diagnostic: String): Boolean {
+    val text = diagnostic.lowercase(Locale.ROOT)
+    return listOf("no supported javascript runtime", "no usable challenge solver", "failed to load challenge solver",
+        "hash mismatch on challenge solver", "error running quickjs process").any { it in text }
 }
 
 internal fun parseYtDlpAudio(json: String, videoId: String, nowMs: Long = System.currentTimeMillis()): YtDlpAudioStream = try {
@@ -237,6 +278,12 @@ internal fun parseYtDlpAudio(json: String, videoId: String, nowMs: Long = System
 }
 
 private fun JSONObject.numberOrNull(key: String): Double? = opt(key)?.toString()?.toDoubleOrNull()?.takeIf { it.isFinite() }
+private fun quoteConfigValue(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+private fun deleteRequestDirectory(directory: Path): Boolean = runCatching {
+    // Files.walk does not follow symbolic links; a sidecar cannot make cleanup traverse outside this request.
+    Files.walk(directory).use { entries -> entries.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } }
+    true
+}.getOrDefault(false)
 private val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
 
 private fun resolverExecutable(name: String, environmentKey: String): String {

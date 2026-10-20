@@ -32,6 +32,7 @@ class YtDlpDesktopStreamExtractor(
             videoId = videoId,
             quality = StreamAudioQuality.valueOf(quality.name),
             cookie = authState.cookie,
+            dataSyncId = authState.dataSyncId,
             proxyUrl = streamProxyUrl(YouTube.streamProxy, YouTube.proxyUsername, YouTube.proxyPassword),
         )
         val stream = ResolvedAudioStream(

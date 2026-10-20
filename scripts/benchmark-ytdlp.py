@@ -776,7 +776,7 @@ def _libvlc_probe_child(url: str, headers: Dict[str, str], timeout: float) -> Di
             return summary
     summary["vlc_available"] = True
 
-    lib.libvlc_new.argtypes = [ctypes.c_int]
+    lib.libvlc_new.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
     lib.libvlc_new.restype = ctypes.c_void_p
     lib.libvlc_media_new_location.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
     lib.libvlc_media_new_location.restype = ctypes.c_void_p
@@ -796,7 +796,7 @@ def _libvlc_probe_child(url: str, headers: Dict[str, str], timeout: float) -> Di
 
     states = {0: "NothingSpecial", 1: "Opening", 2: "Buffering", 3: "Playing",
               4: "Paused", 5: "Stopped", 6: "Ended", 7: "Error"}
-    instance = lib.libvlc_new(0)
+    instance = lib.libvlc_new(0, None)
     if not instance:
         summary["vlc_error"] = "libvlc_new failed"
         return summary

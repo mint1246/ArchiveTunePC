@@ -86,6 +86,13 @@ class YtDlpStreamResolverTest {
         assertEquals("bestaudio[protocol=https]/bestaudio[protocol=http]", formatSelector(StreamAudioQuality.HIGHEST))
     }
 
+    @Test fun `successful exit cannot silently lose its required runtime or EJS`() {
+        assertTrue(hasYtDlpToolchainFailure("WARNING: No supported JavaScript runtime could be found"))
+        assertTrue(hasYtDlpToolchainFailure("WARNING: No usable challenge solver lib script available"))
+        assertTrue(hasYtDlpToolchainFailure("Error running QuickJS process (returncode: 3)"))
+        assertFalse(hasYtDlpToolchainFailure("WARNING: unrelated metadata is missing"))
+    }
+
     @Test fun `cookie bridge preserves equals signs and scopes cookies to secure youtube requests`() {
         val result = netscapeCookies("SID=one=two; SAPISID=secret")
         assertTrue(result.contains(".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tone=two\n"))
@@ -141,7 +148,8 @@ class YtDlpStreamResolverTest {
         try {
             val fixture = createFixture(root, "success")
             val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs path with spaces", 5000, root, root.resolve("player cache")))
-            val result = resolver.resolve(videoId, cookie = "SID=private-value")
+            val result = resolver.resolve(videoId, cookie = "SID=private-value",
+                proxyUrl = "http://test-user:private-proxy@localhost:8080", dataSyncId = "123||456")
             assertEquals(videoId, result.videoId)
             val args = Files.readString(root.resolve("args"))
             assertTrue(args.contains("--ignore-config\n--no-plugin-dirs\n--no-remote-components\n--no-js-runtimes\n"))
@@ -149,6 +157,11 @@ class YtDlpStreamResolverTest {
             assertTrue(args.contains("--cache-dir\n${root.resolve("player cache")}\n"))
             assertTrue(Files.isDirectory(root.resolve("player cache")))
             assertFalse(args.contains("private-value"))
+            assertFalse(args.contains("private-proxy"))
+            assertFalse(args.contains("123||456"))
+            val requestConfig = Files.readString(root.resolve("request-snapshot"))
+            assertTrue(requestConfig.contains("youtube:data_sync_id=123||456"))
+            assertTrue(requestConfig.contains("http://test-user:private-proxy@localhost:8080"))
             assertTrue(Files.exists(root.resolve("cookie-checked")))
             assertFalse(Files.list(root).use { paths -> paths.anyMatch { it.fileName.toString().startsWith("archivetune-resolver-") } })
         } finally { root.toFile().deleteRecursively() }
@@ -165,6 +178,50 @@ class YtDlpStreamResolverTest {
             assertEquals(videoId, first.await().videoId)
             assertEquals(videoId, second.await().videoId)
             assertEquals(1, Files.readAllLines(root.resolve("verifications")).size)
+        } finally { root.toFile().deleteRecursively() }
+    }
+
+    @Test fun `nonzero extraction and oversized output clean up request credentials`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
+        val root = Files.createTempDirectory("resolver-errors-test-")
+        try {
+            for ((mode, expected) in listOf("fail" to YtDlpFailure.AUTH_REQUIRED, "flood" to YtDlpFailure.INVALID_OUTPUT)) {
+                val fixture = createFixture(root, mode)
+                val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root))
+                val failure = assertFailsWith<YtDlpException> { resolver.resolve(videoId, cookie = "SID=private-value") }
+                assertEquals(expected, failure.kind)
+                assertFalse(failure.stackTraceToString().contains("private-value"))
+                assertFalse(Files.list(root).use { paths -> paths.anyMatch { it.fileName.toString().startsWith("archivetune-resolver-") } })
+            }
+        } finally { root.toFile().deleteRecursively() }
+    }
+
+    @Test fun `runtime warning after a cached verification fails and invalidates the capability check`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
+        val root = Files.createTempDirectory("resolver-runtime-change-")
+        try {
+            val fixture = createFixture(root, "success")
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root))
+            resolver.resolve(videoId)
+            createFixture(root, "runtime-missing")
+            val failure = assertFailsWith<YtDlpException> { resolver.resolve(videoId, cookie = "SID=private-value") }
+            assertEquals(YtDlpFailure.TOOLCHAIN, failure.kind)
+            createFixture(root, "success")
+            resolver.resolve(videoId)
+            assertEquals(2, Files.readAllLines(root.resolve("verifications")).size)
+            assertFalse(Files.list(root).use { paths -> paths.anyMatch { it.fileName.toString().startsWith("archivetune-resolver-") } })
+        } finally { root.toFile().deleteRecursively() }
+    }
+
+    @Test fun `temporary cleanup never follows sidecar symlinks outside the request directory`() = runBlocking<Unit> {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isExecutable(Path.of("/bin/sh")), "POSIX subprocess fixture requires /bin/sh")
+        val root = Files.createTempDirectory("resolver-symlink-test-")
+        try {
+            Files.createDirectory(root.resolve("keep"))
+            Files.writeString(root.resolve("keep/untouched"), "preserve")
+            val fixture = createFixture(root, "symlink")
+            YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root)).resolve(videoId)
+            assertEquals("preserve", Files.readString(root.resolve("keep/untouched")))
         } finally { root.toFile().deleteRecursively() }
     }
 
@@ -190,14 +247,28 @@ class YtDlpStreamResolverTest {
                 test "${'$'}(stat -c %a "${'$'}(dirname "${'$'}arg")")" = 700 || exit 4
                 touch "${'$'}root/cookie-checked"
               fi
+              if [ "${'$'}previous" = '--config-locations' ]; then
+                cat "${'$'}arg" > "${'$'}root/request-snapshot"
+              fi
               previous=${'$'}arg
             done
-            if [ '$mode' = sleep ]; then
+            if [ '$mode' = fail ]; then
+              printf 'ERROR: Sign in to confirm private-value\n' >&2
+              exit 1
+            elif [ '$mode' = flood ]; then
+              dd if=/dev/zero bs=1048576 count=17 2>/dev/null
+            elif [ '$mode' = sleep ]; then
               sleep 60 &
               echo ${'$'}! > "${'$'}root/pid"
               touch "${'$'}root/started"
               wait
             else
+              if [ '$mode' = symlink ]; then
+                ln -s "${'$'}root/keep" "${'$'}TMPDIR/link"
+              fi
+              if [ '$mode' = runtime-missing ]; then
+                printf 'WARNING: No supported JavaScript runtime could be found\n' >&2
+              fi
               cat "${'$'}root/response.json"
             fi
         """.trimIndent())
