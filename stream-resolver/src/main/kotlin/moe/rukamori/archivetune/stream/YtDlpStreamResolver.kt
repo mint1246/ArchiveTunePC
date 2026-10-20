@@ -162,18 +162,23 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
             arrayOf(PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         } else emptyArray()
         val directory = Files.createTempDirectory(configuration.temporaryRoot, "archivetune-resolver-", *attributes)
-        if (hasSweptTemporaryFiles.compareAndSet(false, true)) sweepAbandonedRequests(configuration.temporaryRoot, directory)
-        val ownerChannel = FileChannel.open(directory.resolve(".owner.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
-        val ownerLock = ownerChannel.lock()
         var requestFailure: Throwable? = null
         try {
-            block(directory)
+            val ownerChannel = try {
+                FileChannel.open(directory.resolve(".owner.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+            } catch (_: Exception) { throw ResolverTemporaryFileException() }
+            ownerChannel.use { channel ->
+                val ownerLock = try { channel.lock() }
+                    catch (_: Exception) { throw ResolverTemporaryFileException() }
+                ownerLock.use {
+                    if (hasSweptTemporaryFiles.compareAndSet(false, true)) sweepAbandonedRequests(configuration.temporaryRoot, directory)
+                    block(directory)
+                }
+            }
         } catch (failure: Throwable) {
             requestFailure = failure
             throw failure
         } finally {
-            ownerLock.release()
-            ownerChannel.close()
             // Windows uses the user temp directory's inherited ACL. No credentials go into shared caches.
             val removed = withContext(NonCancellable) {
                 var deleted = deleteRequestDirectory(directory)
@@ -206,7 +211,7 @@ internal fun formatSelector(quality: StreamAudioQuality, excludedFormatIds: Set<
     val direct = "bestaudio[protocol=https]/bestaudio[protocol=http]"
     val cap = when (quality) { StreamAudioQuality.LOW -> 70; StreamAudioQuality.HIGH -> 160; else -> null }
     val preferred = if (cap == null) direct else "bestaudio[protocol=https][abr<=$cap]/bestaudio[protocol=http][abr<=$cap]/$direct"
-    require(excludedFormatIds.all { it.matches(Regex("[A-Za-z0-9_.-]{1,64}")) }) { "Invalid excluded format" }
+    if (excludedFormatIds.any { !it.matches(Regex("[A-Za-z0-9_.-]{1,64}")) }) throw YtDlpException(YtDlpFailure.INVALID_OUTPUT)
     val exclusions = excludedFormatIds.sorted().joinToString("") { "[format_id!=$it]" }
     return preferred.split('/').joinToString("/") { it + exclusions }
 }
@@ -226,7 +231,7 @@ internal fun classifyYtDlpError(diagnostic: String): YtDlpFailure {
     val text = diagnostic.lowercase(Locale.ROOT).replace('’', '\'')
     return when {
         listOf("sign in to", "sign-in required", "login required", "private video", "confirm your age", "members-only",
-            "join this channel", "not a bot", "age-restricted").any { it in text } -> YtDlpFailure.AUTH_REQUIRED
+            "join this channel", "members only", "not a bot", "age-restricted").any { it in text } -> YtDlpFailure.AUTH_REQUIRED
         listOf("video unavailable", "video is unavailable", "has been removed", "not available in your country",
             "content isn't available", "content is not available").any { it in text } -> YtDlpFailure.UNAVAILABLE
         "timed out" in text || "timeout" in text -> YtDlpFailure.TIMEOUT
@@ -313,6 +318,8 @@ private fun sweepAbandonedRequests(root: Path, current: Path) {
             if (directory != current && directory.fileName.toString().startsWith("archivetune-resolver-") &&
                 Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) runCatching {
                 if (Files.getOwner(directory, LinkOption.NOFOLLOW_LINKS) != owner) return@runCatching
+                // A peer may have created the marker but not acquired its lock yet.
+                if (Files.getLastModifiedTime(directory).toMillis() > System.currentTimeMillis() - 60_000) return@runCatching
                 val lockPath = directory.resolve(".owner.lock")
                 if (Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)) {
                     // A live JVM holds this lock across extraction. A crash releases it, allowing

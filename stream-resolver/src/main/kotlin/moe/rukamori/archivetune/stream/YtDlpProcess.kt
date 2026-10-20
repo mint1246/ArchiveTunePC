@@ -84,7 +84,7 @@ private suspend fun readProcessPipe(input: InputStream, limit: Int): String = tr
 } catch (_: java.io.IOException) {
     // Closing pipes during cancellation must not turn queue cancellation into an extraction error.
     currentCoroutineContext().ensureActive()
-    throw YtDlpException(YtDlpFailure.INVALID_OUTPUT)
+    throw YtDlpException(YtDlpFailure.NETWORK)
 }
 
 private fun InputStream.readBounded(limit: Int): String = use { input ->

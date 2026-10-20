@@ -23,7 +23,8 @@ conservative five-minute lifetime.
 The backend validates a small head range and, when size is available, a tail range
 before handing the stream to playback. Retryable CDN rejections trigger one fresh
 extraction that excludes the rejected format; transient probe I/O also gets one retry.
-Probe errors are network failures rather than unavailable-video failures. Downloads
+Probes follow media redirects, matching the playback transport. Probe errors are
+network failures rather than unavailable-video failures. Downloads
 reuse this validation instead of probing the same yt-dlp URL again.
 
 A parallel, best-effort player metadata request supplies YouTube loudness metadata to
@@ -35,7 +36,9 @@ through both old and new paths, preserving the existing gain calculation. This p
 variant: cancelling a queue load also cancels the HTTP call. The original synchronous
 probe API remains available to its existing callers. Probes, Googlevideo callback
 playback and downloads now share the same dynamic application proxy, proxy credentials
-and DNS routing policy.
+and DNS routing policy. Desktop currently exposes no proxy settings, so this route
+is DIRECT unless configured programmatically. Explicit routing also suppresses ambient
+system proxy defaults, consistently with the subprocess's explicit proxy option.
 
 The existing libVLC Googlevideo callback transport receives the complete required
 header map. Cookie, Authorization, Proxy-Authorization and transport-controlled headers
@@ -64,8 +67,11 @@ User configuration, plugins and remote solver downloads are disabled. Official f
 binaries bundle their own transient Python interpreter and EJS; system Python, Node
 and Deno are unnecessary. No Python or JS worker stays alive after a request.
 
-The resolver has a 35-second extraction deadline inside the existing 45-second backend
-budget, reserving time for CDN validation and cleanup. Cancellation, timeout, failure and success all
+The desktop extractor allows two attempts of 20 seconds each, including extraction,
+metadata handoff and CDN probes, inside the existing 45-second backend budget.
+A timed-out first attempt is cancelled and cleaned up before the fresh second attempt.
+The remaining budget provides cleanup headroom; the caller's overall deadline still
+wins if cleanup itself stalls. The standalone resolver retains its 35-second deadline. Cancellation, timeout, failure and success all
 terminate/reap the tracked child process tree and remove request temporary files.
 Linux uses a dedicated process group when `setsid` and `kill` are available, including
 children whose parent exits before discovery. Other platforms track process handles
@@ -80,8 +86,11 @@ directory (POSIX 0700; Windows user-temp inherited ACLs). Selected account `data
 is passed with yt-dlp's existing `youtube:data_sync_id` option. Cookies, account context
 and proxy credentials stay out of argv. Cookie-jar mutations by yt-dlp are discarded;
 login storage, login UI and session refresh logic are unchanged. Request directories
-hold a live-JVM file lock. On startup, unlocked abandoned directories from the same
-user are swept; active requests and recent directories from older versions are retained.
+hold a live-JVM file lock. Acquisition failures close the channel and delete the
+request directory before any cookie is written. On startup, unlocked abandoned
+directories from the same user are swept; directories newer than one minute and
+active locks are retained to avoid racing a peer acquiring its lock. Unmarked
+legacy directories are retained for 24 hours.
 Cleanup failure has a redacted I/O error rather than an unavailable-video classification. Signed-in live tests
 were not run: no existing account session was accessed.
 
@@ -200,7 +209,7 @@ headers and cancellable probes. POSIX process fixtures explicitly skip on non-PO
 hosts; JSON/policy/backend contract tests remain portable.
 
 The resolver suite passes 26 tests (19 new process/policy tests plus 7 shared-policy
-tests); the backend suite passes 80 tests. Targeted caller tests for queue preloading,
+tests); the backend suite passes 81 tests. Targeted caller tests for queue preloading,
 cache-session changes, completed-download preference, download attempts and queue
 persistence pass 24 tests; the download manager suite passes 14. The existing
 playback-core (22 tests) and

@@ -31,6 +31,7 @@ fun interface DesktopAudioStreamExtractor {
 
 class YtDlpDesktopStreamExtractor(
     private val resolver: YtDlpStreamResolver,
+    private val attemptTimeoutMs: Long = 20_000,
     private val audioConfigProvider: suspend (String, PlaybackAuthState) -> PlayerResponse.PlayerConfig.AudioConfig? = ::loadAudioConfig,
 ) : DesktopAudioStreamExtractor {
     constructor(cacheDirectory: File? = null) : this(YtDlpStreamResolver(
@@ -50,38 +51,45 @@ class YtDlpDesktopStreamExtractor(
         val excluded = mutableSetOf<String>()
         var probeFailure: Throwable? = null
         repeat(2) { attempt ->
-            val extracted = try {
-                resolver.resolve(
-                    videoId = videoId,
-                    quality = when (quality) {
-                        JvmAudioQuality.LOW -> StreamAudioQuality.LOW
-                        JvmAudioQuality.HIGH -> StreamAudioQuality.HIGH
-                        JvmAudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
-                    },
-                    cookie = authState.cookie, dataSyncId = authState.dataSyncId,
-                    proxyUrl = streamProxyUrl(YouTube.streamProxy, YouTube.proxyUsername, YouTube.proxyPassword),
-                    excludedFormatIds = excluded,
-                )
+            var extractedFormatId: String? = null
+            try {
+                // Bound extraction AND validation together: a slow first request must leave a
+                // complete second attempt within the backend's 45-second overall deadline.
+                val stream = withTimeoutOrNull(attemptTimeoutMs) {
+                    val extracted = resolver.resolve(
+                        videoId = videoId,
+                        quality = when (quality) {
+                            JvmAudioQuality.LOW -> StreamAudioQuality.LOW
+                            JvmAudioQuality.HIGH -> StreamAudioQuality.HIGH
+                            JvmAudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
+                        },
+                        cookie = authState.cookie, dataSyncId = authState.dataSyncId,
+                        proxyUrl = streamProxyUrl(YouTube.streamProxy, YouTube.proxyUsername, YouTube.proxyPassword),
+                        excludedFormatIds = excluded,
+                    )
+                    extractedFormatId = extracted.formatId
+                    ResolvedAudioStream(
+                        videoId = extracted.videoId, url = extracted.url, format = extracted.format,
+                        videoDetails = extracted.videoDetails, playbackTracking = null, audioConfig = audioConfig.await(),
+                        clientName = "YT_DLP", clientVersion = resolver.verifyToolchain().ytDlpVersion,
+                        requestHeaders = extracted.headers, expiresAtEpochMillis = extracted.expiresAtEpochMillis,
+                        authFingerprint = authState.fingerprint,
+                    ).also { probeResolvedAudioStreamCancellable(it).getOrThrow() }
+                } ?: throw YtDlpException(YtDlpFailure.TIMEOUT)
+                return@coroutineScope stream
             } catch (failure: YtDlpException) {
-                if (failure.kind == YtDlpFailure.EXPIRED_STREAM && attempt == 0) return@repeat
-                if (failure.kind == YtDlpFailure.NO_AUDIO && probeFailure != null) throw probeFailure!!
+                if (failure.kind in setOf(YtDlpFailure.EXPIRED_STREAM, YtDlpFailure.TIMEOUT) && attempt == 0) return@repeat
+                if (failure.kind == YtDlpFailure.NO_AUDIO && probeFailure != null) throw probeFailure
                 throw failure
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                val retryable = failure is IOException ||
+                    (failure is AudioStreamProbeHttpException && failure.httpStatus in setOf(403, 404, 410, 416, 429, 500, 502, 503))
+                if (!retryable || attempt == 1) throw failure
+                probeFailure = failure
+                // A transient CDN error gets fresh extraction; a rejected format gets an alternative.
+                if (failure is AudioStreamProbeHttpException) extractedFormatId?.let { excluded += it }
             }
-            val stream = ResolvedAudioStream(
-                videoId = extracted.videoId, url = extracted.url, format = extracted.format,
-                videoDetails = extracted.videoDetails, playbackTracking = null, audioConfig = audioConfig.await(),
-                clientName = "YT_DLP", clientVersion = resolver.verifyToolchain().ytDlpVersion,
-                requestHeaders = extracted.headers, expiresAtEpochMillis = extracted.expiresAtEpochMillis,
-                authFingerprint = authState.fingerprint,
-            )
-            val failure = probeResolvedAudioStreamCancellable(stream).exceptionOrNull()
-            if (failure == null) return@coroutineScope stream
-            val retryable = failure is IOException ||
-                (failure is AudioStreamProbeHttpException && failure.httpStatus in setOf(403, 404, 410, 416, 429, 500, 502, 503))
-            if (!retryable || attempt == 1) throw failure
-            probeFailure = failure
-            // A transient CDN error gets a fresh extraction; a rejected format gets an alternative.
-            if (failure is AudioStreamProbeHttpException) excluded += extracted.formatId
         }
         error("No extraction attempt completed")
     }

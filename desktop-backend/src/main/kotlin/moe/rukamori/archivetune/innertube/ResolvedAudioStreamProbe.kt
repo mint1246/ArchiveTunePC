@@ -142,8 +142,8 @@ private const val MAX_PROBE_BYTES = 1_024
 
 private val PROBE_CLIENT: OkHttpClient =
     desktopStreamHttpClient().newBuilder()
-        .followRedirects(false)
-        .followSslRedirects(false)
+        .followRedirects(true)
+        .followSslRedirects(true)
         // This probe runs inside the per-client resolver race. A CDN that cannot serve the first
         // kilobyte promptly should lose to another YouTube client instead of stalling the wave.
         .connectTimeout(3, TimeUnit.SECONDS)

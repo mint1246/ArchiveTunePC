@@ -190,6 +190,57 @@ class YtDlpDesktopStreamExtractorTest {
         } finally { root.toFile().deleteRecursively(); server.stop(0) }
     }
 
+    @Test fun `slow first extraction leaves time for retry and probe follows media redirect`() = runBlocking {
+        org.junit.Assume.assumeTrue("POSIX subprocess fixture requires /bin/sh", Files.isExecutable(Path.of("/bin/sh")))
+        val root = Files.createTempDirectory("extractor-budget-")
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val requests = CopyOnWriteArrayList<String>()
+        server.createContext("/redirect") { exchange ->
+            exchange.responseHeaders.add("Location", "/audio")
+            exchange.sendResponseHeaders(307, -1); exchange.close()
+        }
+        server.createContext("/audio") { exchange ->
+            requests += exchange.requestHeaders.getFirst("User-Agent")
+            exchange.responseHeaders.add("Content-Range", "bytes 0-1023/8192")
+            exchange.sendResponseHeaders(206, 1024)
+            exchange.responseBody.use { it.write(ByteArray(1024) { 1 }) }
+        }
+        server.start()
+        try {
+            val response = JSONObject().put("id", "jNQXAC9IVRw")
+                .put("url", "http://127.0.0.1:${server.address.port}/redirect")
+                .put("protocol", "http").put("vcodec", "none").put("acodec", "opus").put("ext", "webm")
+                .put("format_id", "251").put("abr", 128)
+                .put("http_headers", JSONObject().put("User-Agent", "redirect-agent"))
+            Files.writeString(root.resolve("response.json"), response.toString())
+            val fixture = root.resolve("yt-dlp")
+            Files.writeString(fixture, """
+                #!/bin/sh
+                root=${'$'}(dirname "${'$'}0")
+                case "${'$'}*" in
+                  *archivetune-runtime-check:*)
+                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n' >&2
+                    exit 1 ;;
+                esac
+                printf 'attempt\n' >> "${'$'}root/attempts"
+                if [ ! -f "${'$'}root/first-started" ]; then
+                    touch "${'$'}root/first-started"
+                    sleep 30
+                fi
+                cat "${'$'}root/response.json"
+            """.trimIndent())
+            fixture.toFile().setExecutable(true)
+            val extractor = YtDlpDesktopStreamExtractor(
+                YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)),
+                attemptTimeoutMs = 1_500, audioConfigProvider = { _, _ -> null })
+            val result = withTimeout(5_000) { extractor.resolve("jNQXAC9IVRw", JvmAudioQuality.HIGH, PlaybackAuthState()) }
+            assertEquals("YT_DLP", result.clientName)
+            assertEquals(2, Files.readAllLines(root.resolve("attempts")).size)
+            assertEquals(listOf("redirect-agent", "redirect-agent"), requests.toList())
+            Files.list(root).use { paths -> assertFalse(paths.anyMatch { it.fileName.toString().startsWith("archivetune-resolver-") }) }
+        } finally { root.toFile().deleteRecursively(); server.stop(0) }
+    }
+
     @Test fun `probe and media client follow the current authenticated proxy route`() = runBlocking {
         val savedProxy = YouTube.proxy
         val savedUsername = YouTube.proxyUsername
@@ -198,6 +249,7 @@ class YtDlpDesktopStreamExtractorTest {
         val requests = CopyOnWriteArrayList<String>()
         proxy.createContext("/") { exchange ->
             if (exchange.requestHeaders.getFirst("Proxy-Authorization") == null) {
+                YouTube.proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", proxy.address.port))
                 exchange.responseHeaders.add("Proxy-Authenticate", "Basic realm=benchmark")
                 exchange.sendResponseHeaders(407, -1); exchange.close()
             } else {

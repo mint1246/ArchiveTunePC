@@ -84,6 +84,9 @@ class YtDlpStreamResolverTest {
         assertTrue(formatSelector(StreamAudioQuality.HIGH).contains("[abr<=160]"))
         assertEquals("bestaudio[protocol=https]/bestaudio[protocol=http]", formatSelector(StreamAudioQuality.HIGHEST))
         assertTrue(formatSelector(StreamAudioQuality.HIGH, setOf("251-drc")).split('/').all { "[format_id!=251-drc]" in it })
+        assertEquals(YtDlpFailure.INVALID_OUTPUT, assertFailsWith<YtDlpException> {
+            formatSelector(StreamAudioQuality.HIGH, setOf("bad][format"))
+        }.kind)
     }
 
     @Test fun `expired streams and actionable YouTube errors have retryable or authentication classes`() {
@@ -93,6 +96,7 @@ class YtDlpStreamResolverTest {
         assertEquals(251, parseYtDlpAudio(audio().put("format_id", "251-drc").toString(), videoId, now).format.itag)
         for (code in listOf(403, 429, 503)) assertEquals(YtDlpFailure.NETWORK, classifyYtDlpError("ERROR: HTTP Error $code"))
         assertEquals(YtDlpFailure.AUTH_REQUIRED, classifyYtDlpError("Join this channel for members-only content"))
+        assertEquals(YtDlpFailure.AUTH_REQUIRED, classifyYtDlpError("This video is for members only"))
         assertEquals(YtDlpFailure.AUTH_REQUIRED, classifyYtDlpError("Sign in to confirm you're not a bot"))
         assertEquals(YtDlpFailure.UNAVAILABLE, classifyYtDlpError("This content isn’t available"))
         assertEquals(YtDlpFailure.EXTRACTION, classifyYtDlpError("Unrelated file ejs-notes.txt is missing"))
@@ -244,14 +248,19 @@ class YtDlpStreamResolverTest {
             val orphan = Files.createDirectory(root.resolve("archivetune-resolver-orphan"))
             Files.writeString(orphan.resolve(".owner.lock"), "")
             Files.writeString(orphan.resolve("cookies.txt"), "SID=private-value")
+            Files.setLastModifiedTime(orphan, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 120_000))
+            val recent = Files.createDirectory(root.resolve("archivetune-resolver-recent"))
+            Files.writeString(recent.resolve(".owner.lock"), "")
             val active = Files.createDirectory(root.resolve("archivetune-resolver-active"))
             java.nio.channels.FileChannel.open(active.resolve(".owner.lock"),
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE).use { channel ->
                 channel.lock().use {
+                    Files.setLastModifiedTime(active, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 120_000))
                     val fixture = createFixture(root, "success")
                     YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root)).resolve(videoId)
                     assertFalse(Files.exists(orphan))
                     assertTrue(Files.isDirectory(active))
+                    assertTrue(Files.isDirectory(recent))
                 }
             }
         } finally { root.toFile().deleteRecursively() }
