@@ -260,6 +260,109 @@ val stageBundledAudioAnalysisRelease = tasks.register<Copy>("stageBundledAudioAn
     into(releaseAppImageDir.map { it.dir("app/resources/native/windows-x64/audio-analysis") })
     mustRunAfter("createReleaseDistributable")
 }
+/*
+ * Experimental desktop resolver sidecars.
+ *
+ * The sidecars are downloaded from pinned upstream GitHub releases, verified
+ * against committed SHA-256 values, and staged into app/resources/resolver so
+ * `<compose.application.resources.dir>/resolver` resolves beside the app image.
+ */
+val resolverPlatformId = ResolverSidecars.resolvePlatform(
+    providers.gradleProperty("archivetune.resolverPlatform").orNull,
+)
+val resolverNoticesFile = rootProject.layout.projectDirectory.file("packaging/resolver/THIRD_PARTY_NOTICES.md")
+val resolverLicensesDir = rootProject.layout.projectDirectory.dir("packaging/resolver/LICENSES")
+val resolverDownloadTasks = ResolverSidecars.assets.associate { asset ->
+    val taskName = ResolverSidecars.downloadTaskName(asset)
+    taskName to tasks.register<DownloadVerifiedFileTask>(taskName) {
+        group = "distribution"
+        description =
+            "Downloads ${asset.kind.displayName} ${asset.version} for ${asset.platformId} and verifies its SHA-256."
+        sourceUrl.set(asset.url)
+        expectedSha256.set(asset.sha256)
+        outputFile.set(layout.buildDirectory.file(ResolverSidecars.downloadPath(asset)))
+    }
+}
+
+fun resolverDownloadTask(platformId: String, kind: ResolverSidecarKind) =
+    resolverDownloadTasks.getValue(
+        ResolverSidecars.downloadTaskName(ResolverSidecars.assetFor(platformId, kind)),
+    )
+
+fun registerResolverStageTask(
+    name: String,
+    destination: Provider<Directory>,
+    runAfterTask: String,
+) = tasks.register<StageResolverSidecarsTask>(name) {
+    group = "distribution"
+    description = "Stages the checksum-verified yt-dlp and quickjs-ng sidecars into the desktop app image."
+    platformId.set(resolverPlatformId ?: "unsupported")
+    ytDlpVersion.set(ResolverSidecars.YT_DLP_VERSION)
+    quickJsVersion.set(ResolverSidecars.QUICKJS_VERSION)
+    bundledEjsVersion.set(ResolverSidecars.YT_DLP_BUNDLED_EJS_VERSION)
+    thirdPartyNotices.set(resolverNoticesFile)
+    licensesDirectory.set(resolverLicensesDir)
+    destinationDirectory.set(destination)
+    if (resolverPlatformId == null) {
+        ytDlpUrl.set("")
+        ytDlpSha256.set("")
+        quickJsUrl.set("")
+        quickJsSha256.set("")
+        unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
+    } else {
+        val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
+        val quickJs = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.QUICKJS)
+        ytDlpUrl.set(ytDlp.url)
+        ytDlpSha256.set(ytDlp.sha256)
+        quickJsUrl.set(quickJs.url)
+        quickJsSha256.set(quickJs.sha256)
+        ytDlpBinary.set(resolverDownloadTask(resolverPlatformId, ResolverSidecarKind.YT_DLP).flatMap { it.outputFile })
+        quickJsBinary.set(resolverDownloadTask(resolverPlatformId, ResolverSidecarKind.QUICKJS).flatMap { it.outputFile })
+    }
+    mustRunAfter(runAfterTask)
+}
+
+fun registerResolverVerifyTask(
+    name: String,
+    directory: Provider<Directory>,
+    stageTask: TaskProvider<out Task>,
+) = tasks.register<VerifyResolverSidecarsTask>(name) {
+    group = "verification"
+    description = "Verifies the bundled yt-dlp and quickjs-ng sidecars, checksums, and notices."
+    dependsOn(stageTask)
+    sidecarDirectory.set(directory)
+    platformId.set(resolverPlatformId ?: "unsupported")
+    if (resolverPlatformId == null) {
+        ytDlpSha256.set("")
+        quickJsSha256.set("")
+        unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
+    } else {
+        ytDlpSha256.set(ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP).sha256)
+        quickJsSha256.set(ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.QUICKJS).sha256)
+    }
+}
+
+val stageBundledResolverSidecars = registerResolverStageTask(
+    name = "stageBundledResolverSidecars",
+    destination = appImageDir.map { it.dir("app/resources/resolver") },
+    runAfterTask = "createDistributable",
+)
+val stageBundledResolverSidecarsRelease = registerResolverStageTask(
+    name = "stageBundledResolverSidecarsRelease",
+    destination = releaseAppImageDir.map { it.dir("app/resources/resolver") },
+    runAfterTask = "createReleaseDistributable",
+)
+val verifyBundledResolverSidecars = registerResolverVerifyTask(
+    name = "verifyBundledResolverSidecars",
+    directory = appImageDir.map { it.dir("app/resources/resolver") },
+    stageTask = stageBundledResolverSidecars,
+)
+val verifyBundledResolverSidecarsRelease = registerResolverVerifyTask(
+    name = "verifyBundledResolverSidecarsRelease",
+    directory = releaseAppImageDir.map { it.dir("app/resources/resolver") },
+    stageTask = stageBundledResolverSidecarsRelease,
+)
+
 val wixToolsetDir = rootProject.layout.buildDirectory.dir("wix311")
 val customWixResourceDir = rootProject.layout.projectDirectory.dir("packaging/windows")
 val jpackageExecutable = "${System.getProperty("java.home")}/bin/jpackage.exe"
@@ -377,7 +480,7 @@ fun installerJpackageArgs(
 val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
     group = "package"
     description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, stageBundledResolverSidecars, verifyBundledResolverSidecars, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(
         listOf(jpackageExecutable) +
@@ -388,7 +491,7 @@ val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
 val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
     group = "package"
     description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, stageBundledResolverSidecars, verifyBundledResolverSidecars, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
     environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
     commandLine(
         listOf(jpackageExecutable) +
@@ -469,9 +572,9 @@ tasks.matching {
 }
 
 tasks.matching { it.name == "createDistributable" }.configureEach {
-    finalizedBy(stageBundledVlcRuntime, stageBundledAudioAnalysis)
+    finalizedBy(stageBundledVlcRuntime, stageBundledAudioAnalysis, stageBundledResolverSidecars)
 }
 
 tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
-    finalizedBy(stageBundledVlcRuntimeRelease, stageBundledAudioAnalysisRelease)
+    finalizedBy(stageBundledVlcRuntimeRelease, stageBundledAudioAnalysisRelease, stageBundledResolverSidecarsRelease)
 }

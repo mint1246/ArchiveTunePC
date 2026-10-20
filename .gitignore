@@ -128,3 +128,11 @@ core.*
 /.mcp-state/
 /.mcp-checkpoints/
 /android_resource_cleaner.py
+
+# Provisioned resolver sidecars (downloaded/staged at build time; never commit binaries).
+# The generated copies under desktopApp/build are already covered by the build/ rule.
+/packaging/resolver/bin/
+/packaging/resolver/**/*.exe
+/packaging/resolver/**/*.dll
+/packaging/resolver/**/*.so
+/packaging/resolver/**/*.part
