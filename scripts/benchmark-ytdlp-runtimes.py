@@ -48,6 +48,12 @@ Usage
         --repeats 3 \
         --out-dir build/reports/ytdlp-runtimes
 
+A second bun build can be measured side by side with ``--bun-new`` (for
+example the Rust-rewrite 1.4.x line). It is measured with the *unchanged*
+yt-dlp CLI: no version gate is bypassed and no wrapper pretends to be a
+different version. The report records what yt-dlp decided about the runtime
+version (``per_runtime.<key>.version_gate``) next to the measurements.
+
 Exit code is 0 only when every runtime completed its challenged extraction and
 the negative control behaved as expected.
 """
@@ -142,7 +148,42 @@ UPSTREAM_SOURCES = [
         "url": "https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/extractor/youtube/jsc/README.md",
         "fact": "Public JS Challenge Provider API and the -v jsc_trace debugging switch.",
     },
+    {
+        "title": "yt-dlp 2026.08.19 - yt_dlp/extractor/youtube/jsc/_builtin/bun.py (bun version gate)",
+        "url": "https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/extractor/youtube/jsc/_builtin/bun.py",
+        "fact": "Source of truth for the bun gate, quoted verbatim: "
+                "_BUN_MAX_SUPPORTED_VERSION = (1, 3, 14); "
+                "is_unsupported_version = self.runtime_info.version_tuple > self._BUN_MAX_SUPPORTED_VERSION; "
+                "the unsupported branch only logs 'bun version {v} is not supported! {max} is the last supported "
+                "bun version. DO NOT open a bug report even if you encounter any errors!' and then continues into "
+                "the same bun invocation; the supported branch logs 'bun support has been deprecated.'. "
+                "The gate is therefore a warning, not a refusal to run.",
+    },
+    {
+        "title": "yt-dlp 2026.08.19 - yt_dlp/utils/_jsruntime.py (BunJsRuntime.MIN_SUPPORTED_VERSION)",
+        "url": "https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/utils/_jsruntime.py",
+        "fact": "BunJsRuntime.MIN_SUPPORTED_VERSION = (1, 2, 11) and JsRuntimeInfo.supported = "
+                "vt >= MIN_SUPPORTED_VERSION. This is the only value that makes a runtime unavailable "
+                "(EJSBaseJCP.runtime_info returns None when not runtime.info.supported), so a bun newer "
+                "than 1.3.14 stays available to the bun challenge provider.",
+    },
+    {
+        "title": "Bun v1.4 release blog (Rust rewrite)",
+        "url": "https://bun.com/blog/bun-v1.4",
+        "fact": "Primary upstream statement: 'We rewrote Bun in Rust - and this is the first release'. "
+                "Bun 1.4 is therefore the Rust rewrite of the runtime.",
+    },
 ]
+
+# Public upstream URLs that are allowed to survive the harness' URL redaction
+# inside the version-gate messages (they are documentation links, not signed
+# media URLs).
+_KNOWN_PUBLIC_UPSTREAM_URLS = ("https://github.com/yt-dlp/yt-dlp/issues/16766",)
+
+# yt-dlp's own bun version gate messages (yt_dlp/extractor/youtube/jsc/_builtin/bun.py @ 2026.08.19).
+_BUN_GATE_UNSUPPORTED_RE = re.compile(
+    r"bun version [\d.]+ is not supported!.*last supported bun version", re.I)
+_BUN_GATE_DEPRECATED_RE = re.compile(r"bun support has been deprecated", re.I)
 
 # ---------------------------------------------------------------------------
 # Runtime descriptions
@@ -170,6 +211,7 @@ class RuntimeSpec:
     sha256: Optional[str] = None
     size_bytes: Optional[int] = None
     supported_by_ytdlp: Optional[bool] = None
+    above_pinned_ytdlp_ceiling: Optional[bool] = None
     upstream_status: str = "unknown"
     notes: List[str] = field(default_factory=list)
     error: Optional[str] = None
@@ -185,6 +227,7 @@ class RuntimeSpec:
             "size_bytes": self.size_bytes,
             "size_mib": round(self.size_bytes / (1024 * 1024), 2) if self.size_bytes else None,
             "supported_by_ytdlp": self.supported_by_ytdlp,
+            "above_pinned_ytdlp_ceiling": self.above_pinned_ytdlp_ceiling,
             "upstream_min_supported_version": RUNTIME_MIN_VERSION.get(self.ytdlp_name),
             "upstream_status": self.upstream_status,
             "notes": list(self.notes),
@@ -414,6 +457,87 @@ def count_invocations(log_path: str) -> int:
         return 0
 
 
+def _proc_starttime(pid: int) -> Optional[int]:
+    try:
+        with open("/proc/%d/stat" % pid, "r") as handle:
+            data = handle.read()
+    except OSError:
+        return None
+    close = data.rfind(")")
+    if close < 0:
+        return None
+    fields = data[close + 2:].split()
+    # field 22 (starttime) -> index 19 after the state field
+    if len(fields) < 20:
+        return None
+    try:
+        return int(fields[19])
+    except ValueError:
+        return None
+
+
+def _matching_runtime_processes(paths: Sequence[str]) -> Dict[Tuple[int, int], str]:
+    """Map (pid, starttime) -> exe for every running process using one of ``paths``.
+
+    The start time is part of the key so a recycled PID is not mistaken for a
+    leftover process.
+    """
+    wanted = set()
+    for path in paths:
+        if not path:
+            continue
+        try:
+            wanted.add(os.path.realpath(path))
+        except OSError:
+            continue
+    found: Dict[Tuple[int, int], str] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:  # pragma: no cover - defensive
+        return found
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            exe = os.readlink("/proc/%s/exe" % entry)
+        except OSError:
+            continue
+        if exe not in wanted:
+            continue
+        starttime = _proc_starttime(int(entry))
+        if starttime is None:
+            continue
+        found[(int(entry), starttime)] = exe
+    return found
+
+
+def residue_check(paths: Sequence[str],
+                  preexisting: Optional[Dict[Tuple[int, int], str]] = None
+                  ) -> Dict[str, Any]:
+    """Confirm that the benchmark left no runtime process behind.
+
+    The resolver must not leave a worker behind: every extraction is a
+    short-lived process tree. Processes that were already running *before* the
+    benchmark started (for example an unrelated development server that
+    happens to use the same executable) are excluded, because they are not
+    the benchmark's residue.
+    """
+    preexisting = preexisting or {}
+    current = _matching_runtime_processes(paths)
+    leftovers = [
+        {"pid": pid, "starttime": starttime, "exe": exe}
+        for (pid, starttime), exe in sorted(current.items())
+        if (pid, starttime) not in preexisting
+    ]
+    return {
+        "checked_executables": sorted({exe for exe in current.values()}),
+        "preexisting_processes_excluded": len(preexisting),
+        "resident_leftover_count": len(leftovers),
+        "resident_leftovers": leftovers,
+        "no_resident_worker": not leftovers,
+    }
+
+
 def count_script_invocations(log_path: str, runtime_name: str) -> int:
     """Count the invocations that actually executed a challenge solver script.
 
@@ -499,6 +623,7 @@ class ExtractionResult:
     challenge_provider: Optional[str] = None
     challenge_script_version: Optional[str] = None
     runtime_command_lines: List[str] = field(default_factory=list)
+    runtime_version_gate_messages: List[Dict[str, str]] = field(default_factory=list)
     format_id: Optional[str] = None
     format_count: int = 0
     protocol: Optional[str] = None
@@ -527,6 +652,42 @@ _CHALLENGE_FAILED_RE = re.compile(
     r"(?:Error solving n challenge|n challenge solving failed|JS Challenge Provider .* failed)", re.I)
 _SCRIPT_VERSION_RE = re.compile(r"challenge solver (?:lib|core) script v?([0-9.]+)")
 _RUNNING_RE = re.compile(r"Running (QuickJS|node|bun|deno): (.+)")
+
+
+def _sanitize_gate_message(line: str) -> str:
+    """Redact like the rest of the harness but keep the known public upstream URL.
+
+    The deprecation notice points at a public yt-dlp issue. Keeping that link
+    makes the gate message verifiable; every other URL is still redacted.
+    """
+    cleaned = REDACT(line, 400)
+    for url in _KNOWN_PUBLIC_UPSTREAM_URLS:
+        if url in line:
+            cleaned = cleaned.replace("<redacted-url>", url, 1)
+    return cleaned
+
+
+def _runtime_version_gate_messages(stderr: str) -> List[Dict[str, str]]:
+    """Extract yt-dlp's runtime version-gate lines from the diagnostics.
+
+    These lines decide whether the pinned yt-dlp *accepted* the runtime
+    (``bun support has been deprecated``) or *flagged* it
+    (``bun version X is not supported!``). They are warnings in both cases -
+    the upstream source continues into the same runtime invocation - so the
+    benchmark records them verbatim instead of interpreting them.
+    """
+    messages: List[Dict[str, str]] = []
+    for line in (stderr or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if _BUN_GATE_UNSUPPORTED_RE.search(line):
+            messages.append({"kind": "version_ceiling_warning",
+                             "message": _sanitize_gate_message(line)})
+        elif _BUN_GATE_DEPRECATED_RE.search(line):
+            messages.append({"kind": "deprecation_notice",
+                             "message": _sanitize_gate_message(line)})
+    return messages
 
 
 def summarize(run: RuntimeRun, payload: Optional[Dict[str, Any]],
@@ -564,6 +725,7 @@ def summarize(run: RuntimeRun, payload: Optional[Dict[str, Any]],
     # The command line contains a temporary script path, never a URL.
     result.runtime_command_lines = [REDACT(match.group(0), 300)
                                     for match in _RUNNING_RE.finditer(stderr)]
+    result.runtime_version_gate_messages = _runtime_version_gate_messages(stderr)
     if stderr.strip():
         result.stderr_excerpt = REDACT(stderr)
 
@@ -689,6 +851,12 @@ def describe_runtime(spec: RuntimeSpec) -> RuntimeSpec:
         spec.version_source = "deno --version"
         spec.version = out.split()[1] if out and len(out.split()) > 1 else None
     spec.supported_by_ytdlp = _is_supported(spec)
+    if spec.ytdlp_name == "bun":
+        # yt_dlp/extractor/youtube/jsc/_builtin/bun.py @ 2026.08.19 keeps
+        # _BUN_MAX_SUPPORTED_VERSION = (1, 3, 14). A newer bun is *flagged*
+        # by the provider but still executed, so the version stays above the
+        # pinned ceiling while the runtime remains usable.
+        spec.above_pinned_ytdlp_ceiling = _version_tuple(spec.version) > (1, 3, 14)
     return spec
 
 
@@ -870,6 +1038,48 @@ def write_reports(report: Dict[str, Any], results: List[ExtractionResult],
     return json_target, csv_path
 
 
+def _ratio(value: Optional[float], base: Optional[float]) -> Optional[float]:
+    if value is None or not base:
+        return None
+    return round(value / base, 3)
+
+
+def build_headline(per_runtime: Dict[str, Any], baseline_key: str) -> Dict[str, Any]:
+    """Headline medians and baseline ratios for a set of measured runtimes.
+
+    Used for the report of this run and for the report files of earlier
+    repetitions, so a repetition recorded by an older harness version can
+    still contribute its numbers.
+    """
+    baseline_challenged = per_runtime.get(baseline_key, {}).get("challenged", {})
+    headline: Dict[str, Any] = {}
+    for key, entry in per_runtime.items():
+        challenged = entry.get("challenged", {})
+        headline[key] = {
+            "version": entry["runtime"]["version"],
+            "size_mib": entry["runtime"]["size_mib"],
+            "attempts_total": challenged.get("attempts_total"),
+            "successful": challenged.get("successful"),
+            "challenge_solved_runs": challenged.get("challenge_solved_runs"),
+            "runtime_script_invocations_total": challenged.get("runtime_script_invocations_total"),
+            "http_read_ok_runs": challenged.get("http_read_ok_runs"),
+            "wall_ms_median": challenged.get("wall_ms_median"),
+            "wall_ms_min": challenged.get("wall_ms_min"),
+            "wall_ms_max": challenged.get("wall_ms_max"),
+            "cpu_total_s_median": challenged.get("cpu_total_s_median"),
+            "peak_tree_rss_bytes_median": challenged.get("peak_tree_rss_bytes_median"),
+            "peak_tree_rss_bytes_max": challenged.get("peak_tree_rss_bytes_max"),
+            "version_gate_outcome": entry.get("version_gate", {}).get("outcome"),
+            "wall_median_vs_baseline": _ratio(challenged.get("wall_ms_median"),
+                                              baseline_challenged.get("wall_ms_median")),
+            "cpu_median_vs_baseline": _ratio(challenged.get("cpu_total_s_median"),
+                                             baseline_challenged.get("cpu_total_s_median")),
+            "peak_rss_max_vs_baseline": _ratio(challenged.get("peak_tree_rss_bytes_max"),
+                                               baseline_challenged.get("peak_tree_rss_bytes_max")),
+        }
+    return headline
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -883,6 +1093,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--qjs", default="build/tools/resolver/qjs")
     parser.add_argument("--node", default="")
     parser.add_argument("--bun", default="")
+    parser.add_argument("--bun-new", default="",
+                        help="optional second bun build (e.g. the Rust-rewrite 1.4.x line); it is "
+                             "measured with the unchanged yt-dlp CLI, no version gate is bypassed")
     parser.add_argument("--deno", default="")
     parser.add_argument("--challenged-video", default="dQw4w9WgXcQ")
     parser.add_argument("--control-video", default="jNQXAC9IVRw")
@@ -892,6 +1105,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sample-interval", type=float, default=0.02)
     parser.add_argument("--out-dir", default="build/reports/ytdlp-runtimes")
     parser.add_argument("--out-json", default="")
+    parser.add_argument("--artifact-provenance", default="",
+                        help="optional JSON file with the release provenance of an externally "
+                             "provisioned runtime artifact; embedded verbatim in the report")
+    parser.add_argument("--report-schema", default="archivetune.ytdlp.runtime-comparison/1")
+    parser.add_argument("--baseline-runtime", default="quickjs-ng",
+                        help="runtime key used as the denominator of the headline ratios")
+    parser.add_argument("--repetition-json", action="append", default=[],
+                        help="path to a previously produced report JSON of the same benchmark; "
+                             "its headline numbers are added to the 'repetitions' section so a "
+                             "single run cannot hide run-to-run variance")
     parser.add_argument("--skip-negative-control", action="store_true")
     parser.add_argument("--expect-ytdlp-sha256", default=YTDLP_SHA256)
     parser.add_argument("--expect-qjs-sha256", default=QJS_SHA256)
@@ -942,6 +1165,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         specs.append(RuntimeSpec("bun", "bun", args.bun,
                                  upstream_status="deprecated upstream "
                                                 "(versions above 1.3.14 are unsupported)"))
+    if args.bun_new:
+        specs.append(RuntimeSpec("bun-rust", "bun", args.bun_new,
+                                 upstream_status="above the pinned yt-dlp bun ceiling of 1.3.14 "
+                                                "(yt-dlp 2026.08.19 warns but still invokes the "
+                                                "runtime); measured with the unchanged CLI"))
     if args.deno:
         specs.append(RuntimeSpec("deno", "deno", args.deno,
                                  upstream_status="recommended upstream default (enabled by default)"))
@@ -952,6 +1180,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     workdir = tempfile.mkdtemp(prefix="archivetune-runtime-bench-")
     env = HERMETIC_ENV(workdir)
     env["TMPDIR"] = workdir
+
+    # Processes that already use one of the measured executables are not the
+    # benchmark's residue, so they are snapshotted before the first run.
+    measured_paths = [ytdlp_path] + [spec.path for spec in specs]
+    preexisting_processes = _matching_runtime_processes(measured_paths)
 
     results: List[ExtractionResult] = []
     negatives: List[Dict[str, Any]] = []
@@ -1018,6 +1251,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "http_read_ok_runs": sum(1 for r in ok_runs if (r.http_bytes_read or 0) > 0),
         }
 
+    def _gate_summary(runs: List[ExtractionResult], key: str) -> Dict[str, Any]:
+        """What the pinned yt-dlp decided about this runtime version.
+
+        ``accepted`` means the unchanged CLI ran the runtime and the extraction
+        succeeded. ``accepted_with_warning`` additionally means yt-dlp printed a
+        version-gate message. ``rejected`` means the runtime was refused
+        (JS_RUNTIME_MISSING) or the challenge was never solved.
+        """
+        messages: List[Dict[str, str]] = []
+        for run in runs:
+            for message in run.runtime_version_gate_messages:
+                if message not in messages:
+                    messages.append(message)
+        solved = sum(1 for r in runs if r.challenge_solved)
+        ok = sum(1 for r in runs if r.ok)
+        refused = sum(1 for r in runs if r.failure_class == "JS_RUNTIME_MISSING")
+        kinds = sorted({message["kind"] for message in messages})
+        if refused and not ok:
+            outcome = "rejected"
+        elif ok:
+            outcome = "accepted_with_warning" if kinds else "accepted"
+        else:
+            outcome = "not_established"
+        return {
+            "cli_gate_bypassed": False,
+            "outcome": outcome,
+            "above_pinned_ytdlp_ceiling": next(
+                (spec.above_pinned_ytdlp_ceiling for spec in specs if spec.key == key), None),
+            "message_kinds": kinds,
+            "messages": messages,
+            "challenged_runs": len(runs),
+            "challenged_successful": ok,
+            "challenged_challenge_solved": solved,
+            "challenged_runtime_refused": refused,
+        }
+
     per_runtime: Dict[str, Dict[str, Any]] = {}
     for spec in specs:
         by_scenario: Dict[str, List[ExtractionResult]] = {}
@@ -1038,6 +1307,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "challenged": _stats(challenged),
             "default_client_same_video": _stats(by_scenario["default_client_same_video"]),
             "control_unchallenged": _stats(by_scenario["control_unchallenged"]),
+            # The "unchallenged" control video is not guaranteed to stay
+            # unchallenged: YouTube sometimes challenges it too. A control run
+            # that executed a solver script is not a control, so the clean
+            # subset (zero solver script invocations) is reported separately.
+            "control_unchallenged_clean": _stats(
+                [r for r in by_scenario["control_unchallenged"]
+                 if not r.runtime_script_invocations]),
             "challenged_per_process_class_peak_rss_bytes": runtime_rss,
             "challenged_per_process_class_peak_cpu_s": {
                 comm: round(ticks / clock_ticks, 3) for comm, ticks in runtime_cpu_ticks.items()
@@ -1046,11 +1322,51 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 r.runtime_script_invocations for r in by_scenario["control_unchallenged"]),
             "default_client_script_invocations": sum(
                 r.runtime_script_invocations for r in by_scenario["default_client_same_video"]),
+            "version_gate": _gate_summary(challenged, spec.key),
         }
         per_runtime[spec.key] = entry
 
+    # -- headline comparison ------------------------------------------------
+    baseline_key = args.baseline_runtime
+    headline_runtimes = build_headline(per_runtime, baseline_key)
+
+    artifact_provenance: Optional[Dict[str, Any]] = None
+    repetitions: List[Dict[str, Any]] = []
+    for path in args.repetition_json:
+        try:
+            with open(os.path.abspath(path), "r") as handle:
+                other = json.load(handle)
+        except (OSError, ValueError) as error:
+            print("ERROR: could not read --repetition-json %s: %s" % (path, error), file=sys.stderr)
+            return 2
+        other_baseline = (other.get("headline_comparison") or {}).get(
+            "baseline_runtime", args.baseline_runtime)
+        other_headline = (other.get("headline_comparison") or {}).get("runtimes")
+        if not other_headline:
+            # An earlier harness version did not write a headline block; the
+            # per-runtime medians are still there, so derive them.
+            other_headline = build_headline(other.get("per_runtime") or {}, other_baseline)
+        repetitions.append({
+            "source": os.path.join(os.path.basename(os.path.dirname(os.path.abspath(path))),
+                                   os.path.basename(os.path.abspath(path))),
+            "generated_at_utc": other.get("generated_at_utc"),
+            "baseline_runtime": other_baseline,
+            "runtimes": other_headline,
+            "version_gate": {
+                key: entry.get("version_gate", {}).get("outcome")
+                for key, entry in (other.get("per_runtime") or {}).items()
+            },
+        })
+    if args.artifact_provenance:
+        try:
+            with open(os.path.abspath(args.artifact_provenance), "r") as handle:
+                artifact_provenance = json.load(handle)
+        except (OSError, ValueError) as error:
+            print("ERROR: could not read --artifact-provenance: %s" % error, file=sys.stderr)
+            return 2
+
     report: Dict[str, Any] = {
-        "schema": "archivetune.ytdlp.runtime-comparison/1",
+        "schema": args.report_schema,
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
         "duration_s": round(time.time() - started_at, 2),
         "host": {
@@ -1062,6 +1378,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "method": {
             "description": "Cold yt-dlp extractions per JS runtime on a challenged YouTube "
                            "video plus two controls, serialized (one extraction at a time).",
+            "control_note": "The 'control_unchallenged' video is not guaranteed to stay "
+                            "unchallenged: YouTube sometimes challenges it too. "
+                            "per_runtime.<key>.control_unchallenged_clean therefore restricts "
+                            "the control to the runs that executed no solver script at all.",
             "cold_definition": "Every extraction is a fresh yt-dlp process with a private "
                                "HOME/XDG_*/TMPDIR, no cookie file, no user profile and no "
                                "shared runtime cache.",
@@ -1096,6 +1416,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "signed_urls_stored": False,
         },
         "tools": tools_checks_report(tools_ok, tool_checks),
+        "artifact_provenance": artifact_provenance,
+        "headline_comparison": {
+            "baseline_runtime": baseline_key,
+            "baseline_note": "Ratios are the median challenged values of each runtime divided "
+                             "by the same values of the baseline runtime. A value below 1.0 "
+                             "means the runtime is cheaper/faster than the baseline.",
+            "runtimes": headline_runtimes,
+        },
+        "resident_worker_check": residue_check(measured_paths, preexisting_processes),
+        "repetitions": {
+            "note": "Independent repetitions of the whole benchmark. 'this_run' is the run "
+                    "that produced this report; the other entries are earlier report files "
+                    "passed with --repetition-json. Comparing them shows how much a "
+                    "three-sample median can move between repetitions.",
+            "this_run": {
+                "source": os.path.basename(os.path.abspath(args.out_json))
+                           if args.out_json else "this run",
+                "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
+                "baseline_runtime": baseline_key,
+                "runtimes": headline_runtimes,
+                "version_gate": {
+                    key: entry.get("version_gate", {}).get("outcome")
+                    for key, entry in per_runtime.items()
+                },
+            },
+            "earlier": repetitions,
+        },
         "runtimes": [spec.summary() for spec in specs],
         "upstream_sources": UPSTREAM_SOURCES,
         "negative_controls": negatives,
