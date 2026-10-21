@@ -148,6 +148,22 @@ require_image() {
   [[ -f $ICON_SOURCE ]] || die "missing launcher icon: $ICON_SOURCE"
 }
 
+# yt-dlp is the default desktop stream resolver, so an image without its staged sidecars
+# would install an AppImage that cannot play YouTube audio. The Gradle stage task writes these
+# beside the launcher's compose.application.resources.dir under lib/app/resources.
+require_resolver() {
+  local resolver_dir=$IMAGE_DIR/lib/app/resources/resolver
+  local name
+  for name in yt-dlp qjs manifest.properties THIRD_PARTY_NOTICES.md; do
+    [[ -f $resolver_dir/$name ]] \
+      || die "resolver sidecar missing: $resolver_dir/$name (rebuild :desktopApp:createDistributable so stageBundledResolverSidecars runs)"
+  done
+  [[ -x $resolver_dir/yt-dlp ]] || die "resolver yt-dlp is not executable: $resolver_dir/yt-dlp"
+  [[ -x $resolver_dir/qjs ]] || die "resolver qjs is not executable: $resolver_dir/qjs"
+  grep -qx 'platform=linux-x86_64' "$resolver_dir/manifest.properties" \
+    || die "resolver sidecars were not staged for linux-x86_64: $resolver_dir/manifest.properties"
+}
+
 # Delete only the staging directory this script owns. Anything else is refused.
 clean_staging() {
   [[ -n $STAGING_ROOT && -n $APP_NAME ]] || die "staging paths are not initialized"
@@ -187,6 +203,7 @@ else
 fi
 
 require_image
+require_resolver
 
 info "staging $APP_NAME $VERSION ($ARCH)"
 clean_staging
@@ -233,6 +250,8 @@ chmod 0755 -- "$APPDIR/AppRun"
 # the Icon= value, in addition to the hicolor/application copies above.
 [[ -x $APPDIR/usr/lib/archivetune/bin/$APP_NAME ]] \
   || die "staged launcher is missing or not executable"
+[[ -x $APPDIR/usr/lib/archivetune/lib/app/resources/resolver/yt-dlp ]] \
+  || die "staged yt-dlp resolver sidecar is missing or not executable"
 
 info "packaging with $APPIMAGETOOL"
 export ARCH

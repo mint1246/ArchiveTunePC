@@ -605,10 +605,10 @@ if (buildingForWindows) {
     // Linux app images cannot use the Windows VLC/Essentia staging tasks. The resolver sidecars
     // are cross-platform and must still land under lib/app/resources/resolver.
     tasks.matching { it.name == "createDistributable" }.configureEach {
-        finalizedBy(stageBundledResolverSidecars)
+        finalizedBy(stageBundledResolverSidecars, verifyBundledResolverSidecars)
     }
 
     tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
-        finalizedBy(stageBundledResolverSidecarsRelease)
+        finalizedBy(stageBundledResolverSidecarsRelease, verifyBundledResolverSidecarsRelease)
     }
 }

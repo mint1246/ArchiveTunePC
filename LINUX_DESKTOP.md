@@ -17,8 +17,19 @@ the existing image copied unchanged into `usr/lib/archivetune`, and `AppRun`
 forwards its arguments to the jpackage launcher. The launcher and the trimmed
 runtime keep their relative `lib/app` and `lib/runtime` layout.
 
+The image must contain the yt-dlp resolver sidecars staged by
+`stageBundledResolverSidecars` under
+`lib/app/resources/resolver` (`yt-dlp`, `qjs`, the manifest, notices, and
+licenses). The script refuses to package an image whose sidecars are missing,
+not executable, or staged for a different platform. Run
+`:desktopApp:createDistributable` (or its `stageBundledResolverSidecars`
+finalizer) before `--skip-build`; the Gradle image uses
+`lib/app/resources` on Linux rather than Windows' `app/resources`.
+
 Requirements:
 
+- An x86_64 Linux host. The resolver sidecars are pinned only for
+  `linux-x86_64`; the AppImage script rejects any other staged platform.
 - JDK 21 in `JAVA_HOME` when the script runs the Gradle build.
 - `appimagetool` passed through `APPIMAGETOOL`, either a plain binary or an
   AppImage. There is no download step.
