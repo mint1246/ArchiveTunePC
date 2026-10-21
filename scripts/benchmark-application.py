@@ -13,6 +13,20 @@ Reported memory is the maximum of *simultaneous* process-tree RSS, never the sum
 of per-process peak maxima.  PSS is sampled separately when
 ``/proc/<pid>/smaps_rollup`` is available.
 
+The candidate arm runs yt-dlp with exactly one JavaScript runtime for the
+challenge solver, and the choice is explicit:
+
+* ``quickjs`` -- quickjs-ng.  This is the historical mode that produced the
+  archived reports; the old command still works unchanged.  The report gains
+  additive fields, so a regenerated report is not literally byte-identical to
+  the archived one.
+* ``bun`` -- the experimental Bun line (1.4.3, the Rust rewrite).
+
+``--resolver-engine`` selects the engine.  Only the selected engine is
+published to the application: ``ARCHIVETUNE_QUICKJS`` for quickjs,
+``ARCHIVETUNE_BUN`` for bun.  The other variable is removed from the child
+environment so a stale system-wide runtime can never be picked up silently.
+
 Only the benchmark script, the Markdown report and the generated JSON belong in
 a commit.  Temporary checkouts, instrumentation and run directories are not
 tracked.
@@ -44,6 +58,9 @@ from typing import Any, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE_COMMIT = "8e4bfb314"
 DEFAULT_VIDEOS = ("jNQXAC9IVRw", "dQw4w9WgXcQ", "aqz-KE-bpKQ")
+# The JavaScript runtime used by yt-dlp for the challenge solver.  "quickjs" is
+# the historical mode; "bun" is the experimental Bun line.
+RESOLVER_ENGINES = ("quickjs", "bun")
 MAIN_CLASS = "moe.rukamori.archivetune.desktop.MainKt"
 MAIN_KT_RELATIVE = Path(
     "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/Main.kt"
@@ -373,7 +390,14 @@ def xvfb_version(executable: Path) -> str | None:
     return None
 
 
-def discover_resolver(repo_root: Path, explicit: str | None, env_name: str, binary: str) -> Path | None:
+def discover_resolver(
+    repo_root: Path,
+    explicit: str | None,
+    env_name: str,
+    binary: str,
+    *,
+    extra_candidates: list[Path] | None = None,
+) -> Path | None:
     candidates: list[Path] = []
     if explicit:
         candidates.append(Path(explicit))
@@ -388,6 +412,10 @@ def discover_resolver(repo_root: Path, explicit: str | None, env_name: str, bina
             / binary,
         ]
     )
+    # Developer-staged builds come before whatever happens to be on PATH, so a
+    # pre-installed system runtime never silently replaces a verified binary.
+    if extra_candidates:
+        candidates.extend(extra_candidates)
     discovered = shutil.which(binary)
     if discovered:
         candidates.append(Path(discovered))
@@ -395,6 +423,36 @@ def discover_resolver(repo_root: Path, explicit: str | None, env_name: str, bina
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate.resolve()
     return None
+
+
+def staged_bun_candidates(repo_root: Path) -> list[Path]:
+    """Bun builds staged by the developer tooling under ``build/tools/runtimes``."""
+    root = repo_root / "build" / "tools" / "runtimes"
+    if not root.is_dir():
+        return []
+    found: list[Path] = []
+    for entry in sorted(root.glob("bun-*/bun-linux-*/bun")):
+        if entry.is_file() and os.access(entry, os.X_OK):
+            found.append(entry.resolve())
+    return sorted(found, key=_bun_version_key, reverse=True)
+
+
+def _bun_version_key(path: Path) -> tuple[int, ...]:
+    match = re.search(r"bun-(\d+(?:\.\d+)*)", str(path))
+    if not match:
+        return ()
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def discover_bun(repo_root: Path, explicit: str | None) -> Path | None:
+    """Locate the Bun executable for the experimental engine."""
+    return discover_resolver(
+        repo_root,
+        explicit,
+        "ARCHIVETUNE_BUN",
+        "bun",
+        extra_candidates=staged_bun_candidates(repo_root),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +505,20 @@ class TreeSnapshot:
     processes: list[dict[str, Any]] = field(default_factory=list)
 
 
+# A Bun release binary is called "bun"; a staged copy may keep a versioned
+# file name such as "bun-1.4.3" or "bun-linux-x64".  The pattern deliberately
+# requires a non-alphanumeric or numeric suffix so unrelated names such as
+# "bundle" are never misclassified.
+BUN_NAME_PATTERN = re.compile(r"^bun([0-9._-]|$)")
+
+
+def is_bun_process(name: str, comm: str) -> bool:
+    """True when the executable is a Bun runtime."""
+    if comm.strip().lower() == "bun":
+        return True
+    return bool(BUN_NAME_PATTERN.match(name.strip().lower()))
+
+
 def classify_process(name: str, comm: str, is_app: bool) -> str:
     lowered = f"{name} {comm}".lower()
     if is_app or name in {"java", "java.exe"}:
@@ -455,11 +527,13 @@ def classify_process(name: str, comm: str, is_app: bool) -> str:
         return "yt_dlp"
     if "qjs" in lowered or "quickjs" in lowered:
         return "quickjs"
+    if is_bun_process(name, comm):
+        return "bun"
     if "python" in lowered:
         return "python"
     if any(token in lowered for token in ("brave", "chromium", "chrome", "headless_shell", "msedge", "firefox")):
         return "browser"
-    if any(token in lowered for token in ("node", "deno", "bun")) and "quickjs" not in lowered:
+    if any(token in lowered for token in ("node", "deno")):
         return "javascript"
     if any(token in lowered for token in ("vlc", "ffmpeg", "ffprobe")):
         return "media"
@@ -928,6 +1002,17 @@ def process_inventory(samples: list[TreeSnapshot]) -> dict[str, Any]:
             max_detached_from_app_group_count,
             snapshot.detached_from_app_group_count,
         )
+        # Simultaneous per-category totals for this one instant.  A category is
+        # summed across the processes that exist at the same sampled moment, so
+        # a transient helper that overlaps another helper is fully accounted.
+        simultaneous_rss: dict[str, int] = {}
+        simultaneous_pss: dict[str, int] = {}
+        for process in snapshot.processes:
+            category = str(process["category"])
+            simultaneous_rss[category] = simultaneous_rss.get(category, 0) + int(process["rss_bytes"])
+            pss_value = process["pss_bytes"]
+            if pss_value is not None:
+                simultaneous_pss[category] = simultaneous_pss.get(category, 0) + int(pss_value)
         for process in snapshot.processes:
             name = str(process["name"])
             category = str(process["category"])
@@ -940,6 +1025,9 @@ def process_inventory(samples: list[TreeSnapshot]) -> dict[str, Any]:
                     "max_pss_bytes": 0,
                     "pss_seen": False,
                     "max_count": 0,
+                    "max_simultaneous_rss_bytes": 0,
+                    "max_simultaneous_pss_bytes": 0,
+                    "simultaneous_pss_seen": False,
                 },
             )
             entry["names"].add(name)
@@ -947,12 +1035,34 @@ def process_inventory(samples: list[TreeSnapshot]) -> dict[str, Any]:
             if process["pss_bytes"] is not None:
                 entry["pss_seen"] = True
                 entry["max_pss_bytes"] = max(entry["max_pss_bytes"], int(process["pss_bytes"]))
+        for category, rss_total in simultaneous_rss.items():
+            entry = categories[category]
+            entry["max_simultaneous_rss_bytes"] = max(
+                entry["max_simultaneous_rss_bytes"], rss_total
+            )
+            entry["max_count"] = max(
+                entry["max_count"],
+                sum(1 for process in snapshot.processes if process["category"] == category),
+            )
+        for category, pss_total in simultaneous_pss.items():
+            entry = categories[category]
+            entry["simultaneous_pss_seen"] = True
+            entry["max_simultaneous_pss_bytes"] = max(
+                entry["max_simultaneous_pss_bytes"], pss_total
+            )
     category_output: dict[str, Any] = {}
     for category, entry in sorted(categories.items()):
         category_output[category] = {
             "names": sorted(entry["names"]),
+            # Largest single process of the category (a per-process maximum).
             "max_observed_rss_mib": mib(entry["max_rss_bytes"]),
             "max_observed_pss_mib": mib(entry["max_pss_bytes"]) if entry["pss_seen"] else None,
+            # Largest sum of the category's processes at one sampled instant.
+            "max_simultaneous_rss_mib": mib(entry["max_simultaneous_rss_bytes"]),
+            "max_simultaneous_pss_mib": (
+                mib(entry["max_simultaneous_pss_bytes"]) if entry["simultaneous_pss_seen"] else None
+            ),
+            "max_simultaneous_process_count": entry["max_count"],
         }
     return {
         "all_process_names": sorted(all_names),
@@ -964,7 +1074,10 @@ def process_inventory(samples: list[TreeSnapshot]) -> dict[str, Any]:
         "browser_processes_observed": sorted(categories.get("browser", {}).get("names", set())),
         "python_processes_observed": sorted(categories.get("python", {}).get("names", set())),
         "quickjs_processes_observed": sorted(categories.get("quickjs", {}).get("names", set())),
+        "bun_processes_observed": sorted(categories.get("bun", {}).get("names", set())),
+        "javascript_processes_observed": sorted(categories.get("javascript", {}).get("names", set())),
         "ytdlp_processes_observed": sorted(categories.get("yt_dlp", {}).get("names", set())),
+        "media_processes_observed": sorted(categories.get("media", {}).get("names", set())),
     }
 
 
@@ -1093,17 +1206,48 @@ def log_evidence(log_lines: list[str]) -> dict[str, Any]:
     }
 
 
+def resolver_engine(resolver: dict[str, Any] | None) -> str:
+    """Return the JavaScript runtime engine of a resolver description.
+
+    Older callers build the mapping without an explicit engine; those always
+    described the historical quickjs mode.
+    """
+    if not resolver:
+        return "quickjs"
+    engine = resolver.get("engine")
+    if engine in RESOLVER_ENGINES:
+        return str(engine)
+    if "bun" in resolver:
+        return "bun"
+    return "quickjs"
+
+
+def resolver_system_properties(resolver: dict[str, Any] | None) -> list[str]:
+    """JVM flags that pin the resolver binary for the selected engine.
+
+    The quickjs mode keeps the historical command line untouched: the runtime
+    already discovers ``ARCHIVETUNE_QUICKJS`` from the environment.
+    """
+    if not resolver or resolver_engine(resolver) != "bun":
+        return []
+    return [f"-Darchivetune.bun={resolver['bun']}"]
+
+
 def build_environment(
     *,
     display: int,
     run_dir: Path,
     home: Path,
     tmp: Path,
-    resolver: dict[str, Path] | None,
+    resolver: dict[str, Any] | None,
 ) -> dict[str, str]:
     environment = os.environ.copy()
     # Do not let a user's JAVA_TOOL_OPTIONS/_JAVA_OPTIONS change one side only.
     for key in ("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "XAUTHORITY"):
+        environment.pop(key, None)
+    # A runtime-specific variable from the developer's shell would change the
+    # measured JavaScript runtime, so it never reaches the benchmarked app.
+    for key in ("BUN_OPTIONS", "DO_NOT_TRACK", "NODE_OPTIONS"):
         environment.pop(key, None)
     environment.update(SKIKO_ENV)
     environment.update(
@@ -1122,25 +1266,42 @@ def build_environment(
             "PYTHONIOENCODING": "utf-8",
         }
     )
+    # Exactly one JavaScript runtime is published.  The other variable is
+    # removed so a stale system-wide quickjs/bun can never be discovered
+    # instead of the verified binary.
+    environment.pop("ARCHIVETUNE_QUICKJS", None)
+    environment.pop("ARCHIVETUNE_BUN", None)
     if resolver:
         environment["ARCHIVETUNE_YTDLP"] = str(resolver["yt_dlp"])
-        environment["ARCHIVETUNE_QUICKJS"] = str(resolver["quickjs"])
+        if resolver_engine(resolver) == "bun":
+            environment["ARCHIVETUNE_BUN"] = str(resolver["bun"])
+        else:
+            environment["ARCHIVETUNE_QUICKJS"] = str(resolver["quickjs"])
     else:
         environment.pop("ARCHIVETUNE_YTDLP", None)
-        environment.pop("ARCHIVETUNE_QUICKJS", None)
     return environment
 
 
-def resolver_summary(resolver: dict[str, Path] | None) -> dict[str, Any] | None:
+def resolver_summary(resolver: dict[str, Any] | None) -> dict[str, Any] | None:
     if not resolver:
         return None
-    return {
+    engine = resolver_engine(resolver)
+    summary: dict[str, Any] = {
+        "engine": engine,
         "yt_dlp_path": str(resolver["yt_dlp"]),
         "yt_dlp_version": resolver.get("yt_dlp_version"),
-        "quickjs_path": str(resolver["quickjs"]),
-        "quickjs_version": resolver.get("quickjs_version"),
-        "selection": "ARCHIVETUNE_YTDLP / ARCHIVETUNE_QUICKJS environment variables",
     }
+    if engine == "bun":
+        summary["bun_path"] = str(resolver["bun"])
+        summary["bun_version"] = resolver.get("bun_version")
+        summary["selection"] = "ARCHIVETUNE_YTDLP / ARCHIVETUNE_BUN environment variables"
+        summary["environment_variables"] = ["ARCHIVETUNE_YTDLP", "ARCHIVETUNE_BUN"]
+    else:
+        summary["quickjs_path"] = str(resolver["quickjs"])
+        summary["quickjs_version"] = resolver.get("quickjs_version")
+        summary["selection"] = "ARCHIVETUNE_YTDLP / ARCHIVETUNE_QUICKJS environment variables"
+        summary["environment_variables"] = ["ARCHIVETUNE_YTDLP", "ARCHIVETUNE_QUICKJS"]
+    return summary
 
 
 def run_application(
@@ -1158,7 +1319,7 @@ def run_application(
     sample_interval_ms: int,
     pss_interval_ms: int,
     app_timeout_s: float,
-    resolver: dict[str, Path] | None,
+    resolver: dict[str, Any] | None,
 ) -> dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     home = run_dir / "home"
@@ -1186,6 +1347,7 @@ def run_application(
         *JVM_FLAGS,
         f"-Djava.io.tmpdir={tmp}",
         "-Dskiko.renderApi=SOFTWARE",
+        *resolver_system_properties(resolver),
         "-cp",
         classpath,
         MAIN_CLASS,
@@ -1584,6 +1746,8 @@ def comparison_summary(baseline: dict[str, Any], candidate: dict[str, Any]) -> d
             "candidate_browser_processes": candidate["process_inventory"]["browser_processes_observed"],
             "baseline_quickjs_processes": baseline["process_inventory"]["quickjs_processes_observed"],
             "candidate_quickjs_processes": candidate["process_inventory"]["quickjs_processes_observed"],
+            "baseline_bun_processes": baseline["process_inventory"].get("bun_processes_observed", []),
+            "candidate_bun_processes": candidate["process_inventory"].get("bun_processes_observed", []),
             "baseline_python_processes": baseline["process_inventory"]["python_processes_observed"],
             "candidate_python_processes": candidate["process_inventory"]["python_processes_observed"],
             "baseline_media_processes": baseline["process_inventory"]["categories"]
@@ -1617,6 +1781,7 @@ def build_report(
     xvfb_version: str | None,
     repo_root: Path,
     candidate_label: str,
+    resolver_engine: str = "quickjs",
 ) -> dict[str, Any]:
     comparison = comparison_summary(baseline, candidate)
     baseline_peak = comparison["rss_mib"]["baseline_extraction_peak"]
@@ -1624,6 +1789,13 @@ def build_report(
     baseline_idle = comparison["rss_mib"]["baseline_idle_max"]
     candidate_idle = comparison["rss_mib"]["candidate_idle_max"]
     candidate_post = comparison["rss_mib"]["candidate_post_idle_max"]
+    engine_label = "Bun" if resolver_engine == "bun" else "QuickJS"
+    engine_variable = "ARCHIVETUNE_BUN" if resolver_engine == "bun" else "ARCHIVETUNE_QUICKJS"
+    engine_inventory = (
+        candidate["process_inventory"]["bun_processes_observed"]
+        if resolver_engine == "bun"
+        else candidate["process_inventory"]["quickjs_processes_observed"]
+    )
 
     observations = [
         (
@@ -1650,8 +1822,8 @@ def build_report(
         ),
         (
             "Observed resolver helper processes: yt-dlp "
-            f"{candidate['process_inventory']['ytdlp_processes_observed']}, QuickJS "
-            f"{candidate['process_inventory']['quickjs_processes_observed']}, separately named Python executables "
+            f"{candidate['process_inventory']['ytdlp_processes_observed']}, {engine_label} "
+            f"{engine_inventory}, separately named Python executables "
             f"{candidate['process_inventory']['python_processes_observed']}, browser "
             f"{candidate['process_inventory']['browser_processes_observed']}, media helpers "
             f"{candidate['process_inventory']['categories'].get('media', {}).get('names', [])}. "
@@ -1674,7 +1846,7 @@ def build_report(
         (
             "The baseline legacy path failed every request in this whole-app run, so the peak extraction "
             "number for baseline reflects failed legacy attempts with no resolver child processes. "
-            "The candidate peak includes the transient yt-dlp/QuickJS processes and is the relevant "
+            f"The candidate peak includes the transient yt-dlp/{engine_label} processes and is the relevant "
             "whole-application worst case."
             if baseline["resolution"]["successes"] == 0 else
             "The baseline completed at least one resolution; interpret latency alongside the recorded success counts."
@@ -1745,7 +1917,7 @@ def build_report(
             ),
             "resolver": (
                 "Baseline uses the original constructor path (legacy). Candidate keeps the production "
-                "default (yt-dlp) and points ARCHIVETUNE_YTDLP/ARCHIVETUNE_QUICKJS at the verified "
+                f"default (yt-dlp) and points ARCHIVETUNE_YTDLP/{engine_variable} at the verified "
                 "official tools. All other app code and instrumentation are identical."
             ),
         },
@@ -1808,11 +1980,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default=str(REPO_ROOT / "packaging/resolver/validation/linux-full-application.json"),
+        default=None,
+        help=(
+            "Report path (default: packaging/resolver/validation/linux-full-application.json for "
+            "the quickjs engine, linux-bun-full-application.json for the bun engine)"
+        ),
     )
     parser.add_argument("--xvfb", help="Path to Xvfb (default: PATH)")
     parser.add_argument("--ytdlp", help="Verified yt-dlp executable for the candidate")
     parser.add_argument("--quickjs", help="Verified quickjs-ng qjs executable for the candidate")
+    parser.add_argument("--bun", help="Verified Bun executable for the candidate (experimental engine)")
+    parser.add_argument(
+        "--resolver-engine",
+        choices=list(RESOLVER_ENGINES),
+        default=None,
+        help=(
+            "JavaScript runtime yt-dlp uses for the candidate arm: quickjs (historical) or bun "
+            "(experimental Bun line). Default: bun when --bun is given, otherwise quickjs."
+        ),
+    )
     parser.add_argument("--java", default="/usr/lib/jvm/java-21-openjdk/bin/java")
     parser.add_argument("--java-home", default="/usr/lib/jvm/java-21-openjdk")
     parser.add_argument(
@@ -1879,23 +2065,54 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     yt_dlp = discover_resolver(repo_root, args.ytdlp, "ARCHIVETUNE_YTDLP", "yt-dlp")
-    quickjs = discover_resolver(repo_root, args.quickjs, "ARCHIVETUNE_QUICKJS", "qjs")
-    if not yt_dlp or not quickjs:
+    if not yt_dlp:
         raise SystemExit(
-            "Candidate resolver tools were not found. Pass --ytdlp and --quickjs, or set "
-            "ARCHIVETUNE_YTDLP/ARCHIVETUNE_QUICKJS. The benchmark will not silently fall back to a "
-            "different toolchain."
+            "Candidate resolver tools were not found. Pass --ytdlp, or set ARCHIVETUNE_YTDLP. "
+            "The benchmark will not silently fall back to a different toolchain."
         )
-    resolver = {
-        "yt_dlp": yt_dlp,
-        "quickjs": quickjs,
-        "yt_dlp_version": tool_version(yt_dlp),
-        "quickjs_version": tool_version(quickjs),
-    }
+    engine = args.resolver_engine or ("bun" if args.bun else "quickjs")
+    if engine == "bun":
+        bun = discover_bun(repo_root, args.bun)
+        if not bun:
+            raise SystemExit(
+                "Candidate resolver tools were not found. Pass --bun, or set ARCHIVETUNE_BUN. "
+                "The benchmark will not silently fall back to a different toolchain."
+            )
+        resolver = {
+            "engine": "bun",
+            "yt_dlp": yt_dlp,
+            "bun": bun,
+            "yt_dlp_version": tool_version(yt_dlp),
+            "bun_version": tool_version(bun),
+        }
+        print(
+            f"Resolver: yt-dlp {resolver['yt_dlp_version']} at {yt_dlp}; "
+            f"bun {resolver['bun_version']} at {bun}",
+            flush=True,
+        )
+    else:
+        quickjs = discover_resolver(repo_root, args.quickjs, "ARCHIVETUNE_QUICKJS", "qjs")
+        if not quickjs:
+            raise SystemExit(
+                "Candidate resolver tools were not found. Pass --ytdlp and --quickjs, or set "
+                "ARCHIVETUNE_YTDLP/ARCHIVETUNE_QUICKJS. The benchmark will not silently fall back to a "
+                "different toolchain."
+            )
+        resolver = {
+            "engine": "quickjs",
+            "yt_dlp": yt_dlp,
+            "quickjs": quickjs,
+            "yt_dlp_version": tool_version(yt_dlp),
+            "quickjs_version": tool_version(quickjs),
+        }
+        print(
+            f"Resolver: yt-dlp {resolver['yt_dlp_version']} at {yt_dlp}; "
+            f"qjs {resolver['quickjs_version']} at {quickjs}",
+            flush=True,
+        )
 
     print(f"Baseline checkout: {baseline_dir}", flush=True)
     print(f"Candidate checkout: {candidate_dir}", flush=True)
-    print(f"Resolver: yt-dlp {resolver['yt_dlp_version']} at {yt_dlp}; qjs {resolver['quickjs_version']} at {quickjs}", flush=True)
 
     baseline_classpath, baseline_build = build_checkout(
         checkout=baseline_dir,
@@ -1971,12 +2188,17 @@ def main(argv: list[str] | None = None) -> int:
         xvfb_version=xvfb_server_version,
         repo_root=repo_root,
         candidate_label=args.candidate_label,
+        resolver_engine=engine,
     )
 
     report["candidate_ref"] = args.candidate_ref
     report["candidate_commit_source"] = args.candidate_commit or args.candidate_ref
     report["baseline_commit_source"] = args.baseline_commit
-    output = Path(args.output)
+    output = Path(args.output) if args.output else (
+        REPO_ROOT
+        / "packaging/resolver/validation"
+        / ("linux-bun-full-application.json" if engine == "bun" else "linux-full-application.json")
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     print(f"Wrote {output}", flush=True)

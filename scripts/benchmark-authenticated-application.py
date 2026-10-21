@@ -55,6 +55,19 @@ SECRET_TOOL = Path("/usr/bin/secret-tool")
 CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
 
 
+def _version_matches(reported: str | None, expected: str) -> bool:
+    """True when a reported version equals the expected one or extends it.
+
+    ``1.4.3`` accepts ``1.4.3`` and ``1.4.3+c6da4a4d3`` but not ``1.4.30``.
+    """
+    if not reported:
+        return False
+    text = reported.strip()
+    return text == expected or any(
+        text.startswith(expected + separator) for separator in ("+", "-", " ")
+    )
+
+
 def load_base_module():
     spec = importlib.util.spec_from_file_location("archivetune_benchmark_application", BASE_SCRIPT)
     if spec is None or spec.loader is None:
@@ -881,6 +894,7 @@ def _run_inner(
         *BASE.JVM_FLAGS,
         f"-Djava.io.tmpdir={tmp}",
         "-Dskiko.renderApi=SOFTWARE",
+        *BASE.resolver_system_properties(resolver),
         "-cp",
         classpath,
         BASE.MAIN_CLASS,
@@ -1233,6 +1247,9 @@ def build_report(
     source_version: int | None,
     source_unchanged: bool,
     platform_info: dict[str, Any],
+    resolver_engine: str = "quickjs",
+    resolver_summary: dict[str, Any] | None = None,
+    expect_bun_version: str | None = None,
 ) -> dict[str, Any]:
     def arm(result: dict[str, Any] | None) -> dict[str, Any] | None:
         if result is None:
@@ -1243,6 +1260,7 @@ def build_report(
             "backend": result["backend"],
             "exit_code": result["app_exit_code"],
             "duration_ms": result["duration_ms"],
+            "resolver": result.get("resolver"),
             "cpu_total_seconds_max": result["cpu"]["total_seconds_max"],
             "cpu_app_seconds_max": result["cpu"]["app_seconds_max"],
             "resolution": result["resolution"],
@@ -1287,6 +1305,13 @@ def build_report(
                 "ytdlp_processes_observed": result["process_inventory"]["ytdlp_processes_observed"],
                 "python_processes_observed": result["process_inventory"]["python_processes_observed"],
                 "quickjs_processes_observed": result["process_inventory"]["quickjs_processes_observed"],
+                "bun_processes_observed": result["process_inventory"].get("bun_processes_observed", []),
+                "javascript_processes_observed": result["process_inventory"].get(
+                    "javascript_processes_observed", []
+                ),
+                "media_processes_observed": result["process_inventory"].get(
+                    "media_processes_observed", []
+                ),
                 "detached_from_app_group_names": result["process_inventory"][
                     "detached_from_app_group_names"
                 ],
@@ -1297,6 +1322,8 @@ def build_report(
                 "ytdlp_processes_max_including_embedded_python": _category_max(result, "yt_dlp"),
                 "python_max_simultaneous": _category_max(result, "python"),
                 "quickjs_max_simultaneous": _category_max(result, "quickjs"),
+                "bun_max_simultaneous": _category_max(result, "bun"),
+                "javascript_max_simultaneous": _category_max(result, "javascript"),
                 "media_max_simultaneous": _category_max(result, "media"),
                 "helper_processes_observed": sorted(
                     {
@@ -1308,6 +1335,17 @@ def build_report(
                         for name in (entry.get("process_names") or [])
                     }
                 ),
+            },
+            "simultaneous_helper_memory": {
+                category: {
+                    "max_process_count": entry.get("max_process_count"),
+                    "max_rss_mib": entry.get("max_rss_mib"),
+                    "max_pss_mib": entry.get("max_pss_mib"),
+                }
+                for category, entry in (
+                    result["process_inventory"].get("categories") or {}
+                ).items()
+                if category != "jvm"
             },
             "zero_helpers": {
                 "browser_in_post_idle": result["authentication"]["browser_proof"][
@@ -1385,15 +1423,40 @@ def build_report(
             + ", ".join(f"{name}={value}" for name, value in baseline_arm["playback"]["checks"].items())
         )
     if candidate_arm:
+        engine_label = "Bun" if resolver_engine == "bun" else "QuickJS"
         observations.append(
             f"Candidate {candidate_arm['commit'][:12]} extracted "
             f"{candidate_arm['resolution']['successes']}/{candidate_arm['resolution']['attempts']} "
-            "authenticated streams with the frozen yt-dlp/QuickJS toolchain."
+            f"streams with the frozen yt-dlp/{engine_label} toolchain."
         )
         observations.append(
             "Candidate playback controller checks (volume 0): "
             + ", ".join(f"{name}={value}" for name, value in candidate_arm["playback"]["checks"].items())
         )
+        if resolver_engine == "bun":
+            bun_helper = candidate_arm["helper_invariants"]
+            observations.append(
+                "Candidate JavaScript runtime processes observed: "
+                f"{candidate_arm['process_inventory'].get('bun_processes_observed', [])}; "
+                f"maximum simultaneous Bun processes {bun_helper.get('bun_max_simultaneous')}; "
+                f"yt-dlp processes (bootloader plus embedded CPython) "
+                f"{bun_helper.get('ytdlp_max_simultaneous')}; media helpers "
+                f"{bun_helper.get('media_max_simultaneous')}."
+            )
+            observations.append(
+                "Candidate Browser processes observed across all phases: "
+                f"{candidate_arm['process_inventory'].get('browser_processes_observed', [])} "
+                f"(maximum simultaneous {bun_helper.get('browser_max_simultaneous')}); cold-proof "
+                f"mints {candidate_arm['authentication']['browser_proof']['cold_successes']}/"
+                f"{candidate_arm['authentication']['browser_proof']['cold_attempts']}. This is what the "
+                "production code actually started in this run; the harness neither forces nor suppresses it."
+            )
+    observations.append(
+        "The signed-in application state is verified with a real account request and the resolved "
+        "streams are public videos. This does not prove cookie-only or age/region restricted media: "
+        "the legacy VISIONOS player client does not send the login cookie, and no such stream was "
+        "exercised in this run."
+    )
 
     return {
         "schema": "archivetune.authenticated-full-application-benchmark/1",
@@ -1445,10 +1508,17 @@ def build_report(
                 "yt-dlp PyInstaller binary runs as two processes with the same yt-dlp executable name "
                 "(bootloader plus embedded CPython); both are counted as yt_dlp, so the embedded interpreter "
                 "is represented by that count rather than a separate python-named process. yt-dlp's ffmpeg/"
-                "ffprobe and qjs sidecars are counted as media/quickjs. Counts are maximum simultaneous "
-                "processes per phase category, and the final cleanup samples expose any post-shutdown residue."
+                "ffprobe sidecars are counted as media and the JavaScript runtime (Bun or quickjs) is counted "
+                "in its own category. Counts are maximum simultaneous processes per phase category, and the "
+                "final cleanup samples expose any post-shutdown residue. Memory numbers are simultaneous sums "
+                "at one sampled instant, never sums of per-process maxima."
             ),
             "argv_collected": False,
+        },
+        "resolver": {
+            "engine": resolver_engine,
+            "expected_bun_version": expect_bun_version,
+            "selection": resolver_summary,
         },
         "method": {
             "application": "real :desktopApp JVM, real Compose/AWT Window, real DesktopMusicServices",
@@ -1460,9 +1530,11 @@ def build_report(
                 "live browser profile is never copied or opened."
             ),
             "instrumentation": (
-                "Identical temporary Main.kt hook in disposable detached checkouts; delegated DesktopSessionProvider "
-                "hides PO-token bindings while retaining cookie/visitor/DataSync, so BotGuard minting must launch "
-                "the real headless Chromium provider."
+                "Identical temporary Main.kt hook in both disposable detached checkouts; the delegated "
+                "DesktopSessionProvider hides PO-token bindings while retaining cookie/visitor/DataSync, so "
+                "a mint through the real headless Chromium provider is possible whenever the production "
+                "code asks for one. Every process the application actually starts is counted; the harness "
+                "does not force or suppress any helper."
             ),
             "playback": (
                 "A real resolved remote stream is loaded into the real VlcjPlaybackController at volume 0; "
@@ -1480,6 +1552,10 @@ def build_report(
                 if candidate_metadata
                 else None
             ),
+            "identical_hook": (
+                "Both arms receive the same temporary Main.kt hook, so the instrumented Main.kt hashes "
+                "must match."
+            ),
         },
         "baseline": baseline_arm,
         "candidate": candidate_arm,
@@ -1490,7 +1566,8 @@ def build_report(
             "The source keyring entry is read twice (before and after) only to prove it is unchanged; its hash is never stored or logged.",
             "Raw application logs stay in a private 0700 work root and are not part of the report or commit.",
             "PSS and CPU are sampled estimates; short-lived helpers can exit between reads.",
-            "Signed-in application state is verified, not authentication of every player client. The baseline VISIONOS client does not send login cookies; cookie-only/restricted media is not tested.",
+            "The signed-in application state is verified with a real account request, and the resolved streams are public videos. Cookie-only, age- or region-restricted media is unverified: the legacy VISIONOS player client does not send the login cookie and no such stream was exercised.",
+            "Both arms run the identical temporary Main.kt hook. Browser, Bun, yt-dlp (bootloader plus embedded CPython) and ffmpeg/ffprobe processes are counted as the application actually starts them; the harness neither forces nor suppresses any helper.",
             "The host is shared with the user's desktop applications, which are outside the tracked session.",
             "Offscreen software Skia; GPU-backed rendering may differ.",
             "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device.",
@@ -1527,7 +1604,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--work-root", default="/tmp/opencode/archivetune-auth-bench")
     parser.add_argument(
         "--output",
-        default=str(HERE.parent / "packaging/resolver/validation/linux-authenticated-full-application.json"),
+        default=None,
+        help=(
+            "Report path (default: packaging/resolver/validation/linux-authenticated-full-application.json "
+            "for the quickjs engine, linux-bun-authenticated-full-application.json for the bun engine)"
+        ),
     )
     parser.add_argument("--xvfb", default="/tmp/opencode/archivetune-bench/tools/usr/bin/Xvfb")
     parser.add_argument(
@@ -1535,6 +1616,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--quickjs", default="/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/qjs"
+    )
+    parser.add_argument(
+        "--bun",
+        default=None,
+        help=(
+            "Verified Bun executable for the candidate arm. It is published as ARCHIVETUNE_BUN "
+            "(and -Darchivetune.bun); ARCHIVETUNE_QUICKJS is removed from the child environment."
+        ),
+    )
+    parser.add_argument(
+        "--resolver-engine",
+        choices=list(BASE.RESOLVER_ENGINES),
+        default=None,
+        help=(
+            "JavaScript runtime yt-dlp uses in the candidate arm: quickjs (historical quickjs-ng) "
+            "or bun (the experimental Bun 1.4.3 line). Default: bun when --bun is given, "
+            "otherwise quickjs."
+        ),
+    )
+    parser.add_argument(
+        "--expect-bun-version",
+        default=None,
+        help=(
+            "Fail closed unless the selected Bun binary reports this version (an exact match or a "
+            "prefix of the reported version, so 1.4.3 accepts 1.4.3+c6da4a4d3)."
+        ),
     )
     parser.add_argument("--java", default="/usr/lib/jvm/java-21-openjdk/bin/java")
     parser.add_argument("--java-home", default="/usr/lib/jvm/java-21-openjdk")
@@ -1601,19 +1708,60 @@ def main(argv: list[str] | None = None) -> int:
     )
     BASE.inject_instrumentation = inject_authenticated_instrumentation
 
-    resolver: dict[str, Path] | None = None
+    engine = args.resolver_engine or ("bun" if args.bun else "quickjs")
+
+    resolver: dict[str, Any] | None = None
     if candidate_commit:
         yt_dlp = BASE.discover_resolver(repo_root, args.ytdlp, "ARCHIVETUNE_YTDLP", "yt-dlp")
-        quickjs = BASE.discover_resolver(repo_root, args.quickjs, "ARCHIVETUNE_QUICKJS", "qjs")
-        if not yt_dlp or not quickjs:
-            raise SystemExit("Candidate resolver tools were not found; pass --ytdlp and --quickjs.")
-        resolver = {
-            "yt_dlp": yt_dlp,
-            "quickjs": quickjs,
-            "yt_dlp_version": BASE.tool_version(yt_dlp),
-            "quickjs_version": BASE.tool_version(quickjs),
-        }
+        if not yt_dlp:
+            raise SystemExit("Candidate resolver tools were not found; pass --ytdlp.")
+        if engine == "bun":
+            bun = BASE.discover_bun(repo_root, args.bun)
+            if not bun:
+                raise SystemExit(
+                    "Candidate resolver tools were not found; pass --bun or set ARCHIVETUNE_BUN. "
+                    "The benchmark will not silently fall back to another JavaScript runtime."
+                )
+            bun_version = BASE.tool_version(bun)
+            if args.expect_bun_version and not _version_matches(bun_version, args.expect_bun_version):
+                raise SystemExit(
+                    f"The selected Bun at {bun} reports {bun_version!r}, which does not match "
+                    f"--expect-bun-version {args.expect_bun_version!r}."
+                )
+            resolver = {
+                "engine": "bun",
+                "yt_dlp": yt_dlp,
+                "bun": bun,
+                "yt_dlp_version": BASE.tool_version(yt_dlp),
+                "bun_version": bun_version,
+            }
+            print(
+                f"Resolver: yt-dlp {resolver['yt_dlp_version']} at {yt_dlp}; "
+                f"bun {bun_version} at {bun}",
+                flush=True,
+            )
+        else:
+            quickjs = BASE.discover_resolver(repo_root, args.quickjs, "ARCHIVETUNE_QUICKJS", "qjs")
+            if not quickjs:
+                raise SystemExit("Candidate resolver tools were not found; pass --ytdlp and --quickjs.")
+            resolver = {
+                "engine": "quickjs",
+                "yt_dlp": yt_dlp,
+                "quickjs": quickjs,
+                "yt_dlp_version": BASE.tool_version(yt_dlp),
+                "quickjs_version": BASE.tool_version(quickjs),
+            }
+            print(
+                f"Resolver: yt-dlp {resolver['yt_dlp_version']} at {yt_dlp}; "
+                f"qjs {resolver['quickjs_version']} at {quickjs}",
+                flush=True,
+            )
 
+    # The baseline arm and the candidate arm receive the identical temporary
+    # Main.kt hook: the delegated session provider hides the PO-token bindings
+    # and the real account manager mints through its real Chromium provider.
+    # What the production code does with that provider is production's own
+    # behaviour; the harness only observes and counts the resulting processes.
     baseline_dir, baseline_created = BASE.ensure_checkout(
         repo_root=repo_root,
         revision=baseline_commit,
@@ -1716,6 +1864,9 @@ def main(argv: list[str] | None = None) -> int:
         source_present=session_store.source_present,
         source_version=source_version,
         source_unchanged=session_store.source_unchanged(),
+        resolver_engine=engine,
+        resolver_summary=BASE.resolver_summary(resolver),
+        expect_bun_version=args.expect_bun_version,
         platform_info={
             "system": BASE.platform.platform(),
             "machine": BASE.platform.machine(),
@@ -1725,7 +1876,15 @@ def main(argv: list[str] | None = None) -> int:
         },
     )
 
-    output = Path(args.output)
+    output = Path(args.output) if args.output else (
+        HERE.parent
+        / "packaging/resolver/validation"
+        / (
+            "linux-bun-authenticated-full-application.json"
+            if engine == "bun"
+            else "linux-authenticated-full-application.json"
+        )
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     os.chmod(output, 0o600)
