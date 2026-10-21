@@ -234,8 +234,8 @@ Candidate median / maximum latency was **2.508 / 7.678 seconds**. Baseline faile
 attempts cannot establish latency or memory for successful legacy extraction.
 This is not a valid comparison of successful old and new playback: anonymous state
 bypasses the legacy headless PoToken browser before minting, so its browser cost was
-never measured. A successful legacy comparison with equivalent authentication and
-confirmed browser execution remains open.
+never measured. The historical authenticated comparison above supplies the successful Linux baseline
+and confirms browser execution; it must be used instead of this failed baseline.
 
 No browser was launched during these anonymous runs, and no tracked process remained
 after shutdown. The temporary helpers account for most of the extraction peak;
@@ -280,10 +280,15 @@ applications are excluded. This is a small public-video sample, not a reliabilit
 
 The one-shot design is retained. There is no measured justification here for keeping a
 Python or JavaScript worker resident. In particular, a resident Python worker would
-not by itself remove the separate QuickJS solver cost. Future optimization should
+not by itself remove the separate JavaScript challenge-solving cost. Future optimization should
 measure that distinction rather than infer it from process startup overhead.
 
-Reproduce the initial resolver-only comparison:
+The following command runs the API harness against the current checkout and its
+configured tools; checking out `c5cb2e578` is necessary to reproduce the historical
+QuickJS candidate. Prefer the full-application harness for current resource totals,
+including helpers that detach from their initial parent.
+
+Run the resolver-only comparison:
 
 ```bash
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew :desktop-backend:writeResolverBenchmarkClasspath
