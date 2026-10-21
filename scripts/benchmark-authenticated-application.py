@@ -36,6 +36,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import resource
 import shutil
 import signal
 import statistics
@@ -664,6 +665,7 @@ class CpuTracker:
         self.registry: dict[tuple[int, int], int] = {}
         self.max_total_seconds = 0.0
         self.max_app_seconds = 0.0
+        self.samples: list[dict[str, float | int]] = []
         self.error: str | None = None
 
     def start(self) -> None:
@@ -741,9 +743,28 @@ class CpuTracker:
                 total_ticks = sum(self.registry.values())
                 self.max_total_seconds = max(self.max_total_seconds, total_ticks / CLOCK_TICKS)
                 self.max_app_seconds = max(self.max_app_seconds, app_ticks / CLOCK_TICKS)
+                self.samples.append({"wall_ms": int(time.time() * 1000),
+                                     "total_seconds": self.max_total_seconds,
+                                     "app_seconds": self.max_app_seconds})
                 self.stop_event.wait(0.05)
         except Exception as failure:  # pragma: no cover - diagnostic path
             self.error = failure.__class__.__name__
+
+
+def phase_cpu(samples: list[dict[str, Any]], window: tuple[int, int] | None) -> dict[str, Any] | None:
+    if window is None:
+        return None
+    before = [sample for sample in samples if sample["wall_ms"] <= window[0]]
+    after = [sample for sample in samples if sample["wall_ms"] <= window[1]]
+    if not before or not after or after[-1]["wall_ms"] < before[-1]["wall_ms"]:
+        return None
+    first, last = before[-1], after[-1]
+    return {
+        "total_seconds": round(max(0.0, last["total_seconds"] - first["total_seconds"]), 3),
+        "app_seconds": round(max(0.0, last["app_seconds"] - first["app_seconds"]), 3),
+        "start_sample_gap_ms": window[0] - first["wall_ms"],
+        "end_sample_gap_ms": window[1] - last["wall_ms"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -902,6 +923,7 @@ def _run_inner(
     raw_log = run_dir / "application.log"
     launch_wall_ms = int(time.time() * 1000)
     system_before = BASE.system_memory_snapshot()
+    reaped_cpu_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     process = subprocess.Popen(
         command,
         cwd=str(checkout),
@@ -923,6 +945,7 @@ def _run_inner(
     )
     sampler.start()
     cpu = CpuTracker(process.pid)
+    cpu.samples.append({"wall_ms": launch_wall_ms, "total_seconds": 0.0, "app_seconds": 0.0})
     cpu.start()
 
     timed_out = False
@@ -941,6 +964,11 @@ def _run_inner(
             process.wait(timeout=15)
     finally:
         exit_wall_ms = int(time.time() * 1000)
+        # The JVM has been waited/reaped, while Xvfb is still alive. Its reaped
+        # descendants contribute transitively, including helpers too short for polling.
+        reaped_cpu_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        reaped_tree_cpu = ((reaped_cpu_after.ru_utime + reaped_cpu_after.ru_stime)
+                          - (reaped_cpu_before.ru_utime + reaped_cpu_before.ru_stime))
         for delay in (0.0, 0.25, 1.0, 2.0):
             if delay:
                 time.sleep(delay)
@@ -1115,6 +1143,8 @@ def _run_inner(
             "total_seconds_max": round(cpu.max_total_seconds, 3),
             "app_seconds_max": round(cpu.max_app_seconds, 3),
             "tracker_error": cpu.error,
+            "reaped_tree_seconds": round(reaped_tree_cpu, 3),
+            "phases": {name: phase_cpu(cpu.samples, window) for name, window in phase_windows.items()},
         },
         "markers": markers,
         "phase_windows": {name: (list(window) if window else None) for name, window in phase_windows.items()},
@@ -1174,8 +1204,8 @@ def _run_inner(
             "sample_interval_ms": sample_interval_ms,
             "pss_interval_ms": pss_interval_ms,
             "samples": len(sampler.samples),
-            "rss_method": "maximum sampled sum of simultaneous process-tree RSS",
-            "pss_method": "sum of per-process PSS at the same sampled instant",
+            "rss_method": "maximum sampled tree sum; stat RSS at 25ms, paired smaps_rollup RSS/PSS at PSS samples",
+            "pss_method": "sum of paired smaps_rollup PSS; incomplete samples excluded and counted",
             "inclusion": (
                 "application PID, PID session, PID process group, descendant closure, and a persistent "
                 "(pid, starttime) registry for reparented/detached descendants"
@@ -1212,6 +1242,8 @@ def _phase_summary(result: dict[str, Any], phase: str) -> dict[str, Any] | None:
         "duration_ms": value.get("duration_ms"),
         "rss_mib": value.get("rss_mib"),
         "pss_mib": value.get("pss_mib"),
+        "complete_pss_samples": value.get("complete_pss_samples"),
+        "incomplete_pss_samples": value.get("incomplete_pss_samples"),
         "process_count": value.get("process_count"),
         "max_processes": value.get("process_count", {}).get("max") if value.get("process_count") else None,
         "categories": {
@@ -1263,6 +1295,8 @@ def build_report(
             "resolver": result.get("resolver"),
             "cpu_total_seconds_max": result["cpu"]["total_seconds_max"],
             "cpu_app_seconds_max": result["cpu"]["app_seconds_max"],
+            "cpu_reaped_tree_seconds": result["cpu"].get("reaped_tree_seconds"),
+            "cpu_by_phase": result["cpu"].get("phases"),
             "resolution": result["resolution"],
             "streams": [
                 {
@@ -1506,8 +1540,9 @@ def build_report(
                 "its descendant closure and the persistent reparented-descendant registry; report the "
                 "maximum simultaneous total."
             ),
-            "pss_method": "Sum /proc/<pid>/smaps_rollup Pss for the same tracked set at PSS samples.",
+            "pss_method": "Sum paired smaps_rollup Rss/Pss reads over the tracked set; discard incomplete PSS samples. Sequential reads are not atomic.",
             "cpu_method": "Sum of each tracked (pid,starttime) maximum observed /proc utime+stime, retaining exited processes. CPU sampled every 50 ms; unobserved processes and final ticks between samples can be missed.",
+            "reaped_cpu_method": "Supplementary RUSAGE_CHILDREN delta after waiting for JVM, before Xvfb teardown. Includes descendants reaped transitively by JVM; excludes orphaned helpers reaped elsewhere. Sampled registry is primary.",
             "helper_counting": (
                 "All browser renderer/gpu/network helpers are classified as browser and counted. The frozen "
                 "yt-dlp PyInstaller binary runs as two processes with the same yt-dlp executable name "
@@ -1640,6 +1675,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "otherwise quickjs."
         ),
     )
+    parser.add_argument("--candidate-policy", choices=("legacy", "ytdlp", "hybrid"), default=None,
+                        help="Explicit backend policy for the candidate; baseline is unchanged.")
     parser.add_argument(
         "--expect-bun-version",
         default=None,
@@ -1761,6 +1798,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"qjs {resolver['quickjs_version']} at {quickjs}",
                 flush=True,
             )
+
+    if resolver is not None and args.candidate_policy is not None:
+        resolver["policy"] = args.candidate_policy
 
     # The baseline arm and the candidate arm receive the identical temporary
     # Main.kt hook: the delegated session provider hides the PO-token bindings

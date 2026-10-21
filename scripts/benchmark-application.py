@@ -503,6 +503,7 @@ class TreeSnapshot:
     detached_from_app_group_names: list[str]
     cgroup_paths: list[str]
     processes: list[dict[str, Any]] = field(default_factory=list)
+    pss_sample_attempted: bool = False
 
 
 # A Bun release binary is called "bun"; a staged copy may keep a versioned
@@ -587,15 +588,25 @@ def process_name(pid: int, fallback: str) -> str:
     return fallback or "unknown"
 
 
-def process_pss(pid: int) -> int | None:
+def process_memory_rollup(pid: int) -> tuple[int, int] | None:
+    """Read paired RSS/PSS from one rollup rather than mix stat RSS with later PSS."""
     try:
+        values: dict[str, int] = {}
         with open(f"/proc/{pid}/smaps_rollup", "r", encoding="ascii", errors="replace") as handle:
             for line in handle:
-                if line.startswith("Pss:"):
-                    return int(line.split()[1]) * 1024
+                if line.startswith(("Rss:", "Pss:")):
+                    key, value, *_ = line.split()
+                    values[key] = int(value) * 1024
+        if "Rss:" in values and "Pss:" in values:
+            return values["Rss:"], values["Pss:"]
     except (OSError, ValueError, IndexError):
         return None
     return None
+
+
+def process_pss(pid: int) -> int | None:
+    rollup = process_memory_rollup(pid)
+    return rollup[1] if rollup else None
 
 
 def process_cgroup(pid: int) -> str:
@@ -710,7 +721,6 @@ class ProcessTreeSampler:
         detached_from_app_group_names: list[str] = []
         pss_total = 0
         pss_missing = 0
-        pss_available = False
         cgroup_paths: set[str] = set()
         processes: list[dict[str, Any]] = []
         total_rss = 0
@@ -735,11 +745,11 @@ class ProcessTreeSampler:
             if info.cgroup:
                 cgroup_paths.add(info.cgroup)
             if with_pss:
-                info.pss_bytes = process_pss(pid)
-                if info.pss_bytes is None:
+                rollup = process_memory_rollup(pid)
+                if rollup is None:
                     pss_missing += 1
                 else:
-                    pss_available = True
+                    info.rss_bytes, info.pss_bytes = rollup
                     pss_total += info.pss_bytes
             else:
                 pss_missing += 1
@@ -785,7 +795,8 @@ class ProcessTreeSampler:
         return TreeSnapshot(
             wall_ms=wall_ms,
             rss_bytes=total_rss,
-            pss_bytes=pss_total if pss_available else None,
+            # Partial totals understate memory. Keep them out of PSS distributions.
+            pss_bytes=pss_total if with_pss and pss_missing == 0 else None,
             pss_missing=pss_missing,
             app_rss_bytes=app_rss,
             child_rss_bytes=max(0, total_rss - app_rss),
@@ -799,6 +810,7 @@ class ProcessTreeSampler:
             detached_from_app_group_names=sorted(set(detached_from_app_group_names)),
             cgroup_paths=sorted(cgroup_paths),
             processes=processes,
+            pss_sample_attempted=with_pss,
         )
 
 
@@ -875,9 +887,10 @@ def category_aggregate(samples: list[TreeSnapshot]) -> dict[str, dict[str, Any]]
             pss_values = [int(process["pss_bytes"]) for process in processes if process["pss_bytes"] is not None]
             entry["counts"].append(len(processes))
             entry["rss"].append(rss)
-            entry["pss"].append(sum(pss_values) if pss_values else None)
+            complete_pss = len(pss_values) == len(processes)
+            entry["pss"].append(sum(pss_values) if complete_pss else None)
             entry["max_rss_bytes"] = max(entry["max_rss_bytes"], rss)
-            if pss_values:
+            if complete_pss:
                 entry["pss_seen"] = True
                 entry["max_pss_bytes"] = max(entry["max_pss_bytes"], sum(pss_values))
             for process in processes:
@@ -932,6 +945,8 @@ def phase_stats(samples: list[TreeSnapshot], window: tuple[int, int] | None) -> 
         "end_wall_ms": end_ms,
         "duration_ms": max(0, end_ms - start_ms),
         "samples": len(selected),
+        "complete_pss_samples": sum(sample.pss_sample_attempted and sample.pss_missing == 0 for sample in selected),
+        "incomplete_pss_samples": sum(sample.pss_sample_attempted and sample.pss_missing != 0 for sample in selected),
         "rss_mib": stat_summary(mib(sample.rss_bytes) for sample in selected),
         "pss_mib": stat_summary(mib(sample.pss_bytes) for sample in selected),
         "app_rss_mib": stat_summary(mib(sample.app_rss_bytes) for sample in selected),
@@ -1045,6 +1060,8 @@ def process_inventory(samples: list[TreeSnapshot]) -> dict[str, Any]:
                 sum(1 for process in snapshot.processes if process["category"] == category),
             )
         for category, pss_total in simultaneous_pss.items():
+            if any(process["pss_bytes"] is None for process in snapshot.processes if process["category"] == category):
+                continue
             entry = categories[category]
             entry["simultaneous_pss_seen"] = True
             entry["max_simultaneous_pss_bytes"] = max(
@@ -1228,9 +1245,15 @@ def resolver_system_properties(resolver: dict[str, Any] | None) -> list[str]:
     The quickjs mode keeps the historical command line untouched: the runtime
     already discovers ``ARCHIVETUNE_QUICKJS`` from the environment.
     """
-    if not resolver or resolver_engine(resolver) != "bun":
+    if not resolver:
         return []
-    return [f"-Darchivetune.bun={resolver['bun']}"]
+    arguments = [f"-Darchivetune.bun={resolver['bun']}"] if resolver_engine(resolver) == "bun" else []
+    policy = resolver.get("policy")
+    if policy is not None:
+        if policy not in ("legacy", "ytdlp", "hybrid"):
+            raise ValueError("Unknown resolver policy")
+        arguments.append(f"-Darchivetune.streamResolver={policy}")
+    return arguments
 
 
 def build_environment(
@@ -1271,12 +1294,15 @@ def build_environment(
     # instead of the verified binary.
     environment.pop("ARCHIVETUNE_QUICKJS", None)
     environment.pop("ARCHIVETUNE_BUN", None)
+    environment.pop("ARCHIVETUNE_STREAM_RESOLVER", None)
     if resolver:
         environment["ARCHIVETUNE_YTDLP"] = str(resolver["yt_dlp"])
         if resolver_engine(resolver) == "bun":
             environment["ARCHIVETUNE_BUN"] = str(resolver["bun"])
         else:
             environment["ARCHIVETUNE_QUICKJS"] = str(resolver["quickjs"])
+        if resolver.get("policy") is not None:
+            environment["ARCHIVETUNE_STREAM_RESOLVER"] = str(resolver["policy"])
     else:
         environment.pop("ARCHIVETUNE_YTDLP", None)
     return environment
@@ -1290,6 +1316,7 @@ def resolver_summary(resolver: dict[str, Any] | None) -> dict[str, Any] | None:
         "engine": engine,
         "yt_dlp_path": str(resolver["yt_dlp"]),
         "yt_dlp_version": resolver.get("yt_dlp_version"),
+        "policy": resolver.get("policy"),
     }
     if engine == "bun":
         summary["bun_path"] = str(resolver["bun"])
@@ -1520,8 +1547,8 @@ def run_application(
             "sample_interval_ms": sample_interval_ms,
             "pss_interval_ms": pss_interval_ms,
             "samples": len(sampler.samples),
-            "rss_method": "maximum sampled sum of simultaneous process-tree RSS",
-            "pss_method": "sum of per-process PSS at the same sampled instant; skipped when smaps_rollup is unavailable",
+            "rss_method": "maximum sampled tree sum; stat RSS at 25ms, paired smaps_rollup RSS/PSS at PSS samples",
+            "pss_method": "sum paired smaps_rollup PSS over tracked processes; incomplete samples excluded and counted",
             "inclusion": (
                 "application PID, PID session, PID process group, descendant closure, and a persistent "
                 "(pid, starttime) registry for reparented/detached descendants"
@@ -1665,6 +1692,8 @@ def build_checkout(
                 str(init_script),
                 ":desktopApp:exportBenchmarkRuntimeClasspath",
                 "--console=plain",
+                "--no-daemon",
+                "-Pkotlin.compiler.execution.strategy=in-process",
             ],
             cwd=checkout,
             env=environment,

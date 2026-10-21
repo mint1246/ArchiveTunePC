@@ -15,6 +15,7 @@ import inspect
 import os
 import sys
 import unittest
+from unittest.mock import mock_open, patch
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -95,6 +96,63 @@ class ClassificationTest(unittest.TestCase):
     def test_unrelated_names_are_not_bun(self) -> None:
         for name in ("bundle", "bunny", "rebundle"):
             self.assertNotEqual(BASE.classify_process(name, name, False), "bun")
+
+
+class PairedMemoryTest(unittest.TestCase):
+    def test_rollup_reads_total_rss_and_pss_from_the_same_file(self) -> None:
+        with patch("builtins.open", mock_open(read_data="Rss: 100 kB\nPss: 60 kB\nPss_Dirty: 20 kB\n")):
+            self.assertEqual(BASE.process_memory_rollup(123), (102400, 61440))
+
+    def test_missing_rollup_does_not_become_a_partial_total(self) -> None:
+        table = {
+            123: BASE.ProcessInfo(123, "java", 1, 123, 123, 10, 999),
+            124: BASE.ProcessInfo(124, "yt-dlp", 123, 123, 123, 11, 888),
+        }
+        sampler = BASE.ProcessTreeSampler(123, sample_interval_ms=25, pss_interval_ms=100, start_wall_ms=0)
+        with patch.object(BASE, "read_process_table", return_value=table), \
+             patch.object(BASE, "process_memory_rollup", side_effect=[(100 * MIB, 60 * MIB), None]), \
+             patch.object(BASE, "process_name", side_effect=["java", "yt-dlp"]), \
+             patch.object(BASE, "process_cgroup", return_value=""):
+            sample = sampler._snapshot(with_pss=True)
+        self.assertIsNone(sample.pss_bytes)
+        self.assertEqual(sample.pss_missing, 1)
+        self.assertTrue(sample.pss_sample_attempted)
+        self.assertEqual(sample.processes[0]["rss_bytes"], 100 * MIB)
+        # Per-category PSS is likewise unknown if one member could not be read.
+        incomplete = snapshot([process("yt-dlp", "yt_dlp", 10, 5), process("yt-dlp", "yt_dlp", 10)])
+        self.assertIsNone(BASE.category_aggregate([incomplete])["yt_dlp"]["max_pss_mib"])
+        self.assertIsNone(BASE.process_inventory([incomplete])["categories"]["yt_dlp"]["max_simultaneous_pss_mib"])
+
+    def test_phase_cpu_subtracts_completed_control_helpers(self) -> None:
+        samples = [
+            {"wall_ms": 900, "total_seconds": 10., "app_seconds": 4.},
+            {"wall_ms": 1000, "total_seconds": 12., "app_seconds": 5.},
+            {"wall_ms": 1900, "total_seconds": 15., "app_seconds": 6.},
+        ]
+        result = AUTH.phase_cpu(samples, (1000, 2000))
+        self.assertEqual(result["total_seconds"], 3.)
+        self.assertEqual(result["app_seconds"], 1.)
+        self.assertEqual(result["end_sample_gap_ms"], 100)
+
+
+class ResolverMatrixTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.matrix = load_module(SCRIPTS / "benchmark-resolver-matrix.py", "archivetune_resolver_matrix")
+
+    def test_production_auth_keeps_bindings_and_control_does_not_prewarm_extraction(self):
+        block = self.matrix.hook(["jNQXAC9IVRw"], 2, "BaW_jenozKc", "production")
+        self.assertIn("currentAuthState(): PlaybackAuthState = account.currentAuthState()", block)
+        self.assertIn("val stripped = account.currentAuthState().copy(poToken = null", block)
+        self.assertLess(block.index('emit("extraction-end"'), block.index('emit("cold-proof-begin"'))
+        self.assertLess(block.index('emit("cold-proof-teardown-settled"'), block.index('emit("playback-begin"'))
+        self.assertIn('System.getenv("ARCHIVETUNE_BENCH_VIDEOS")', block)
+
+    def test_quantile_semantics_are_explicit(self):
+        result = self.matrix.distribution(range(1, 21))
+        self.assertEqual(result["p50"], 10.5)
+        self.assertEqual(result["p90"], 18)
+        self.assertEqual(result["p95"], 19)
 
 
 class SimultaneousAccountingTest(unittest.TestCase):
