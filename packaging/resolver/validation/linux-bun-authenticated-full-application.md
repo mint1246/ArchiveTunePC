@@ -76,9 +76,9 @@ file hashes match exactly:
 
 The delegated session provider hides the PO-token bindings in both arms, so a
 mint through the real headless Chromium provider is possible whenever the
-production code asks for one. The harness does not force and does not suppress
-any helper: the Browser counts below are what the production code actually
-started.
+production code asks for one. Both arms use that same cold-token policy. A
+separate explicit browser-proof control is excluded from extraction measurements;
+extraction Browser counts reflect the helpers the production path starts.
 
 ## Authentication and Browser proof
 
@@ -89,14 +89,15 @@ started.
 | Account request verified | yes | yes |
 | Cold headless-Browser mint | 1/1 (688 ms) | 1/1 (628 ms) |
 | Browser teardown observed | yes | yes |
-| Application-side mints during extraction | 6 | **0** |
+| Playback-auth calls returning a token during extraction | 6 | **0** |
 | Browser processes observed | `brave` | `brave` |
 
 The candidate's cold Browser proof is the control measurement. During the
 production extraction the candidate started **no** Browser process: the yt-dlp
 path never asks the account manager for a PO token, so the delegated provider
-is simply unused. The baseline, in contrast, minted six times and therefore
-carries nine Chromium processes through its extraction phase.
+is simply unused. The baseline, in contrast, made six playback-auth calls returning a token, including cached results. Its
+extraction phase reached nine simultaneous Chromium helpers; the call count does
+not establish six cold browser launches.
 
 ## Extraction results
 
@@ -127,7 +128,7 @@ at volume 0.
 | Stopped | yes | yes |
 
 All controller checks passed in both arms, including the real seek, pause and
-resume round trip.
+resume round trip. Output was muted, so audible output was not verified.
 
 ## Wall time and memory
 
@@ -165,6 +166,11 @@ executable name: the PyInstaller bootloader and its embedded CPython
 interpreter. Both are counted and both are inside the simultaneous totals.
 `ffmpeg`/`ffprobe` sidecars are counted as media.
 
+RSS uses `/proc/<pid>/stat`; PSS uses `smaps_rollup` at a different sampling
+rate. Reads are sequential, not atomic. Independent sampled maxima can therefore
+show small inconsistencies, including the yt-dlp PSS maximum exceeding its RSS
+maximum. Category maxima must not be added to reconstruct a whole-app peak.
+
 ### CPU (cumulative `utime+stime`, exited helpers retained)
 
 | Metric | Baseline | Candidate |
@@ -174,7 +180,8 @@ interpreter. Both are counted and both are inside the simultaneous totals.
 
 The CPU tracker keeps the maximum observed `utime+stime` per
 `(pid, starttime)` and retains processes after they leave `/proc`, so helper
-CPU is not lost when a short-lived process exits between samples.
+already-observed CPU is retained after a helper exits. Unobserved short-lived
+processes and final ticks between samples can still be missed.
 
 ## Helper lifecycle
 

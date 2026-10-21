@@ -102,9 +102,8 @@ directories from the same user are swept; directories newer than one minute and
 active locks are retained to avoid racing a peer acquiring its lock. Unmarked
 legacy directories are retained for 24 hours.
 Cleanup failure has a redacted I/O error rather than an unavailable-video classification.
-Signed-in QuickJS application playback was exercised with isolated copies of the existing
-account session; the Bun whole-application run is pending. Cookie-only/restricted media
-remains unverified.
+Signed-in Bun and earlier QuickJS application playback passed with isolated copies of
+the existing account session. Cookie-only/restricted media remains unverified.
 
 Public signature-cache data may be stored under the application's supplied cache
 folder, in `yt-dlp/`. Credentials, signed stream URLs and temporary EJS scripts do not
@@ -206,8 +205,50 @@ The integrated branch passed 26 resolver tests, 94 backend tests (one opt-in ski
 also passed with inherited `BUN_OPTIONS=--cwd=/nonexistent-parent-project` and
 `DO_NOT_TRACK=0`: subprocess fixtures require the options to be removed and tracking
 to be disabled. The real Bun/libVLC callback class passed both tests, including
-ranged playback, advancing time, seek, pause and resume. Signed-in Bun whole-app
-results are recorded separately when that run completes.
+ranged playback, advancing time, seek, pause and resume. Five automated build-logic
+tests additionally cover unsafe ZIP entries, duplicate/oversized members, digest
+failures, manifest tampering and stale runtimes. The stricter manifest verifier
+also passed against the extracted final AppImage without changing its payload.
+
+## Signed-in Bun application comparison
+
+The [Bun whole-application report](packaging/resolver/validation/linux-bun-authenticated-full-application.md)
+compares committed Linux baseline `0817a5024` with runtime/package candidate
+`04232ffa7`, both with core `144fe5c`. Both restored isolated account-session
+copies, verified a real account request, resolved **6/6 public streams**, and passed
+real application playback, advancing position, seek, pause, resume and stop.
+The original keyring entry remained unchanged and both clones were cleared.
+
+| Measurement | Linux legacy | yt-dlp + Bun 1.4.3 |
+| --- | ---: | ---: |
+| Resolution median | 395 ms | 2939 ms |
+| First request per video, median | 934 ms | 2977 ms |
+| Repeat request per video, median | 141 ms | 2901 ms |
+| Extraction peak RSS, all app processes | 1281.14 MiB | 826.13 MiB |
+| Extraction peak PSS, all app processes | 610.82 MiB | 747.01 MiB |
+| Playback peak RSS | 450.99 MiB | 426.69 MiB |
+| Whole-run tracked CPU | 13.39 s | 25.88 s |
+
+During extraction the baseline reached nine Chromium helpers; the Bun candidate
+started no browser and used short-lived yt-dlp (bootloader plus embedded CPython),
+Bun, and ffmpeg/ffprobe processes. A separate cold browser-proof control ran in
+both arms and is excluded from extraction measurements. All helpers were gone
+by post-idle and after shutdown.
+
+Bun reduces the earlier QuickJS candidate's measured challenge delay, whose
+historical signed-in application median was 7697 ms. These are separate paired
+runs, not a three-arm randomized trial. The working Linux legacy resolver is
+still faster, and both backends succeeded on this small public sample. Lower
+summed RSS is not evidence of a physical-memory saving: Chromium shares pages
+across helpers, while the Bun candidate had **higher PSS** and higher whole-run
+CPU. RSS/PSS are sampled from different `/proc` sources and category maxima can
+occur at different times; see the report for accounting limits.
+
+Both arms use identical temporary `Main.kt` instrumentation and the same cold-token
+policy. Repeats bypass the resolved-URL cache, so they are not repeat playback
+latency. The run used offscreen software rendering and muted output; audible,
+restricted-media, live preloading/cancellation and download acceptance remain
+separate. No merge or replacement of the installed app was performed.
 
 ## Historical authenticated QuickJS application comparison
 

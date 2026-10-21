@@ -1445,7 +1445,7 @@ def build_report(
                 f"{candidate_arm['process_inventory'].get('bun_processes_observed', [])}; "
                 f"maximum simultaneous Bun processes {bun_helper.get('bun_max_simultaneous')}; "
                 f"yt-dlp processes (bootloader plus embedded CPython) "
-                f"{bun_helper.get('ytdlp_max_simultaneous')}; media helpers "
+                f"{bun_helper.get('ytdlp_processes_max_including_embedded_python')}; media helpers "
                 f"{bun_helper.get('media_max_simultaneous')}."
             )
             observations.append(
@@ -1453,8 +1453,8 @@ def build_report(
                 f"{candidate_arm['process_inventory'].get('browser_processes_observed', [])} "
                 f"(maximum simultaneous {bun_helper.get('browser_max_simultaneous')}); cold-proof "
                 f"mints {candidate_arm['authentication']['browser_proof']['cold_successes']}/"
-                f"{candidate_arm['authentication']['browser_proof']['cold_attempts']}. This is what the "
-                "production code actually started in this run; the harness neither forces nor suppresses it."
+                f"{candidate_arm['authentication']['browser_proof']['cold_attempts']}. The browser total includes the explicit "
+                "cold-proof control; production extraction is measured separately."
             )
     observations.append(
         "The signed-in application state is verified with a real account request and the resolved "
@@ -1538,8 +1538,8 @@ def build_report(
                 "Identical temporary Main.kt hook in both disposable detached checkouts; the delegated "
                 "DesktopSessionProvider hides PO-token bindings while retaining cookie/visitor/DataSync, so "
                 "a mint through the real headless Chromium provider is possible whenever the production "
-                "code asks for one. Every process the application actually starts is counted; the harness "
-                "does not force or suppress any helper."
+                "code asks for one. Every helper actually started during extraction is counted. Both arms use the same "
+                "cold-token policy; a separate explicit browser-proof control is excluded from extraction measurements."
             ),
             "playback": (
                 "A real resolved remote stream is loaded into the real VlcjPlaybackController at volume 0; "
@@ -1572,7 +1572,7 @@ def build_report(
             "Raw application logs stay in a private 0700 work root and are not part of the report or commit.",
             "PSS and CPU are sampled estimates; short-lived helpers can exit between reads.",
             "The signed-in application state is verified with a real account request, and the resolved streams are public videos. Cookie-only, age- or region-restricted media is unverified: the legacy VISIONOS player client does not send the login cookie and no such stream was exercised.",
-            "Both arms run the identical temporary Main.kt hook. Browser, Bun, yt-dlp (bootloader plus embedded CPython) and ffmpeg/ffprobe processes are counted as the application actually starts them; the harness neither forces nor suppresses any helper.",
+            "Both arms run the identical temporary Main.kt hook. Browser, Bun, yt-dlp (bootloader plus embedded CPython) and ffmpeg/ffprobe processes are counted as the application actually starts them; both arms use the same cold-token policy, with a separate forced browser-proof control excluded from extraction measurements.",
             "The host is shared with the user's desktop applications, which are outside the tracked session.",
             "Offscreen software Skia; GPU-backed rendering may differ.",
             "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device.",
