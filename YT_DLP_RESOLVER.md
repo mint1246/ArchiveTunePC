@@ -172,9 +172,11 @@ production sources match this feature branch. The current account was verified
 through a real request. Each run restored an isolated copy of the saved keyring
 entry; the original entry was unchanged, and both copies were removed afterward.
 
-Both versions resolved **6/6** authenticated streams and passed the real application
+Both signed-in applications resolved **6/6** public streams and passed the real application
 controller's playback, advancing position, seek, pause, resume and stop checks.
-Output was muted, so audible playback was not verified. The baseline really launched
+Output was muted, so audible playback was not verified. The legacy VISIONOS player
+client does not send cookies; these public-video tests do not establish playback
+of cookie-only/restricted content. The baseline really launched
 headless Brave, including renderer/GPU/network helpers, during extraction. A separate
 forced browser-proof control ran in both arms and is excluded from extraction costs.
 

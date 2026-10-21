@@ -225,7 +225,7 @@ if (System.getenv("ARCHIVETUNE_APP_BENCHMARK") == "1") {
         musicServices.backend.bindSessionProvider(delegatedProvider)
 
         val guard = account.currentAuthState()
-        if (!guard.hasLoginCookie || guard.dataSyncId.isNullOrBlank()) {
+        if (!guard.hasLoginCookie || guard.dataSyncId.isNullOrBlank() || !verifyResult.isSuccess) {
             emit("auth-guard", "passed" to false, "reason" to "missing-restored-auth")
             emit("benchmark-complete", "attempts" to 0, "successes" to 0, "auth_valid" to false)
             emit("shutdown-begin")
@@ -1490,6 +1490,7 @@ def build_report(
             "The source keyring entry is read twice (before and after) only to prove it is unchanged; its hash is never stored or logged.",
             "Raw application logs stay in a private 0700 work root and are not part of the report or commit.",
             "PSS and CPU are sampled estimates; short-lived helpers can exit between reads.",
+            "Signed-in application state is verified, not authentication of every player client. The baseline VISIONOS client does not send login cookies; cookie-only/restricted media is not tested.",
             "The host is shared with the user's desktop applications, which are outside the tracked session.",
             "Offscreen software Skia; GPU-backed rendering may differ.",
             "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device.",
@@ -1517,7 +1518,7 @@ def _category_max(result: dict[str, Any], category: str) -> int | None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo-root", default="/home/mint/Projects/ArchiveTuneLinux")
+    parser.add_argument("--repo-root", default=str(HERE.parent))
     parser.add_argument("--baseline-commit", default=DEFAULT_BASELINE_COMMIT)
     parser.add_argument("--candidate-ref", default=None)
     parser.add_argument("--candidate-commit", default=None)
@@ -1744,14 +1745,16 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline_ok = (
         baseline_run["authentication"]["guard_passed"]
-        and baseline_run["resolution"]["successes"] > 0
+        and baseline_run["authentication"]["account_request_verified"]
+        and baseline_run["resolution"]["successes"] == len(args.videos) * args.repeats
         and baseline_run["playback"]["all_checks_passed"]
     )
     candidate_ok = True
     if candidate_run is not None:
         candidate_ok = (
             candidate_run["authentication"]["guard_passed"]
-            and candidate_run["resolution"]["successes"] > 0
+            and candidate_run["authentication"]["account_request_verified"]
+            and candidate_run["resolution"]["successes"] == len(args.videos) * args.repeats
             and candidate_run["playback"]["all_checks_passed"]
         )
     return 0 if baseline_ok and candidate_ok else 1

@@ -43,7 +43,8 @@ to the clone, not the live entry.
 ## Authentication and Browser proof
 
 Both arms restored a signed-in session from secure storage with a login cookie,
-visitor data, and DataSync. The test hook retained those values but hid every
+visitor data, and DataSync. Account verification used that session; individual
+stream-client authentication was not separately asserted. The test hook retained those values but hid every
 PO-token binding from the backend, so the real account manager had to mint
 again through its real Chromium provider.
 
@@ -71,8 +72,11 @@ legacy path and is visible in the baseline extraction peak below.
 
 ## Extraction results
 
-All six attempts in each arm succeeded with a real signed remote stream. There
-were no failures, no anonymous fallbacks, and no unresolved placeholders.
+All six attempts in each arm succeeded with a real signed remote URL while the
+application held a verified signed-in session. No anonymous application state was
+accepted. The legacy VISIONOS client does not send login cookies, so this does
+not prove every player request was authenticated or that cookie-only/restricted
+content works. There were no extraction failures or unresolved placeholders.
 
 | Arm | Min | Median | Max | Success |
 | --- | ---: | ---: | ---: | ---: |

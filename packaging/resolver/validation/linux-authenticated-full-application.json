@@ -20,7 +20,8 @@
     "keyring_clone_isolated": true,
     "keyring_clone_cleared": true,
     "secret_values_in_report": false,
-    "anonymous_runs_accepted": false
+    "anonymous_runs_accepted": false,
+    "cookie_only_media_verified": false
   },
   "baseline_commit": "0817a502413c6e77871eb161ee5c18ad6c4486da",
   "baseline_commit_source": "0817a5024",
@@ -1255,6 +1256,7 @@
     "Offscreen software Skia; GPU-backed rendering may differ.",
     "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device.",
     "CPU totals excluded: the original tracker maximized the cumulative CPU of currently live processes instead of summing CPU across exited helpers. It could report zero child CPU despite observed Chromium. The harness is fixed for future runs; no corrected total can be recovered from this recorded artifact.",
-    "The separate candidate cold-proof phase explicitly invokes the existing Chromium provider as a control; yt-dlp extraction itself does not invoke that provider. Backend calls bypass the app URL cache in both arms."
+    "The separate candidate cold-proof phase explicitly invokes the existing Chromium provider as a control; yt-dlp extraction itself does not invoke that provider. Backend calls bypass the app URL cache in both arms.",
+    "Signed-in application state and account verification passed. The baseline VISIONOS player client does not send login cookies; these public-video results do not prove authentication of each player request or playback of cookie-only/restricted content."
   ]
 }
