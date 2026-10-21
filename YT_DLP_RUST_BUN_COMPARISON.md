@@ -9,7 +9,7 @@ pinned yt-dlp accept it at all?
 **Answer, measured.**
 
 1. **The pinned yt-dlp 2026.08.19 accepts Bun 1.4.3 with the *unchanged* CLI.**
-   No version-check bypass, no wrapper, no spoofed `--version` output was used
+   No version-check bypass or version-spoofing wrapper was used
    (`version_gate.cli_gate_bypassed = false` in the JSON artifact). Every
    challenged extraction succeeded and the challenge was solved by the `bun`
    provider. yt-dlp does print a warning
@@ -28,15 +28,15 @@ pinned yt-dlp accept it at all?
    *bimodal*: 9 of 18 challenged runs used ~0.90–0.97 s of child CPU (better
    than Bun 1.3.14) and 9 of 18 used ~1.54–1.62 s (worse). A three-sample
    median therefore lands anywhere between 1.84 s and 2.50 s of total CPU
-   depending on which mode dominates. This is a **three-run, single-workload
-   observation**, not a claim about the Rust JIT in general.
+   depending on which mode dominates. These are repeated three-run batches on
+   one workload, not a general claim about the engine or Rust rewrite.
 5. **Wall time is not separated.** Bun 1.3.14 and Bun 1.4.3 overlap
-   completely (2526–3411 ms vs 2656–3107 ms over 18 runs each).
-6. **Nothing changes in production.** The shipped runtime stays QuickJS-NG.
-   Bun is deprecated upstream, 1.4.3 is above the supported ceiling, and the
-   one solid win (memory) does not outweigh an unsupported, unpermissioned
-   runtime. **No production runtime, Gradle task, pinned manifest or global
-   installation was modified by this work.**
+   completely (2656–3107 ms vs 2526–3411 ms over 18 successes each).
+6. **This benchmark does not change the requested runtime.** The experiment
+   still ships QuickJS-NG. Bun 1.4.3 is a technically functional alternative
+   in this test despite the upstream support warning. A product choice must
+   weigh package size, memory, CPU and latency. No production runtime, Gradle
+   task, pinned manifest or global installation was modified.
 
 Everything below is a measurement of the pinned tools in this repository. No
 engine marketing claims are used as evidence.
@@ -155,6 +155,23 @@ pinned build. Nothing here turns the first fact into the second.
 
 ## Measured results
 
+Across all six repetitions (18 successful challenged extractions per runtime),
+the pooled successful-run statistics are:
+
+| Runtime | Success / attempts | Wall median (ms) | CPU median (s) | Median peak RSS | Maximum peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| bun | 18 / 18 | 2787.0 | 2.0205 | 472.1 MiB | 485.8 MiB |
+| bun-rust | 18 / 18 | 2806.0 | 2.1920 | 400.0 MiB | 416.0 MiB |
+| node | 18 / 20 | 2903.0 | 1.8415 | 394.5 MiB | 410.4 MiB |
+| quickjs-ng | 18 / 18 | 7380.5 | 5.9390 | 358.5 MiB | 359.1 MiB |
+
+These are medians of the raw observations, not averages of batch medians.
+Node's two format-unavailable attempts remain counted and preserved; its
+challenge solving succeeded even on those attempts. The raw records and
+`pooled_challenged` summaries are committed so the pooling can be audited.
+
+### Most recent repetition
+
 Cold, serialized extractions of the **challenged** video `dQw4w9WgXcQ` with
 `player_client=web_embedded` (the runtime is load-bearing here), three
 successful extractions per runtime, same machine, same pinned yt-dlp. These
@@ -218,7 +235,10 @@ but YouTube returned no formats on that attempt, so the requested audio
 format was missing. The harness retried until three successful extractions
 were collected and records the attempt count
 (`attempts_total = len(runs)`); Node therefore shows
-`attempts_total = 5, successful = 3`. The failed attempts are **not**
+`attempts_total = 5, successful = 3`. The original retry invocation log appended
+to the previous failed attempt, so counts of two on retry successes are not
+evidence of two solver executions in that attempt. The harness now resets
+that log. Challenge diagnostics and child CPU independently show execution. The failed attempts are **not**
 discarded from the artifact — they are in `runs[]` with their own wall time,
 CPU and RSS.
 
@@ -228,7 +248,9 @@ The whole benchmark was repeated **six times** on the same machine, same
 pinned yt-dlp, same videos (18 successful challenged extractions per runtime
 in total; Node needed 20 attempts to get its 18 successes because of the two
 retries described above). The five earlier repetitions are attached to the
-published artifact under `repetitions`.
+published artifact under `repetitions`, including compact per-attempt records
+used by the pooled summaries. The most recent repetition also keeps full
+safe raw records in `runs[]`.
 
 Median of the **successful** challenged runs, per repetition (the medians are
 taken over successful extractions only; the attempt count including the two
@@ -261,8 +283,8 @@ Node retries is `attempts_total` in the artifact):
 | run 5 | node | 2898 | 1.841 | 393.9 |
 | run 5 | quickjs-ng | 7273 | 5.920 | 358.8 |
 
-Pooled over all repetitions, the **solver child's own CPU** (sampled ticks at
-100 Hz, one value per challenged run):
+Pooled over all repetitions, the **solver child's own CPU** (sampled CPU ticks,
+100 ticks per CPU-second, one value per challenged attempt):
 
 | Runtime | Solver-child CPU ticks across all challenged runs | Interpretation |
 | --- | --- | --- |
@@ -271,8 +293,7 @@ Pooled over all repetitions, the **solver child's own CPU** (sampled ticks at
 | bun 1.3.14 | 106, 106, 106, 106, 107, 107, 108, 108, 108, 108, 108, 109, 109, 109, 112, 112, 115, 118 | stable, ~1.06–1.18 s |
 | **bun 1.4.3** | **90, 91, 91, 91, 91, 91, 92, 95, 97** ‖ **154, 155, 156, 156, 156, 158, 159, 161, 162** | **bimodal: ~0.90–0.97 s or ~1.54–1.62 s** |
 
-This is the most important technical result of the comparison, and it is a
-**negative** one for the Rust rewrite as a *performance* argument:
+The repeated CPU observations do not support a general speedup claim:
 
 * QuickJS-NG, Node and Bun 1.3.14 are each **unimodal**. Their solver-child
   CPU is reproducible to within a few percent across 18–20 runs.
@@ -286,12 +307,9 @@ This is the most important technical result of the comparison, and it is a
   three-run median of Bun 1.4.3 is therefore an unreliable statistic, and a
   report that quoted only the favourable repetition would be cherry-picking.
 
-**This is a three-run, single-workload observation.** It is **not** a claim
-about the Rust JIT, about Bun 1.4 in general, or about any other workload.
-The cause of the bimodality was not investigated; it could be tiering,
-garbage-collection timing, or something about how the EJS solver script
-triggers the engine. Establishing a cause needs a dedicated experiment that
-this task did not perform.
+These are six repetitions of three successful runs on one workload. The
+cause of the CPU split was not investigated. It should not be attributed to
+the implementation language or generalized to other Bun workloads.
 
 ### Where the memory goes
 
@@ -455,34 +473,26 @@ issue exists and the pinned code links to it, but this report does not
 characterise why upstream deprecated Bun, because it does not read the issue
 as evidence for a performance claim.
 
-## Recommendation
+## Runtime tradeoffs
 
-**No production change. Keep QuickJS-NG as the shipped resolver runtime.**
+The requested QuickJS-NG default is unchanged. The measurements establish:
 
-Constrained to this evidence:
-
-1. **Bun 1.4.3 is technically usable with the pinned yt-dlp, but it is not
-   supported by it.** The pinned source caps Bun at 1.3.14 and says so in the
-   runtime's own diagnostics. Shipping an unsupported runtime for a desktop
-   application that resolves signed media URLs is a worse trade than the
-   memory saving is worth.
-2. **The Rust rewrite's memory win is real but small relative to the risk.**
-   57–82 MiB less peak tree RSS on a ~360–490 MiB tree, with no measured
-   latency win, bought at the cost of an unsupported, unpermissioned runtime
-   (Bun gives the solver script full filesystem and network access, while
-   QuickJS and Node are restricted).
-3. **The CPU result does not support switching.** Bun 1.4.3's solver child is
-   bimodal, so its median CPU over three runs is unstable; on the pooled data
-   its median child CPU is actually *higher* than Bun 1.3.14's (1.255 s vs
-   1.080 s).
-4. **QuickJS-NG remains the smallest artifact by a wide margin** (2.44 MiB vs
-   84.86 MiB) and the lowest measured peak RSS, at the cost of ~2.6x Node's
-   wall time and ~3.2x Node's total CPU on challenged extraction. That
-   trade-off is unchanged by this report.
-5. **If the upstream bun support situation changes**, this benchmark can be
-   re-run unchanged: `--bun-new` measures a second Bun build with the same
-   unchanged CLI, and `scripts/fetch-bun-release.py` re-provisions and
-   re-verifies the artifact.
+1. Bun 1.4.3 works with this pinned yt-dlp and bundled EJS, with an upstream
+   support warning. No version-check bypass was required. The warning alone
+   is not evidence of execution failure.
+2. New Bun's repeatable improvement over 1.3.14 is memory. Its median of
+   per-run peak RSS was 400.0 MiB versus 472.1 MiB; measured wall medians
+   were 2806 and 2787 ms. A speed improvement is not established here.
+3. Node used the least total CPU in the pooled successful runs (1.8415 s).
+   Bun 1.4.3's total CPU median was 2.192 s, with two solver-child CPU modes.
+   The narrow wall-time differences among these fast runtimes still include
+   network and shared-host effects.
+4. QuickJS-NG has the smallest binary and lowest sampled peak RAM, while its
+   challenged extraction took much longer. Installer size and runtime cost
+   are distinct product choices.
+5. These are Linux resolver-only measurements. They do not establish Windows
+   behavior or the full-app performance of a Bun-based resolver. The separate
+   authenticated application comparison tested the current QuickJS backend.
 
 ### What was explicitly *not* changed
 
@@ -504,7 +514,7 @@ Constrained to this evidence:
   not counted but can affect scheduling and page-cache pressure.
 * **The CPU bimodality of Bun 1.4.3 is unexplained.** This report documents
   it and refuses to summarise it as an improvement. It is *not* a general
-  statement about the Rust JIT, about Bun 1.4, or about any workload other
+  statement about the engine, Bun 1.4, or any workload other
   than the yt-dlp EJS challenge solver.
 * **Sampled RSS is approximate.** Polling every 20 ms can miss spikes, and
   RSS counts shared pages in each process. The whole-tree peak is therefore

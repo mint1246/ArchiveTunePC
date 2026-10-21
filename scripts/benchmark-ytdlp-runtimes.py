@@ -530,7 +530,8 @@ def residue_check(paths: Sequence[str],
         if (pid, starttime) not in preexisting
     ]
     return {
-        "checked_executables": sorted({exe for exe in current.values()}),
+        "checked_executables": sorted({os.path.realpath(path) for path in paths}),
+        "matched_executables_at_check": sorted({exe for exe in current.values()}),
         "preexisting_processes_excluded": len(preexisting),
         "resident_leftover_count": len(leftovers),
         "resident_leftovers": leftovers,
@@ -928,6 +929,9 @@ def run_scenario(ytdlp: str, spec: RuntimeSpec, scenario: Scenario, repeat: int,
                  probe_timeout: float) -> Tuple[ExtractionResult, Optional[Dict[str, Any]]]:
     log_path = os.path.join(workdir, "runtime-invocations-%s-%s-%d.log"
                             % (spec.key, scenario.key, repeat))
+    # Retries reuse the success index, but their invocation counts must be independent.
+    with open(log_path, "w"):
+        pass
     shim = make_counting_shim(spec.path, log_path)
     extra: List[str] = []
     if scenario.client:
@@ -1078,6 +1082,32 @@ def build_headline(per_runtime: Dict[str, Any], baseline_key: str) -> Dict[str, 
                                                baseline_challenged.get("peak_tree_rss_bytes_max")),
         }
     return headline
+
+
+def compact_challenged_runs(runs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep enough safe per-run evidence to audit pooled repetition statistics."""
+    fields = ("runtime_key", "repeat", "attempt", "ok", "failure_class", "wall_ms",
+              "cpu_total_s", "peak_tree_rss_bytes", "cpu_ticks_by_comm",
+              "runtime_script_invocations", "challenge_solved", "http_status",
+              "http_bytes_read", "http_tail_status", "http_tail_bytes")
+    return [{key: run.get(key) for key in fields} for run in runs
+            if run.get("scenario") == "challenged"]
+
+
+def pooled_challenged_summary(runs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pool raw observations, rather than averaging three-sample medians."""
+    result: Dict[str, Any] = {}
+    for key in sorted({run["runtime_key"] for run in runs}):
+        attempts = [run for run in runs if run["runtime_key"] == key]
+        ok = [run for run in attempts if run.get("ok")]
+        result[key] = {
+            "successful": len(ok), "attempts_total": len(attempts),
+            "wall_ms_median": statistics.median(run["wall_ms"] for run in ok) if ok else None,
+            "cpu_total_s_median": statistics.median(run["cpu_total_s"] for run in ok) if ok else None,
+            "peak_tree_rss_bytes_median": statistics.median(run["peak_tree_rss_bytes"] for run in ok) if ok else None,
+            "peak_tree_rss_bytes_max": max((run["peak_tree_rss_bytes"] for run in ok), default=None),
+        }
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1382,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "generated_at_utc": other.get("generated_at_utc"),
             "baseline_runtime": other_baseline,
             "runtimes": other_headline,
+            "challenged_runs": compact_challenged_runs(other.get("runs", [])),
             "version_gate": {
                 key: entry.get("version_gate", {}).get("outcome")
                 for key, entry in (other.get("per_runtime") or {}).items()
@@ -1451,6 +1482,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "per_runtime": per_runtime,
     }
 
+    primary_challenged = compact_challenged_runs(report["runs"])
+    report["repetitions"]["this_run"]["challenged_runs"] = primary_challenged
+    all_challenged = primary_challenged + [run for repetition in repetitions
+                                        for run in repetition.get("challenged_runs", [])]
+    report["pooled_challenged"] = pooled_challenged_summary(all_challenged)
     json_path, csv_path = write_reports(report, results, args.out_dir, args.out_json or None)
     print("")
     print("report: %s" % json_path)

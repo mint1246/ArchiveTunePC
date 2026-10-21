@@ -189,7 +189,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             "draft": release.get("draft"),
             "html_url": release.get("html_url"),
             "api_url": GITHUB_API + "/latest",
-            "release_notes": (release.get("body") or "")[:2000],
         },
         "asset": {
             "name": asset_name,

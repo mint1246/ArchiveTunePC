@@ -47,7 +47,6 @@
       "name": "Bun v1.4.3",
       "prerelease": false,
       "published_at_utc": "2026-10-10T05:24:54Z",
-      "release_notes": "To install Bun v1.4.3\n```bash\ncurl -fsSL https://bun.sh/install | bash\n# or you can use npm\n# npm install -g bun\n```\n\nWindows:\n```bash\npowershell -c \"irm bun.sh/install.ps1|iex\"\n```\n\nTo upgrade to Bun v1.4.3:\n```bash\nbun upgrade\n```\n\n### [Read Bun v1.4.3's release notes on Bun's blog](https://bun.com/blog/bun-v1.4.3)\n\n### Thanks to 8 contributors!\n\n- [@alii](https://github.com/alii)\n- [@cirospaciari](https://github.com/cirospaciari)\n- [@dylan-conway](https://github.com/dylan-conway)\n- [@eastlondoner](https://github.com/eastlondoner)\n- [@jarred-sumner](https://github.com/jarred-sumner)\n- [@robobun](https://github.com/robobun)\n- [@sosukesuzuki](https://github.com/sosukesuzuki)\n- [@steipete](https://github.com/steipete)\n\n",
       "repository": "oven-sh/bun",
       "tag": "bun-v1.4.3",
       "version": "1.4.3"
@@ -163,6 +162,7 @@
     "cookies_used": false,
     "cpu_method": "getrusage(RUSAGE_CHILDREN) delta around each extraction; on Linux this is transitive, so the frozen yt-dlp's embedded CPython and the JS runtime child are both included.",
     "description": "Cold yt-dlp extractions per JS runtime on a challenged YouTube video plus two controls, serialized (one extraction at a time).",
+    "invocation_count_note": "Original failed retries reused an append-only invocation log, so counts on Node retry successes can include the previous failed attempt. They are not exact per-attempt solver counts. Each challenge also has independent diagnostic and CPU evidence. The harness now resets the log for each attempt; recorded raw counts are preserved.",
     "js_runtime_selection": "--no-js-runtimes --js-runtimes <name>:<path>",
     "repeats_challenged": 3,
     "resolver_flags": [
@@ -727,10 +727,313 @@
       }
     }
   },
+  "pooled_challenged": {
+    "bun": {
+      "attempts_total": 18,
+      "cpu_total_s_median": 2.0205,
+      "peak_tree_rss_bytes_max": 509448192,
+      "peak_tree_rss_bytes_median": 494991360.0,
+      "successful": 18,
+      "wall_ms_median": 2787.0
+    },
+    "bun-rust": {
+      "attempts_total": 18,
+      "cpu_total_s_median": 2.192,
+      "peak_tree_rss_bytes_max": 436207616,
+      "peak_tree_rss_bytes_median": 419440640.0,
+      "successful": 18,
+      "wall_ms_median": 2806.0
+    },
+    "node": {
+      "attempts_total": 20,
+      "cpu_total_s_median": 1.8415,
+      "peak_tree_rss_bytes_max": 430354432,
+      "peak_tree_rss_bytes_median": 413665280.0,
+      "successful": 18,
+      "wall_ms_median": 2903.0
+    },
+    "quickjs-ng": {
+      "attempts_total": 18,
+      "cpu_total_s_median": 5.939,
+      "peak_tree_rss_bytes_max": 376537088,
+      "peak_tree_rss_bytes_median": 375951360.0,
+      "successful": 18,
+      "wall_ms_median": 7380.5
+    }
+  },
   "repetitions": {
     "earlier": [
       {
         "baseline_runtime": "quickjs-ng",
+        "challenged_runs": [
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "qjs": 513,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 6.062,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 375279616,
+            "repeat": 1,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7426
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "qjs": 499,
+              "uname": 0,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 5.933,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 375513088,
+            "repeat": 2,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7577
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "qjs": 504,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 5.974,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376180736,
+            "repeat": 3,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7576
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "node-MainThread": 86,
+              "yt-dlp": 82
+            },
+            "cpu_total_s": 1.809,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 416382976,
+            "repeat": 1,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2869
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "node-MainThread": 90,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.842,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 413732864,
+            "repeat": 2,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3023
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "node-MainThread": 91,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.855,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 428359680,
+            "repeat": 3,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2908
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 109,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.029,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 494960640,
+            "repeat": 1,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2844
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 108,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 2.001,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 490872832,
+            "repeat": 2,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2894
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 112,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "unknown": 0,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.051,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 498950144,
+            "repeat": 3,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2656
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 156,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.515,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 432369664,
+            "repeat": 1,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2956
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 97,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.917,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 400916480,
+            "repeat": 2,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2693
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 91,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.85,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 407248896,
+            "repeat": 3,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2526
+          }
+        ],
         "generated_at_utc": "2026-10-21T06:42:03Z",
         "runtimes": {
           "bun": {
@@ -820,6 +1123,278 @@
       },
       {
         "baseline_runtime": "quickjs-ng",
+        "challenged_runs": [
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "qjs": 509,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 6.025,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376020992,
+            "repeat": 1,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7183
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 1,
+              "qjs": 500,
+              "yt-dlp": 83
+            },
+            "cpu_total_s": 5.957,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376537088,
+            "repeat": 2,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7897
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "qjs": 514,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 6.072,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 374669312,
+            "repeat": 3,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7430
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "node": 0,
+              "node-MainThread": 90,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.847,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 423919616,
+            "repeat": 1,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2945
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "node": 0,
+              "node-MainThread": 87,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 1.805,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 413597696,
+            "repeat": 2,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2873
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "node": 0,
+              "node-MainThread": 90,
+              "yt-dlp": 82
+            },
+            "cpu_total_s": 1.85,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 430354432,
+            "repeat": 3,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2786
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 106,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 78
+            },
+            "cpu_total_s": 1.988,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 495022080,
+            "repeat": 1,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2760
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 106,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.007,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 494596096,
+            "repeat": 2,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2766
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 107,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.01,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 488062976,
+            "repeat": 3,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2743
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 92,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "file": 0,
+              "yt-dlp": 82
+            },
+            "cpu_total_s": 1.861,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 400793600,
+            "repeat": 1,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2690
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 95,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 1.902,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 409554944,
+            "repeat": 2,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2654
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 154,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 2.467,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 422993920,
+            "repeat": 3,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2812
+          }
+        ],
         "generated_at_utc": "2026-10-21T06:45:42Z",
         "runtimes": {
           "bun": {
@@ -909,6 +1484,277 @@
       },
       {
         "baseline_runtime": "quickjs-ng",
+        "challenged_runs": [
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "qjs": 503,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 5.97,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376352768,
+            "repeat": 1,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7399
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "qjs": 498,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 5.919,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 375951360,
+            "repeat": 2,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7334
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "qjs": 506,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 5.979,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 354586624,
+            "repeat": 3,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7331
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "node-MainThread": 88,
+              "unknown": 0,
+              "yt-dlp": 82
+            },
+            "cpu_total_s": 1.828,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 419315712,
+            "repeat": 1,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2766
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "node-MainThread": 91,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.853,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 429477888,
+            "repeat": 2,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2805
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "node": 0,
+              "node-MainThread": 90,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.849,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 405684224,
+            "repeat": 3,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3264
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 108,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.014,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 495751168,
+            "repeat": 1,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2821
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 108,
+              "ffmpeg": 2,
+              "ffprobe": 1,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.022,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 490532864,
+            "repeat": 2,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2746
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 112,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.052,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 497000448,
+            "repeat": 3,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2994
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 155,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 78
+            },
+            "cpu_total_s": 2.486,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 422625280,
+            "repeat": 1,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2823
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 156,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.48,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 426704896,
+            "repeat": 2,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2835
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 91,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.85,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 393891840,
+            "repeat": 3,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2800
+          }
+        ],
         "generated_at_utc": "2026-10-21T06:48:53Z",
         "runtimes": {
           "bun": {
@@ -998,6 +1844,278 @@
       },
       {
         "baseline_runtime": "quickjs-ng",
+        "challenged_runs": [
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "qjs": 496,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 5.902,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 360869888,
+            "repeat": 1,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7172
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "qjs": 494,
+              "uname": 0,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 5.879,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376135680,
+            "repeat": 2,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7466
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "qjs": 499,
+              "unknown": 16,
+              "yt-dlp": 63
+            },
+            "cpu_total_s": 5.92,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 375365632,
+            "repeat": 3,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7165
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "node-MainThread": 89,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.831,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 404873216,
+            "repeat": 1,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2948
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "node-MainThread": 90,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.829,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 412889088,
+            "repeat": 2,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2890
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 1,
+              "node-MainThread": 91,
+              "rtmpdump": 0,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 1.843,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 406355968,
+            "repeat": 3,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3023
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 107,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 2.004,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 494465024,
+            "repeat": 1,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2960
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 109,
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.028,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 497037312,
+            "repeat": 2,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2886
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 106,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 2.004,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 495267840,
+            "repeat": 3,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2767
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 159,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.515,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 427245568,
+            "repeat": 1,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2813
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 156,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.503,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 419315712,
+            "repeat": 2,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3411
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 158,
+              "ffmpeg": 2,
+              "ffprobe": 3,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.502,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 434741248,
+            "repeat": 3,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2876
+          }
+        ],
         "generated_at_utc": "2026-10-21T06:54:00Z",
         "runtimes": {
           "bun": {
@@ -1087,6 +2205,277 @@
       },
       {
         "baseline_runtime": "quickjs-ng",
+        "challenged_runs": [
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 1,
+              "qjs": 503,
+              "unknown": 0,
+              "yt-dlp": 82
+            },
+            "cpu_total_s": 5.963,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376119296,
+            "repeat": 1,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7273
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "file": 0,
+              "qjs": 493,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 5.866,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 376229888,
+            "repeat": 2,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7372
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "qjs": 497,
+              "unknown": 0,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 5.92,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 364630016,
+            "repeat": 3,
+            "runtime_key": "quickjs-ng",
+            "runtime_script_invocations": 1,
+            "wall_ms": 7193
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "node-MainThread": 92,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.85,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 413057024,
+            "repeat": 1,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3056
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "node-MainThread": 89,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 1.826,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 412213248,
+            "repeat": 2,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2856
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "ffmpeg": 1,
+              "ffprobe": 2,
+              "node-MainThread": 91,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 1.841,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 411656192,
+            "repeat": 3,
+            "runtime_key": "node",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2975
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 108,
+              "ffmpeg": 2,
+              "ffprobe": 1,
+              "yt-dlp": 80
+            },
+            "cpu_total_s": 2.019,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 489791488,
+            "repeat": 1,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3107
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 109,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.029,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 494333952,
+            "repeat": 2,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2852
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 108,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "uname": 0,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.025,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 496164864,
+            "repeat": 3,
+            "runtime_key": "bun",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2681
+          },
+          {
+            "attempt": 1,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 91,
+              "ffmpeg": 2,
+              "ffprobe": 2,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 1.849,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 419565568,
+            "repeat": 1,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2787
+          },
+          {
+            "attempt": 2,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 162,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "yt-dlp": 81
+            },
+            "cpu_total_s": 2.554,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 436207616,
+            "repeat": 2,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 3034
+          },
+          {
+            "attempt": 3,
+            "challenge_solved": true,
+            "cpu_ticks_by_comm": {
+              "bun": 91,
+              "ffmpeg": 1,
+              "ffprobe": 1,
+              "unknown": 0,
+              "yt-dlp": 79
+            },
+            "cpu_total_s": 1.834,
+            "failure_class": "NONE",
+            "http_bytes_read": 65536,
+            "http_status": 206,
+            "http_tail_bytes": 65536,
+            "http_tail_status": 206,
+            "ok": true,
+            "peak_tree_rss_bytes": 403906560,
+            "repeat": 3,
+            "runtime_key": "bun-rust",
+            "runtime_script_invocations": 1,
+            "wall_ms": 2542
+          }
+        ],
         "generated_at_utc": "2026-10-21T07:06:39Z",
         "runtimes": {
           "bun": {
@@ -1175,9 +2564,325 @@
         }
       }
     ],
-    "note": "Independent repetitions of the whole benchmark. 'this_run' is the run that produced this report; the other entries are earlier report files passed with --repetition-json. Comparing them shows how much a three-sample median can move between repetitions.",
+    "note": "Independent repetitions of the whole benchmark. 'this_run' is the run that produced this report; the other entries are earlier report files passed with --repetition-json. Comparing them shows how much a three-sample median can move between repetitions. Compact challenged_runs preserve each raw observation used by pooled_challenged; failed attempts remain included in counts.",
     "this_run": {
       "baseline_runtime": "quickjs-ng",
+      "challenged_runs": [
+        {
+          "attempt": 1,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 2,
+            "ffprobe": 1,
+            "qjs": 501,
+            "yt-dlp": 80
+          },
+          "cpu_total_s": 5.945,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 375951360,
+          "repeat": 1,
+          "runtime_key": "quickjs-ng",
+          "runtime_script_invocations": 1,
+          "wall_ms": 7225
+        },
+        {
+          "attempt": 2,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "qjs": 500,
+            "yt-dlp": 79
+          },
+          "cpu_total_s": 5.923,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 359989248,
+          "repeat": 2,
+          "runtime_key": "quickjs-ng",
+          "runtime_script_invocations": 1,
+          "wall_ms": 7389
+        },
+        {
+          "attempt": 3,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "qjs": 499,
+            "yt-dlp": 79
+          },
+          "cpu_total_s": 5.914,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 376324096,
+          "repeat": 3,
+          "runtime_key": "quickjs-ng",
+          "runtime_script_invocations": 1,
+          "wall_ms": 7489
+        },
+        {
+          "attempt": 1,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "node-MainThread": 90,
+            "yt-dlp": 81
+          },
+          "cpu_total_s": 1.825,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 408772608,
+          "repeat": 1,
+          "runtime_key": "node",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2898
+        },
+        {
+          "attempt": 2,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 1,
+            "file": 0,
+            "node": 0,
+            "node-MainThread": 88,
+            "yt-dlp": 76
+          },
+          "cpu_total_s": 1.776,
+          "failure_class": "FORMAT_UNAVAILABLE",
+          "http_bytes_read": 0,
+          "http_status": null,
+          "http_tail_bytes": 0,
+          "http_tail_status": null,
+          "ok": false,
+          "peak_tree_rss_bytes": 412971008,
+          "repeat": 2,
+          "runtime_key": "node",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2997
+        },
+        {
+          "attempt": 3,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 1,
+            "file": 0,
+            "node": 0,
+            "node-MainThread": 91,
+            "yt-dlp": 80
+          },
+          "cpu_total_s": 1.846,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 414707712,
+          "repeat": 2,
+          "runtime_key": "node",
+          "runtime_script_invocations": 2,
+          "wall_ms": 2911
+        },
+        {
+          "attempt": 4,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "file": 0,
+            "node-MainThread": 84,
+            "yt-dlp": 75
+          },
+          "cpu_total_s": 1.752,
+          "failure_class": "FORMAT_UNAVAILABLE",
+          "http_bytes_read": 0,
+          "http_status": null,
+          "http_tail_bytes": 0,
+          "http_tail_status": null,
+          "ok": false,
+          "peak_tree_rss_bytes": 421822464,
+          "repeat": 3,
+          "runtime_key": "node",
+          "runtime_script_invocations": 1,
+          "wall_ms": 3129
+        },
+        {
+          "attempt": 5,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "node-MainThread": 87,
+            "yt-dlp": 81
+          },
+          "cpu_total_s": 1.828,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 415047680,
+          "repeat": 3,
+          "runtime_key": "node",
+          "runtime_script_invocations": 2,
+          "wall_ms": 2787
+        },
+        {
+          "attempt": 1,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "bun": 115,
+            "ffmpeg": 2,
+            "ffprobe": 2,
+            "yt-dlp": 79
+          },
+          "cpu_total_s": 2.092,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 509448192,
+          "repeat": 1,
+          "runtime_key": "bun",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2807
+        },
+        {
+          "attempt": 2,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "bun": 118,
+            "ffmpeg": 2,
+            "ffprobe": 2,
+            "yt-dlp": 79
+          },
+          "cpu_total_s": 2.107,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 507899904,
+          "repeat": 2,
+          "runtime_key": "bun",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2680
+        },
+        {
+          "attempt": 3,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "bun": 106,
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "yt-dlp": 79
+          },
+          "cpu_total_s": 1.995,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 489295872,
+          "repeat": 3,
+          "runtime_key": "bun",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2685
+        },
+        {
+          "attempt": 1,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "bun": 161,
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "file": 0,
+            "yt-dlp": 80
+          },
+          "cpu_total_s": 2.541,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 423649280,
+          "repeat": 1,
+          "runtime_key": "bun-rust",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2856
+        },
+        {
+          "attempt": 2,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "bun": 91,
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "yt-dlp": 80
+          },
+          "cpu_total_s": 1.843,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 398487552,
+          "repeat": 2,
+          "runtime_key": "bun-rust",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2669
+        },
+        {
+          "attempt": 3,
+          "challenge_solved": true,
+          "cpu_ticks_by_comm": {
+            "bun": 90,
+            "ffmpeg": 1,
+            "ffprobe": 2,
+            "yt-dlp": 80
+          },
+          "cpu_total_s": 1.833,
+          "failure_class": "NONE",
+          "http_bytes_read": 65536,
+          "http_status": 206,
+          "http_tail_bytes": 65536,
+          "http_tail_status": 206,
+          "ok": true,
+          "peak_tree_rss_bytes": 403308544,
+          "repeat": 3,
+          "runtime_key": "bun-rust",
+          "runtime_script_invocations": 1,
+          "wall_ms": 2559
+        }
+      ],
       "generated_at_utc": "2026-10-21T07:13:51Z",
       "runtimes": {
         "bun": {
@@ -1267,7 +2972,14 @@
     }
   },
   "resident_worker_check": {
-    "checked_executables": [],
+    "checked_executables": [
+      "/home/mint/.bun/bin/bun",
+      "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-131f7306/build/tools/runtimes/bun-1.4.3/bun-linux-x64/bun",
+      "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/qjs",
+      "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/yt-dlp",
+      "/usr/bin/node"
+    ],
+    "matched_executables_at_check": [],
     "no_resident_worker": true,
     "preexisting_processes_excluded": 2,
     "resident_leftover_count": 0,

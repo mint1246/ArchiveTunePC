@@ -53,6 +53,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     out: List[str] = []
 
+    # -- pooled repetitions, when raw observations are available ------------
+    pooled = data.get("pooled_challenged") or {}
+    if pooled:
+        out.append("| Runtime | Success / attempts | Wall median (ms) | CPU median (s) | Median peak RSS | Maximum peak RSS |")
+        out.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+        for key in keys:
+            entry = pooled[key]
+            out.append("| %s | %s / %s | %.1f | %.4f | %s | %s |" % (
+                key, entry["successful"], entry["attempts_total"],
+                entry["wall_ms_median"], entry["cpu_total_s_median"],
+                _mib(entry["peak_tree_rss_bytes_median"]), _mib(entry["peak_tree_rss_bytes_max"])))
+        out.append("")
+
     # -- headline table ----------------------------------------------------
     out.append("| Runtime | Version | Binary size | Wall time (median) | CPU time (median) "
                "| Peak tree RSS (max) | Runtime child RSS (max) | Runtime child CPU (max) |")

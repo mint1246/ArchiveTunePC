@@ -1,5 +1,10 @@
 # yt-dlp EJS JS runtime comparison: is QuickJS-NG the cheapest way?
 
+This initial comparison measured **pre-Rust Bun 1.3.14**. The newer
+[Bun 1.4.3 comparison](YT_DLP_RUST_BUN_COMPARISON.md) confirms that Rust-based
+Bun works with the same yt-dlp CLI despite its warning, and uses less memory
+than the old build. Do not apply this document's old-Bun numbers to current Bun.
+
 **Question.** Is QuickJS-NG the cheapest JS runtime for the yt-dlp EJS challenge
 solver that the desktop resolver ships, or is a heavier runtime (Node / Deno /
 Bun) cheaper to *run*?
@@ -226,10 +231,9 @@ Constrained to this evidence:
 1. **Keep the current experiment's QuickJS default while evaluating the tradeoff.**
    It remains the smallest packaged runtime and lowest measured peak-RAM option.
    These measurements do not justify calling it cheapest for CPU or latency.
-2. **Exclude Bun from a future default choice.** It is deprecated upstream,
-   capped at supported version 1.3.14, has no permission restrictions, and had
-   the highest peak RSS. Its slightly lower measured wall time is insufficient
-   to establish a stable latency advantage in this small sample.
+2. **This Bun row covers 1.3.14 only.** It had the highest peak RSS in this
+   sample. The upstream support warning does not prevent Bun 1.4.3 from
+   running; the separate newer comparison should inform any current choice.
 3. **For lower CPU and faster challenged extraction, evaluate Node.** It had the
    lowest total CPU (1.79 s), second-lowest peak RSS (407.3 MiB), and smallest
    non-QuickJS binary (52.78 MiB). Deno is also viable: it had similar timings,

@@ -130,10 +130,18 @@ for Node. These measurements exclude the application JVM.
 
 QuickJS has the smallest binary (2.44 MiB versus Node's 52.78 MiB) and lowest
 measured peak RAM, while Node reduces CPU and startup delay. Deno had similar
-latency to Node; Bun is deprecated upstream. No engine is cheapest across all
+latency to Node in that initial comparison. No engine is cheapest across all
 costs. This branch retains the requested QuickJS-NG default; changing it needs
 an explicit packaging and product choice. The sample does not establish challenge
 frequency, Windows performance, or the cost of a persistent worker.
+
+The [Rust Bun follow-up](YT_DLP_RUST_BUN_COMPARISON.md) tested Bun 1.4.3 with
+unchanged yt-dlp arguments: the unsupported-version message is a warning, and
+challenge solving worked without a bypass. Across 18 successes per engine,
+Bun 1.4.3 and 1.3.14 had similar wall medians (2806 / 2787 ms), while median
+per-run peak RSS fell from 472.1 to 400.0 MiB. New Bun's CPU results split into
+two groups; Node had the lowest pooled total CPU. This establishes a memory
+improvement for this workload, not a general speedup from the Rust rewrite.
 
 ## Provisioning and packages
 
