@@ -28,6 +28,11 @@ import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 
 class DesktopStreamResolutionPolicyTest {
+    @Test fun `shipped policy is hybrid with explicit upstream and legacy controls`() {
+        assertEquals(DesktopStreamResolutionMode.HYBRID, configuredDesktopStreamResolutionMode(null))
+        assertEquals(DesktopStreamResolutionMode.YT_DLP, configuredDesktopStreamResolutionMode("ytdlp"))
+        assertEquals(DesktopStreamResolutionMode.LEGACY, configuredDesktopStreamResolutionMode("legacy"))
+    }
     @After fun resetSession() { YouTube.authState = PlaybackAuthState(); NetworkGatekeeper.setConnectionBlocked(true) }
     private val directFormat = PlayerResponse.StreamingData.Format(
         251, "https://media.example/audio?expire=9999999999", "audio/webm", 128000,

@@ -15,12 +15,13 @@ import java.util.Locale
 /** Developer/benchmark selection; playback and download interfaces remain the same. */
 enum class DesktopStreamResolutionMode { LEGACY, YT_DLP, HYBRID }
 
-internal fun configuredDesktopStreamResolutionMode(): DesktopStreamResolutionMode =
-    when ((System.getProperty("archivetune.streamResolver")
-        ?: System.getenv("ARCHIVETUNE_STREAM_RESOLVER"))?.trim()?.lowercase(Locale.ROOT)) {
-        null, "", "ytdlp" -> DesktopStreamResolutionMode.YT_DLP
+internal fun configuredDesktopStreamResolutionMode(
+    value: String? = System.getProperty("archivetune.streamResolver") ?: System.getenv("ARCHIVETUNE_STREAM_RESOLVER"),
+): DesktopStreamResolutionMode =
+    when (value?.trim()?.lowercase(Locale.ROOT)) {
+        null, "", "hybrid" -> DesktopStreamResolutionMode.HYBRID
+        "ytdlp" -> DesktopStreamResolutionMode.YT_DLP
         "legacy" -> DesktopStreamResolutionMode.LEGACY
-        "hybrid" -> DesktopStreamResolutionMode.HYBRID
         else -> throw IllegalArgumentException("Unknown desktop stream resolver mode")
     }
 
