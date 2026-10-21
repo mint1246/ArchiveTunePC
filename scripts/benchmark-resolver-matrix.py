@@ -48,11 +48,15 @@ def distribution(values):
 
 def hook(videos, repeats, probe, auth_policy):
     block = AUTH.instrumentation_block(videos, repeats, probe)
+    if block.count('"bitrate" to stream.bitrate,') != 1:
+        raise RuntimeError("Quality hook anchor changed")
     block = block.replace('"bitrate" to stream.bitrate,', '''"bitrate" to stream.bitrate,
                         "has_audio_config" to (stream.audioConfig != null),
                         "loudness_db" to stream.audioConfig?.loudnessDb,
                         "perceptual_loudness_db" to stream.audioConfig?.perceptualLoudnessDb,''')
     literal = ", ".join(f'"{video}"' for video in videos)
+    if block.count(f"val videos = listOf({literal})") != 1:
+        raise RuntimeError("Video-order hook anchor changed")
     block = block.replace(f"val videos = listOf({literal})",
                           f'val videos = System.getenv("ARCHIVETUNE_BENCH_VIDEOS")?.split(",") ?: listOf({literal})')
     if auth_policy == "production":
@@ -64,6 +68,8 @@ def hook(videos, repeats, probe, auth_policy):
         block = block.replace("// every PO-token binding is hidden so the real account manager has to mint again through",
                               "// PO-token bindings remain intact; the real account manager decides whether to mint through")
         # Force only the separate control, never the production extraction phase.
+        if block.count("val stripped = delegatedProvider.currentAuthState()") != 1:
+            raise RuntimeError("Cold proof hook anchor changed")
         block = block.replace("val stripped = delegatedProvider.currentAuthState()",
                               "val stripped = account.currentAuthState().copy(poToken = null, poTokenGvs = null, "
                               "poTokenGvsSession = null, poTokenGvsVideoId = null, poTokenPlayer = null, "
@@ -157,6 +163,16 @@ def summary(runs):
     return output
 
 
+def valid_measurement(run):
+    proof = run["authentication"]["browser_proof"]
+    cleanup = run["cleanup"]
+    return (run["authentication"]["guard_passed"] and run["session_clone"]["clone_key_cleared"]
+            and run["sampler_error"] is None and run["cpu"]["tracker_error"] is None
+            and proof["browser_teardown_observed"] and proof["cold_successes"] == proof["cold_attempts"] > 0
+            and cleanup["no_helpers_in_post_idle"] and cleanup["no_helpers_after_shutdown"] and cleanup["private_home_removed"]
+            and run["phases"]["extraction"]["complete_pss_samples"] > 0)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-ref", default="feature/ytdlp-resolver")
@@ -243,6 +259,7 @@ def main():
             runs[-1]["host_context"] = {"started_utc": started_utc,
                                         "loadavg_before": load_before, "loadavg_after": os.getloadavg()}
             document = {"schema": "archivetune.resolver-matrix/1", "seed": args.seed, "schedule": schedule,
+                        "harness_commit": BASE.git_head(repo), "measurement_valid": all(valid_measurement(item) for item in runs),
                         "tool_sha256": hashes,
                         "auth_policy": args.auth_policy, "source_entry_unchanged": store.source_unchanged(),
                         "core_commits": {rev: BASE.git_output(repo, "ls-tree", rev, "core") for rev in prepared},
@@ -252,10 +269,18 @@ def main():
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(document, indent=2) + "\n")
             print(f"  success {run['resolution']['successes']}/{len(videos) * args.repeats}; playback={run['playback']['all_checks_passed']}", flush=True)
+            if not valid_measurement(runs[-1]):
+                raise RuntimeError("Invalid benchmark environment or cleanup; saved evidence, refusing further timed runs")
     return 0 if all(run["authentication"]["guard_passed"] and run["session_clone"]["clone_key_cleared"]
                     and run["sampler_error"] is None and run["cpu"]["tracker_error"] is None
                     and run["exit_code"] == 0 and not run["harness_timeout"] and run["missing_attempts"] == 0
+                    and run["authentication"]["browser_proof"]["browser_teardown_observed"]
+                    and run["authentication"]["browser_proof"]["cold_successes"] == run["authentication"]["browser_proof"]["cold_attempts"] > 0
+                    and run["cleanup"]["no_helpers_in_post_idle"] and run["cleanup"]["no_helpers_after_shutdown"]
+                    and run["cleanup"]["private_home_removed"]
+                    and run["phases"]["extraction"]["complete_pss_samples"] > 0
                     and len(run["records"]) == run["expected_attempts"] and all(record["success"] for record in run["records"])
+                    and all(record["bitrate"] and isinstance(record["has_audio_config"], bool) for record in run["records"])
                     and run["playback"]["all_checks_passed"]
                     and (run["mode"] == "legacy" or run["resolver"]["policy"] == ("hybrid" if run["mode"] == "hybrid" else "ytdlp"))
                     for run in runs) and store.source_unchanged() and all(

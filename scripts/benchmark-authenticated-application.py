@@ -37,6 +37,8 @@ import importlib.util
 import json
 import os
 import resource
+import secrets
+import string
 import shutil
 import signal
 import statistics
@@ -771,6 +773,23 @@ def phase_cpu(samples: list[dict[str, Any]], window: tuple[int, int] | None) -> 
 # Run
 # ---------------------------------------------------------------------------
 
+def create_private_benchmark_home() -> Path:
+    """Keep Chromium's profile/socket paths below Linux sockaddr_un limits.
+
+    The app appends ArchiveTune/botguard and a random profile name to XDG_CACHE_HOME.
+    Long report/worktree paths must never become that cache root. Atomic mkdir with
+    mode 0700 prevents collisions from reusing someone else's directory.
+    """
+    alphabet = string.ascii_letters + string.digits
+    for _ in range(256):
+        directory = Path("/tmp") / "".join(secrets.choice(alphabet) for _ in range(2))
+        try:
+            directory.mkdir(mode=0o700)
+            return directory
+        except FileExistsError:
+            continue
+    raise RuntimeError("Could not allocate a short private benchmark home")
+
 
 def _phase_window(
     markers: list[dict[str, Any]], name: str, launch_wall_ms: int, exit_wall_ms: int
@@ -834,10 +853,10 @@ def run_application(
     resolver: dict[str, Path] | None,
     session_store: SecretServiceSessions,
 ) -> dict[str, Any]:
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=False)
     os.chmod(run_dir, 0o700)
-    home = run_dir / "home"
-    tmp = run_dir / "tmp"
+    home = create_private_benchmark_home()
+    tmp = home / "t"
     for directory in (home, tmp, home / "config", home / "data", home / "cache", home / "state"):
         directory.mkdir(parents=True, exist_ok=True)
     for directory in (home, tmp):
@@ -870,8 +889,10 @@ def run_application(
         return result
     finally:
         cleared = session_store.clear_clone(clone_path)
+        shutil.rmtree(home, ignore_errors=True)
         if result is not None:
             result["session_clone"]["clone_key_cleared"] = cleared
+            result["cleanup"]["private_home_removed"] = not home.exists()
 
 
 def _run_inner(
@@ -909,6 +930,8 @@ def _run_inner(
         tmp=tmp,
         resolver=resolver,
     )
+    # Match the application's real browser policy, with an isolated short cache path.
+    environment["XDG_CACHE_HOME"] = str(home)
 
     command = [
         str(java),
@@ -1000,6 +1023,8 @@ def _run_inner(
             except Exception:
                 pass
         xvfb_exit = BASE.stop_xvfb(xvfb)
+        if process.poll() is None:
+            process.wait(timeout=15)
 
     system_after = BASE.system_memory_snapshot()
     markers = list(collector.markers)
@@ -1675,7 +1700,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "otherwise quickjs."
         ),
     )
-    parser.add_argument("--candidate-policy", choices=("legacy", "ytdlp", "hybrid"), default=None,
+    parser.add_argument("--candidate-policy", choices=("legacy", "ytdlp", "hybrid"), default="ytdlp",
                         help="Explicit backend policy for the candidate; baseline is unchanged.")
     parser.add_argument(
         "--expect-bun-version",
@@ -1870,7 +1895,7 @@ def main(argv: list[str] | None = None) -> int:
             classpath_file=candidate_classpath,
             version="candidate",
             commit=candidate_commit,
-            backend="ytdlp",
+            backend=args.candidate_policy,
             run_dir=work_root / "runs" / "candidate",
             xvfb_path=xvfb_path,
             java=java,

@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import os
+import shutil
 import sys
 import unittest
 from unittest.mock import mock_open, patch
@@ -153,6 +154,22 @@ class ResolverMatrixTest(unittest.TestCase):
         self.assertEqual(result["p50"], 10.5)
         self.assertEqual(result["p90"], 18)
         self.assertEqual(result["p95"], 19)
+
+    def test_missing_quality_anchor_cannot_silently_measure_a_different_hook(self):
+        original = self.matrix.AUTH.instrumentation_block
+        def changed(*args):
+            return original(*args).replace('"bitrate" to stream.bitrate,', '')
+        with patch.object(self.matrix.AUTH, "instrumentation_block", changed):
+            with self.assertRaisesRegex(RuntimeError, "Quality hook anchor"):
+                self.matrix.hook(["jNQXAC9IVRw"], 2, "BaW_jenozKc", "production")
+
+    def test_private_home_keeps_chromium_roots_short_and_owner_only(self):
+        home = AUTH.create_private_benchmark_home()
+        try:
+            self.assertLessEqual(len(str(home).encode()), 8)
+            self.assertEqual(home.stat().st_mode & 0o777, 0o700)
+        finally:
+            shutil.rmtree(home)
 
 
 class SimultaneousAccountingTest(unittest.TestCase):

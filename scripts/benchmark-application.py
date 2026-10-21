@@ -1830,7 +1830,7 @@ def build_report(
         (
             f"Baseline {baseline['commit'][:12]} (legacy resolver) resolved "
             f"{baseline['resolution']['successes']}/{baseline['resolution']['attempts']} requests; "
-            f"candidate {candidate['commit'][:12]} (yt-dlp default) resolved "
+            f"candidate {candidate['commit'][:12]} ({(candidate.get('resolver') or {}).get('policy') or 'ytdlp'} policy) resolved "
             f"{candidate['resolution']['successes']}/{candidate['resolution']['attempts']}."
         ),
         (
@@ -2019,6 +2019,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ytdlp", help="Verified yt-dlp executable for the candidate")
     parser.add_argument("--quickjs", help="Verified quickjs-ng qjs executable for the candidate")
     parser.add_argument("--bun", help="Verified Bun executable for the candidate (experimental engine)")
+    parser.add_argument("--candidate-policy", choices=("legacy", "ytdlp", "hybrid"), default="ytdlp",
+                        help="Explicit candidate policy; historical command defaults to yt-dlp.")
     parser.add_argument(
         "--resolver-engine",
         choices=list(RESOLVER_ENGINES),
@@ -2140,6 +2142,7 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
+    resolver["policy"] = args.candidate_policy
     print(f"Baseline checkout: {baseline_dir}", flush=True)
     print(f"Candidate checkout: {candidate_dir}", flush=True)
 
