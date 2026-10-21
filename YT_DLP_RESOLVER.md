@@ -70,7 +70,9 @@ unsupported, but executes 1.4.3 without a bypass. This is an experimentally veri
 combination, not an upstream support guarantee. It uses bundled EJS, `--no-install`
 and no remote components. Bun has no sandbox; the request's private directory
 prevents project `.env`/`bunfig.toml` discovery, but does not isolate the process
-from the user's permissions.
+from the user's permissions. Inherited `BUN_OPTIONS` is removed so it cannot override
+the working directory or add preloads, and `DO_NOT_TRACK=1` disables Bun's automatic
+crash-report uploads.
 User configuration, plugins and remote solver downloads are disabled. Official frozen
 binaries bundle their own transient Python interpreter and EJS; system Python, Node
 and Deno are unnecessary. No Python or JS worker stays alive after a request.
@@ -100,8 +102,9 @@ directories from the same user are swept; directories newer than one minute and
 active locks are retained to avoid racing a peer acquiring its lock. Unmarked
 legacy directories are retained for 24 hours.
 Cleanup failure has a redacted I/O error rather than an unavailable-video classification.
-Signed-in application playback has been exercised with isolated copies of the existing
-account session; cookie-only/restricted media remains unverified.
+Signed-in QuickJS application playback was exercised with isolated copies of the existing
+account session; the Bun whole-application run is pending. Cookie-only/restricted media
+remains unverified.
 
 Public signature-cache data may be stored under the application's supplied cache
 folder, in `yt-dlp/`. Credentials, signed stream URLs and temporary EJS scripts do not

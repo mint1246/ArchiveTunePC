@@ -158,10 +158,11 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
     private data class Completed<T>(val value: T)
 
     private suspend fun <T> inTemporaryDirectory(block: suspend (Path) -> T): T = withContext(Dispatchers.IO) {
-        val attributes = if (Files.getFileStore(configuration.temporaryRoot).supportsFileAttributeView("posix")) {
+        val root = configuration.temporaryRoot.toAbsolutePath().normalize()
+        val attributes = if (Files.getFileStore(root).supportsFileAttributeView("posix")) {
             arrayOf(PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
         } else emptyArray()
-        val directory = Files.createTempDirectory(configuration.temporaryRoot, "archivetune-resolver-", *attributes)
+        val directory = Files.createTempDirectory(root, "archivetune-resolver-", *attributes)
         var requestFailure: Throwable? = null
         try {
             val ownerChannel = try {
@@ -171,7 +172,7 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
                 val ownerLock = try { channel.lock() }
                     catch (_: Exception) { throw ResolverTemporaryFileException() }
                 ownerLock.use {
-                    if (hasSweptTemporaryFiles.compareAndSet(false, true)) sweepAbandonedRequests(configuration.temporaryRoot, directory)
+                    if (hasSweptTemporaryFiles.compareAndSet(false, true)) sweepAbandonedRequests(root, directory)
                     block(directory)
                 }
             }

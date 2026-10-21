@@ -73,6 +73,7 @@ class YtDlpStreamResolverTest {
         val diagnostics = "[debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp\n" +
             "[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: bun-1.4.3\n"
         assertEquals(YtDlpToolchain("2026.08.19", "1.4.3", "0.8.0"), parseToolchain(diagnostics))
+        assertEquals("1.5.0", parseToolchain(diagnostics.replace("bun-1.4.3", "bun-1.5.0")).bunVersion)
         listOf(diagnostics.replace("yt_dlp_ejs-0.8.0", ""), diagnostics.replace("bun-1.4.3", "bun-1.3.14"),
             diagnostics.replace("bun-1.4.3", "none"), diagnostics.replace("bun-1.4.3", "quickjs-ng-0.17.0"), diagnostics.replace("bun-1.4.3", "bun-1.4.2")).forEach {
             assertEquals(YtDlpFailure.TOOLCHAIN, assertFailsWith<YtDlpException> { parseToolchain(it) }.kind)
@@ -167,7 +168,8 @@ class YtDlpStreamResolverTest {
             val fixture = createFixture(root, "success")
             val relativeFixture = Path.of("").toAbsolutePath().relativize(fixture).toString()
             val relativeBun = "./bun path with spaces"
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(relativeFixture, relativeBun, 5000, root, root.resolve("player cache")))
+            val relativeRoot = Path.of("").toAbsolutePath().relativize(root)
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(relativeFixture, relativeBun, 5000, relativeRoot, root.resolve("player cache")))
             val result = resolver.resolve(videoId, cookie = "SID=private-value",
                 proxyUrl = "http://test-user:private-proxy@localhost:8080", dataSyncId = "123||456")
             assertEquals(videoId, result.videoId)
@@ -294,6 +296,8 @@ class YtDlpStreamResolverTest {
         Files.writeString(script, """
             #!/bin/sh
             root=${'$'}(CDPATH= cd -- "${'$'}(dirname -- "${'$'}0")" && pwd)
+            test -z "${'$'}{BUN_OPTIONS+x}" || exit 5
+            test "${'$'}{DO_NOT_TRACK:-}" = 1 || exit 6
             case "${'$'}*" in
               *archivetune-runtime-check:*)
                 echo checked >> "${'$'}root/verifications"

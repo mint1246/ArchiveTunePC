@@ -34,6 +34,9 @@ internal suspend fun runResolverProcess(command: List<String>, temporaryDirector
                 environment()["TMP"] = temporaryDirectory.toString()
                 environment()["TEMP"] = temporaryDirectory.toString()
                 environment()["PYTHONIOENCODING"] = "utf-8"
+                // Runtime flags must come from yt-dlp; inherited --cwd/preload options defeat isolation.
+                environment().remove("BUN_OPTIONS")
+                environment()["DO_NOT_TRACK"] = "1"
             }.start()
         } catch (_: Exception) {
             throw YtDlpException(YtDlpFailure.TOOLCHAIN)
@@ -65,7 +68,7 @@ internal suspend fun runResolverProcess(command: List<String>, temporaryDirector
                 terminateDescendants()
                 ResolverProcessOutput(process.exitValue(), stdout.await(), stderr.await())
             } finally {
-                // PyInstaller and QuickJS can be grandchildren. Snapshot before killing their parent.
+                // PyInstaller and Bun can be grandchildren. Snapshot before killing their parent.
                 terminateDescendants()
                 if (process.isAlive) process.destroyForcibly()
                 process.waitFor(2, TimeUnit.SECONDS) // Reap before removing cookies and temporary EJS files.
