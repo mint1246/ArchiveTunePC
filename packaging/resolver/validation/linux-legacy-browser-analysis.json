@@ -1,0 +1,437 @@
+{
+  "schema": 1,
+  "title": "Legacy extraction Chromium fan-out: controlled role proof and harness path-length exclusion",
+  "kind": "derived_analysis",
+  "status": "completed_controlled_role_proof_with_matrix_longpath_exclusion",
+  "measured": "2026-10-21",
+  "source_of_truth": {
+    "safe_report": "packaging/resolver/validation/linux-bun-authenticated-full-application.md",
+    "safe_json": "packaging/resolver/validation/linux-bun-authenticated-full-application.json",
+    "baseline_commit": "0817a502413c6e77871eb161ee5c18ad6c4486da",
+    "candidate_commit": "04232ffa7d2a9fc141789829975ab9d6183f371e",
+    "core_commit": "144fe5c33c9e2f1f8a6c8c84bb03a34c3c4d7b3c",
+    "instrumented_main_sha256": "87bd86847190ec96e9eb27836c46a473f5a7ab240f1e208a4787bb8403b4a00e",
+    "private_run_log": "baseline application.log, benchmark marker lines only; not committed and not reproduced here",
+    "matrix_longpath_run": "resolver-matrix-final1/0-legacy long-path arm; safe marker metrics and crash-report substring counts only; retained as an ignored excluded artifact",
+    "matrix_harness_fix": "29ed69003; benchmark harness only, not product or login code"
+  },
+  "conclusions": {
+    "nine_is_one_invocation": true,
+    "nine_is_nine_launches": false,
+    "playback_auth_calls_equal_launches": false,
+    "legacy_extraction_chromium_invocations": 3,
+    "chromium_invocations_basis": "three delegated mint calls had non-zero elapsed time and therefore missed the single-entry token cache; each cache miss performs exactly one ProcessBuilder start",
+    "max_simultaneous_browser_processes": 9,
+    "browser_process_split_pending_roles": false,
+    "browser_processes_are_persistent": false,
+    "helpers_are_required_for_observed_resolution": false,
+    "observed_successful_client": "VISIONOS 0.1",
+    "browser_work_is_transient": true,
+    "browser_work_is_avoidable_when_bound_token_exists": true,
+    "unrelated_user_browser_was_included": false,
+    "role_mix_confirmed": true,
+    "controlled_launch_count": 3,
+    "controlled_role_mix_stable": true,
+    "matrix_longpath_arm_valid": false,
+    "matrix_longpath_cause": "harness_singleton_socket_path",
+    "matrix_longpath_arm_excluded": true
+  },
+  "legacy_extraction": {
+    "arm": "baseline 0817a5024, legacy resolver, core 144fe5c3",
+    "videos": 3,
+    "repeats": 2,
+    "resolve_attempts": 6,
+    "resolve_successes": 6,
+    "resolve_latency_ms": [934, 141, 628, 129, 1087, 162],
+    "resolve_median_ms": 395,
+    "resolve_min_ms": 129,
+    "resolve_max_ms": 1087,
+    "phase_duration_ms": 3084,
+    "playback_auth_calls": 6,
+    "playback_auth_calls_returning_token": 6,
+    "provider_cache_hits_inferred": 3,
+    "provider_cache_misses_inferred": 3,
+    "mint_elapsed_ms": [486, 477, 513],
+    "cache_hit_elapsed_ms": [0, 0, 0],
+    "mint_sequence": [
+      {"video_id": "jNQXAC9IVRw", "elapsed_ms": 486, "cache_miss": true},
+      {"video_id": "jNQXAC9IVRw", "elapsed_ms": 0, "cache_miss": false},
+      {"video_id": "dQw4w9WgXcQ", "elapsed_ms": 477, "cache_miss": true},
+      {"video_id": "dQw4w9WgXcQ", "elapsed_ms": 0, "cache_miss": false},
+      {"video_id": "aqz-KE-bpKQ", "elapsed_ms": 513, "cache_miss": true},
+      {"video_id": "aqz-KE-bpKQ", "elapsed_ms": 0, "cache_miss": false}
+    ],
+    "inferred_chromium_invocations": 3,
+    "max_simultaneous_browser_processes": 9,
+    "max_simultaneous_total_processes": 10,
+    "browser_process_names_observed": ["brave"],
+    "browser_peak_rss_mib": 857.4,
+    "browser_peak_pss_mib": 217.55,
+    "browser_processes_in_post_idle": 0,
+    "browser_processes_after_shutdown": []
+  },
+  "candidate_extraction": {
+    "arm": "candidate 04232ffa7, yt-dlp 2026.08.19 + Bun 1.4.3",
+    "resolve_attempts": 6,
+    "resolve_successes": 6,
+    "browser_processes_in_extraction": 0,
+    "max_simultaneous_total_processes": 4,
+    "note": "The candidate never asks the account manager for playback proof during extraction, so the delegated provider is not called."
+  },
+  "cold_proof_control": {
+    "both_arms_forced_browser_launch": true,
+    "probe_video_id": "BaW_jenozKc",
+    "baseline_elapsed_ms": 688,
+    "candidate_elapsed_ms": 628,
+    "max_simultaneous_browser_processes_each_arm": 9,
+    "candidate_production_extraction_browser_processes": 0,
+    "note": "The candidate's nine browser processes belong to this explicit control, not to its production extraction. Whole-run browser unions and the helper-accounting table must not be read as candidate extraction cost."
+  },
+  "fanout": {
+    "one_chromium_invocation": true,
+    "process_count_per_invocation": 9,
+    "names_observed": ["brave"],
+    "roles_confirmed": true,
+    "role_evidence": "Three controlled launches used the exact non-root botGuardBrowserCommand and a fresh private profile. Roles were read only from --type and --utility-sub-type; Chromium's space-joined process titles were normalized before parsing.",
+    "observed_roles": {
+      "browser": 1,
+      "zygote": 3,
+      "renderer": 2,
+      "gpu": 1,
+      "utility:network": 1,
+      "utility:storage": 1
+    },
+    "observed_role_total": 9,
+    "roles_per_launch": "identical in 3 of 3 launches",
+    "crashpad_observed": false,
+    "gpu_observed": true,
+    "gpu_note": "--disable-gpu selects software rendering; it does not remove the GPU process on this Brave build.",
+    "standard_fanout": true,
+    "single_process_used": false,
+    "no_zygote_used": false,
+    "confirmation_tool": "scripts/trace-legacy-browser.py"
+  },
+  "role_mix_proof": {
+    "status": "measured",
+    "measured_utc": "2026-10-21T11:33:35Z",
+    "launches": 3,
+    "method": {
+      "profile": "fresh 0700 directory under /tmp/opencode with the archivetune-potoken- prefix; removed after each launch",
+      "command": "exact non-root Linux botGuardBrowserCommand",
+      "page": "about:blank",
+      "attach_to_application": false,
+      "auth_profile_used": false,
+      "cookies_or_tokens_passed": false,
+      "sample_interval_ms": 20
+    },
+    "per_launch": [
+      {
+        "launch_index": 1,
+        "peak": 9,
+        "distinct": 9,
+        "roles": {
+          "browser": 1, "zygote": 3, "renderer": 2,
+          "gpu": 1, "utility:network": 1, "utility:storage": 1
+        },
+        "teardown_ms": 39, "leftovers": 0,
+        "profile_removed": true, "devtools_ready": true
+      },
+      {
+        "launch_index": 2,
+        "peak": 9,
+        "distinct": 9,
+        "roles": {
+          "browser": 1, "zygote": 3, "renderer": 2,
+          "gpu": 1, "utility:network": 1, "utility:storage": 1
+        },
+        "teardown_ms": 38, "leftovers": 0,
+        "profile_removed": true, "devtools_ready": true
+      },
+      {
+        "launch_index": 3,
+        "peak": 9,
+        "distinct": 9,
+        "roles": {
+          "browser": 1, "zygote": 3, "renderer": 2,
+          "gpu": 1, "utility:network": 1, "utility:storage": 1
+        },
+        "teardown_ms": 38, "leftovers": 0,
+        "profile_removed": true, "devtools_ready": true
+      }
+    ],
+    "role_edges_totals": [
+      {"parent": "external", "child": "browser", "count": 3},
+      {"parent": "browser", "child": "zygote", "count": 6},
+      {"parent": "browser", "child": "utility:network", "count": 3},
+      {"parent": "zygote", "child": "zygote", "count": 3},
+      {"parent": "zygote", "child": "renderer", "count": 6},
+      {"parent": "zygote", "child": "gpu", "count": 3},
+      {"parent": "zygote", "child": "utility:storage", "count": 3}
+    ],
+    "stable_role_counts": true,
+    "stable_peak": true,
+    "crashpad_seen": false,
+    "gpu_seen": true,
+    "leftovers_total": 0,
+    "profiles_removed": true,
+    "devtools_ready_all": true,
+    "caveat": "Controlled process-shape proof of the exact command with about:blank. It does not execute BotGuard JavaScript or mint a token. The benchmark's nine-process peak matches; per-role counts during the real mint were not sampled."
+  },
+  "matrix_longpath_exclusion": {
+    "status": "confirmed_harness_path_length_failure_arm_excluded",
+    "evidence_scope": "Read-only observation of the first resolver-matrix legacy arm. No launch was performed for this finding, and the run log was later replaced by the fresh short-root rerun; the values below are the safe metrics captured for this excluded arm.",
+    "run_label": "resolver-matrix-final1/0-legacy long-path arm (excluded artifact)",
+    "observed": {
+      "extraction_attempts": 12,
+      "extraction_successes": 12,
+      "phase_elapsed_ms": 186190,
+      "resolve_elapsed_ms": {
+        "count": 12,
+        "sum": 186183,
+        "min": 15164,
+        "p50": 15203,
+        "max": 17008
+      },
+      "successful_clients": {
+        "VISIONOS": 11,
+        "ANDROID_VR": 1
+      },
+      "browser_process_peak": 4,
+      "sampled_child_cpu_seconds": 1.56,
+      "sampled_window_seconds": 180,
+      "delegated_playback_auth_markers": 0,
+      "cold_proof": {
+        "attempts": 1,
+        "successes": 0,
+        "minted": false,
+        "elapsed_ms": 15039,
+        "failure": null
+      },
+      "cleanup_browser_helpers_after": 0,
+      "auth_verify_success": true
+    },
+    "path_lengths": {
+      "tmpdir_bytes": 66,
+      "xdg_cache_home_bytes": 73,
+      "botguard_profile_root_bytes": 94,
+      "generated_profile_bytes": 125,
+      "chromium_singleton_socket_bytes": 171,
+      "unix_socket_path_limit_bytes": 108,
+      "over_limit_bytes": 63,
+      "controlled_profile_bytes": 43,
+      "controlled_singleton_socket_bytes": 89
+    },
+    "cause": "The harness placed XDG_CACHE_HOME under a long run root. defaultBotGuardTempRoot() therefore created the throwaway profile under that long root, and Chromium's SingletonSocket path exceeded the 108-byte UNIX socket limit.",
+    "diagnostic": {
+      "browser_stderr": "discarded by the provider",
+      "brave_crash_dumps": 13,
+      "crash_dumps_containing_singleton_socket": 13,
+      "crash_dumps_containing_too_long": 13,
+      "singleton_socket_substring_count": 39,
+      "too_long_substring_count": 52,
+      "crash_dumps_match_browser_attempts": true,
+      "raw_log_lines_emitted": false
+    },
+    "causal_chain": [
+      "The harness set HOME, XDG_CACHE_HOME, and TMPDIR to long run-local paths.",
+      "defaultBotGuardTempRoot() selected XDG_CACHE_HOME/ArchiveTune/botguard as the profile root.",
+      "The generated profile and Chromium's SingletonSocket path exceeded the 108-byte UNIX socket limit.",
+      "Chromium started a partial four-process tree but could not create the singleton socket and crashed before renderers or DevTools became ready.",
+      "waitForDevTools() consumed its 15 s startup budget; the provider returned null without a failure class.",
+      "The outer preparePlaybackAuth() 15 s timeout then cancelled the delegated mint path before a delegated-playback-auth marker.",
+      "All 12 resolve attempts still succeeded through native clients, but at the timeout floor; the cold proof independently reproduced the 15 s mint failure."
+    ],
+    "not_the_cause": [
+      "signature-timestamp resolution",
+      "NewPipe connect timeout",
+      "the stream resolver or product login flow",
+      "YouTube rejecting the public test streams"
+    ],
+    "why_cold_proof_is_decisive": "The cold proof exercises only the playback-auth browser mint, not signature timestamp or NewPipe; it took 15,039 ms and minted false, matching waitForDevTools' 15 s budget.",
+    "fix": {
+      "parent_reported_commit": "29ed69003",
+      "scope": "benchmark harness only",
+      "summary": "The authenticated harness now creates an atomic 0700 short HOME under /tmp, sets XDG_CACHE_HOME directly to that HOME, sets the Java temp directory to HOME/t, and removes the private HOME after clone cleanup.",
+      "profile_root_bytes_after_fix": 28,
+      "product_or_login_change_required": false,
+      "verification": "A fresh four-round short-root rerun was active when this report was prepared; its results are not part of this excluded arm."
+    },
+    "disclosure": {
+      "cold_proof_mints": "0/1",
+      "extraction_mints": "0/12 inferred; no delegated-playback-auth markers",
+      "resolutions": "12/12 succeeded through native clients",
+      "account_verified": true,
+      "public_streams_valid": true,
+      "arm_excluded_from": [
+        "resolver timing",
+        "browser-mint success",
+        "process-role evidence"
+      ],
+      "reason": "The delay and missing mint are a harness path-length failure, not a product result."
+    }
+  },
+  "scope": {
+    "benchmark_tracking_model": [
+      "application PID session and process group",
+      "iterative descendant closure",
+      "persistent (pid, starttime) registry for reparented/detached descendants"
+    ],
+    "application_started_with_new_session": true,
+    "baseline_detached_from_app_group_names": [],
+    "baseline_max_detached_from_app_group_count": 0,
+    "baseline_browser_processes_in_startup_idle_auth_playback": 0,
+    "baseline_browser_processes_in_post_idle": 0,
+    "baseline_browser_processes_after_shutdown": [],
+    "unrelated_user_brave_excluded_by_construction": true,
+    "why": "The user's Brave lives in the desktop login session, not in the benchmark application's private session; the tracer additionally requires the archivetune-potoken- profile prefix and browser-lineage descent.",
+    "cleanup_model": "destroy the browser process and its descendants, plus Linux processes whose exact --user-data-dir matches the temporary managed profile; SIGTERM, 2 s grace, then SIGKILL",
+    "cleanup_observed": true,
+    "caveats": [
+      "The cold-proof teardown check scans cmdline for the profile prefix; helpers that rewrite argv could make that check a false negative.",
+      "The sampler's 25 ms interval can miss a helper that calls setsid and exits before its first sample.",
+      "Category classification is name-based; any same-session process named brave/chrome would be counted, but no such process appeared outside the managed launches."
+    ]
+  },
+  "instrumentation_bias": [
+    {
+      "item": "delegated provider strips PO-token bindings on every currentAuthState()",
+      "effect": "forces a cold mint for every unique video even when the restored session already holds a valid bound token",
+      "inflates_legacy_browser_usage": true,
+      "severity": "high",
+      "evidence": "scripts/benchmark-authenticated-application.py lines 147-181; restored session reported has_bound_po_token_before_strip=true"
+    },
+    {
+      "item": "provider single-entry cache still serves repeat resolutions of the same video",
+      "effect": "six playback-auth calls became three launches, not six",
+      "inflates_legacy_browser_usage": false,
+      "severity": "high",
+      "evidence": "elapsed_ms 0 on the second call for each video; DesktopBotGuardPoTokenProvider.kt lines 71-97"
+    },
+    {
+      "item": "cold-proof control runs before extraction",
+      "effect": "warms the browser binary and OS page cache; extraction mints took 486-513 ms versus 688 ms for the first cold proof",
+      "inflates_legacy_browser_usage": false,
+      "severity": "medium",
+      "evidence": "cold-proof elapsed 688 ms; first extraction mint 486 ms"
+    },
+    {
+      "item": "candidate arm receives the same forced cold proof",
+      "effect": "the candidate has one deliberate browser launch and nine helpers that its production extraction would never start",
+      "inflates_legacy_browser_usage": false,
+      "severity": "high",
+      "evidence": "candidate cold_proof browser max 9; candidate extraction browser max 0"
+    },
+    {
+      "item": "browser_processes_observed is a whole-run set of names",
+      "effect": "candidate reports 'brave' even though extraction had none",
+      "inflates_legacy_browser_usage": false,
+      "severity": "medium",
+      "evidence": "authentication.browser_proof.browser_processes_observed is a union, not a phase metric"
+    },
+    {
+      "item": "phase boundary between cold proof and extraction",
+      "effect": "a lingering cold-proof helper could be attributed to extraction if teardown detection were wrong",
+      "inflates_legacy_browser_usage": true,
+      "severity": "low",
+      "evidence": "teardown-settled and extraction-begin share the same marker millisecond (cold-proof-end to teardown is 3 ms); three non-zero extraction mints independently prove new launches; browser p95 is 10 and median is 1"
+    },
+    {
+      "item": "name-only role accounting",
+      "effect": "nine processes collapse to one name; no browser/zygote/GPU/renderer/network/crashpad attribution",
+      "inflates_legacy_browser_usage": false,
+      "severity": "medium",
+      "evidence": "benchmark process_name() uses /proc/pid/exe basename; classify_process() is token-based"
+    }
+  ],
+  "cache_semantics": {
+    "provider": "ChromiumBotGuardPoTokenProvider",
+    "cache_scope": "one provider instance",
+    "cache_key": "videoId + sessionId",
+    "cache_capacity": 1,
+    "cache_ttl": "GenerateIT lifetime minus 10 minutes safety margin",
+    "same_video_repeat": "cache hit, no browser",
+    "different_video": "cache miss, one browser invocation",
+    "a_b_a_thrash": "three browser invocations",
+    "desktop_fastpath": "webClientPoTokenEnabled && poTokenGvs non-blank && poTokenGvsVideoId == requested video",
+    "persisted_token": "secure store v4 keeps the last bound token and video id; the stored session has an expiry for session refresh, but the PO-token binding has no separate expiry and the fastpath does not check one",
+    "cross_video_session_token": "resolveGvsPoToken() falls back to poTokenGvsSession for non-WEB_CREATOR clients that use Web proof; native clients such as VISIONOS do not use Web proof, but DesktopSessionManager still mints for each new video",
+    "forced_cold_wrapper": "the benchmark hides every binding, so the fastpath and persisted token can never be used in either arm"
+  },
+  "necessity": {
+    "required_for_observed_stream_resolution": false,
+    "required_for_web_client_proof": "conditional and not proven by this run",
+    "required_for_native_clients": false,
+    "required_for_login": false,
+    "required_for_playback_controller": false,
+    "transient": true,
+    "persistent_after_extraction": false,
+    "one_invocation_per_unique_video_under_eager_policy": true,
+    "avoidable_with_existing_fastpath": true,
+    "avoidable_by_lazy_mint_on_403": "candidate design option; not implemented or measured",
+    "why_observed_resolution_did_not_need_it": "all six baseline rows resolved through VISIONOS 0.1, while the token was minted for the WEB_REMIX preference; the candidate resolved the same videos via yt-dlp with zero browser processes"
+  },
+  "recommendations": [
+    {
+      "type": "measurement",
+      "action": "Add a warm-policy arm that does not strip persisted bindings, and mark each provider cache hit/miss explicitly.",
+      "reason": "Separates production steady-state from the forced cold worst case."
+    },
+    {
+      "type": "measurement",
+      "action": "Run scripts/trace-legacy-browser.py in attach mode during one real mint and in controlled launch mode.",
+      "reason": "Confirms the role mix, ancestry edges, lifetime, and teardown without recording argv."
+    },
+    {
+      "type": "architecture",
+      "action": "Preserve and exercise the existing per-video token fastpath; do not let a resolver change clear valid bindings.",
+      "reason": "This is the only browser-free path that still provides Web proof when a token is already valid."
+    },
+    {
+      "type": "architecture",
+      "action": "Evaluate lazy proof: resolve with the existing session/native clients, and mint per-video proof only after a concrete 403 from a Web client.",
+      "reason": "prepareStreamHttpRecovery already implements the retry path; the observed VISIONOS success suggests eager proof may be unnecessary for many tracks."
+    },
+    {
+      "type": "architecture",
+      "action": "Evaluate session-token reuse for clients that accept session-bound GVS proof before minting a new per-video token.",
+      "reason": "resolveGvsPoToken already treats poTokenGvsSession as valid for non-WEB_CREATOR clients."
+    },
+    {
+      "type": "architecture",
+      "action": "Consider a small bounded multi-entry cache to avoid A,B,A thrash and preloader churn.",
+      "reason": "A single entry re-launches on alternating videos; a queue preloader can trigger mints ahead of playback."
+    }
+  ],
+  "confirmation_plan": {
+    "status": "controlled_role_mix_completed; matrix_longpath_arm_excluded; short_root_rerun_pending",
+    "no_secret_required": true,
+    "safe_self_test": "python3 scripts/trace-legacy-browser.py --self-test",
+    "controlled_launch": "python3 scripts/trace-legacy-browser.py --launch --hold-ms 1200 --output /tmp/opencode/legacy-browser-role-mix-N.json",
+    "attach": "not required for this proof; no user application, auth profile, or session access was used",
+    "acceptance_criteria": [
+      "nine simultaneous processes for one invocation in 3 of 3 launches",
+      "identical role counts in 3 of 3 launches",
+      "browser root plus browser/zygote, zygote/renderer, zygote/GPU and zygote/storage ancestry edges",
+      "crashpad presence recorded as 0 rather than assumed",
+      "GPU process presence recorded rather than inferred from --disable-gpu",
+      "zero leftovers and profile removed after every teardown",
+      "no argv, URL, cookie, profile path, or environment value in the JSON"
+    ]
+  },
+  "redaction": {
+    "argv_emitted": false,
+    "urls_emitted": false,
+    "cookies_emitted": false,
+    "profile_paths_emitted": false,
+    "environment_emitted": false,
+    "signed_values_emitted": false,
+    "allowed_process_fields": ["pid", "role", "parent_role", "timing", "RSS", "PSS", "thread count", "scope booleans"]
+  },
+  "open_questions": [
+    "Whether the fresh short-root matrix rerun restores the nine-process fan-out and a successful browser mint.",
+    "Whether BotGuard JavaScript adds a role or changes the about:blank role mix during a real mint.",
+    "Whether the production warm policy would have skipped zero, one, or three of the observed mints.",
+    "Whether WEB_REMIX actually needed the minted proof, or simply lost the race to VISIONOS.",
+    "Whether the next-stream preloader triggers additional mints during playback outside the measured phase."
+  ]
+}

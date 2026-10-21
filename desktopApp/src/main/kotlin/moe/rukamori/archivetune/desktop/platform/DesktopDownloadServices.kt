@@ -30,7 +30,7 @@ import moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy
 import moe.rukamori.archivetune.innertube.AudioStreamProbeHttpException
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.ResolvedAudioStream
-import moe.rukamori.archivetune.innertube.probeResolvedAudioStream
+import moe.rukamori.archivetune.innertube.probeResolvedAudioStreamCancellable
 import moe.rukamori.archivetune.innertube.models.SongItem
 
 internal data class RetryableDownloadSpec(
@@ -177,7 +177,8 @@ class DesktopDownloadServices(
                 durationHintMs = spec.durationMs,
             ).getOrThrow()
 
-        val initialProbeFailure = probeResolvedAudioStream(stream).exceptionOrNull()
+        if (stream.clientName == "YT_DLP") return stream // Already range-validated by the extractor.
+        val initialProbeFailure = probeResolvedAudioStreamCancellable(stream).exceptionOrNull()
         val httpFailure = initialProbeFailure as? AudioStreamProbeHttpException
         if (httpFailure == null || httpFailure.httpStatus !in RETRYABLE_STREAM_RESPONSE_CODES) {
             if (initialProbeFailure != null) throw initialProbeFailure
@@ -192,7 +193,7 @@ class DesktopDownloadServices(
             failedUrlHadPoToken = stream.url.hasQueryParameter("pot"),
         )
         stream = backend.resolveAudioStream(stream.videoId).getOrThrow()
-        probeResolvedAudioStream(stream).getOrThrow()
+        probeResolvedAudioStreamCancellable(stream).getOrThrow()
         return stream
     }
 
@@ -358,7 +359,8 @@ class DesktopDownloadServices(
     private fun configuredDirectory(): Path = runtime.settings.snapshot().downloadLocation ?: runtime.paths.downloads
     private fun newManager(path: Path, settings: moe.rukamori.archivetune.desktop.settings.DesktopSettings) =
         DesktopDownloadManager(
-            path,
+            downloadDirectory = path,
+            client = moe.rukamori.archivetune.innertube.desktopStreamHttpClient(),
             maxConcurrentDownloads = settings.downloadConcurrency,
             partialCleanupPolicy = settings.partialCleanupPolicy.toDownloadPolicy(),
         )

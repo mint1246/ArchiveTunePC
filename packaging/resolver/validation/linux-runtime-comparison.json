@@ -1,0 +1,3210 @@
+{
+  "duration_s": 98.53,
+  "generated_at_utc": "2026-10-21T06:03:59Z",
+  "host": {
+    "cpu_count": 16,
+    "machine": "x86_64",
+    "platform": "Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44",
+    "python": "3.14.8"
+  },
+  "method": {
+    "aggregation": "Medians use statistics.median (average of middle two for even samples). attempts_total is the number of recorded attempts; summaries corrected from original raw runs without rerunning extraction.",
+    "challenged_client": "web_embedded",
+    "challenged_video": "dQw4w9WgXcQ",
+    "cold_definition": "Every extraction is a fresh yt-dlp process with a private HOME/XDG_*/TMPDIR, no cookie file, no user profile and no shared runtime cache.",
+    "control_video": "jNQXAC9IVRw",
+    "cookies_used": false,
+    "cpu_method": "getrusage(RUSAGE_CHILDREN) delta around each extraction; on Linux this is transitive, so the frozen yt-dlp's embedded CPython and the JS runtime child are both included.",
+    "description": "Cold yt-dlp extractions per JS runtime on a challenged YouTube video plus two controls, serialized (one extraction at a time).",
+    "js_runtime_selection": "--no-js-runtimes --js-runtimes <name>:<path>",
+    "repeats_challenged": 3,
+    "resolver_flags": [
+      "--ignore-config",
+      "--no-plugin-dirs",
+      "--no-remote-components",
+      "--no-playlist",
+      "--skip-download",
+      "--dump-single-json",
+      "-f",
+      "bestaudio[protocol=https]/bestaudio[protocol=http]",
+      "--no-cache-dir"
+    ],
+    "rss_method": "Maximum sampled sum of process-tree RSS over the whole yt-dlp process tree; shared pages may be counted once per mapping process and short-lived spikes may be missed.",
+    "sample_interval_s": 0.02,
+    "scenarios": [
+      {
+        "description": "challenged video with the web_embedded player client; the JS runtime is load-bearing here (a broken or missing runtime makes the extraction fail)",
+        "key": "challenged",
+        "max_attempts": 5,
+        "player_client": "web_embedded",
+        "runtime_required": true,
+        "target_successes": 3,
+        "video_id": "dQw4w9WgXcQ"
+      },
+      {
+        "description": "challenged video with the default player client, i.e. the exact production flag set; the runtime is still invoked by yt-dlp but the extraction can also succeed without it",
+        "key": "default_client_same_video",
+        "max_attempts": 1,
+        "player_client": "default",
+        "runtime_required": false,
+        "target_successes": 1,
+        "video_id": "dQw4w9WgXcQ"
+      },
+      {
+        "description": "unchallenged video, default player client; the runtime is only probed for its version unless YouTube decides to challenge this request",
+        "key": "control_unchallenged",
+        "max_attempts": 2,
+        "player_client": "default",
+        "runtime_required": false,
+        "target_successes": 2,
+        "video_id": "jNQXAC9IVRw"
+      }
+    ],
+    "serialized": true,
+    "signed_urls_stored": false,
+    "timeout_s": 120.0
+  },
+  "missing_runtime_controls": [
+    {
+      "exit_code": 1,
+      "failed_as_expected": true,
+      "failure_class": "JS_CHALLENGE_SOLVER_FAILED",
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '-v', '--extractor-args', 'youtube:player_client=web_embedded', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - Linux-7.2.9-2-cachyo",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2134
+    }
+  ],
+  "negative_controls": [
+    {
+      "exit_code": 1,
+      "failed_as_expected": true,
+      "failure_class": "JS_CHALLENGE_SOLVER_FAILED",
+      "runtime_invocations": 1,
+      "runtime_key": "quickjs-ng",
+      "runtime_script_invocations": 0,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-broken-3v85jhiz/runtime-broken', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-d",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2343
+    },
+    {
+      "exit_code": 1,
+      "failed_as_expected": true,
+      "failure_class": "JS_CHALLENGE_SOLVER_FAILED",
+      "runtime_invocations": 1,
+      "runtime_key": "node",
+      "runtime_script_invocations": 0,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-broken-1pzbq_lo/runtime-broken', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp ",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2210
+    },
+    {
+      "exit_code": 1,
+      "failed_as_expected": true,
+      "failure_class": "JS_CHALLENGE_SOLVER_FAILED",
+      "runtime_invocations": 1,
+      "runtime_key": "bun",
+      "runtime_script_invocations": 0,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-broken-lvg9zb8w/runtime-broken', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2379
+    },
+    {
+      "exit_code": 1,
+      "failed_as_expected": true,
+      "failure_class": "JS_CHALLENGE_SOLVER_FAILED",
+      "runtime_invocations": 1,
+      "runtime_key": "deno",
+      "runtime_script_invocations": 0,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-broken-r13tz537/runtime-broken', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp ",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2226
+    }
+  ],
+  "per_runtime": {
+    "bun": {
+      "challenged": {
+        "attempts_total": 3,
+        "challenge_solved_runs": 3,
+        "cpu_total_s_max": 2.0420000000000003,
+        "cpu_total_s_median": 2.032,
+        "cpu_total_s_min": 2.002,
+        "http_read_ok_runs": 3,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 497352704,
+        "peak_tree_rss_bytes_median": 494342144,
+        "runs": 3,
+        "runtime_script_invocations_total": 3,
+        "successful": 3,
+        "wall_ms_max": 3023,
+        "wall_ms_median": 2737,
+        "wall_ms_min": 2712
+      },
+      "challenged_per_process_class_peak_cpu_s": {
+        "bun": 1.1,
+        "ffmpeg": 0.02,
+        "ffprobe": 0.02,
+        "yt-dlp": 0.83
+      },
+      "challenged_per_process_class_peak_rss_bytes": {
+        "bun": 385974272,
+        "yt-dlp": 108748800
+      },
+      "control_unchallenged": {
+        "attempts_total": 2,
+        "challenge_solved_runs": 0,
+        "cpu_total_s_max": 0.9029999999999999,
+        "cpu_total_s_median": 0.8395,
+        "cpu_total_s_min": 0.776,
+        "http_read_ok_runs": 2,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 114532352,
+        "peak_tree_rss_bytes_median": 102510592.0,
+        "runs": 2,
+        "runtime_script_invocations_total": 0,
+        "successful": 2,
+        "wall_ms_max": 2030,
+        "wall_ms_median": 1986.5,
+        "wall_ms_min": 1943
+      },
+      "control_unchallenged_script_invocations": 0,
+      "default_client_same_video": {
+        "attempts_total": 1,
+        "challenge_solved_runs": 1,
+        "cpu_total_s_max": 2.0180000000000002,
+        "cpu_total_s_median": 2.018,
+        "cpu_total_s_min": 2.0180000000000002,
+        "http_read_ok_runs": 1,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 500633600,
+        "peak_tree_rss_bytes_median": 500633600,
+        "runs": 1,
+        "runtime_script_invocations_total": 1,
+        "successful": 1,
+        "wall_ms_max": 2866,
+        "wall_ms_median": 2866,
+        "wall_ms_min": 2866
+      },
+      "default_client_script_invocations": 1,
+      "runtime": {
+        "error": null,
+        "key": "bun",
+        "notes": [],
+        "path": "/home/mint/.bun/bin/bun",
+        "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74",
+        "size_bytes": 92752752,
+        "size_mib": 88.46,
+        "supported_by_ytdlp": true,
+        "upstream_min_supported_version": "1.2.11",
+        "upstream_status": "deprecated upstream (versions above 1.3.14 are unsupported)",
+        "version": "1.3.14",
+        "version_source": "bun --version",
+        "ytdlp_runtime_name": "bun"
+      }
+    },
+    "deno": {
+      "challenged": {
+        "attempts_total": 3,
+        "challenge_solved_runs": 3,
+        "cpu_total_s_max": 2.11,
+        "cpu_total_s_median": 1.999,
+        "cpu_total_s_min": 1.966,
+        "http_read_ok_runs": 3,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 444436480,
+        "peak_tree_rss_bytes_median": 431452160,
+        "runs": 3,
+        "runtime_script_invocations_total": 3,
+        "successful": 3,
+        "wall_ms_max": 3161,
+        "wall_ms_median": 2929,
+        "wall_ms_min": 2893
+      },
+      "challenged_per_process_class_peak_cpu_s": {
+        "deno": 1.07,
+        "ffmpeg": 0.02,
+        "ffprobe": 0.02,
+        "rtmpdump": 0.0,
+        "uname": 0.0,
+        "unknown": 1.03,
+        "yt-dlp": 0.9
+      },
+      "challenged_per_process_class_peak_rss_bytes": {
+        "deno": 333803520,
+        "yt-dlp": 108335104
+      },
+      "control_unchallenged": {
+        "attempts_total": 2,
+        "challenge_solved_runs": 0,
+        "cpu_total_s_max": 0.7989999999999999,
+        "cpu_total_s_median": 0.79,
+        "cpu_total_s_min": 0.7809999999999999,
+        "http_read_ok_runs": 2,
+        "peak_process_count_max": 2,
+        "peak_tree_rss_bytes_max": 90427392,
+        "peak_tree_rss_bytes_median": 90120192.0,
+        "runs": 2,
+        "runtime_script_invocations_total": 0,
+        "successful": 2,
+        "wall_ms_max": 2118,
+        "wall_ms_median": 2014.0,
+        "wall_ms_min": 1910
+      },
+      "control_unchallenged_script_invocations": 0,
+      "default_client_same_video": {
+        "attempts_total": 1,
+        "challenge_solved_runs": 1,
+        "cpu_total_s_max": 2.02,
+        "cpu_total_s_median": 2.02,
+        "cpu_total_s_min": 2.02,
+        "http_read_ok_runs": 1,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 432836608,
+        "peak_tree_rss_bytes_median": 432836608,
+        "runs": 1,
+        "runtime_script_invocations_total": 1,
+        "successful": 1,
+        "wall_ms_max": 3160,
+        "wall_ms_median": 3160,
+        "wall_ms_min": 3160
+      },
+      "default_client_script_invocations": 1,
+      "runtime": {
+        "error": null,
+        "key": "deno",
+        "notes": [],
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-2883e144/build/tools/runtimes/deno/deno",
+        "sha256": "ce6a052beb97c2b92de67077e3f3924ba7c9661ede0d8dc2f66a116a3c841f21",
+        "size_bytes": 95830104,
+        "size_mib": 91.39,
+        "supported_by_ytdlp": true,
+        "upstream_min_supported_version": "2.3.0",
+        "upstream_status": "recommended upstream default (enabled by default)",
+        "version": "2.9.7",
+        "version_source": "deno --version",
+        "ytdlp_runtime_name": "deno"
+      }
+    },
+    "node": {
+      "challenged": {
+        "attempts_total": 3,
+        "challenge_solved_runs": 3,
+        "cpu_total_s_max": 1.81,
+        "cpu_total_s_median": 1.792,
+        "cpu_total_s_min": 1.7899999999999998,
+        "http_read_ok_runs": 3,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 427110400,
+        "peak_tree_rss_bytes_median": 425742336,
+        "runs": 3,
+        "runtime_script_invocations_total": 3,
+        "successful": 3,
+        "wall_ms_max": 3236,
+        "wall_ms_median": 2988,
+        "wall_ms_min": 2817
+      },
+      "challenged_per_process_class_peak_cpu_s": {
+        "ffmpeg": 0.02,
+        "ffprobe": 0.02,
+        "node-MainThread": 0.87,
+        "rtmpdump": 0.0,
+        "yt-dlp": 0.8
+      },
+      "challenged_per_process_class_peak_rss_bytes": {
+        "node-MainThread": 316739584,
+        "yt-dlp": 108724224
+      },
+      "control_unchallenged": {
+        "attempts_total": 2,
+        "challenge_solved_runs": 0,
+        "cpu_total_s_max": 0.7979999999999999,
+        "cpu_total_s_median": 0.788,
+        "cpu_total_s_min": 0.7779999999999999,
+        "http_read_ok_runs": 2,
+        "peak_process_count_max": 2,
+        "peak_tree_rss_bytes_max": 90492928,
+        "peak_tree_rss_bytes_median": 90109952.0,
+        "runs": 2,
+        "runtime_script_invocations_total": 0,
+        "successful": 2,
+        "wall_ms_max": 2077,
+        "wall_ms_median": 2059.5,
+        "wall_ms_min": 2042
+      },
+      "control_unchallenged_script_invocations": 0,
+      "default_client_same_video": {
+        "attempts_total": 1,
+        "challenge_solved_runs": 1,
+        "cpu_total_s_max": 1.833,
+        "cpu_total_s_median": 1.833,
+        "cpu_total_s_min": 1.833,
+        "http_read_ok_runs": 1,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 414973952,
+        "peak_tree_rss_bytes_median": 414973952,
+        "runs": 1,
+        "runtime_script_invocations_total": 1,
+        "successful": 1,
+        "wall_ms_max": 2845,
+        "wall_ms_median": 2845,
+        "wall_ms_min": 2845
+      },
+      "default_client_script_invocations": 1,
+      "runtime": {
+        "error": null,
+        "key": "node",
+        "notes": [],
+        "path": "/usr/bin/node",
+        "sha256": "ebafec51df89974c09045e125b4408f822cc6814d3941836d742937256dbc61a",
+        "size_bytes": 55342272,
+        "size_mib": 52.78,
+        "supported_by_ytdlp": true,
+        "upstream_min_supported_version": "22.0.0",
+        "upstream_status": "supported upstream runtime",
+        "version": "26.11.1",
+        "version_source": "node --version",
+        "ytdlp_runtime_name": "node"
+      }
+    },
+    "quickjs-ng": {
+      "challenged": {
+        "attempts_total": 3,
+        "challenge_solved_runs": 3,
+        "cpu_total_s_max": 6.457,
+        "cpu_total_s_median": 5.966,
+        "cpu_total_s_min": 5.917,
+        "http_read_ok_runs": 3,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 376418304,
+        "peak_tree_rss_bytes_median": 376250368,
+        "runs": 3,
+        "runtime_script_invocations_total": 3,
+        "successful": 3,
+        "wall_ms_max": 10097,
+        "wall_ms_median": 7541,
+        "wall_ms_min": 7162
+      },
+      "challenged_per_process_class_peak_cpu_s": {
+        "ffmpeg": 0.05,
+        "ffprobe": 0.02,
+        "file": 0.0,
+        "qjs": 5.3,
+        "runtime-shim": 0.0,
+        "yt-dlp": 1.01
+      },
+      "challenged_per_process_class_peak_rss_bytes": {
+        "qjs": 269058048,
+        "yt-dlp": 106160128
+      },
+      "control_unchallenged": {
+        "attempts_total": 2,
+        "challenge_solved_runs": 0,
+        "cpu_total_s_max": 0.758,
+        "cpu_total_s_median": 0.7575000000000001,
+        "cpu_total_s_min": 0.7569999999999999,
+        "http_read_ok_runs": 2,
+        "peak_process_count_max": 2,
+        "peak_tree_rss_bytes_max": 90464256,
+        "peak_tree_rss_bytes_median": 90081280.0,
+        "runs": 2,
+        "runtime_script_invocations_total": 0,
+        "successful": 2,
+        "wall_ms_max": 2176,
+        "wall_ms_median": 2058.0,
+        "wall_ms_min": 1940
+      },
+      "control_unchallenged_script_invocations": 0,
+      "default_client_same_video": {
+        "attempts_total": 1,
+        "challenge_solved_runs": 1,
+        "cpu_total_s_max": 6.367,
+        "cpu_total_s_median": 6.367,
+        "cpu_total_s_min": 6.367,
+        "http_read_ok_runs": 1,
+        "peak_process_count_max": 3,
+        "peak_tree_rss_bytes_max": 382574592,
+        "peak_tree_rss_bytes_median": 382574592,
+        "runs": 1,
+        "runtime_script_invocations_total": 1,
+        "successful": 1,
+        "wall_ms_max": 7808,
+        "wall_ms_median": 7808,
+        "wall_ms_min": 7808
+      },
+      "default_client_script_invocations": 1,
+      "runtime": {
+        "error": null,
+        "key": "quickjs-ng",
+        "notes": [],
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/qjs",
+        "sha256": "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5",
+        "size_bytes": 2562504,
+        "size_mib": 2.44,
+        "supported_by_ytdlp": true,
+        "upstream_min_supported_version": "2023.12.9 (quickjs-ng: any version)",
+        "upstream_status": "supported; quickjs-ng 0.17.0 >= 0.12.0 recommended threshold",
+        "version": "0.17.0",
+        "version_source": "qjs --help",
+        "ytdlp_runtime_name": "quickjs"
+      }
+    }
+  },
+  "runs": [
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "quickjs",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.108,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "qjs": 504,
+        "yt-dlp": 80
+      },
+      "cpu_total_s": 5.966,
+      "cpu_user_s": 5.858,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2715648,
+          "pid": 178046
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 64,
+          "max_rss_bytes": 106090496,
+          "pid": 178048
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15568896,
+          "pid": 178052
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 17412096,
+          "pid": 178053
+        },
+        {
+          "comm": "qjs",
+          "cpu_ticks": 504,
+          "max_rss_bytes": 267403264,
+          "pid": 178057
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "qjs": 250,
+        "yt-dlp": 735
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178046,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178048,
+          "rss_bytes": 106090496
+        },
+        {
+          "comm": "qjs",
+          "pid": 178057,
+          "rss_bytes": 267403264
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 376209408,
+      "peak_tree_rss_mib": 358.78,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 372,
+      "runtime_command_lines": [
+        "Running QuickJS: /tmp/archivetune-runtime-shim-uu9bmdw6/runtime-shim --script /tmp/archivetune-runtime-bench-tjihdck3/tmpk3vu1cs8.js"
+      ],
+      "runtime_invocation_argv": [
+        "--help",
+        "--script /tmp/archivetune-runtime-bench-tjihdck3/tmpk3vu1cs8.js"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "quickjs-ng",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-shim-uu9bmdw6/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 7541
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": "quickjs",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.087,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 0,
+        "qjs": 498,
+        "yt-dlp": 81
+      },
+      "cpu_total_s": 5.917,
+      "cpu_user_s": 5.83,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2715648,
+          "pid": 178141
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 65,
+          "max_rss_bytes": 117325824,
+          "pid": 178143
+        },
+        {
+          "comm": "file",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 20701184,
+          "pid": 178145
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14614528,
+          "pid": 178147
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15003648,
+          "pid": 178148
+        },
+        {
+          "comm": "qjs",
+          "cpu_ticks": 498,
+          "max_rss_bytes": 267374592,
+          "pid": 178162
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 1,
+        "qjs": 247,
+        "yt-dlp": 697
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178141,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178143,
+          "rss_bytes": 106160128
+        },
+        {
+          "comm": "qjs",
+          "pid": 178162,
+          "rss_bytes": 267374592
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 376250368,
+      "peak_tree_rss_mib": 358.82,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 353,
+      "runtime_command_lines": [
+        "Running QuickJS: /tmp/archivetune-runtime-shim-wqiksvop/runtime-shim --script /tmp/archivetune-runtime-bench-tjihdck3/tmpx3ryajy_.js"
+      ],
+      "runtime_invocation_argv": [
+        "--help",
+        "--script /tmp/archivetune-runtime-bench-tjihdck3/tmpx3ryajy_.js"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "quickjs-ng",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-shim-wqiksvop/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 7162
+    },
+    {
+      "acodec": "opus",
+      "attempt": 3,
+      "challenge_failed": false,
+      "challenge_provider": "quickjs",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.201,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 5,
+        "ffprobe": 2,
+        "qjs": 530,
+        "runtime-shim": 0,
+        "yt-dlp": 101
+      },
+      "cpu_total_s": 6.457,
+      "cpu_user_s": 6.256,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2715648,
+          "pid": 178215
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 85,
+          "max_rss_bytes": 106291200,
+          "pid": 178217
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 5,
+          "max_rss_bytes": 32477184,
+          "pid": 178275
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 14741504,
+          "pid": 178291
+        },
+        {
+          "comm": "runtime-shim",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 3846144,
+          "pid": 178294
+        },
+        {
+          "comm": "qjs",
+          "cpu_ticks": 530,
+          "max_rss_bytes": 269058048,
+          "pid": 178324
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 74,
+        "ffprobe": 2,
+        "qjs": 263,
+        "runtime-shim": 1,
+        "yt-dlp": 979
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178215,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178217,
+          "rss_bytes": 104644608
+        },
+        {
+          "comm": "qjs",
+          "pid": 178324,
+          "rss_bytes": 269058048
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 376418304,
+      "peak_tree_rss_mib": 358.98,
+      "protocol": "https",
+      "repeat": 3,
+      "rss_samples": 494,
+      "runtime_command_lines": [
+        "Running QuickJS: /tmp/archivetune-runtime-shim-eee7ujor/runtime-shim --script /tmp/archivetune-runtime-bench-tjihdck3/tmpva1xxux7.js"
+      ],
+      "runtime_invocation_argv": [
+        "--help",
+        "--script /tmp/archivetune-runtime-bench-tjihdck3/tmpva1xxux7.js"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "quickjs-ng",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-shim-eee7ujor/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 10097
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "quickjs",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.286,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "file": 0,
+        "qjs": 541,
+        "yt-dlp": 83
+      },
+      "cpu_total_s": 6.367,
+      "cpu_user_s": 6.081,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2715648,
+          "pid": 178485
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 67,
+          "max_rss_bytes": 120852480,
+          "pid": 178492
+        },
+        {
+          "comm": "file",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 18079744,
+          "pid": 178494
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14422016,
+          "pid": 178496
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14700544,
+          "pid": 178497
+        },
+        {
+          "comm": "qjs",
+          "cpu_ticks": 541,
+          "max_rss_bytes": 271310848,
+          "pid": 178501
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 49,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 1,
+        "qjs": 269,
+        "yt-dlp": 761
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178485,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178492,
+          "rss_bytes": 108548096
+        },
+        {
+          "comm": "qjs",
+          "pid": 178501,
+          "rss_bytes": 271310848
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 382574592,
+      "peak_tree_rss_mib": 364.85,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 385,
+      "runtime_command_lines": [
+        "Running QuickJS: /tmp/archivetune-runtime-shim-_1xbl__f/runtime-shim --script /tmp/archivetune-runtime-bench-tjihdck3/tmpweu7tfgr.js"
+      ],
+      "runtime_invocation_argv": [
+        "--help",
+        "--script /tmp/archivetune-runtime-bench-tjihdck3/tmpweu7tfgr.js"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "quickjs-ng",
+      "runtime_process_observed": true,
+      "runtime_required": false,
+      "runtime_script_invocations": 1,
+      "scenario": "default_client_same_video",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-shim-_1xbl__f/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) ",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 7808
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.071,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "file": 0,
+        "yt-dlp": 65
+      },
+      "cpu_total_s": 0.758,
+      "cpu_user_s": 0.687,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2707456,
+          "pid": 178638
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 49,
+          "max_rss_bytes": 87756800,
+          "pid": 178663
+        },
+        {
+          "comm": "file",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 14995456,
+          "pid": 178665
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14344192,
+          "pid": 178667
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14905344,
+          "pid": 178668
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 1,
+        "yt-dlp": 207
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178638,
+          "rss_bytes": 2707456
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178663,
+          "rss_bytes": 87756800
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 90464256,
+      "peak_tree_rss_mib": 86.27,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 108,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--help"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "quickjs-ng",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-shim-git5scsy/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) ",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2176
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.062,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "yt-dlp": 64
+      },
+      "cpu_total_s": 0.757,
+      "cpu_user_s": 0.695,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 15,
+          "max_rss_bytes": 2715648,
+          "pid": 178686
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 49,
+          "max_rss_bytes": 86982656,
+          "pid": 178688
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14725120,
+          "pid": 178692
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15486976,
+          "pid": 178693
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 183
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178686,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178688,
+          "rss_bytes": 86982656
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 89698304,
+      "peak_tree_rss_mib": 85.54,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 96,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--help"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "quickjs-ng",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'quickjs:/tmp/archivetune-runtime-shim-wtwtvo4t/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) ",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 1940
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "node",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.146,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "node-MainThread": 85,
+        "yt-dlp": 79
+      },
+      "cpu_total_s": 1.79,
+      "cpu_user_s": 1.644,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 15,
+          "max_rss_bytes": 2711552,
+          "pid": 178697
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 64,
+          "max_rss_bytes": 114679808,
+          "pid": 178699
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15233024,
+          "pid": 178703
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15720448,
+          "pid": 178704
+        },
+        {
+          "comm": "node-MainThread",
+          "cpu_ticks": 85,
+          "max_rss_bytes": 316739584,
+          "pid": 178723
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "node-MainThread": 31,
+        "yt-dlp": 269
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178697,
+          "rss_bytes": 2711552
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178699,
+          "rss_bytes": 107659264
+        },
+        {
+          "comm": "node-MainThread",
+          "pid": 178723,
+          "rss_bytes": 316739584
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 427110400,
+      "peak_tree_rss_mib": 407.32,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 139,
+      "runtime_command_lines": [
+        "Running node: /tmp/archivetune-runtime-shim-y5n3_pmm/runtime-shim --permission -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--permission -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "node",
+      "runtime_process_observed": false,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-shim-y5n3_pmm/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (lin",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2817
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": "node",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.127,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "node-MainThread": 87,
+        "yt-dlp": 79
+      },
+      "cpu_total_s": 1.81,
+      "cpu_user_s": 1.683,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2723840,
+          "pid": 178729
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 63,
+          "max_rss_bytes": 114835456,
+          "pid": 178731
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 14991360,
+          "pid": 178735
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15544320,
+          "pid": 178736
+        },
+        {
+          "comm": "node-MainThread",
+          "cpu_ticks": 87,
+          "max_rss_bytes": 310067200,
+          "pid": 178755
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "node-MainThread": 31,
+        "yt-dlp": 286
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178729,
+          "rss_bytes": 2703360
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178731,
+          "rss_bytes": 108699648
+        },
+        {
+          "comm": "node-MainThread",
+          "pid": 178755,
+          "rss_bytes": 310067200
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 421470208,
+      "peak_tree_rss_mib": 401.95,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 148,
+      "runtime_command_lines": [
+        "Running node: /tmp/archivetune-runtime-shim-oukixtd0/runtime-shim --permission -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--permission -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "node",
+      "runtime_process_observed": false,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-shim-oukixtd0/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (lin",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2988
+    },
+    {
+      "acodec": "opus",
+      "attempt": 3,
+      "challenge_failed": false,
+      "challenge_provider": "node",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.147,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 1,
+        "node-MainThread": 85,
+        "rtmpdump": 0,
+        "yt-dlp": 80
+      },
+      "cpu_total_s": 1.792,
+      "cpu_user_s": 1.645,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2707456,
+          "pid": 178761
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 64,
+          "max_rss_bytes": 122343424,
+          "pid": 178763
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 16019456,
+          "pid": 178767
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 13680640,
+          "pid": 178768
+        },
+        {
+          "comm": "rtmpdump",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 1695744,
+          "pid": 178769
+        },
+        {
+          "comm": "node-MainThread",
+          "cpu_ticks": 85,
+          "max_rss_bytes": 314310656,
+          "pid": 178772
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 1,
+        "node": 1,
+        "node-MainThread": 31,
+        "rtmpdump": 1,
+        "yt-dlp": 311
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178761,
+          "rss_bytes": 2707456
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178763,
+          "rss_bytes": 108724224
+        },
+        {
+          "comm": "node-MainThread",
+          "pid": 178772,
+          "rss_bytes": 314310656
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 425742336,
+      "peak_tree_rss_mib": 406.02,
+      "protocol": "https",
+      "repeat": 3,
+      "rss_samples": 160,
+      "runtime_command_lines": [
+        "Running node: /tmp/archivetune-runtime-shim-asmntiy9/runtime-shim --permission -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--permission -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "node",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-shim-asmntiy9/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (lin",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3236
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "node",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.161,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "file": 0,
+        "node-MainThread": 91,
+        "yt-dlp": 80
+      },
+      "cpu_total_s": 1.833,
+      "cpu_user_s": 1.672,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 17,
+          "max_rss_bytes": 2732032,
+          "pid": 178819
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 63,
+          "max_rss_bytes": 111624192,
+          "pid": 178821
+        },
+        {
+          "comm": "file",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 17866752,
+          "pid": 178823
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14422016,
+          "pid": 178825
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 15253504,
+          "pid": 178826
+        },
+        {
+          "comm": "node-MainThread",
+          "cpu_ticks": 91,
+          "max_rss_bytes": 302317568,
+          "pid": 178832
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 49,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 1,
+        "node-MainThread": 33,
+        "yt-dlp": 272
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178819,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178821,
+          "rss_bytes": 109940736
+        },
+        {
+          "comm": "node-MainThread",
+          "pid": 178832,
+          "rss_bytes": 302317568
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 414973952,
+      "peak_tree_rss_mib": 395.75,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 141,
+      "runtime_command_lines": [
+        "Running node: /tmp/archivetune-runtime-shim-2fe7nzdn/runtime-shim --permission -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--permission -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "node",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 1,
+      "scenario": "default_client_same_video",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-shim-2fe7nzdn/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - L",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2845
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.084,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "file": 0,
+        "node": 0,
+        "yt-dlp": 68
+      },
+      "cpu_total_s": 0.798,
+      "cpu_user_s": 0.714,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2699264,
+          "pid": 178838
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 52,
+          "max_rss_bytes": 87027712,
+          "pid": 178846
+        },
+        {
+          "comm": "file",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 17100800,
+          "pid": 178887
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14356480,
+          "pid": 178889
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14700544,
+          "pid": 178890
+        },
+        {
+          "comm": "node",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 6443008,
+          "pid": 178893
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 1,
+        "node": 1,
+        "yt-dlp": 197
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178838,
+          "rss_bytes": 2699264
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178846,
+          "rss_bytes": 87027712
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 89726976,
+      "peak_tree_rss_mib": 85.57,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 103,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--version"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "node",
+      "runtime_process_observed": true,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-shim-ul4_2aox/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - L",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2077
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.082,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 65
+      },
+      "cpu_total_s": 0.778,
+      "cpu_user_s": 0.696,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2711552,
+          "pid": 178947
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 49,
+          "max_rss_bytes": 87781376,
+          "pid": 178949
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15675392,
+          "pid": 178954
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15695872,
+          "pid": 178955
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 193
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178947,
+          "rss_bytes": 2711552
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178949,
+          "rss_bytes": 87781376
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 90492928,
+      "peak_tree_rss_mib": 86.3,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 101,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--version"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "node",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'node:/tmp/archivetune-runtime-shim-1ybg6h7f/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - L",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2042
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "bun",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.179,
+      "cpu_ticks_by_comm": {
+        "bun": 108,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 80
+      },
+      "cpu_total_s": 2.002,
+      "cpu_user_s": 1.823,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2711552,
+          "pid": 178991
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 64,
+          "max_rss_bytes": 126070784,
+          "pid": 178993
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 14819328,
+          "pid": 178997
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15708160,
+          "pid": 178998
+        },
+        {
+          "comm": "bun",
+          "cpu_ticks": 108,
+          "max_rss_bytes": 383696896,
+          "pid": 179003
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "bun": 28,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 261
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 178991,
+          "rss_bytes": 2711552
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 178993,
+          "rss_bytes": 107933696
+        },
+        {
+          "comm": "bun",
+          "pid": 179003,
+          "rss_bytes": 383696896
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 494342144,
+      "peak_tree_rss_mib": 471.44,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 135,
+      "runtime_command_lines": [
+        "Running bun: /tmp/archivetune-runtime-shim-sdujqw0e/runtime-shim --bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "bun",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-shim-sdujqw0e/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linu",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2737
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": "bun",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.171,
+      "cpu_ticks_by_comm": {
+        "bun": 107,
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "yt-dlp": 83
+      },
+      "cpu_total_s": 2.032,
+      "cpu_user_s": 1.861,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 17,
+          "max_rss_bytes": 2715648,
+          "pid": 179015
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 66,
+          "max_rss_bytes": 122884096,
+          "pid": 179017
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14843904,
+          "pid": 179053
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15622144,
+          "pid": 179054
+        },
+        {
+          "comm": "bun",
+          "cpu_ticks": 107,
+          "max_rss_bytes": 385974272,
+          "pid": 179085
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "bun": 28,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 289
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179015,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179017,
+          "rss_bytes": 108662784
+        },
+        {
+          "comm": "bun",
+          "pid": 179085,
+          "rss_bytes": 385974272
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 497352704,
+      "peak_tree_rss_mib": 474.31,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 149,
+      "runtime_command_lines": [
+        "Running bun: /tmp/archivetune-runtime-shim-devhsqdr/runtime-shim --bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "bun",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-shim-devhsqdr/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linu",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3023
+    },
+    {
+      "acodec": "opus",
+      "attempt": 3,
+      "challenge_failed": false,
+      "challenge_provider": "bun",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.178,
+      "cpu_ticks_by_comm": {
+        "bun": 110,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 82
+      },
+      "cpu_total_s": 2.042,
+      "cpu_user_s": 1.864,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2715648,
+          "pid": 179097
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 66,
+          "max_rss_bytes": 114765824,
+          "pid": 179099
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15769600,
+          "pid": 179103
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 13697024,
+          "pid": 179104
+        },
+        {
+          "comm": "bun",
+          "cpu_ticks": 110,
+          "max_rss_bytes": 381865984,
+          "pid": 179217
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "bun": 28,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 259
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179097,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179099,
+          "rss_bytes": 108748800
+        },
+        {
+          "comm": "bun",
+          "pid": 179217,
+          "rss_bytes": 381865984
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 493330432,
+      "peak_tree_rss_mib": 470.48,
+      "protocol": "https",
+      "repeat": 3,
+      "rss_samples": 134,
+      "runtime_command_lines": [
+        "Running bun: /tmp/archivetune-runtime-shim-pun3efej/runtime-shim --bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "bun",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-shim-pun3efej/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linu",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2712
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "bun",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.184,
+      "cpu_ticks_by_comm": {
+        "bun": 110,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 79
+      },
+      "cpu_total_s": 2.018,
+      "cpu_user_s": 1.834,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2727936,
+          "pid": 179311
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 63,
+          "max_rss_bytes": 111927296,
+          "pid": 179313
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15134720,
+          "pid": 179317
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15802368,
+          "pid": 179318
+        },
+        {
+          "comm": "bun",
+          "cpu_ticks": 110,
+          "max_rss_bytes": 387747840,
+          "pid": 179322
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 49,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "bun": 28,
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 274
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179311,
+          "rss_bytes": 2711552
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179313,
+          "rss_bytes": 110174208
+        },
+        {
+          "comm": "bun",
+          "pid": 179322,
+          "rss_bytes": 387747840
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 500633600,
+      "peak_tree_rss_mib": 477.44,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 142,
+      "runtime_command_lines": [
+        "Running bun: /tmp/archivetune-runtime-shim-y5a11ri9/runtime-shim --bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "--bun run --no-addons --prefer-offline --no-install -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "bun",
+      "runtime_process_observed": true,
+      "runtime_required": false,
+      "runtime_script_invocations": 1,
+      "scenario": "default_client_same_video",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-shim-y5a11ri9/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - Li",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2866
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.069,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "uname": 0,
+        "yt-dlp": 67
+      },
+      "cpu_total_s": 0.776,
+      "cpu_user_s": 0.707,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 17,
+          "max_rss_bytes": 2707456,
+          "pid": 179334
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 50,
+          "max_rss_bytes": 87781376,
+          "pid": 179336
+        },
+        {
+          "comm": "uname",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 389120,
+          "pid": 179339
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14630912,
+          "pid": 179340
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 14876672,
+          "pid": 179341
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "uname": 1,
+        "yt-dlp": 183
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179334,
+          "rss_bytes": 2707456
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179336,
+          "rss_bytes": 87781376
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 90488832,
+      "peak_tree_rss_mib": 86.3,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 96,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--version"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "bun",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-shim-wx8hfsb6/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - Li",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 1943
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.08,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 4,
+        "yt-dlp": 76
+      },
+      "cpu_total_s": 0.903,
+      "cpu_user_s": 0.823,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2703360,
+          "pid": 179403
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 60,
+          "max_rss_bytes": 87822336,
+          "pid": 179409
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15564800,
+          "pid": 179467
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 4,
+          "max_rss_bytes": 42147840,
+          "pid": 179470
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 3,
+        "yt-dlp": 192
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179403,
+          "rss_bytes": 2682880
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179409,
+          "rss_bytes": 69701632
+        },
+        {
+          "comm": "ffprobe",
+          "pid": 179470,
+          "rss_bytes": 42147840
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 114532352,
+      "peak_tree_rss_mib": 109.23,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 101,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--version"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "bun",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-runtime-shim-aa5unxpz/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - Li",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2030
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "deno",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.146,
+      "cpu_ticks_by_comm": {
+        "deno": 107,
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "uname": 0,
+        "yt-dlp": 90
+      },
+      "cpu_total_s": 2.11,
+      "cpu_user_s": 1.964,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 22,
+          "max_rss_bytes": 2715648,
+          "pid": 179494
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 68,
+          "max_rss_bytes": 121528320,
+          "pid": 179504
+        },
+        {
+          "comm": "uname",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 700416,
+          "pid": 179508
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14680064,
+          "pid": 179509
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15011840,
+          "pid": 179510
+        },
+        {
+          "comm": "deno",
+          "cpu_ticks": 107,
+          "max_rss_bytes": 320401408,
+          "pid": 179546
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "deno": 40,
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "uname": 1,
+        "yt-dlp": 300
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179494,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179504,
+          "rss_bytes": 108335104
+        },
+        {
+          "comm": "deno",
+          "pid": 179546,
+          "rss_bytes": 320401408
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 431452160,
+      "peak_tree_rss_mib": 411.46,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 156,
+      "runtime_command_lines": [
+        "Running deno: /tmp/archivetune-runtime-shim-sm8dnzqz/runtime-shim run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "deno",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-shim-sm8dnzqz/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (lin",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3161
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": "deno",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.181,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 1,
+        "rtmpdump": 0,
+        "unknown": 103,
+        "yt-dlp": 82
+      },
+      "cpu_total_s": 1.999,
+      "cpu_user_s": 1.818,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2711552,
+          "pid": 179553
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 66,
+          "max_rss_bytes": 109576192,
+          "pid": 179555
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 37330944,
+          "pid": 179559
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14290944,
+          "pid": 179560
+        },
+        {
+          "comm": "rtmpdump",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 2387968,
+          "pid": 179561
+        },
+        {
+          "comm": "unknown",
+          "cpu_ticks": 103,
+          "max_rss_bytes": 333803520,
+          "pid": 179564
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "deno": 38,
+        "ffmpeg": 2,
+        "ffprobe": 1,
+        "rtmpdump": 1,
+        "unknown": 1,
+        "yt-dlp": 277
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179553,
+          "rss_bytes": 2711552
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179555,
+          "rss_bytes": 107921408
+        },
+        {
+          "comm": "deno",
+          "pid": 179564,
+          "rss_bytes": 333803520
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 444436480,
+      "peak_tree_rss_mib": 423.85,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 143,
+      "runtime_command_lines": [
+        "Running deno: /tmp/archivetune-runtime-shim-0objjijo/runtime-shim run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "deno",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-shim-0objjijo/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (lin",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2893
+    },
+    {
+      "acodec": "opus",
+      "attempt": 3,
+      "challenge_failed": false,
+      "challenge_provider": "deno",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.177,
+      "cpu_ticks_by_comm": {
+        "deno": 100,
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "yt-dlp": 83
+      },
+      "cpu_total_s": 1.966,
+      "cpu_user_s": 1.789,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2715648,
+          "pid": 179597
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 67,
+          "max_rss_bytes": 114761728,
+          "pid": 179599
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 13815808,
+          "pid": 179603
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14757888,
+          "pid": 179604
+        },
+        {
+          "comm": "deno",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 5648384,
+          "pid": 179607
+        },
+        {
+          "comm": "deno",
+          "cpu_ticks": 100,
+          "max_rss_bytes": 313688064,
+          "pid": 179608
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 31,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "deno": 39,
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "yt-dlp": 281
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 179597,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 179599,
+          "rss_bytes": 107741184
+        },
+        {
+          "comm": "deno",
+          "pid": 179608,
+          "rss_bytes": 313688064
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 424144896,
+      "peak_tree_rss_mib": 404.5,
+      "protocol": "https",
+      "repeat": 3,
+      "rss_samples": 145,
+      "runtime_command_lines": [
+        "Running deno: /tmp/archivetune-runtime-shim-suxynz5x/runtime-shim run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "deno",
+      "runtime_process_observed": true,
+      "runtime_required": true,
+      "runtime_script_invocations": 1,
+      "scenario": "challenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-shim-suxynz5x/runtime-shim', '--extractor-args', 'youtube:player_client=web_embedded', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (lin",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2929
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": "deno",
+      "challenge_script_version": "0.8.0",
+      "challenge_solved": true,
+      "cpu_sys_s": 0.156,
+      "cpu_ticks_by_comm": {
+        "deno": 104,
+        "ffmpeg": 1,
+        "ffprobe": 1,
+        "file": 0,
+        "yt-dlp": 85
+      },
+      "cpu_total_s": 2.02,
+      "cpu_user_s": 1.864,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 16,
+          "max_rss_bytes": 2678784,
+          "pid": 180039
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 69,
+          "max_rss_bytes": 126930944,
+          "pid": 180047
+        },
+        {
+          "comm": "file",
+          "cpu_ticks": 0,
+          "max_rss_bytes": 17211392,
+          "pid": 180163
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14450688,
+          "pid": 180165
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14852096,
+          "pid": 180166
+        },
+        {
+          "comm": "deno",
+          "cpu_ticks": 104,
+          "max_rss_bytes": 320610304,
+          "pid": 180316
+        }
+      ],
+      "duration_s": 213,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 49,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "deno": 39,
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "file": 1,
+        "runtime-shim": 1,
+        "yt-dlp": 303
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 180039,
+          "rss_bytes": 2678784
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 180047,
+          "rss_bytes": 109547520
+        },
+        {
+          "comm": "deno",
+          "pid": 180316,
+          "rss_bytes": 320610304
+        }
+      ],
+      "peak_process_count": 3,
+      "peak_tree_rss_bytes": 432836608,
+      "peak_tree_rss_mib": 412.79,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 156,
+      "runtime_command_lines": [
+        "Running deno: /tmp/archivetune-runtime-shim-scvjfkwg/runtime-shim run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocation_argv": [
+        "--version",
+        "run --ext=js --no-code-cache --no-prompt --no-remote --no-lock --node-modules-dir=none --no-config --no-npm --cached-only -"
+      ],
+      "runtime_invocations": 2,
+      "runtime_key": "deno",
+      "runtime_process_observed": true,
+      "runtime_required": false,
+      "runtime_script_invocations": 1,
+      "scenario": "default_client_same_video",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-shim-scvjfkwg/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - L",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3160
+    },
+    {
+      "acodec": "opus",
+      "attempt": 1,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.072,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 1,
+        "ffprobe": 2,
+        "yt-dlp": 70
+      },
+      "cpu_total_s": 0.799,
+      "cpu_user_s": 0.727,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 17,
+          "max_rss_bytes": 2715648,
+          "pid": 180453
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 53,
+          "max_rss_bytes": 87711744,
+          "pid": 180455
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 1,
+          "max_rss_bytes": 14794752,
+          "pid": 180459
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15482880,
+          "pid": 180460
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 201
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 180453,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 180455,
+          "rss_bytes": 87711744
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 90427392,
+      "peak_tree_rss_mib": 86.24,
+      "protocol": "https",
+      "repeat": 1,
+      "rss_samples": 105,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--version"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "deno",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-shim-fbl8fsyc/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - L",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2118
+    },
+    {
+      "acodec": "opus",
+      "attempt": 2,
+      "challenge_failed": false,
+      "challenge_provider": null,
+      "challenge_script_version": null,
+      "challenge_solved": false,
+      "cpu_sys_s": 0.069,
+      "cpu_ticks_by_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 68
+      },
+      "cpu_total_s": 0.781,
+      "cpu_user_s": 0.712,
+      "distinct_processes": [
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 17,
+          "max_rss_bytes": 2715648,
+          "pid": 180480
+        },
+        {
+          "comm": "yt-dlp",
+          "cpu_ticks": 51,
+          "max_rss_bytes": 87097344,
+          "pid": 180482
+        },
+        {
+          "comm": "ffmpeg",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 14856192,
+          "pid": 180489
+        },
+        {
+          "comm": "ffprobe",
+          "cpu_ticks": 2,
+          "max_rss_bytes": 15740928,
+          "pid": 180490
+        }
+      ],
+      "duration_s": 19,
+      "exit_code": 0,
+      "ext": "webm",
+      "failure_class": "NONE",
+      "format_count": 24,
+      "format_id": "251",
+      "http_bytes_read": 65536,
+      "http_content_type": "audio/webm",
+      "http_error": null,
+      "http_ranged": true,
+      "http_status": 206,
+      "http_tail_bytes": 65536,
+      "http_tail_status": 206,
+      "max_cpu_ticks": {},
+      "observed_comm": {
+        "ffmpeg": 2,
+        "ffprobe": 2,
+        "yt-dlp": 181
+      },
+      "ok": true,
+      "peak_breakdown": [
+        {
+          "comm": "yt-dlp",
+          "pid": 180480,
+          "rss_bytes": 2715648
+        },
+        {
+          "comm": "yt-dlp",
+          "pid": 180482,
+          "rss_bytes": 87097344
+        }
+      ],
+      "peak_process_count": 2,
+      "peak_tree_rss_bytes": 89812992,
+      "peak_tree_rss_mib": 85.65,
+      "protocol": "https",
+      "repeat": 2,
+      "rss_samples": 95,
+      "runtime_command_lines": [],
+      "runtime_invocation_argv": [
+        "--version"
+      ],
+      "runtime_invocations": 1,
+      "runtime_key": "deno",
+      "runtime_process_observed": false,
+      "runtime_required": false,
+      "runtime_script_invocations": 0,
+      "scenario": "control_unchallenged",
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-playlist', '--skip-download', '--dump-single-json', '-f', 'bestaudio[protocol=https]/bestaudio[protocol=http]', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'deno:/tmp/archivetune-runtime-shim-8jmcjccd/runtime-shim', '-v', '<redacted-url>'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - L",
+      "timed_out": false,
+      "vcodec": "none",
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 1910
+    }
+  ],
+  "runtimes": [
+    {
+      "error": null,
+      "key": "quickjs-ng",
+      "notes": [],
+      "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/qjs",
+      "sha256": "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5",
+      "size_bytes": 2562504,
+      "size_mib": 2.44,
+      "supported_by_ytdlp": true,
+      "upstream_min_supported_version": "2023.12.9 (quickjs-ng: any version)",
+      "upstream_status": "supported; quickjs-ng 0.17.0 >= 0.12.0 recommended threshold",
+      "version": "0.17.0",
+      "version_source": "qjs --help",
+      "ytdlp_runtime_name": "quickjs"
+    },
+    {
+      "error": null,
+      "key": "node",
+      "notes": [],
+      "path": "/usr/bin/node",
+      "sha256": "ebafec51df89974c09045e125b4408f822cc6814d3941836d742937256dbc61a",
+      "size_bytes": 55342272,
+      "size_mib": 52.78,
+      "supported_by_ytdlp": true,
+      "upstream_min_supported_version": "22.0.0",
+      "upstream_status": "supported upstream runtime",
+      "version": "26.11.1",
+      "version_source": "node --version",
+      "ytdlp_runtime_name": "node"
+    },
+    {
+      "error": null,
+      "key": "bun",
+      "notes": [],
+      "path": "/home/mint/.bun/bin/bun",
+      "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74",
+      "size_bytes": 92752752,
+      "size_mib": 88.46,
+      "supported_by_ytdlp": true,
+      "upstream_min_supported_version": "1.2.11",
+      "upstream_status": "deprecated upstream (versions above 1.3.14 are unsupported)",
+      "version": "1.3.14",
+      "version_source": "bun --version",
+      "ytdlp_runtime_name": "bun"
+    },
+    {
+      "error": null,
+      "key": "deno",
+      "notes": [],
+      "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-2883e144/build/tools/runtimes/deno/deno",
+      "sha256": "ce6a052beb97c2b92de67077e3f3924ba7c9661ede0d8dc2f66a116a3c841f21",
+      "size_bytes": 95830104,
+      "size_mib": 91.39,
+      "supported_by_ytdlp": true,
+      "upstream_min_supported_version": "2.3.0",
+      "upstream_status": "recommended upstream default (enabled by default)",
+      "version": "2.9.7",
+      "version_source": "deno --version",
+      "ytdlp_runtime_name": "deno"
+    }
+  ],
+  "schema": "archivetune.ytdlp.runtime-comparison/1",
+  "tools": {
+    "checks": {
+      "quickjs-ng": {
+        "expected_sha256": "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/qjs",
+        "sha256": "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5",
+        "sha256_matches": true,
+        "size_bytes": 2562504,
+        "version": "0.17.0"
+      },
+      "yt-dlp": {
+        "expected_sha256": "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/yt-dlp",
+        "sha256": "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a",
+        "sha256_matches": true,
+        "size_bytes": 40446224,
+        "version": "2026.08.19"
+      }
+    },
+    "verified": true
+  },
+  "upstream_sources": [
+    {
+      "fact": "deno >= 2.3.0, node >= 22.0.0, bun >= 1.2.11, quickjs >= 2023-12-9, all quickjs-ng versions supported.",
+      "title": "yt-dlp 2026.08.19 - yt_dlp/utils/_jsruntime.py (minimum supported runtime versions)",
+      "url": "https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/utils/_jsruntime.py"
+    },
+    {
+      "fact": "Provider preference: deno 1000, node 900, quickjs 850, bun 800. Bun is capped at 1.3.14 and deprecated. quickjs-ng below 0.12.0 is missing optimizations.",
+      "title": "yt-dlp 2026.08.19 - yt_dlp/extractor/youtube/jsc/_builtin/{deno,node,quickjs,bun}.py",
+      "url": "https://github.com/yt-dlp/yt-dlp/tree/2026.08.19/yt_dlp/extractor/youtube/jsc/_builtin"
+    },
+    {
+      "fact": "Deno is the recommended runtime and is enabled by default; bun support is deprecated and versions after 1.3.14 are unsupported; quickjs-ng below 0.12.0 can take minutes per challenge.",
+      "title": "yt-dlp wiki - EJS: External JS Scripts Setup Guide",
+      "url": "https://github.com/yt-dlp/yt-dlp/wiki/EJS"
+    },
+    {
+      "fact": "Public JS Challenge Provider API and the -v jsc_trace debugging switch.",
+      "title": "yt-dlp 2026.08.19 - yt_dlp/extractor/youtube/jsc/README.md",
+      "url": "https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/extractor/youtube/jsc/README.md"
+    }
+  ]
+}

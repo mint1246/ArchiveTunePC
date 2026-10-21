@@ -12,4 +12,9 @@ dependencies {
     implementation(gradleApi())
     implementation(localGroovy())
     implementation("org.apache.xmlgraphics:batik-all:1.19")
+    testImplementation("junit:junit:4.13.2")
+}
+
+tasks.test {
+    jvmArgs("--add-opens=java.base/java.lang=ALL-UNNAMED")
 }

@@ -1,0 +1,2043 @@
+{
+  "schema": "archivetune.full-application-benchmark/1",
+  "measured_on": "2026-10-20",
+  "platform": {
+    "system": "Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu_count": 16,
+    "python": "3.14.8",
+    "xvfb_version": "21.1.25-2"
+  },
+  "quality": "HIGH",
+  "authentication": "anonymous; no account session and no sign-in flow was started",
+  "baseline_commit": "8e4bfb3140c81ea4b968a8f4ca4bf866603e0de3",
+  "candidate_commit": "87e4e1446f6b64a8cfa6fdf81ab292246d44a302",
+  "candidate_label": "interim",
+  "candidate_note": "Older candidate retained for comparison; superseded by dedcb8aa73108bd6389f386f094620ea1760f663. This run predates the detached/setsid and candidate-label reporting fields.",
+  "videos": [
+    "jNQXAC9IVRw",
+    "dQw4w9WgXcQ",
+    "aqz-KE-bpKQ"
+  ],
+  "repeats_per_video": 2,
+  "java": {
+    "home": "/usr/lib/jvm/java-21-openjdk",
+    "executable": "/usr/lib/jvm/java-21-openjdk/bin/java",
+    "version": "openjdk version \"21.0.12.1\" 2026-08-18"
+  },
+  "jvm_flags": [
+    "-Xms32m",
+    "-Xmx768m",
+    "-XX:ReservedCodeCacheSize=128m",
+    "-XX:ParallelGCThreads=4",
+    "-XX:ConcGCThreads=2",
+    "-XX:G1ConcRefinementThreads=4",
+    "-Dfile.encoding=UTF-8",
+    "-Dsun.java2d.dpiaware=true",
+    "-Djava.awt.headless=false"
+  ],
+  "sampling": {
+    "sample_interval_ms": 25,
+    "pss_interval_ms": 100,
+    "rss_method": "At each sample, sum RSS of every process in the application session/process group, its descendant closure and the persistent reparented-descendant registry. Report the maximum of those simultaneous totals.",
+    "pss_method": "At PSS samples, sum /proc/<pid>/smaps_rollup Pss for the same tracked set. Report the maximum sampled sum. PSS is unavailable for processes that exit during the read.",
+    "process_inclusion": "Application PID, PID session, PID process group, descendant closure, and a persistent (pid, starttime) registry for children that detach or are reparented. No full argv is read or stored.",
+    "not_a_sum_of_peaks": true,
+    "serialized": true
+  },
+  "method": {
+    "application": "real :desktopApp JVM, real Compose/AWT Window, real DesktopMusicServices",
+    "window": "waited for a visible/showing AWT Window, then 10 s settle before extraction",
+    "post_idle": "10 s after the last extraction before runtime.close()/exit",
+    "offscreen": "private Xvfb display, 1440x900x24, software Skia",
+    "isolation": "Each run uses a disposable ARCHIVETUNE_HOME, HOME, XDG dirs and TMPDIR; the user's profiles, cookies, settings and tokens are not read or written.",
+    "instrumentation": "Identical temporary Main.kt instrumentation in disposable detached checkouts; it is not committed and does not exist on either production branch.",
+    "resolver": "Baseline uses the original constructor path (legacy). Candidate keeps the production default (yt-dlp) and points ARCHIVETUNE_YTDLP/ARCHIVETUNE_QUICKJS at the verified official tools. All other app code and instrumentation are identical."
+  },
+  "instrumentation": {
+    "main_kt": "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/Main.kt",
+    "scope": "temporary hook in disposable detached checkouts only; never committed and never present in production source",
+    "baseline_sha256": "08f46a058eb4838ce80e027daca5ccf44ceb8b7e3e6007440377a31d88f9b61a",
+    "candidate_sha256": "08f46a058eb4838ce80e027daca5ccf44ceb8b7e3e6007440377a31d88f9b61a",
+    "identical": true
+  },
+  "baseline_build": {
+    "injection": "already-present",
+    "build_status": "built",
+    "build_log": "/tmp/opencode/archivetune-bench/final-run-87e/build-baseline.log",
+    "main_kt_sha256": "08f46a058eb4838ce80e027daca5ccf44ceb8b7e3e6007440377a31d88f9b61a"
+  },
+  "candidate_build": {
+    "injection": "already-present",
+    "build_status": "built",
+    "build_log": "/tmp/opencode/archivetune-bench/final-run-87e/build-candidate.log",
+    "main_kt_sha256": "08f46a058eb4838ce80e027daca5ccf44ceb8b7e3e6007440377a31d88f9b61a"
+  },
+  "application_comparison": [
+    {
+      "version": "baseline",
+      "backend": "legacy",
+      "commit": "8e4bfb3140c81ea4b968a8f4ca4bf866603e0de3",
+      "checkout": "/tmp/opencode/archivetune-bench/worktrees/baseline",
+      "main_kt_sha256": "08f46a058eb4838ce80e027daca5ccf44ceb8b7e3e6007440377a31d88f9b61a",
+      "classpath_entries": 136,
+      "run_dir": "/tmp/opencode/archivetune-bench/final-run-87e/runs/baseline",
+      "resolver": null,
+      "environment": {
+        "display": ":90",
+        "offscreen_xvfb": true,
+        "xvfb_screen": "1440x900x24",
+        "skiko_render_api": "SOFTWARE",
+        "home_override": "/tmp/opencode/archivetune-bench/final-run-87e/runs/baseline/home",
+        "archivetune_home_override": "/tmp/opencode/archivetune-bench/final-run-87e/runs/baseline/home",
+        "tmp_override": "/tmp/opencode/archivetune-bench/final-run-87e/runs/baseline/tmp",
+        "resolver_env_present": false
+      },
+      "launch_wall_ms": 1792532816536,
+      "exit_wall_ms": 1792532844072,
+      "duration_ms": 27536,
+      "app_exit_code": 0,
+      "harness_timeout": false,
+      "sampler_error": null,
+      "markers": [
+        {
+          "java_version": "21.0.12.1",
+          "wall_ms": 1792532817171,
+          "type": "benchmark-begin"
+        },
+        {
+          "visible": true,
+          "window_count": 1,
+          "wall_ms": 1792532818184,
+          "type": "window-visible"
+        },
+        {
+          "wall_ms": 1792532828185,
+          "type": "idle-settled"
+        },
+        {
+          "repeats": 2,
+          "videos": 3,
+          "wall_ms": 1792532828185,
+          "type": "extraction-begin"
+        },
+        {
+          "elapsed_ms": 1151,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 0,
+          "wall_ms": 1792532829337,
+          "type": "resolve",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 773,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 1,
+          "wall_ms": 1792532830110,
+          "type": "resolve",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 867,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 0,
+          "wall_ms": 1792532830978,
+          "type": "resolve",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 1081,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 1,
+          "wall_ms": 1792532832059,
+          "type": "resolve",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 782,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 0,
+          "wall_ms": 1792532832842,
+          "type": "resolve",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "elapsed_ms": 855,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 1,
+          "wall_ms": 1792532833698,
+          "type": "resolve",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "successes": 0,
+          "wall_ms": 1792532833698,
+          "type": "extraction-end",
+          "attempts": 6
+        },
+        {
+          "successes": 0,
+          "wall_ms": 1792532843698,
+          "type": "benchmark-complete",
+          "attempts": 6
+        },
+        {
+          "wall_ms": 1792532843698,
+          "type": "shutdown-begin"
+        },
+        {
+          "wall_ms": 1792532843703,
+          "type": "shutdown-complete"
+        }
+      ],
+      "phase_windows": {
+        "startup": [
+          1792532816536,
+          1792532818184
+        ],
+        "idle": [
+          1792532820184,
+          1792532828185
+        ],
+        "extraction": [
+          1792532828185,
+          1792532833698
+        ],
+        "post_idle": [
+          1792532835698,
+          1792532843698
+        ],
+        "shutdown": [
+          1792532843698,
+          1792532843703
+        ]
+      },
+      "phases": {
+        "startup": {
+          "start_wall_ms": 1792532816536,
+          "end_wall_ms": 1792532818184,
+          "duration_ms": 1648,
+          "samples": 66,
+          "rss_mib": {
+            "samples": 66,
+            "min": 38.71,
+            "median": 206.38,
+            "p95": 306.71,
+            "max": 307.09
+          },
+          "pss_mib": {
+            "samples": 17,
+            "min": 24.15,
+            "median": 176.29,
+            "p95": 280.34,
+            "max": 283.34
+          },
+          "app_rss_mib": {
+            "samples": 66,
+            "min": 38.71,
+            "median": 206.38,
+            "p95": 306.71,
+            "max": 307.09
+          },
+          "children_rss_mib": {
+            "samples": 66,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 66,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 66,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 66,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 66,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 66,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 307.09,
+              "median_rss_mib": 206.38,
+              "max_pss_mib": 283.34
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532818037,
+            "rss_mib": 307.09,
+            "pss_mib": 283.34,
+            "app_rss_mib": 307.09,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 307.09,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 307.09,
+                "pss_mib": 283.34,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532818037,
+            "rss_mib": 307.09,
+            "pss_mib": 283.34,
+            "app_rss_mib": 307.09,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 307.09,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 307.09,
+                "pss_mib": 283.34,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "idle": {
+          "start_wall_ms": 1792532820184,
+          "end_wall_ms": 1792532828185,
+          "duration_ms": 8001,
+          "samples": 320,
+          "rss_mib": {
+            "samples": 320,
+            "min": 306.84,
+            "median": 306.96,
+            "p95": 306.96,
+            "max": 306.96
+          },
+          "pss_mib": {
+            "samples": 80,
+            "min": 280.56,
+            "median": 280.72,
+            "p95": 280.75,
+            "max": 280.76
+          },
+          "app_rss_mib": {
+            "samples": 320,
+            "min": 306.84,
+            "median": 306.96,
+            "p95": 306.96,
+            "max": 306.96
+          },
+          "children_rss_mib": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 306.96,
+              "median_rss_mib": 306.96,
+              "max_pss_mib": 280.76
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532823662,
+            "rss_mib": 306.96,
+            "pss_mib": null,
+            "app_rss_mib": 306.96,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 306.96,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 306.96,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532827837,
+            "rss_mib": 306.96,
+            "pss_mib": 280.76,
+            "app_rss_mib": 306.96,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 306.96,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 306.96,
+                "pss_mib": 280.76,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "extraction": {
+          "start_wall_ms": 1792532828185,
+          "end_wall_ms": 1792532833698,
+          "duration_ms": 5513,
+          "samples": 221,
+          "rss_mib": {
+            "samples": 221,
+            "min": 307.34,
+            "median": 313.59,
+            "p95": 315.34,
+            "max": 316.21
+          },
+          "pss_mib": {
+            "samples": 55,
+            "min": 280.92,
+            "median": 287.29,
+            "p95": 288.7,
+            "max": 289.89
+          },
+          "app_rss_mib": {
+            "samples": 221,
+            "min": 307.34,
+            "median": 313.59,
+            "p95": 315.34,
+            "max": 316.21
+          },
+          "children_rss_mib": {
+            "samples": 221,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 221,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 221,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 221,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 221,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 221,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1,
+              "max_rss_mib": 316.21,
+              "median_rss_mib": 313.59,
+              "max_pss_mib": 289.89
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532833487,
+            "rss_mib": 316.21,
+            "pss_mib": null,
+            "app_rss_mib": 316.21,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 316.21,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 316.21,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532833637,
+            "rss_mib": 316.21,
+            "pss_mib": 289.89,
+            "app_rss_mib": 316.21,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 316.21,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 316.21,
+                "pss_mib": 289.89,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "post_idle": {
+          "start_wall_ms": 1792532835698,
+          "end_wall_ms": 1792532843698,
+          "duration_ms": 8000,
+          "samples": 320,
+          "rss_mib": {
+            "samples": 320,
+            "min": 316.21,
+            "median": 316.21,
+            "p95": 316.21,
+            "max": 316.21
+          },
+          "pss_mib": {
+            "samples": 80,
+            "min": 289.9,
+            "median": 289.93,
+            "p95": 289.93,
+            "max": 289.93
+          },
+          "app_rss_mib": {
+            "samples": 320,
+            "min": 316.21,
+            "median": 316.21,
+            "p95": 316.21,
+            "max": 316.21
+          },
+          "children_rss_mib": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 316.21,
+              "median_rss_mib": 316.21,
+              "max_pss_mib": 289.93
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532835712,
+            "rss_mib": 316.21,
+            "pss_mib": null,
+            "app_rss_mib": 316.21,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 316.21,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 316.21,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532841137,
+            "rss_mib": 316.21,
+            "pss_mib": 289.93,
+            "app_rss_mib": 316.21,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 316.21,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108754,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 316.21,
+                "pss_mib": 289.93,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "shutdown": null
+      },
+      "resolver_records": [
+        {
+          "elapsed_ms": 1151,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 0,
+          "wall_ms": 1792532829337,
+          "type": "resolve",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 773,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 1,
+          "wall_ms": 1792532830110,
+          "type": "resolve",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 867,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 0,
+          "wall_ms": 1792532830978,
+          "type": "resolve",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 1081,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 1,
+          "wall_ms": 1792532832059,
+          "type": "resolve",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 782,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 0,
+          "wall_ms": 1792532832842,
+          "type": "resolve",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "elapsed_ms": 855,
+          "success": false,
+          "failure": "StreamResolutionException",
+          "iteration": 1,
+          "wall_ms": 1792532833698,
+          "type": "resolve",
+          "video_id": "aqz-KE-bpKQ"
+        }
+      ],
+      "resolution": {
+        "attempts": 6,
+        "successes": 0,
+        "failures": 6,
+        "min_ms": 773,
+        "median_ms": 861.0,
+        "max_ms": 1151
+      },
+      "process_inventory": {
+        "all_process_names": [
+          "java"
+        ],
+        "categories": {
+          "jvm": {
+            "names": [
+              "java"
+            ],
+            "max_observed_rss_mib": 316.71,
+            "max_observed_pss_mib": 290.12
+          }
+        },
+        "max_simultaneous_process_count": 1,
+        "reparented_process_names": [],
+        "browser_processes_observed": [],
+        "python_processes_observed": [],
+        "quickjs_processes_observed": [],
+        "ytdlp_processes_observed": []
+      },
+      "sampling": {
+        "sample_interval_ms": 25,
+        "pss_interval_ms": 100,
+        "samples": 1176,
+        "rss_method": "maximum sampled sum of simultaneous process-tree RSS",
+        "pss_method": "sum of per-process PSS at the same sampled instant; skipped when smaps_rollup is unavailable",
+        "inclusion": "application PID, PID session, PID process group, descendant closure, and a persistent (pid, starttime) registry for reparented/detached descendants",
+        "argv_collected": false
+      },
+      "cleanup": {
+        "samples": [
+          {
+            "index": 0,
+            "wall_ms": 1792532844074,
+            "process_count": 0,
+            "rss_mib": 0.0,
+            "process_names": []
+          },
+          {
+            "index": 1,
+            "wall_ms": 1792532844337,
+            "process_count": 0,
+            "rss_mib": 0.0,
+            "process_names": []
+          },
+          {
+            "index": 2,
+            "wall_ms": 1792532845349,
+            "process_count": 0,
+            "rss_mib": 0.0,
+            "process_names": []
+          }
+        ],
+        "killpg_sent": false,
+        "xvfb_exit_code": 0
+      },
+      "log_evidence": {
+        "app_log_bytes": 5105,
+        "libvlc_prewarm_failed": true,
+        "vlc_runtime_not_found": true,
+        "playback_engine_available": false,
+        "anonymous_home_request_failed": true,
+        "anonymous_library_playlists_request_failed": true,
+        "anonymous_podcast_library_request_failed": true,
+        "anonymous_request_400": true,
+        "out_of_memory_error": false,
+        "severe_log_entries": 0,
+        "uncaught_exception": false
+      },
+      "system_before": {
+        "mem_total_mib": 31999.16,
+        "mem_available_mib": 17240.32,
+        "mem_free_mib": 5740.29,
+        "swap_total_mib": 64766.99,
+        "swap_free_mib": 64157.2,
+        "loadavg": [
+          1.6337890625,
+          2.11181640625,
+          1.78369140625
+        ]
+      },
+      "system_after": {
+        "mem_total_mib": 31999.16,
+        "mem_available_mib": 17295.0,
+        "mem_free_mib": 5793.63,
+        "swap_total_mib": 64766.99,
+        "swap_free_mib": 64157.23,
+        "loadavg": [
+          1.12060546875,
+          1.94091796875,
+          1.73583984375
+        ]
+      }
+    },
+    {
+      "version": "candidate",
+      "backend": "ytdlp",
+      "commit": "87e4e1446f6b64a8cfa6fdf81ab292246d44a302",
+      "checkout": "/tmp/opencode/archivetune-bench/worktrees/candidate",
+      "main_kt_sha256": "08f46a058eb4838ce80e027daca5ccf44ceb8b7e3e6007440377a31d88f9b61a",
+      "classpath_entries": 136,
+      "run_dir": "/tmp/opencode/archivetune-bench/final-run-87e/runs/candidate",
+      "resolver": {
+        "yt_dlp_path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/yt-dlp",
+        "yt_dlp_version": "2026.08.19",
+        "quickjs_path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-e22b0ea4/.tools/resolver/qjs",
+        "quickjs_version": "0.17.0",
+        "selection": "ARCHIVETUNE_YTDLP / ARCHIVETUNE_QUICKJS environment variables"
+      },
+      "environment": {
+        "display": ":90",
+        "offscreen_xvfb": true,
+        "xvfb_screen": "1440x900x24",
+        "skiko_render_api": "SOFTWARE",
+        "home_override": "/tmp/opencode/archivetune-bench/final-run-87e/runs/candidate/home",
+        "archivetune_home_override": "/tmp/opencode/archivetune-bench/final-run-87e/runs/candidate/home",
+        "tmp_override": "/tmp/opencode/archivetune-bench/final-run-87e/runs/candidate/tmp",
+        "resolver_env_present": true
+      },
+      "launch_wall_ms": 1792532845919,
+      "exit_wall_ms": 1792532891846,
+      "duration_ms": 45927,
+      "app_exit_code": 0,
+      "harness_timeout": false,
+      "sampler_error": null,
+      "markers": [
+        {
+          "java_version": "21.0.12.1",
+          "wall_ms": 1792532846536,
+          "type": "benchmark-begin"
+        },
+        {
+          "visible": true,
+          "window_count": 1,
+          "wall_ms": 1792532847550,
+          "type": "window-visible"
+        },
+        {
+          "wall_ms": 1792532857551,
+          "type": "idle-settled"
+        },
+        {
+          "repeats": 2,
+          "videos": 3,
+          "wall_ms": 1792532857551,
+          "type": "extraction-begin"
+        },
+        {
+          "elapsed_ms": 2924,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 0,
+          "bitrate": 106064,
+          "wall_ms": 1792532860475,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 1959,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 1,
+          "bitrate": 106064,
+          "wall_ms": 1792532862435,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 7461,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21593,
+          "iteration": 0,
+          "bitrate": 128930,
+          "wall_ms": 1792532869897,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 7410,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21593,
+          "iteration": 1,
+          "bitrate": 128930,
+          "wall_ms": 1792532877307,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 2163,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 0,
+          "bitrate": 128612,
+          "wall_ms": 1792532879471,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "elapsed_ms": 2021,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 1,
+          "bitrate": 128612,
+          "wall_ms": 1792532881492,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "successes": 6,
+          "wall_ms": 1792532881493,
+          "type": "extraction-end",
+          "attempts": 6
+        },
+        {
+          "successes": 6,
+          "wall_ms": 1792532891493,
+          "type": "benchmark-complete",
+          "attempts": 6
+        },
+        {
+          "wall_ms": 1792532891493,
+          "type": "shutdown-begin"
+        },
+        {
+          "wall_ms": 1792532891498,
+          "type": "shutdown-complete"
+        }
+      ],
+      "phase_windows": {
+        "startup": [
+          1792532845919,
+          1792532847550
+        ],
+        "idle": [
+          1792532849550,
+          1792532857551
+        ],
+        "extraction": [
+          1792532857551,
+          1792532881493
+        ],
+        "post_idle": [
+          1792532883493,
+          1792532891493
+        ],
+        "shutdown": [
+          1792532891493,
+          1792532891498
+        ]
+      },
+      "phases": {
+        "startup": {
+          "start_wall_ms": 1792532845919,
+          "end_wall_ms": 1792532847550,
+          "duration_ms": 1631,
+          "samples": 66,
+          "rss_mib": {
+            "samples": 66,
+            "min": 38.77,
+            "median": 217.16,
+            "p95": 312.02,
+            "max": 313.7
+          },
+          "pss_mib": {
+            "samples": 17,
+            "min": 24.13,
+            "median": 193.24,
+            "p95": 285.77,
+            "max": 286.13
+          },
+          "app_rss_mib": {
+            "samples": 66,
+            "min": 38.77,
+            "median": 217.16,
+            "p95": 312.02,
+            "max": 313.7
+          },
+          "children_rss_mib": {
+            "samples": 66,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 66,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 66,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 66,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 66,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 66,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 313.7,
+              "median_rss_mib": 217.16,
+              "max_pss_mib": 286.13
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532847395,
+            "rss_mib": 313.7,
+            "pss_mib": null,
+            "app_rss_mib": 313.7,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 313.7,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 313.7,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532847420,
+            "rss_mib": 310.29,
+            "pss_mib": 286.13,
+            "app_rss_mib": 310.29,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 310.29,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 310.29,
+                "pss_mib": 286.13,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "idle": {
+          "start_wall_ms": 1792532849550,
+          "end_wall_ms": 1792532857551,
+          "duration_ms": 8001,
+          "samples": 320,
+          "rss_mib": {
+            "samples": 320,
+            "min": 304.55,
+            "median": 304.68,
+            "p95": 312.27,
+            "max": 312.27
+          },
+          "pss_mib": {
+            "samples": 80,
+            "min": 278.17,
+            "median": 278.34,
+            "p95": 285.99,
+            "max": 285.99
+          },
+          "app_rss_mib": {
+            "samples": 320,
+            "min": 304.55,
+            "median": 304.68,
+            "p95": 312.27,
+            "max": 312.27
+          },
+          "children_rss_mib": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 312.27,
+              "median_rss_mib": 304.68,
+              "max_pss_mib": 285.99
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532849570,
+            "rss_mib": 312.27,
+            "pss_mib": null,
+            "app_rss_mib": 312.27,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 312.27,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 312.27,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532850520,
+            "rss_mib": 312.27,
+            "pss_mib": 285.99,
+            "app_rss_mib": 312.27,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 312.27,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 312.27,
+                "pss_mib": 285.99,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "extraction": {
+          "start_wall_ms": 1792532857551,
+          "end_wall_ms": 1792532881493,
+          "duration_ms": 23942,
+          "samples": 957,
+          "rss_mib": {
+            "samples": 957,
+            "min": 305.18,
+            "median": 395.68,
+            "p95": 640.93,
+            "max": 664.3
+          },
+          "pss_mib": {
+            "samples": 239,
+            "min": 279.11,
+            "median": 363.56,
+            "p95": 600.86,
+            "max": 612.06
+          },
+          "app_rss_mib": {
+            "samples": 957,
+            "min": 305.05,
+            "median": 307.18,
+            "p95": 310.55,
+            "max": 310.55
+          },
+          "children_rss_mib": {
+            "samples": 957,
+            "min": 0.0,
+            "median": 85.61,
+            "p95": 333.21,
+            "max": 357.12
+          },
+          "process_count": {
+            "samples": 957,
+            "min": 1.0,
+            "median": 3.0,
+            "p95": 4.0,
+            "max": 4.0
+          },
+          "session_process_count": {
+            "samples": 957,
+            "min": 1.0,
+            "median": 3.0,
+            "p95": 4.0,
+            "max": 4.0
+          },
+          "process_group_count": {
+            "samples": 957,
+            "min": 1.0,
+            "median": 3.0,
+            "p95": 4.0,
+            "max": 4.0
+          },
+          "registry_count": {
+            "samples": 957,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 957,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1,
+              "max_rss_mib": 310.55,
+              "median_rss_mib": 307.18,
+              "max_pss_mib": 284.26
+            },
+            "media": {
+              "process_names": [
+                "ffmpeg",
+                "ffprobe"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 38.38,
+              "median_rss_mib": 26.11,
+              "max_pss_mib": 7.17
+            },
+            "quickjs": {
+              "process_names": [
+                "qjs"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 253.07,
+              "median_rss_mib": 157.66,
+              "max_pss_mib": 231.07
+            },
+            "yt_dlp": {
+              "process_names": [
+                "yt-dlp"
+              ],
+              "max_process_count": 2,
+              "median_process_count": 2,
+              "max_rss_mib": 116.59,
+              "median_rss_mib": 85.61,
+              "max_pss_mib": 112.23
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532869595,
+            "rss_mib": 664.3,
+            "pss_mib": null,
+            "app_rss_mib": 307.18,
+            "children_rss_mib": 357.12,
+            "process_count": 4,
+            "sum_process_rss_mib": 664.3,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 307.18,
+                "pss_mib": null,
+                "is_app": true
+              },
+              {
+                "pid": 109001,
+                "name": "qjs",
+                "category": "quickjs",
+                "rss_mib": 253.07,
+                "pss_mib": null,
+                "is_app": false
+              },
+              {
+                "pid": 108993,
+                "name": "yt-dlp",
+                "category": "yt_dlp",
+                "rss_mib": 101.64,
+                "pss_mib": null,
+                "is_app": false
+              },
+              {
+                "pid": 108991,
+                "name": "yt-dlp",
+                "category": "yt_dlp",
+                "rss_mib": 2.41,
+                "pss_mib": null,
+                "is_app": false
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532876820,
+            "rss_mib": 643.7,
+            "pss_mib": 612.06,
+            "app_rss_mib": 309.3,
+            "children_rss_mib": 334.4,
+            "process_count": 4,
+            "sum_process_rss_mib": 643.7,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 309.3,
+                "pss_mib": 283.08,
+                "is_app": true
+              },
+              {
+                "pid": 109017,
+                "name": "qjs",
+                "category": "quickjs",
+                "rss_mib": 230.87,
+                "pss_mib": 231.05,
+                "is_app": false
+              },
+              {
+                "pid": 109012,
+                "name": "yt-dlp",
+                "category": "yt_dlp",
+                "rss_mib": 101.16,
+                "pss_mib": 97.64,
+                "is_app": false
+              },
+              {
+                "pid": 109011,
+                "name": "yt-dlp",
+                "category": "yt_dlp",
+                "rss_mib": 2.38,
+                "pss_mib": 0.3,
+                "is_app": false
+              }
+            ]
+          }
+        },
+        "post_idle": {
+          "start_wall_ms": 1792532883493,
+          "end_wall_ms": 1792532891493,
+          "duration_ms": 8000,
+          "samples": 320,
+          "rss_mib": {
+            "samples": 320,
+            "min": 310.55,
+            "median": 310.55,
+            "p95": 310.55,
+            "max": 310.55
+          },
+          "pss_mib": {
+            "samples": 80,
+            "min": 284.32,
+            "median": 284.32,
+            "p95": 284.32,
+            "max": 284.32
+          },
+          "app_rss_mib": {
+            "samples": 320,
+            "min": 310.55,
+            "median": 310.55,
+            "p95": 310.55,
+            "max": 310.55
+          },
+          "children_rss_mib": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 320,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 320,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1.0,
+              "max_rss_mib": 310.55,
+              "median_rss_mib": 310.55,
+              "max_pss_mib": 284.32
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532883495,
+            "rss_mib": 310.55,
+            "pss_mib": null,
+            "app_rss_mib": 310.55,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 310.55,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 310.55,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": {
+            "wall_ms": 1792532883520,
+            "rss_mib": 310.55,
+            "pss_mib": 284.32,
+            "app_rss_mib": 310.55,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 310.55,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 310.55,
+                "pss_mib": 284.32,
+                "is_app": true
+              }
+            ]
+          }
+        },
+        "shutdown": {
+          "start_wall_ms": 1792532891493,
+          "end_wall_ms": 1792532891498,
+          "duration_ms": 5,
+          "samples": 1,
+          "rss_mib": {
+            "samples": 1,
+            "min": 311.55,
+            "median": 311.55,
+            "p95": 311.55,
+            "max": 311.55
+          },
+          "pss_mib": {
+            "samples": 0,
+            "min": null,
+            "median": null,
+            "p95": null,
+            "max": null
+          },
+          "app_rss_mib": {
+            "samples": 1,
+            "min": 311.55,
+            "median": 311.55,
+            "p95": 311.55,
+            "max": 311.55
+          },
+          "children_rss_mib": {
+            "samples": 1,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "process_count": {
+            "samples": 1,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "session_process_count": {
+            "samples": 1,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "process_group_count": {
+            "samples": 1,
+            "min": 1.0,
+            "median": 1.0,
+            "p95": 1.0,
+            "max": 1.0
+          },
+          "registry_count": {
+            "samples": 1,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "reparented_count": {
+            "samples": 1,
+            "min": 0.0,
+            "median": 0.0,
+            "p95": 0.0,
+            "max": 0.0
+          },
+          "category": {
+            "jvm": {
+              "process_names": [
+                "java"
+              ],
+              "max_process_count": 1,
+              "median_process_count": 1,
+              "max_rss_mib": 311.55,
+              "median_rss_mib": 311.55,
+              "max_pss_mib": null
+            }
+          },
+          "peak_simultaneous_sample": {
+            "wall_ms": 1792532891495,
+            "rss_mib": 311.55,
+            "pss_mib": null,
+            "app_rss_mib": 311.55,
+            "children_rss_mib": 0.0,
+            "process_count": 1,
+            "sum_process_rss_mib": 311.55,
+            "cgroup_paths": [
+              "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-t3code.slice/app-t3code-agents.slice/app-t3code-agents-799e3f282963.slice/t3code-opencode-d065086d.scope"
+            ],
+            "processes": [
+              {
+                "pid": 108897,
+                "name": "java",
+                "category": "jvm",
+                "rss_mib": 311.55,
+                "pss_mib": null,
+                "is_app": true
+              }
+            ]
+          },
+          "peak_simultaneous_pss_sample": null
+        }
+      },
+      "resolver_records": [
+        {
+          "elapsed_ms": 2924,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 0,
+          "bitrate": 106064,
+          "wall_ms": 1792532860475,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 1959,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 1,
+          "bitrate": 106064,
+          "wall_ms": 1792532862435,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "elapsed_ms": 7461,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21593,
+          "iteration": 0,
+          "bitrate": 128930,
+          "wall_ms": 1792532869897,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 7410,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21593,
+          "iteration": 1,
+          "bitrate": 128930,
+          "wall_ms": 1792532877307,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "elapsed_ms": 2163,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 0,
+          "bitrate": 128612,
+          "wall_ms": 1792532879471,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "elapsed_ms": 2021,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 1,
+          "bitrate": 128612,
+          "wall_ms": 1792532881492,
+          "type": "resolve",
+          "client_version": "2026.08.19",
+          "client_name": "YT_DLP",
+          "video_id": "aqz-KE-bpKQ"
+        }
+      ],
+      "resolution": {
+        "attempts": 6,
+        "successes": 6,
+        "failures": 0,
+        "min_ms": 1959,
+        "median_ms": 2543.5,
+        "max_ms": 7461
+      },
+      "process_inventory": {
+        "all_process_names": [
+          "ffmpeg",
+          "ffprobe",
+          "java",
+          "qjs",
+          "yt-dlp"
+        ],
+        "categories": {
+          "jvm": {
+            "names": [
+              "java"
+            ],
+            "max_observed_rss_mib": 313.7,
+            "max_observed_pss_mib": 286.13
+          },
+          "media": {
+            "names": [
+              "ffmpeg",
+              "ffprobe"
+            ],
+            "max_observed_rss_mib": 38.38,
+            "max_observed_pss_mib": 7.17
+          },
+          "quickjs": {
+            "names": [
+              "qjs"
+            ],
+            "max_observed_rss_mib": 253.07,
+            "max_observed_pss_mib": 231.07
+          },
+          "yt_dlp": {
+            "names": [
+              "yt-dlp"
+            ],
+            "max_observed_rss_mib": 114.18,
+            "max_observed_pss_mib": 111.93
+          }
+        },
+        "max_simultaneous_process_count": 4,
+        "reparented_process_names": [],
+        "browser_processes_observed": [],
+        "python_processes_observed": [],
+        "quickjs_processes_observed": [
+          "qjs"
+        ],
+        "ytdlp_processes_observed": [
+          "yt-dlp"
+        ]
+      },
+      "sampling": {
+        "sample_interval_ms": 25,
+        "pss_interval_ms": 100,
+        "samples": 1913,
+        "rss_method": "maximum sampled sum of simultaneous process-tree RSS",
+        "pss_method": "sum of per-process PSS at the same sampled instant; skipped when smaps_rollup is unavailable",
+        "inclusion": "application PID, PID session, PID process group, descendant closure, and a persistent (pid, starttime) registry for reparented/detached descendants",
+        "argv_collected": false
+      },
+      "cleanup": {
+        "samples": [
+          {
+            "index": 0,
+            "wall_ms": 1792532891857,
+            "process_count": 0,
+            "rss_mib": 0.0,
+            "process_names": []
+          },
+          {
+            "index": 1,
+            "wall_ms": 1792532892132,
+            "process_count": 0,
+            "rss_mib": 0.0,
+            "process_names": []
+          },
+          {
+            "index": 2,
+            "wall_ms": 1792532893144,
+            "process_count": 0,
+            "rss_mib": 0.0,
+            "process_names": []
+          }
+        ],
+        "killpg_sent": false,
+        "xvfb_exit_code": 0
+      },
+      "log_evidence": {
+        "app_log_bytes": 5738,
+        "libvlc_prewarm_failed": true,
+        "vlc_runtime_not_found": true,
+        "playback_engine_available": false,
+        "anonymous_home_request_failed": true,
+        "anonymous_library_playlists_request_failed": true,
+        "anonymous_podcast_library_request_failed": true,
+        "anonymous_request_400": true,
+        "out_of_memory_error": false,
+        "severe_log_entries": 0,
+        "uncaught_exception": false
+      },
+      "system_before": {
+        "mem_total_mib": 31999.16,
+        "mem_available_mib": 17274.74,
+        "mem_free_mib": 5773.38,
+        "swap_total_mib": 64766.99,
+        "swap_free_mib": 64157.25,
+        "loadavg": [
+          1.12060546875,
+          1.94091796875,
+          1.73583984375
+        ]
+      },
+      "system_after": {
+        "mem_total_mib": 31999.16,
+        "mem_available_mib": 17318.3,
+        "mem_free_mib": 5713.44,
+        "swap_total_mib": 64766.99,
+        "swap_free_mib": 64157.84,
+        "loadavg": [
+          0.755859375,
+          1.716796875,
+          1.669921875
+        ]
+      }
+    }
+  ],
+  "comparison": {
+    "rss_mib": {
+      "baseline_idle_max": 306.96,
+      "candidate_idle_max": 312.27,
+      "idle_delta": 5.31,
+      "baseline_idle_pss_max": 280.76,
+      "candidate_idle_pss_max": 285.99,
+      "baseline_extraction_peak": 316.21,
+      "candidate_extraction_peak": 664.3,
+      "extraction_peak_delta": 348.09,
+      "baseline_extraction_peak_pss": 289.89,
+      "candidate_extraction_peak_pss": 612.06,
+      "baseline_post_idle_max": 316.21,
+      "candidate_post_idle_max": 310.55,
+      "post_idle_delta": -5.66
+    },
+    "resolution": {
+      "baseline_successes": 0,
+      "baseline_attempts": 6,
+      "candidate_successes": 6,
+      "candidate_attempts": 6,
+      "baseline_latency_median_ms": 861.0,
+      "candidate_latency_median_ms": 2543.5,
+      "baseline_latency_max_ms": 1151,
+      "candidate_latency_max_ms": 7461
+    },
+    "processes": {
+      "baseline_max_process_count": 1,
+      "candidate_max_process_count": 4,
+      "baseline_all_process_names": [
+        "java"
+      ],
+      "candidate_all_process_names": [
+        "ffmpeg",
+        "ffprobe",
+        "java",
+        "qjs",
+        "yt-dlp"
+      ],
+      "baseline_browser_processes": [],
+      "candidate_browser_processes": [],
+      "baseline_quickjs_processes": [],
+      "candidate_quickjs_processes": [
+        "qjs"
+      ],
+      "baseline_python_processes": [],
+      "candidate_python_processes": [],
+      "baseline_media_processes": [],
+      "candidate_media_processes": [
+        "ffmpeg",
+        "ffprobe"
+      ]
+    }
+  },
+  "observations": [
+    "Baseline 8e4bfb3140c8 (legacy resolver) resolved 0/6 requests; candidate 87e4e1446f6b (yt-dlp default) resolved 6/6.",
+    "Whole-application idle max RSS: baseline 306.96 MiB, candidate 312.27 MiB (candidate delta 5.31 MiB).",
+    "Whole-application extraction-phase peak of simultaneous total RSS: baseline 316.21 MiB, candidate 664.3 MiB (candidate delta 348.09 MiB). This is a measured process-tree total at one instant, not a sum of per-process maxima.",
+    "Candidate post-extraction idle max RSS: 310.55 MiB; baseline post-extraction idle max RSS: 316.21 MiB.",
+    "Observed resolver helper processes: yt-dlp ['yt-dlp'], QuickJS ['qjs'], separately named Python executables [], browser [], media helpers ['ffmpeg', 'ffprobe']. Anonymous startup did not open a sign-in browser; auth-specific browser RAM is unmeasured. The yt-dlp category includes its embedded CPython worker.",
+    "Transient media helpers observed during candidate extraction: ['ffmpeg', 'ffprobe']. Their RSS is included in the simultaneous process-tree totals; short-lived ffprobe/ffmpeg processes can be missed by the PSS sampling pass.",
+    "The baseline legacy path failed every request in this whole-app run, so the peak extraction number for baseline reflects failed legacy attempts with no resolver child processes. The candidate peak includes the transient yt-dlp/QuickJS processes and is the relevant whole-application worst case.",
+    "The production Windows-only VLC locator did not find the installed system libVLC, so the app's playback engine could not be initialized. The measurement covers the real UI, services, home loads and stream resolution, but not audio playback."
+  ],
+  "limitations": [
+    "One run per version, three public video IDs and two sequential repeats each; this is a small sample.",
+    "The Linux playback controller locator is Windows-only. libVLC was not initialized, so audio playback was not exercised.",
+    "Anonymous startup produced a visible window and loaded services/home, but this environment's anonymous home/library requests returned HTTP 400; the UI idle footprint is still real, while server-content-dependent memory may differ from a signed-in session.",
+    "No sign-in flow was triggered, so browser/WebView memory for authentication is unmeasured; anonymous runs observed no browser processes.",
+    "PSS sums are sampled estimates and can miss processes that exit between /proc reads, especially short-lived ffmpeg/ffprobe helpers; RSS is the primary reported number.",
+    "The host is shared with the user's desktop applications. Those processes are outside the tracked session and were not counted, but they can affect system scheduling and page-cache pressure.",
+    "The benchmark is offscreen with software Skia; GPU-backed rendering may differ."
+  ],
+  "repo_root": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-0d82699e",
+  "candidate_ref": "feature/ytdlp-resolver",
+  "candidate_commit_source": "87e4e1446",
+  "baseline_commit_source": "8e4bfb314"
+}

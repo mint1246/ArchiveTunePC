@@ -129,6 +129,51 @@ val stageNativeAudioAnalysis = tasks.register<Copy>("stageNativeAudioAnalysis") 
     mustRunAfter("packageGraalvmNative")
 }
 
+/*
+ * Experimental desktop resolver sidecars for the GraalVM native distribution.
+ * The runtime probes `<executable parent>/resolver` (and `../resolver`), so the
+ * sidecars are staged as a sibling directory of the native executable and then
+ * carried into the staged release directory beside it.
+ */
+val resolverPlatformId = ResolverSidecars.resolvePlatform(
+    providers.gradleProperty("archivetune.resolverPlatform").orNull,
+)
+val resolverNoticesFile = rootProject.layout.projectDirectory.file("packaging/resolver/THIRD_PARTY_NOTICES.md")
+val resolverLicensesDir = rootProject.layout.projectDirectory.dir("packaging/resolver/LICENSES")
+
+val stageNativeResolverSidecars = tasks.register<StageResolverSidecarsTask>("stageNativeResolverSidecars") {
+    group = "distribution"
+    description = "Stages the checksum-verified yt-dlp and Bun sidecars beside the native executable."
+    platformId.set(resolverPlatformId ?: "unsupported")
+    ytDlpVersion.set(ResolverSidecars.YT_DLP_VERSION)
+    bunVersion.set(ResolverSidecars.BUN_VERSION)
+    bundledEjsVersion.set(ResolverSidecars.YT_DLP_BUNDLED_EJS_VERSION)
+    thirdPartyNotices.set(resolverNoticesFile)
+    licensesDirectory.set(resolverLicensesDir)
+    destinationDirectory.set(nativeOutputDir.map { it.dir("resolver") })
+    if (resolverPlatformId == null) {
+        ytDlpUrl.set("")
+        ytDlpSha256.set("")
+        bunUrl.set("")
+        bunSha256.set("")
+        bunBinarySha256.set("")
+        unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
+    } else {
+        val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
+        val bun = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.BUN)
+        ytDlpUrl.set(ytDlp.url)
+        ytDlpSha256.set(ytDlp.sha256)
+        bunUrl.set(bun.url)
+        bunSha256.set(bun.sha256)
+        bunBinarySha256.set(bun.binarySha256)
+        dependsOn(desktopAppProject.tasks.named(ResolverSidecars.downloadTaskName(ytDlp)))
+        dependsOn(desktopAppProject.tasks.named(ResolverSidecars.extractTaskName(bun)))
+        ytDlpBinary.set(desktopAppProject.layout.buildDirectory.file(ResolverSidecars.downloadPath(ytDlp)))
+        bunBinary.set(desktopAppProject.layout.buildDirectory.file(ResolverSidecars.extractedBinaryPath(bun)))
+    }
+    mustRunAfter("packageGraalvmNative")
+}
+
 val buildStemWorker = tasks.register<Exec>("buildStemWorker") {
     group = "distribution"
     description = "Builds ArchiveTune's native DirectML model-inference sidecar."
@@ -201,17 +246,37 @@ val stageNativeStemRuntime = tasks.register<Copy>("stageNativeStemRuntime") {
 }
 
 tasks.matching { it.name == "packageGraalvmNative" }.configureEach {
-    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis)
+    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis, stageNativeResolverSidecars)
 }
 
 val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     group = "distribution"
     description = "Stages the production GraalVM distribution under desktopApp/build/compose/binaries/main-native."
-    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis)
+    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis, stageNativeResolverSidecars)
     from(nativeOutputDir) {
         exclude("native/windows-x64/vlc/**")
     }
     into(nativeReleaseDir)
+}
+
+val verifyNativeResolverSidecars = tasks.register<VerifyResolverSidecarsTask>("verifyNativeResolverSidecars") {
+    group = "verification"
+    description = "Verifies the yt-dlp and Bun sidecars carried into the native release directory."
+    dependsOn(stageNativeDistribution)
+    sidecarDirectory.set(nativeReleaseDir.map { it.dir("resolver") })
+    platformId.set(resolverPlatformId ?: "unsupported")
+    if (resolverPlatformId == null) {
+        ytDlpSha256.set("")
+        bunSha256.set("")
+        bunBinarySha256.set("")
+        unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
+    } else {
+        val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
+        val bun = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.BUN)
+        ytDlpSha256.set(ytDlp.sha256)
+        bunSha256.set(bun.sha256)
+        bunBinarySha256.set(bun.binarySha256)
+    }
 }
 
 val stageNativeReleaseVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("stageNativeReleaseVlcRuntime") {
@@ -228,6 +293,7 @@ tasks.register<Exec>("packageNativeMsi") {
 
     dependsOn(
         stageNativeReleaseVlcRuntime,
+        verifyNativeResolverSidecars,
         desktopAppProject.tasks.named("generateWindowsIcon"),
         rootProject.tasks.named("unzipWix"),
     )

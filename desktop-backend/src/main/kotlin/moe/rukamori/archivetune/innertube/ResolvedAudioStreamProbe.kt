@@ -9,7 +9,14 @@ package moe.rukamori.archivetune.innertube
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 /** Redaction-safe result of the ranged requests used to validate a freshly resolved stream. */
 data class AudioStreamProbeResult(
@@ -47,6 +54,53 @@ fun probeResolvedAudioStream(stream: ResolvedAudioStream): Result<AudioStreamPro
             rangedResponse = first.rangedResponse,
         )
     }
+
+/** The process resolver's CDN validation must also stop promptly on queue changes/cancellation. */
+suspend fun probeResolvedAudioStreamCancellable(stream: ResolvedAudioStream): Result<AudioStreamProbeResult> =
+    try {
+        val first = probeRangeCancellable(stream, 0L)
+        first.contentRangeTotal?.takeIf { it > first.bytesRead }?.let { length ->
+            probeRangeCancellable(stream, (length - MAX_PROBE_BYTES).coerceAtLeast(first.bytesRead.toLong()))
+        }
+        Result.success(AudioStreamProbeResult(first.httpStatus, first.bytesRead, first.rangedResponse))
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (failure: AudioStreamProbeHttpException) {
+        Result.failure(failure)
+    } catch (_: Exception) {
+        Result.failure(IOException("Resolved audio stream probe failed"))
+    }
+
+private suspend fun probeRangeCancellable(stream: ResolvedAudioStream, offset: Long): RangeProbeResult {
+    val request = Request.Builder().url(stream.url)
+        .apply { stream.requestHeaders.forEach { (name, value) -> header(name, value) } }
+        .header("Range", "bytes=$offset-${offset + MAX_PROBE_BYTES - 1}")
+        .build()
+    val result = suspendCancellableCoroutine<Result<RangeProbeResult>> { continuation ->
+        val call = PROBE_CLIENT.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                continuation.resume(Result.failure(IOException("Resolved audio stream probe failed")))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val probed = runCatching {
+                    response.use {
+                        if (!it.isSuccessful) throw AudioStreamProbeHttpException(it.code)
+                        val bytesRead = it.body.byteStream().readNBytes(MAX_PROBE_BYTES).size
+                        check(bytesRead > 0) { "Resolved audio stream probe returned no audio bytes" }
+                        val range = it.header("Content-Range")
+                        RangeProbeResult(it.code, bytesRead, it.code == 206 || range != null,
+                            range?.substringAfterLast('/')?.toLongOrNull())
+                    }
+                }
+                continuation.resume(probed)
+            }
+        })
+    }
+    return result.getOrThrow()
+}
 
 private data class RangeProbeResult(
     val httpStatus: Int,
@@ -87,7 +141,7 @@ private fun probeRange(
 private const val MAX_PROBE_BYTES = 1_024
 
 private val PROBE_CLIENT: OkHttpClient =
-    OkHttpClient.Builder()
+    desktopStreamHttpClient().newBuilder()
         // VLC's VlcjCallbackMedia enables both redirect modes for the same media URL. Rejecting a
         // playable 301/302 here would discard a stream the player can actually open.
         .followRedirects(true)

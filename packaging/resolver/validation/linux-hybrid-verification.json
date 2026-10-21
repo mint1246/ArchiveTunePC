@@ -1,0 +1,163 @@
+{
+  "schema": "archivetune.hybrid-verification/1",
+  "runtime_ref": "ac0350ee6200c42d73e72a8f299824d821d23ee9",
+  "packaged_ref": "fb434722e58e0ad700e8be3375f798eed099714b",
+  "evidence_publication_ref": "59daf70e0425327c99dca752c97203b6e61b097c",
+  "test_results": {
+    "desktop-backend": {
+      "last_local_xml_totals": {
+        "tests": 106,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1
+      },
+      "suite_count": 17,
+      "scope": "Opt-in live classes included in backend; playback directory contains the last filtered YtDlpPlaybackIntegrationTest run only, not the earlier full suite. Resolver results are from the earlier unchanged full run.",
+      "xml_files": [
+        {
+          "name": "TEST-moe.rukamori.archivetune.chords.SongsterrChordClientTest.xml",
+          "sha256": "2f437dce4f5377a48d993b0353e4509d9eeea8a9e5443f82dacf181eb773afa9"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.desktop.sponsorblock.DesktopSponsorBlockTest.xml",
+          "sha256": "4e72cf8967ed96a088e6d203494e2a585c894ed1aa7b9e2e06a55fb14b4f3bfc"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.ArchiveTuneJvmClientTest.xml",
+          "sha256": "81ae51451a609b8dc155ab84f31b7fc3218e77b555e456a3321d67873838bf31"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.DesktopStreamIntegrationTest.xml",
+          "sha256": "da7486d89881aef6fa6484243064d7c985a1b2754d8dded1bce6db241f276018"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.DesktopStreamResolutionPolicyTest.xml",
+          "sha256": "80f867df1e468c3003b784ab06a0e7d838e5f32fe470ee89d5e01c666a9f83ed"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.ResolvedAudioStreamProbeTest.xml",
+          "sha256": "9075f1f4ab25ee96c1a979d3c81f50f2590931860861d39ffc12c8bfc8fcc219"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.YtDlpDesktopStreamExtractorTest.xml",
+          "sha256": "0a47c30e1844c1aa27aec813268ee0e06611e193d14ad3bf414c86aac8249975"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.cache.DesktopResourceCoordinatorTest.xml",
+          "sha256": "213bd54096d17a824090dcfbd383894445f41a88b546089df9f9eea451f368dc"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.home.DesktopHomeStoreTest.xml",
+          "sha256": "16d9b400e62e4dc16730babab2a2bf266be09a1ac5f71c9de6384c5f7f03af7c"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.home.DesktopFeaturedHomeCacheTest.xml",
+          "sha256": "11e7e95a26f2b9d12eea71764aad3ed24d465dd09da2d8c20aa8706c3474b181"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.home.DesktopLibraryRepositoryTest.xml",
+          "sha256": "525f12a5b3ca0b6fb5dea59129da49a37e14ede363594add2c57809eaf134b02"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.innertube.search.DesktopSearchRepositoryTest.xml",
+          "sha256": "95f49f3dc519189537e845f2486fefaa708e375574052ee49eefaf38b1036866"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.lyrics.JvmLyricsClientTest.xml",
+          "sha256": "a7b44779cd23a3a0cf760d11ffd0de3934963e80cd3e8ebe58faa82b1fe58297"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.lyrics.JvmLyricsTranslationClientTest.xml",
+          "sha256": "3c60d824a5bd6ccce910d36d98a7658ad12885c6582f4a57947dcd4412cb3a16"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.spotify.SpotifyMapperHebrewMatchingTest.xml",
+          "sha256": "1cfe69bf9e1a06874ae80f916dc30996b8d0cd102ecc82048fd2cf59793046c7"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.spotify.SpotifyPlaylistAddBatchingTest.xml",
+          "sha256": "420b9a3811ad690987e1af349f809faecbc0653d7b09086bc88e6627c76e50f5"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.spotify.SpotifyPlaylistLinkTest.xml",
+          "sha256": "5df684700fd2dee09c8aa936dda2a6911dab857373fd5fc6b12287cc59b30a08"
+        }
+      ]
+    },
+    "desktop-playback": {
+      "last_local_xml_totals": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suite_count": 1,
+      "scope": "Opt-in live classes included in backend; playback directory contains the last filtered YtDlpPlaybackIntegrationTest run only, not the earlier full suite. Resolver results are from the earlier unchanged full run.",
+      "xml_files": [
+        {
+          "name": "TEST-moe.rukamori.archivetune.playback.desktop.YtDlpPlaybackIntegrationTest.xml",
+          "sha256": "89c19423b1cea84b81872b475c8ae2d5ee5dc6b70e6379aec2aa56be1817ffe8"
+        }
+      ]
+    },
+    "stream-resolver": {
+      "last_local_xml_totals": {
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suite_count": 2,
+      "scope": "Opt-in live classes included in backend; playback directory contains the last filtered YtDlpPlaybackIntegrationTest run only, not the earlier full suite. Resolver results are from the earlier unchanged full run.",
+      "xml_files": [
+        {
+          "name": "TEST-moe.rukamori.archivetune.stream.PlaybackStreamResolverTest.xml",
+          "sha256": "57dfc3a32f822ce24ea3346becf1721fff698092c941788fcd2c9f1c44b341e6"
+        },
+        {
+          "name": "TEST-moe.rukamori.archivetune.stream.YtDlpStreamResolverTest.xml",
+          "sha256": "f0d4b6e7ef369d25803dacfdb00a66555ece2c40c9ded5dff2ee599609842763"
+        }
+      ]
+    }
+  },
+  "python_sampler_suite": {
+    "tests": 22,
+    "failures": 0,
+    "command": "python3 scripts/tests/test_benchmark_sampler.py"
+  },
+  "desktop_compilation": {
+    "passed": true,
+    "log_sha256": "6fa3e6ca89a131df099d7a02b7413dd8fe34e70292d110723a59924e1eb22ed0",
+    "raw_log_committed": false
+  },
+  "packaging": {
+    "createDistributable_and_verifyBundledResolverSidecars_passed": true,
+    "build_log_sha256": "d648162d632393d9a31c49c5a5f71dfa5634135123493f0033828ea92bccfa06",
+    "appimage_bytes": 221399544,
+    "appimage_sha256": "3be8ceb5c232c8ab5d04e0e15b0592540d0f63f18cc50362db963a7cf052a615",
+    "raw_log_committed": false
+  },
+  "gui_boot_observation": {
+    "status": "Window rendered; local offscreen boot observation, not full packaged playback acceptance",
+    "network_isolation": "bubblewrap --unshare-net (delegated launcher observation)",
+    "private_home_xdg": true,
+    "account_accessed": false,
+    "installed_or_replaced_user_app": false,
+    "screenshot_sha256": "39947737d52a62dd5ba709bf97e393f5b323a0dcefa4ef84696c0603c0428f1d",
+    "gui_log_sha256": "852cdb676395cc9446687d403b4a63ee521649370880108db68f4bd99f8de32b",
+    "parent_visually_inspected_screenshot": true,
+    "raw_screenshot_or_log_committed": false,
+    "visible_state": "Home screen with Network is unreachable and playback controls",
+    "observed_environment_limits": [
+      "No PulseAudio connection in isolated sandbox",
+      "OpenGL fallback to software rendering",
+      "No real audio or GUI playback attempt"
+    ]
+  },
+  "review": {
+    "reviewed_ref": "59daf70e0425327c99dca752c97203b6e61b097c",
+    "blocking_findings": 0,
+    "subsequent_changes": "Documentation quantile convention/exclusion/provenance clarifications and this local observation record; no production behavior changes."
+  }
+}

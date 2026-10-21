@@ -1,0 +1,403 @@
+{
+  "schema": "archivetune.desktop-resolver-comparison/1",
+  "measured_on": "2026-10-21",
+  "platform": "Linux x86_64",
+  "java": "OpenJDK 21.0.12.1",
+  "jvm_flags": [
+    "-Xms32m",
+    "-Xmx512m"
+  ],
+  "baseline_commit": "8e4bfb314",
+  "benchmark_implementation_commit": "c5cb2e578",
+  "quality": "HIGH",
+  "authentication": "anonymous",
+  "sample_interval_ms": 20,
+  "rss_method": "Maximum sampled sum of process-tree RSS; shared pages may be counted twice, brief spikes may be missed.",
+  "toolchain": {
+    "yt-dlp": "2026.08.19",
+    "ejs": "0.8.0",
+    "quickjs-ng": "0.17.0"
+  },
+  "application_comparison": [
+    {
+      "backend": "legacy",
+      "video_id": "jNQXAC9IVRw",
+      "records": [
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 1510,
+          "success": false,
+          "failure": "UNAVAILABLE",
+          "iteration": 0,
+          "backend": "legacy",
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 759,
+          "success": false,
+          "failure": "UNAVAILABLE",
+          "iteration": 1,
+          "backend": "legacy",
+          "video_id": "jNQXAC9IVRw"
+        }
+      ],
+      "peak_tree_rss_mib": 146.97,
+      "peak_jvm_rss_mib": 146.97,
+      "peak_children_rss_mib": 0.0,
+      "exit_code": 0,
+      "harness_timeout": false
+    },
+    {
+      "backend": "ytdlp",
+      "video_id": "jNQXAC9IVRw",
+      "records": [
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 3250,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 0,
+          "backend": "ytdlp",
+          "bitrate": 106064,
+          "header_names": [
+            "Accept",
+            "Accept-Language",
+            "Sec-Fetch-Mode",
+            "User-Agent"
+          ],
+          "video_id": "jNQXAC9IVRw"
+        },
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 1976,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21599,
+          "iteration": 1,
+          "backend": "ytdlp",
+          "bitrate": 106064,
+          "header_names": [
+            "Accept",
+            "Accept-Language",
+            "Sec-Fetch-Mode",
+            "User-Agent"
+          ],
+          "video_id": "jNQXAC9IVRw"
+        }
+      ],
+      "peak_tree_rss_mib": 204.39,
+      "peak_jvm_rss_mib": 119.34,
+      "peak_children_rss_mib": 85.05,
+      "exit_code": 0,
+      "harness_timeout": false
+    },
+    {
+      "backend": "legacy",
+      "video_id": "dQw4w9WgXcQ",
+      "records": [
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 831,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21539,
+          "iteration": 0,
+          "backend": "legacy",
+          "bitrate": 136544,
+          "header_names": [
+            "User-Agent"
+          ],
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 133,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21539,
+          "iteration": 1,
+          "backend": "legacy",
+          "bitrate": 136544,
+          "header_names": [
+            "User-Agent"
+          ],
+          "video_id": "dQw4w9WgXcQ"
+        }
+      ],
+      "peak_tree_rss_mib": 141.71,
+      "peak_jvm_rss_mib": 141.71,
+      "peak_children_rss_mib": 0.0,
+      "exit_code": 0,
+      "harness_timeout": false
+    },
+    {
+      "backend": "ytdlp",
+      "video_id": "dQw4w9WgXcQ",
+      "records": [
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 8930,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21593,
+          "iteration": 0,
+          "backend": "ytdlp",
+          "bitrate": 128930,
+          "header_names": [
+            "Accept",
+            "Accept-Language",
+            "Sec-Fetch-Mode",
+            "User-Agent"
+          ],
+          "video_id": "dQw4w9WgXcQ"
+        },
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 7589,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21592,
+          "iteration": 1,
+          "backend": "ytdlp",
+          "bitrate": 128930,
+          "header_names": [
+            "Accept",
+            "Accept-Language",
+            "Sec-Fetch-Mode",
+            "User-Agent"
+          ],
+          "video_id": "dQw4w9WgXcQ"
+        }
+      ],
+      "peak_tree_rss_mib": 467.74,
+      "peak_jvm_rss_mib": 126.54,
+      "peak_children_rss_mib": 360.04,
+      "exit_code": 0,
+      "harness_timeout": false
+    },
+    {
+      "backend": "legacy",
+      "video_id": "aqz-KE-bpKQ",
+      "records": [
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 1552,
+          "success": false,
+          "failure": "UNAVAILABLE",
+          "iteration": 0,
+          "backend": "legacy",
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 865,
+          "success": false,
+          "failure": "UNAVAILABLE",
+          "iteration": 1,
+          "backend": "legacy",
+          "video_id": "aqz-KE-bpKQ"
+        }
+      ],
+      "peak_tree_rss_mib": 170.52,
+      "peak_jvm_rss_mib": 170.52,
+      "peak_children_rss_mib": 0.0,
+      "exit_code": 0,
+      "harness_timeout": false
+    },
+    {
+      "backend": "ytdlp",
+      "video_id": "aqz-KE-bpKQ",
+      "records": [
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 3327,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 0,
+          "backend": "ytdlp",
+          "bitrate": 128612,
+          "header_names": [
+            "Accept",
+            "Accept-Language",
+            "Sec-Fetch-Mode",
+            "User-Agent"
+          ],
+          "video_id": "aqz-KE-bpKQ"
+        },
+        {
+          "remaining_children": 0,
+          "elapsed_ms": 1837,
+          "success": true,
+          "mime": "audio/webm; codecs=\"opus\"",
+          "format": 251,
+          "expiry_seconds": 21598,
+          "iteration": 1,
+          "backend": "ytdlp",
+          "bitrate": 128612,
+          "header_names": [
+            "Accept",
+            "Accept-Language",
+            "Sec-Fetch-Mode",
+            "User-Agent"
+          ],
+          "video_id": "aqz-KE-bpKQ"
+        }
+      ],
+      "peak_tree_rss_mib": 204.95,
+      "peak_jvm_rss_mib": 121.6,
+      "peak_children_rss_mib": 87.58,
+      "exit_code": 0,
+      "harness_timeout": false
+    }
+  ],
+  "independent_live_playback": {
+    "summary": {
+      "distinct_videos_ok": 3,
+      "ejs_version_reported": [
+        "0.8.0"
+      ],
+      "failure_classes": [],
+      "js_challenge_runs_failed": 0,
+      "js_challenge_runs_solved": 1,
+      "js_runtime_reported": [
+        "0.17.0"
+      ],
+      "js_solver_sources": [
+        "python package"
+      ],
+      "latency_ms_max": 7568,
+      "latency_ms_min": 1944,
+      "latency_ms_p50": 2234,
+      "latency_ms_p95": 7568,
+      "live_verdicts": [
+        "LIVE_PLAYBACK_CONFIRMED"
+      ],
+      "peak_tree_rss_bytes_max": 377823232,
+      "peak_tree_rss_bytes_median": 97071104,
+      "successful_runs": 3,
+      "total_runs": 3,
+      "videos_ok": [
+        "aqz-KE-bpKQ",
+        "dQw4w9WgXcQ",
+        "jNQXAC9IVRw"
+      ],
+      "videos_with_js_challenge": [
+        "dQw4w9WgXcQ"
+      ]
+    },
+    "videos": [
+      {
+        "video_id": "jNQXAC9IVRw",
+        "live_playback": {
+          "checked": true,
+          "ffmpeg_attempts": 1,
+          "ffmpeg_available": true,
+          "ffmpeg_error": null,
+          "ffmpeg_offset_s": 5,
+          "ffmpeg_pcm_frames": 240000,
+          "ffmpeg_peak": 0.604877233505249,
+          "ffmpeg_rms": 0.07294915975538553,
+          "verdict": "LIVE_PLAYBACK_CONFIRMED",
+          "vlc_attempts": 1,
+          "vlc_audio_codec": null,
+          "vlc_audio_sample_rate": null,
+          "vlc_available": true,
+          "vlc_error": null,
+          "vlc_position_advanced": true,
+          "vlc_reached_playing": true,
+          "vlc_state_path": "NothingSpecial->Opening->Playing"
+        },
+        "http_probe": {
+          "attempted": true,
+          "bytes_read": 65536,
+          "content_type": "audio/webm",
+          "duration_ms": 82,
+          "error": null,
+          "magic_hex": "1a45dfa3",
+          "ranged_response": true,
+          "status": 206,
+          "tail_bytes_read": 65536,
+          "tail_status": 206
+        }
+      },
+      {
+        "video_id": "dQw4w9WgXcQ",
+        "live_playback": {
+          "checked": true,
+          "ffmpeg_attempts": 1,
+          "ffmpeg_available": true,
+          "ffmpeg_error": null,
+          "ffmpeg_offset_s": 5,
+          "ffmpeg_pcm_frames": 240000,
+          "ffmpeg_peak": 1.0247232913970947,
+          "ffmpeg_rms": 0.1691723028719501,
+          "verdict": "LIVE_PLAYBACK_CONFIRMED",
+          "vlc_attempts": 1,
+          "vlc_audio_codec": null,
+          "vlc_audio_sample_rate": null,
+          "vlc_available": true,
+          "vlc_error": null,
+          "vlc_position_advanced": true,
+          "vlc_reached_playing": true,
+          "vlc_state_path": "NothingSpecial->Opening->Playing"
+        },
+        "http_probe": {
+          "attempted": true,
+          "bytes_read": 65536,
+          "content_type": "audio/webm",
+          "duration_ms": 89,
+          "error": null,
+          "magic_hex": "1a45dfa3",
+          "ranged_response": true,
+          "status": 206,
+          "tail_bytes_read": 65536,
+          "tail_status": 206
+        }
+      },
+      {
+        "video_id": "aqz-KE-bpKQ",
+        "live_playback": {
+          "checked": true,
+          "ffmpeg_attempts": 1,
+          "ffmpeg_available": true,
+          "ffmpeg_error": null,
+          "ffmpeg_offset_s": 5,
+          "ffmpeg_pcm_frames": 240000,
+          "ffmpeg_peak": 0.042807623744010925,
+          "ffmpeg_rms": 0.008396262423643885,
+          "verdict": "LIVE_PLAYBACK_CONFIRMED",
+          "vlc_attempts": 1,
+          "vlc_audio_codec": null,
+          "vlc_audio_sample_rate": null,
+          "vlc_available": true,
+          "vlc_error": null,
+          "vlc_position_advanced": true,
+          "vlc_reached_playing": true,
+          "vlc_state_path": "NothingSpecial->Opening->Playing"
+        },
+        "http_probe": {
+          "attempted": true,
+          "bytes_read": 65536,
+          "content_type": "audio/webm",
+          "duration_ms": 154,
+          "error": null,
+          "magic_hex": "1a45dfa3",
+          "ranged_response": true,
+          "status": 206,
+          "tail_bytes_read": 65536,
+          "tail_status": 206
+        }
+      }
+    ]
+  }
+}

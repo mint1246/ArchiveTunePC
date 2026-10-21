@@ -25,3 +25,12 @@ dependencies {
     implementation(libs.json)
     testImplementation(libs.junit)
 }
+
+// Developer-only classpath export for measuring resolver JVMs without Gradle startup/daemon RSS.
+tasks.register("writeResolverBenchmarkClasspath") {
+    dependsOn(tasks.testClasses)
+    val destination = layout.buildDirectory.file("resolver-benchmark-classpath.txt")
+    outputs.file(destination)
+    outputs.upToDateWhen { false }
+    doLast { destination.get().asFile.writeText(sourceSets.test.get().runtimeClasspath.asPath) }
+}

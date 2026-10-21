@@ -45,6 +45,8 @@ import moe.rukamori.archivetune.morideobfuscator.MoriCipherRuntime
 import moe.rukamori.archivetune.stream.PlaybackStreamResolver
 import moe.rukamori.archivetune.stream.StreamAudioQuality
 import moe.rukamori.archivetune.stream.StreamClientPreference
+import moe.rukamori.archivetune.stream.YtDlpException
+import moe.rukamori.archivetune.stream.YtDlpFailure
 import java.io.File
 import java.net.URI
 import java.util.Locale
@@ -64,7 +66,14 @@ class ArchiveTuneJvmClient(
     private val streamUrlResolver: StreamUrlResolver = NewPipeStreamUrlResolver,
     networkPolicy: DesktopNetworkPolicy = DesktopNetworkPolicy(),
     sessionProvider: DesktopSessionProvider? = null,
+    private val audioStreamExtractor: DesktopAudioStreamExtractor? =
+        if (streamUrlResolver === NewPipeStreamUrlResolver) YtDlpDesktopStreamExtractor(cacheDirectory) else null,
+    streamResolutionMode: DesktopStreamResolutionMode? = null,
 ) {
+    private val streamResolutionMode = if (audioStreamExtractor == null) DesktopStreamResolutionMode.LEGACY
+    else streamResolutionMode ?: if (audioStreamExtractor is YtDlpDesktopStreamExtractor) {
+        configuredDesktopStreamResolutionMode()
+    } else DesktopStreamResolutionMode.YT_DLP
     @Volatile
     private var sessionProvider: DesktopSessionProvider? = sessionProvider
     private val failedStreamClientsUntil = ConcurrentHashMap<String, Long>()
@@ -82,6 +91,14 @@ class ArchiveTuneJvmClient(
     internal var accountValidationTimeoutMillis: Long = 45_000L
     internal var accountContextTimeoutMillis: Long = 8_000L
 
+    /** Testable transport boundary; client/format policy remains in the resolver below. */
+    internal var streamPlayerRequest: suspend (YouTubeClient, String, String?, Int?, PlaybackAuthState) -> PlayerResponse =
+        { client, videoId, playlistId, signatureTimestamp, auth ->
+            YouTube.player(videoId = videoId, playlistId = playlistId, client = client,
+                signatureTimestamp = signatureTimestamp.takeIf { client.useSignatureTimestamp },
+                setLogin = auth.hasLoginCookie && client.supportsCookieAuthentication, authState = auth).getOrThrow()
+        }
+
     init {
         require(cacheDirectory.path.isNotBlank()) { "Cipher cache directory is required" }
         require(streamClients.isNotEmpty()) { "At least one YouTube stream client is required" }
@@ -89,7 +106,7 @@ class ArchiveTuneJvmClient(
         // charts, new releases and library pages that do not explicitly pass setLogin = true.
         YouTube.useLoginForBrowse = true
         NetworkGatekeeper.setConnectionBlocked(networkPolicy.gatekeeperEnabled)
-        MoriCipherRuntime.initialize(
+        if (audioStreamExtractor == null || this.streamResolutionMode == DesktopStreamResolutionMode.LEGACY) MoriCipherRuntime.initialize(
             MoriCipherConfig(
                 cacheDirectory = cacheDirectory,
                 proxyProvider = { YouTube.streamProxy },
@@ -665,7 +682,18 @@ class ArchiveTuneJvmClient(
             val resolvedVideoId = normalizedId(videoId, "Video ID").getOrThrow()
             val resolvedPlaylistId = playlistId?.trim()?.takeIf(String::isNotEmpty)
             val stream = resolveStreamWithinTimeout(STREAM_RESOLUTION_TIMEOUT_MILLIS) {
-                resolveAudioStreamOrThrow(resolvedVideoId, resolvedPlaylistId, quality)
+                val upstream = audioStreamExtractor
+                if (upstream == null) resolveAudioStreamOrThrow(resolvedVideoId, resolvedPlaylistId, quality)
+                else resolveDesktopStream(
+                    mode = streamResolutionMode,
+                    native = {
+                        if (streamResolutionMode == DesktopStreamResolutionMode.HYBRID) {
+                            resolveDirectAudioFastPath(resolvedVideoId, resolvedPlaylistId, quality)
+                        } else resolveAudioStreamOrThrow(resolvedVideoId, resolvedPlaylistId, quality)
+                    },
+                    // Native auth repair can update the session before failing. Read it again.
+                    upstream = { upstream.resolve(resolvedVideoId, quality, YouTube.currentPlaybackAuthState()) },
+                )
             }
             Result.success(stream)
         } catch (timeout: TimeoutCancellationException) {
@@ -731,6 +759,25 @@ class ArchiveTuneJvmClient(
             if (replacement.isSuccess) return replacement
         }
         return original
+    }
+
+    private suspend fun resolveDirectAudioFastPath(
+        videoId: String,
+        playlistId: String?,
+        quality: JvmAudioQuality,
+    ): ResolvedAudioStream {
+        val auth = YouTube.currentPlaybackAuthState()
+        if (!allowsDirectAudioFastPath(quality, auth)) {
+            throw StreamAudioFormatUnavailableException(videoId, "DIRECT")
+        }
+        if (isStreamClientTemporarilyBlocked(videoId, PlaybackStreamResolver.clientKey(YouTubeClient.VISIONOS), auth.fingerprint)) {
+            throw StreamAudioFormatUnavailableException(videoId, "DIRECT")
+        }
+        // Reuse the existing client and format/header/expiry/probe contracts. This client needs
+        // neither Web proof nor a signature timestamp. Its failures belong to yt-dlp, not a
+        // growing list of native fallback clients or a locally maintained JS solver.
+        return resolveAudioStreamForClient(YouTubeClient.VISIONOS, videoId, playlistId, quality,
+            auth, signatureTimestamp = null, directOnly = true).also { lastSuccessfulStreamClientKey = it.clientKey }
     }
 
     private suspend fun resolveAudioStreamOrThrow(
@@ -856,20 +903,12 @@ class ArchiveTuneJvmClient(
         quality: JvmAudioQuality,
         authState: PlaybackAuthState,
         signatureTimestamp: Int?,
+        directOnly: Boolean = false,
     ): ResolvedAudioStream {
         if (client.loginRequired && !authState.hasPlaybackLoginContext) {
             throw StreamPlaybackUnavailableException(videoId, client.clientName, "LOGIN_REQUIRED", null)
         }
-        val useLogin = authState.hasLoginCookie && client.supportsCookieAuthentication
-        val playerResponse =
-            YouTube.player(
-                videoId = videoId,
-                playlistId = playlistId,
-                client = client,
-                signatureTimestamp = signatureTimestamp.takeIf { client.useSignatureTimestamp },
-                setLogin = useLogin,
-                authState = authState,
-            ).getOrThrow()
+        val playerResponse = streamPlayerRequest(client, videoId, playlistId, signatureTimestamp, authState)
 
         if (playerResponse.playabilityStatus.status != "OK") {
             throw StreamPlaybackUnavailableException(
@@ -885,7 +924,9 @@ class ArchiveTuneJvmClient(
 
         val formatFailures = mutableListOf<Throwable>()
         for (format in audioFormats) {
-            val streamUrlResult = streamUrlResolver.resolve(format, videoId, client, authState)
+            val streamUrlResult = if (directOnly) {
+                directAudioFastPathUrl(format)?.let { Result.success(it) } ?: continue
+            } else streamUrlResolver.resolve(format, videoId, client, authState)
             val streamUrlFailure = streamUrlResult.exceptionOrNull()
             if (streamUrlFailure != null) {
                 formatFailures += streamUrlFailure
@@ -911,7 +952,7 @@ class ArchiveTuneJvmClient(
                 expiresAtEpochMillis = System.currentTimeMillis() + expiresInSeconds * 1_000L,
                 authFingerprint = authState.fingerprint,
             )
-            val probeFailure = probeResolvedAudioStream(stream).exceptionOrNull()
+            val probeFailure = probeResolvedAudioStreamCancellable(stream).exceptionOrNull()
             if (probeFailure == null) return stream
 
             val probeHttpStatus = (probeFailure as? AudioStreamProbeHttpException)?.httpStatus
@@ -923,6 +964,7 @@ class ArchiveTuneJvmClient(
                     authFingerprint = authState.fingerprint,
                 )
             }
+            if (directOnly) throw probeFailure // Compatibility recovery belongs to upstream.
             formatFailures += probeFailure
         }
 
@@ -1061,6 +1103,9 @@ class ArchiveTuneJvmClient(
 
         prepareProvidedSession()
         val normalizedClientKey = PlaybackStreamResolver.normalizeClientKey(clientKey)
+        // yt-dlp owns its client selection. A new extraction is the retry; a synthetic YT_DLP
+        // key must not enter the legacy YouTube-client backoff/proof-refresh machinery.
+        if (normalizedClientKey.startsWith("YT_DLP@")) return StreamHttpRecoveryAction.RETRY_ONLY
         val currentAuth = YouTube.currentPlaybackAuthState()
         val sameAuthGeneration = currentAuth.fingerprint == authFingerprint
         val failedClient =
@@ -1262,6 +1307,16 @@ private data class StreamClientWaveResult(
 /** Classifies only exception types and explicit playability states; never inspect/log URL-bearing messages. */
 fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailureKind {
     val all = generateSequence(failure) { it.cause }.toList() + failure.suppressed.toList()
+    all.filterIsInstance<YtDlpException>().firstOrNull()?.let {
+        return when (it.kind) {
+            YtDlpFailure.TOOLCHAIN, YtDlpFailure.INVALID_OUTPUT, YtDlpFailure.EXTRACTION, YtDlpFailure.NO_AUDIO -> StreamResolutionFailureKind.EXTRACTOR_INCOMPATIBLE
+            YtDlpFailure.TIMEOUT -> StreamResolutionFailureKind.NETWORK_TIMEOUT
+            YtDlpFailure.AUTH_REQUIRED -> StreamResolutionFailureKind.AUTH_REQUIRED
+            YtDlpFailure.NETWORK, YtDlpFailure.EXPIRED_STREAM -> StreamResolutionFailureKind.NETWORK
+            YtDlpFailure.UNAVAILABLE -> StreamResolutionFailureKind.UNAVAILABLE
+        }
+    }
+    if (all.any { it is AudioStreamProbeHttpException }) return StreamResolutionFailureKind.NETWORK
     if (all.any { it is StreamResolutionTimeoutException }) {
         return StreamResolutionFailureKind.NETWORK_TIMEOUT
     }
@@ -1292,6 +1347,7 @@ fun classifyStreamResolutionFailure(failure: Throwable): StreamResolutionFailure
 
 internal fun isExplicitlyUnavailableStreamFailure(failure: Throwable): Boolean {
     val all = generateSequence(failure) { it.cause }.toList() + failure.suppressed.toList()
+    if (all.filterIsInstance<YtDlpException>().any { it.kind == YtDlpFailure.UNAVAILABLE }) return true
     return all.filterIsInstance<StreamPlaybackUnavailableException>().any { unavailable ->
         !unavailable.status.equals("LOGIN_REQUIRED", ignoreCase = true) &&
             unavailable.reason.orEmpty().contains("unavailable", ignoreCase = true)

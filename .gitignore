@@ -105,6 +105,10 @@ output-metadata.json
 # VS Code
 .vscode/
 
+# Python bytecode (developer benchmark harnesses import each other)
+__pycache__/
+*.py[cod]
+
 # Binary files and core dumps
 core
 core.*
@@ -131,3 +135,14 @@ core.*
 /.mcp-state/
 /.mcp-checkpoints/
 /android_resource_cleaner.py
+
+# Provisioned resolver sidecars (downloaded/staged at build time; never commit binaries).
+# The generated copies under desktopApp/build are already covered by the build/ rule.
+/packaging/resolver/bin/
+/packaging/resolver/**/*.exe
+/packaging/resolver/**/*.dll
+/packaging/resolver/**/*.so
+/packaging/resolver/**/*.part
+
+# Local resolver development tools (official binaries are provisioned for packages by Gradle).
+/.tools/
