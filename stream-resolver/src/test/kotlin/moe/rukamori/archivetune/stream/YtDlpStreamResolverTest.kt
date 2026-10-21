@@ -186,7 +186,9 @@ class YtDlpStreamResolverTest {
             assertFalse(args.contains("private-proxy"))
             assertFalse(args.contains("123||456"))
             val requestConfig = Files.readString(root.resolve("request-snapshot"))
-            assertTrue(requestConfig.contains("youtube:data_sync_id=123||456"))
+            assertTrue(requestConfig.contains("youtube:skip=hls,dash;data_sync_id=123||456"))
+            assertEquals(1, requestConfig.lineSequence().count { it.startsWith("--extractor-args ") })
+            assertFalse(requestConfig.contains("player_skip")) // Webpage/config context stays intact.
             assertTrue(requestConfig.contains("http://test-user:private-proxy@localhost:8080"))
             assertTrue(Files.exists(root.resolve("cookie-checked")))
             assertFalse(Files.list(root).use { paths -> paths.anyMatch { it.fileName.toString().startsWith("archivetune-resolver-") } })

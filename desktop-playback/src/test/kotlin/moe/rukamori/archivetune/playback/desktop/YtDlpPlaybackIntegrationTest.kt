@@ -11,6 +11,7 @@ import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.JvmAudioQuality
+import moe.rukamori.archivetune.innertube.DesktopStreamResolutionMode
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.probeResolvedAudioStream
 import okhttp3.Interceptor
@@ -63,7 +64,14 @@ import kotlin.test.assertTrue
 class YtDlpPlaybackIntegrationTest {
 
     @Test
-    fun `yt-dlp resolved audio plays through the ranged callback transport`() = runBlocking {
+    fun `yt-dlp resolved audio plays through the ranged callback transport`() =
+        assertLivePlayback(DesktopStreamResolutionMode.YT_DLP)
+
+    @Test
+    fun `hybrid resolved audio plays through the ranged callback transport`() =
+        assertLivePlayback(DesktopStreamResolutionMode.HYBRID)
+
+    private fun assertLivePlayback(mode: DesktopStreamResolutionMode) = runBlocking {
         val environment = assumeLiveResolverEnvironment()
         // The production resolver looks the toolchain up through these very properties, so pinning
         // them keeps the test on the configured binaries no matter how the opt-in was provided.
@@ -71,7 +79,7 @@ class YtDlpPlaybackIntegrationTest {
         System.setProperty("archivetune.bun", environment.bunExecutable.toAbsolutePath().toString())
 
         val cacheDirectory = Files.createTempDirectory("archivetune-live-ytdlp-")
-        val client = ArchiveTuneJvmClient(cacheDirectory.toFile())
+        val client = ArchiveTuneJvmClient(cacheDirectory.toFile(), streamResolutionMode = mode)
         // Never reuse an interactive login session: this integration run resolves anonymously.
         client.authState = PlaybackAuthState()
 
@@ -83,7 +91,8 @@ class YtDlpPlaybackIntegrationTest {
                     )
                 }
 
-            assertEquals("YT_DLP", resolved.clientName)
+            if (mode == DesktopStreamResolutionMode.YT_DLP) assertEquals("YT_DLP", resolved.clientName)
+            else assertTrue(resolved.clientName in setOf("VISIONOS", "YT_DLP"))
             assertTrue(
                 resolved.mimeType.startsWith("audio/"),
                 "yt-dlp did not resolve a direct audio-only format",

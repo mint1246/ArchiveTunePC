@@ -114,14 +114,19 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
             }
             // Keep proxy credentials and the selected account context out of argv/process listings.
             val requestOptions = buildList {
+                // Only progressive HTTP(S) audio is accepted by formatSelector. Fetching HLS/DASH
+                // manifests cannot contribute a playable format here. Keep yt-dlp's webpage and
+                // cookie-aware client selection intact; both are needed for some public videos.
+                val youtubeOptions = mutableListOf("skip=hls,dash")
                 if (proxyUrl != null) {
                     require(proxyUrl.none { it == '\r' || it == '\n' || it == '\u0000' }) { "Invalid proxy" }
                     add("--proxy ${quoteConfigValue(proxyUrl)}")
                 }
                 if (!cookie.isNullOrBlank() && !dataSyncId.isNullOrBlank()) {
                     if (dataSyncId.any { it in "\r\n\u0000;,=" }) throw YtDlpException(YtDlpFailure.AUTH_REQUIRED)
-                    add("--extractor-args ${quoteConfigValue("youtube:data_sync_id=$dataSyncId")}")
+                    youtubeOptions += "data_sync_id=$dataSyncId"
                 }
+                add("--extractor-args ${quoteConfigValue("youtube:" + youtubeOptions.joinToString(";"))}")
             }
             if (requestOptions.isNotEmpty()) {
                 val configFile = directory.resolve("request.conf")
