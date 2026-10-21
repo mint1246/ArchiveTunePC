@@ -1,0 +1,41 @@
+{
+  "reflection": [
+    {
+      "type": "moe.rukamori.archivetune.linuxmedia.LinuxMediaControls$Endpoint",
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "moe.rukamori.archivetune.linuxmedia.MprisInterfaces$Root",
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "moe.rukamori.archivetune.linuxmedia.MprisInterfaces$Player",
+      "allDeclaredMethods": true
+    },
+    {
+      "type": "moe.rukamori.archivetune.linuxmedia.MprisInterfaces$MetadataType"
+    },
+    {
+      "type": "moe.rukamori.archivetune.linuxmedia.MprisInterfaces$Player$Seeked",
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "org.freedesktop.dbus.interfaces.Properties",
+      "allPublicMethods": true
+    },
+    {
+      "type": "org.freedesktop.dbus.interfaces.Properties$PropertiesChanged",
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "org.freedesktop.dbus.transport.jre.NativeTransportProvider",
+      "allDeclaredConstructors": true,
+      "allPublicMethods": true
+    }
+  ],
+  "resources": [
+    {
+      "glob": "META-INF/services/org.freedesktop.dbus.spi.transport.ITransportProvider"
+    }
+  ]
+}

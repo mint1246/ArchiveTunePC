@@ -1,3 +1,4 @@
+import org.gradle.api.GradleException
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import dev.nucleusframework.desktop.application.dsl.NativeImageOptimization
 
@@ -17,6 +18,107 @@ val windowsPackageVersion = version.toString().let { value ->
     if (value.count { it == '.' } == 1) "$value.0" else value
 }
 val generatedWindowsIcon = desktopAppProject.layout.buildDirectory.file("generated/desktop/icon/ArchiveTune.ico")
+
+/*
+ * Host platform detection.
+ *
+ * Compose Desktop and GraalVM Native Image cannot cross-compile a complete distribution, so the
+ * native build always targets the machine that runs Gradle. Everything that is specific to one
+ * operating system (resource excludes, staged sidecars, installers) is therefore selected from
+ * the host instead of being hardcoded for Windows.
+ */
+val hostOsName = System.getProperty("os.name").orEmpty()
+val buildingForWindows = hostOsName.startsWith("Windows", ignoreCase = true)
+val buildingForLinux = hostOsName.startsWith("Linux", ignoreCase = true)
+
+/** Canonical GraalVM/Skiko architecture name for the build host. */
+val hostArch = when (System.getProperty("os.arch").orEmpty().lowercase()) {
+    "amd64", "x86_64" -> "x86_64"
+    "aarch64", "arm64" -> "aarch64"
+    else -> System.getProperty("os.arch").orEmpty().lowercase()
+}
+
+/**
+ * Architecture name used by the Skiko and Nucleus native payloads.
+ *
+ * They spell the x86-64 architecture `x64` (`libskiko-linux-x64.so`, `nucleus/native/linux-x64/`),
+ * while the libdatachannel bindings spell it `x86_64`.
+ */
+val payloadArch = if (hostArch == "x86_64") "x64" else hostArch
+
+/** The payload of the other architecture, which can never be loaded by this image. */
+val foreignPayloadArch = if (hostArch == "x86_64") "aarch64" else "x64"
+
+/** The libdatachannel bindings spell the x86-64 architecture `x86_64`. */
+val foreignArch = if (hostArch == "x86_64") "aarch64" else "x86_64"
+
+/*
+ * Native-image compiler budget.
+ *
+ * These properties only tune the *builder* JVM that runs the native-image compiler. They are
+ * unrelated to `graalvm.maxHeapSize`, which is the heap of the produced application.
+ *
+ *   ./gradlew :desktop-native:nativeImageCompile -PnativeImageBuildHeap=6g -PnativeImageBuildParallelism=4
+ */
+val nativeImageBuildHeap = providers.gradleProperty("nativeImageBuildHeap")
+    .map(String::trim)
+    .filter { it.isNotEmpty() }
+    .orNull
+val nativeImageBuildParallelism = providers.gradleProperty("nativeImageBuildParallelism")
+    .map(String::trim)
+    .filter { it.isNotEmpty() }
+    .orNull
+
+if (nativeImageBuildHeap != null && !nativeImageBuildHeap.matches(Regex("^[0-9]+[kKmMgGtT]?$"))) {
+    throw GradleException(
+        "-PnativeImageBuildHeap must be a JVM memory size such as 6g or 4096m, but was '$nativeImageBuildHeap'",
+    )
+}
+if (nativeImageBuildParallelism != null &&
+    (!nativeImageBuildParallelism.matches(Regex("^[0-9]+$")) || (nativeImageBuildParallelism.toIntOrNull() ?: 0) < 1)
+) {
+    throw GradleException(
+        "-PnativeImageBuildParallelism must be a positive integer, but was '$nativeImageBuildParallelism'",
+    )
+}
+
+/*
+ * Native payload excludes for the host platform.
+ *
+ * Nucleus' static resource scanner sees the native payloads of every supported platform in a
+ * few dependencies. Only the payloads that this image can actually load are kept; the rest
+ * would otherwise be embedded verbatim in the image heap.
+ *
+ * The Linux payloads (JNA, the Nucleus native helpers and the libdatachannel Java bindings)
+ * must survive for a Linux image, so the excludes are the mirror image of the Windows ones.
+ */
+val nativeImageResourceExcludes: List<String> = buildList {
+    if (buildingForWindows) {
+        // This image can only load the Windows payloads.
+        add("""-H:ExcludeResources=^(macos-(x86_64|arm64)|x86_64|aarch64)/native/libdatachannel-java[.](dylib|so)$""")
+        add("""-H:ExcludeResources=^com/sun/jna/(aix|darwin|dragonflybsd|freebsd|linux|openbsd|sunos)-.*/.*$""")
+        add("""-H:ExcludeResources=^com/sun/jna/win32-(aarch64|x86)/.*$""")
+        add("""-H:ExcludeResources=^nucleus/native/(darwin|linux)-.*/.*$""")
+        // Nucleus already stages this DLL beside the executable in bin/, so keeping a second
+        // byte-for-byte copy in the image heap only inflates the EXE.
+        add("""-H:ExcludeResources=^skiko-windows-x64[.]dll$""")
+    } else if (buildingForLinux) {
+        // This image can only load the Linux payloads; the JNA dispatcher, the Nucleus native
+        // helpers and the libdatachannel Java bindings have to stay in the image heap.
+        // The Nucleus Windows payload lives in `nucleus/native/win32-*`, not `windows-*`.
+        add("""-H:ExcludeResources=^com/sun/jna/(aix|darwin|dragonflybsd|freebsd|openbsd|sunos|win32)-.*/.*$""")
+        add("""-H:ExcludeResources=^nucleus/native/(darwin|win32)-.*/.*$""")
+        add("""-H:ExcludeResources=^macos-(x86_64|arm64)/native/libdatachannel-java[.]dylib$""")
+        add("""-H:ExcludeResources=^windows-x86_64/native/libdatachannel-java[.]dll$""")
+        // The payload of the other architecture can never be loaded by this image.
+        add("""-H:ExcludeResources=^$foreignArch/native/libdatachannel-java[.]so$""")
+        add("""-H:ExcludeResources=^nucleus/native/linux-$foreignPayloadArch/.*$""")
+        // Nucleus already stages these libraries beside the executable in lib/, so keeping a
+        // second byte-for-byte copy in the image heap only inflates the image.
+        add("""-H:ExcludeResources=^libskiko-linux-$payloadArch[.]so$""")
+        add("""-H:ExcludeResources=^libskiko-linux-$foreignPayloadArch[.]so$""")
+    }
+}
 
 kotlin {
     jvmToolchain(21)
@@ -45,8 +147,10 @@ nucleus.application {
         appName = "ArchiveTune"
         packageName = "ArchiveTune"
         packageVersion = windowsPackageVersion
-        windows {
-            iconFile.set(generatedWindowsIcon)
+        if (buildingForWindows) {
+            windows {
+                iconFile.set(generatedWindowsIcon)
+            }
         }
     }
 
@@ -66,25 +170,21 @@ nucleus.application {
         // working set we see after it has been running for a while, without forcing System.gc()
         // or using Windows working-set trimming (both of which just trade RAM for stalls/faults).
         buildArgs.add("-H:MaxHeapFree=16m")
-        // Nucleus' static resource scanner sees native payloads for every supported platform in
-        // a few dependencies. They can never be loaded by this Windows-x64 image, but Graal would
-        // otherwise embed them verbatim in the executable's image heap.
-        buildArgs.add(
-            """-H:ExcludeResources=^(macos-(x86_64|arm64)|x86_64|aarch64)/native/libdatachannel-java[.](dylib|so)$""",
-        )
-        buildArgs.add(
-            """-H:ExcludeResources=^com/sun/jna/(aix|darwin|dragonflybsd|freebsd|linux|openbsd|sunos)-.*/.*$""",
-        )
-        buildArgs.add("""-H:ExcludeResources=^com/sun/jna/win32-(aarch64|x86)/.*$""")
-        buildArgs.add("""-H:ExcludeResources=^nucleus/native/(darwin|linux)-.*/.*$""")
-        // Nucleus already stages this DLL beside the executable in bin/, so keeping a second
-        // byte-for-byte copy in the image heap only inflates the EXE.
-        buildArgs.add("""-H:ExcludeResources=^skiko-windows-x64[.]dll$""")
+        // Optional compiler budget for the native-image builder JVM. This is not the heap of the
+        // produced application, which stays at `maxHeapSize` above.
+        nativeImageBuildHeap?.let { buildArgs.add("-J-Xmx$it") }
+        nativeImageBuildParallelism?.let { buildArgs.add("--parallelism=$it") }
+        nativeImageResourceExcludes.forEach { buildArgs.add(it) }
     }
 }
 
 val nativeOutputDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/output/ArchiveTune")
 val nativeCompileDir = layout.buildDirectory.dir("compose/tmp/main/graalvm/nativeCompile")
+val nativeRuntimeShimNames = when {
+    buildingForWindows -> listOf("java.dll", "jvm.dll")
+    buildingForLinux -> listOf("libjava.so", "libjvm.so")
+    else -> emptyList()
+}
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
 val nativeMsiScript = rootProject.layout.projectDirectory.file("packaging/windows/build-native-msi.ps1")
 val nativeReleaseDir = desktopAppProject.layout.buildDirectory.dir("compose/binaries/main-native/app/ArchiveTune")
@@ -101,12 +201,23 @@ tasks.matching { it.name == "generateGraalvmWindowsResources" }.configureEach {
     dependsOn(desktopAppProject.tasks.named("generateWindowsIcon"))
 }
 
+/*
+ * Replaces the full GraalVM JDK runtime libraries with the tiny shims that native-image emitted
+ * for this build.
+ *
+ * Nucleus stages the complete `libjava`/`libjvm` (or `java`/`jvm` on Windows) libraries next to
+ * the executable, but the native image does not need the full JVM: it only needs the shims that
+ * the image was linked against. Shipping the full libraries instead adds tens of megabytes and
+ * crashes the process during shutdown, because the full JVM tears down state the native image
+ * never initialised.
+ */
 val stageNativeRuntimeShims = tasks.register<Copy>("stageNativeRuntimeShims") {
     group = "distribution"
-    description = "Replaces full GraalVM JDK java/jvm DLLs with the tiny shims emitted for this native image."
+    description = "Replaces the full GraalVM JDK runtime libraries with the shims emitted for this native image."
     dependsOn("nativeImageCompile")
+    onlyIf { nativeRuntimeShimNames.isNotEmpty() }
     from(nativeCompileDir) {
-        include("java.dll", "jvm.dll")
+        include(nativeRuntimeShimNames)
     }
     into(nativeOutputDir)
     mustRunAfter("packageGraalvmNative")
@@ -245,16 +356,54 @@ val stageNativeStemRuntime = tasks.register<Copy>("stageNativeStemRuntime") {
     mustRunAfter("packageGraalvmNative")
 }
 
+/*
+ * Staging steps that only exist for a Windows x64 distribution.
+ *
+ * A Linux native image links against the system libVLC, ships no DirectML stem worker and no
+ * Essentia analysis DLL, so these tasks must not become part of the Linux task graph. They stay
+ * registered (so their names remain stable across platforms) but are only wired into the
+ * packaging chain on Windows.
+ */
+val windowsNativeStageTasks: List<TaskProvider<*>> = listOf(
+    stageNativeVlcRuntime,
+    stageNativeStemRuntime,
+    stageNativeAudioAnalysis,
+)
+
+/** Every staging step that has to run for the host platform after the native image is packaged. */
+val nativeStageTasks: List<TaskProvider<*>> = buildList {
+    // The GraalVM runtime shims replace the full JDK libraries on every platform.
+    add(stageNativeRuntimeShims)
+    if (buildingForWindows) {
+        addAll(windowsNativeStageTasks)
+    }
+    // The yt-dlp and Bun sidecars exist for Windows and Linux x86_64 alike.
+    add(stageNativeResolverSidecars)
+}
+
 tasks.matching { it.name == "packageGraalvmNative" }.configureEach {
-    finalizedBy(stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis, stageNativeResolverSidecars)
+    finalizedBy(nativeStageTasks)
 }
 
 val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
     group = "distribution"
     description = "Stages the production GraalVM distribution under desktopApp/build/compose/binaries/main-native."
-    dependsOn("packageGraalvmNative", stageNativeRuntimeShims, stageNativeVlcRuntime, stageNativeStemRuntime, stageNativeAudioAnalysis, stageNativeResolverSidecars)
+    dependsOn(listOf<Any>("packageGraalvmNative") + nativeStageTasks)
+    doFirst {
+        nativeRuntimeShimNames.forEach { name ->
+            val compiled = nativeCompileDir.get().file(name).asFile
+            val packaged = nativeOutputDir.get().file(name).asFile
+            check(compiled.isFile && packaged.isFile && compiled.readBytes().contentEquals(packaged.readBytes())) {
+                "Native runtime shim $name is missing or differs from this build; refusing to stage full JVM libraries."
+            }
+        }
+    }
     from(nativeOutputDir) {
-        exclude("native/windows-x64/vlc/**")
+        if (buildingForWindows) {
+            // The bundled libVLC runtime is copied separately so its plugin timestamps stay
+            // intact for plugins.dat.
+            exclude("native/windows-x64/vlc/**")
+        }
     }
     into(nativeReleaseDir)
 }
@@ -285,18 +434,43 @@ val stageNativeReleaseVlcRuntime = tasks.register<StageBundledVlcRuntimeTask>("s
     dependsOn(stageNativeDistribution)
     sourceDirectory.set(bundledVlcSourceDir)
     destinationDirectory.set(nativeReleaseDir.map { it.dir("native/windows-x64/vlc") })
+    onlyIf { buildingForWindows }
+}
+
+/*
+ * Portable release entry point.
+ *
+ * `stageNativeReleaseVlcRuntime` only stages the Windows libVLC runtime, so the root
+ * `nativeRelease` task has to depend on this task instead to work on every host.
+ */
+val stageNativeRelease = tasks.register("stageNativeRelease") {
+    group = "distribution"
+    description = "Stages the production GraalVM native distribution for the current host platform."
+    dependsOn(stageNativeDistribution, verifyNativeResolverSidecars)
+    if (buildingForWindows) {
+        dependsOn(stageNativeReleaseVlcRuntime)
+    }
 }
 
 tasks.register<Exec>("packageNativeMsi") {
     group = "distribution"
     description = "Builds the production per-user/upgradable MSI from the size-optimized GraalVM native distribution."
 
-    dependsOn(
-        stageNativeReleaseVlcRuntime,
-        verifyNativeResolverSidecars,
-        desktopAppProject.tasks.named("generateWindowsIcon"),
-        rootProject.tasks.named("unzipWix"),
-    )
+    // The MSI is a Windows-only artifact; the task stays registered so its path remains stable
+    // across platforms, but it never runs on another host.
+    onlyIf { buildingForWindows }
+
+    if (buildingForWindows) {
+        dependsOn(
+            stageNativeReleaseVlcRuntime,
+            verifyNativeResolverSidecars,
+            desktopAppProject.tasks.named("generateWindowsIcon"),
+            // The Compose plugin only registers the WiX toolset tasks on Windows, so this task
+            // does not exist on any other host. Resolving it eagerly would fail the whole
+            // configuration there, so the dependency is only declared on Windows.
+            rootProject.tasks.named("unzipWix"),
+        )
+    }
 
     inputs.dir(nativeReleaseDir)
     inputs.file(nativeMsiScript)

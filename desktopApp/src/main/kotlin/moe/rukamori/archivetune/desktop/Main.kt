@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.map
 import moe.rukamori.archivetune.desktop.platform.DesktopPartyPlaybackPolicy
 import moe.rukamori.archivetune.desktop.platform.DesktopAudioAnalysisRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopRuntime
+import moe.rukamori.archivetune.desktop.platform.DesktopRuntimeBenchmark
 import moe.rukamori.archivetune.desktop.platform.DesktopMusicServices
 import moe.rukamori.archivetune.desktop.platform.DesktopDownloadServices
 import moe.rukamori.archivetune.desktop.platform.DesktopUpdateCoordinator
@@ -80,6 +81,7 @@ fun main() {
     configureDesktopImageLoader()
     val runtime = DesktopRuntime.start()
     val musicServices = runtime.own(DesktopMusicServices(runtime))
+    val runtimeBenchmark = DesktopRuntimeBenchmark.startIfRequested(runtime, musicServices)
     val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
     val updateCoordinator = DesktopUpdateCoordinator(runtime, musicServices.playback)
     val playTogether = runtime.own(PlayTogetherManager(musicServices.playback, runtime.paths.cache, runtime.logger))
@@ -244,6 +246,12 @@ fun main() {
                 transparent = !linuxWindow,
                 resizable = true,
             ) {
+                LaunchedEffect(runtimeBenchmark) {
+                    if (runtimeBenchmark != null) {
+                        androidx.compose.runtime.withFrameNanos { }
+                        runtimeBenchmark.onWindowFrame()
+                    }
+                }
                 var showLyrics by remember { mutableStateOf(false) }
                 var showStems by remember { mutableStateOf(false) }
                 var showQueue by remember { mutableStateOf(false) }

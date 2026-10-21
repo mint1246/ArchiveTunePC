@@ -9,6 +9,10 @@ Use JDK 21 for the Gradle build. Run the application with:
 Build an application image with `./gradlew :desktopApp:createDistributable`. The
 launcher is `desktopApp/build/compose/binaries/main/app/ArchiveTune/bin/ArchiveTune`.
 
+The GraalVM native image is built with `./gradlew nativeRelease` and staged at
+`desktopApp/build/compose/binaries/main-native/app/ArchiveTune`. Its executable
+is `desktopApp/build/compose/binaries/main-native/app/ArchiveTune/ArchiveTune`.
+
 ## AppImage packaging
 
 `packaging/linux/build-appimage.sh` wraps that jpackage image in an AppImage. It
@@ -50,22 +54,78 @@ APPIMAGETOOL=/tmp/archivetune-appimage-tools/appimagetool.AppImage \
 
 The result is `dist/ArchiveTune-15.10-x86_64.AppImage` (`dist/` is ignored by
 git). `--version`, `--arch`, `--image`, and `--output` change the inputs and the
-artifact name; `--keep-staging` preserves the generated AppDir for inspection.
-Staging lives under `build/packaging/appimage`, and the script deletes only that
-directory, guarded by an explicit path check. The script also rejects an
-architecture that differs from the host, because the jpackage runtime is built
-for the host architecture.
+artifact name; `--image` overrides the source of both packaging modes;
+`--keep-staging` preserves the generated AppDir for inspection. Staging lives
+under `build/packaging/appimage`, and the script deletes only that directory,
+guarded by an explicit path check. The script also rejects an architecture that
+differs from the host, because the jpackage runtime is built for the host
+architecture.
+
+### GraalVM native AppImage
+
+`--native` packages the GraalVM native image instead of the jpackage image. Its
+payload layout is different: the executable sits in the image root, the
+`libjava.so` and `libjvm.so` runtime shims replace the full JDK libraries next
+to it, Skiko is loaded from `lib/libskiko-linux-x64.so`, and the resolver
+sidecars live in `resolver/` beside the executable. The script copies that
+payload unchanged into `usr/lib/archivetune` as well and lets `AppRun` start
+the native executable, so the native image keeps resolving its runtime shims,
+its Skiko library, and its resolver sidecars relative to its own path. The
+resolver sidecars are validated exactly like in the jpackage mode, only the
+directory that holds them differs.
+
+Build the native image with the `nativeRelease` task:
+
+```sh
+./gradlew nativeRelease
+```
+
+or let the script run that task itself:
+
+```sh
+JAVA_HOME=/path/to/jdk-21 \
+APPIMAGETOOL=/path/to/appimagetool.AppImage \
+  packaging/linux/build-appimage.sh --native
+```
+
+The native-image compiler is memory hungry. Its budget is tuned with two Gradle
+properties, `-PnativeImageBuildHeap` and `-PnativeImageBuildParallelism`.
+They only affect the builder JVM that runs the compiler, not the heap of the
+produced application:
+
+```sh
+./gradlew nativeRelease -PnativeImageBuildHeap=6g -PnativeImageBuildParallelism=4
+APPIMAGETOOL=/tmp/archivetune-appimage-tools/appimagetool.AppImage \
+  packaging/linux/build-appimage.sh --native --skip-build
+```
+
+`--skip-build` packages the native image that is already staged, so the
+properties can be applied by a direct Gradle run first. `JAVA_HOME` selects the
+JDK 21 used to run Gradle. Nucleus provisions the separate GraalVM toolchain;
+the validated Linux build used its GraalVM Community Java 25 toolchain.
+
+The two modes produce different artifacts, so both can be built and compared:
+
+- JVM: `dist/ArchiveTune-15.10-x86_64.AppImage`
+- Native: `dist/ArchiveTune-15.10-graal-x86_64.AppImage`
+
+The native desktop entry is named `ArchiveTune (GraalVM)`. It keeps the same
+desktop id (`archivetune.desktop`) and the same icon (`archivetune.png`) as the
+JVM build, so existing desktop-menu and portal entries that reference
+`archivetune.desktop` keep working.
 
 The AppImage is not distribution-independent. It carries the runtime for the
-build host's architecture and glibc, so the target needs a compatible C library
-and desktop stack, and the runtime dependencies below still apply: a native
-Chromium browser, `secret-tool` with an unlocked Secret Service keyring, system
-libVLC with its plugins, and a normal desktop session with D-Bus and the usual
-GL/fontconfig libraries. On systems without libfuse2, run the AppImage with
+build host's architecture and glibc, and the native image is linked for the
+build host as well, so both modes carry the same ABI limitation: the target
+needs a compatible C library and desktop stack, and the runtime dependencies
+below still apply — a native Chromium browser, `secret-tool` with an unlocked
+Secret Service keyring, system libVLC with its plugins, and a normal desktop
+session with D-Bus and the usual GL/fontconfig libraries. Neither mode bundles
+those host dependencies. On systems without libfuse2, run the AppImage with
 `--appimage-extract-and-run` or set `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 Only build output is staged. No account data, browser profile, keyring entry,
-configuration, cache, or log is copied into the AppDir.
+configuration, cache, or log is copied into the AppDir, in either mode.
 
 For an optional desktop-menu entry, move the AppImage to a stable location such
 as `~/Applications` and add it in Gear Lever, which writes the desktop entry and

@@ -1,0 +1,486 @@
+{
+  "schema": "archivetune.linux-graal-comparison-summary/1",
+  "measured_on": "2026-10-21T23:21:58+0300",
+  "host": {
+    "kernel": "7.2.9-2-cachyos",
+    "machine": "x86_64",
+    "cpu_model": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "logical_cpus": 16,
+    "mem_total_mib": 31999.16,
+    "mem_available_mib": 14640.43,
+    "page_cache_mib": 8727.74,
+    "buffers_mib": 0.07,
+    "swap_total_mib": 64766.99,
+    "python": "3.14.8"
+  },
+  "source_build": {
+    "base_commit": "09363338dd67ef73160f7ab26fa0065984c30cdb",
+    "submodules": [
+      " 950d41259ef32b8f3ffef5651e6bf668c5790e15 IconPack (remotes/origin/main-4-g950d412)",
+      " 144fe5c33c9e2f1f8a6c8c84bb03a34c3c4d7b3c core (heads/integrate-upstream-v15-selective-1-g144fe5c)",
+      " 86792f9497dba016c5fdef1f12d203f75f46baf4 lyrics (remotes/origin/integrate-upstream-v15-lyrics-pinned-2-g86792f9)",
+      " 387706fb24876d7da4a0a3a00e10ad9752abbda4 morideobfuscator (remotes/origin/main-56-g387706f)",
+      " 7abc1d7379e779589e619bfcc7d9d7cb14df4df1 moriextractor (heads/main)"
+    ],
+    "source_overlay": {
+      "build.gradle.kts": "dd0b84e952fc73a7f29028829882d6a98248384ad22914bc9d788f39e6868619",
+      "desktop-native/build.gradle.kts": "69f3d028319fc137bdee208c5450b75201c8e4a3f1611e9be526d13638a696f4",
+      "desktop-native/src/main/resources/META-INF/native-image/moe.rukamori.archivetune/linux-dbus/reachability-metadata.json": "4250bfb9aaf13e2f31174f64241b1c57113f88ffb9cda1ac31d2027c3857ea38",
+      "desktop-native/src/main/kotlin/moe/rukamori/archivetune/native/NativeMain.kt": "67f4ec79a1010da371816f6eb2fc0af0ca8abf42261a49f55431cffa33758d5b",
+      "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/Main.kt": "baef588874c7631ff79a927a58c8cdf65f3d4ed67d0cfa474c8a956cee89ad39",
+      "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/platform/DesktopRuntimeBenchmark.kt": "2e00803bcfdc73c9ecfd79cad6dc24fa0c609beb38cb52fc35f26bcd15359cba",
+      "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/platform/DesktopLinuxPlatformSmoke.kt": "4e8f6c5602d3587c462d384e45152ef6845b17a840fe33f14aee4816adb6f729",
+      "linux-media-integration/src/main/kotlin/moe/rukamori/archivetune/linuxmedia/LinuxMediaControls.kt": "bda67c76a26ef915fbcefc46827c158fee03405ab82b7919e6af265f6d33cebe"
+    },
+    "source_isolation": "git archive of base commit and submodule HEADs, plus only the listed source overlays; unrelated working tree edits excluded",
+    "fixture_sha256": "5b12fbb282c0b20a26d72e6e13e57b7bde6bf9547373da813c19d8455376c746",
+    "jvm_launcher_cfg": "[Application]\napp.classpath=$APPDIR/desktopApp-15.10-c91481b74a3d2e79f4431ed6a6dc3f.jar\napp.mainclass=moe.rukamori.archivetune.desktop.MainKt\napp.classpath=$APPDIR/NewPipeExtractor-0.26.5-58d88813b6131bb0360923881f95a8c.jar\napp.classpath=$APPDIR/animation-core-desktop-1.11.1-3ec8687bba1c875f4630e7c99d49defc.jar\napp.classpath=$APPDIR/animation-desktop-1.11.1-3b1636eba8fac16d053e567d9b91df8.jar\napp.classpath=$APPDIR/annotation-jvm-1.9.1-1d6a04b3b9847638d0529df8ef76a.jar\napp.classpath=$APPDIR/annotations-23.0.0-8484cd17d040d837983323f760b2c660.jar\napp.classpath=$APPDIR/atomicfu-jvm-0.28.0-70921245a0aed3c3e3d17c34ca3dbd87.jar\napp.classpath=$APPDIR/betterlyrics-b743bc871e1d3d1f3ed2d60e4a7037.jar\napp.classpath=$APPDIR/canvas-99249a6ba5598f5841adce45bedac5.jar\napp.classpath=$APPDIR/coil-compose-core-jvm-3.5.0-9565c4af0fad861b0bc16b7bffc53.jar\napp.classpath=$APPDIR/coil-compose-jvm-3.5.0-c0c057f9ba1311897cfbada05f910fb.jar\napp.classpath=$APPDIR/coil-core-jvm-3.5.0-73da9d924cacaf672c3cc0d09340dfa.jar\napp.classpath=$APPDIR/coil-jvm-3.5.0-4cd0fba134e919a7ce9b2982d8d52685.jar\napp.classpath=$APPDIR/coil-network-core-jvm-3.5.0-ae9139c71aff8fac3760d889bf422572.jar\napp.classpath=$APPDIR/coil-network-okhttp-jvm-3.5.0-f974fdd495c0323392b2471d5755364.jar\napp.classpath=$APPDIR/collection-jvm-1.5.0-4421442c114a4f8c8fe587cf2d668237.jar\napp.classpath=$APPDIR/config-1.4.9-c62e4875399181f2a41573ee1fb0d00.jar\napp.classpath=$APPDIR/core-4fe2ff61baed2e3fd2cbaa6d2bb5191.jar\napp.classpath=$APPDIR/core-common-2.2.0-2212d240dfe1e8a7598ee117ccc316d.jar\napp.classpath=$APPDIR/dbus-java-core-5.2.2-81e9831d26c208e9daa8edf936d8e.jar\napp.classpath=$APPDIR/dbus-java-transport-native-unixsocket-5.2.2-a5f5c3da8d3f5318bef66caeee548d2.jar\napp.classpath=$APPDIR/dec-0.1.2-4b1cd14cf29733941cc536b27e6aedfa.jar\napp.classpath=$APPDIR/desktop-audio-analysis-e10c129ee8c1a2d88209a9f9abadf66.jar\napp.classpath=$APPDIR/desktop-auth-62d7d152d985c2aba6d017ff33f19f49.jar\napp.classpath=$APPDIR/desktop-backend-9b5c1762dc632ddcfae4bd45e288b50.jar\napp.classpath=$APPDIR/desktop-downloads-11397ea7602341ca60efc82e3ab4eb62.jar\napp.classpath=$APPDIR/desktop-jvm-1.11.0-853ec1ce1542426c233c62225bcd3895.jar\napp.classpath=$APPDIR/desktop-library-14f9d2d8ce3bdfd5ebdd6d9c58dceeb7.jar\napp.classpath=$APPDIR/desktop-lyrics-ui-1cef350624ddd832a629eb65e1f6acf.jar\napp.classpath=$APPDIR/desktop-play-together-6f75c39ca6ccf1f08759503aa85525d1.jar\napp.classpath=$APPDIR/desktop-playback-3534eae987582f116d87d31e5795732.jar\napp.classpath=$APPDIR/desktop-settings-331d5b77d0d29ce2124cc6b8a3929db.jar\napp.classpath=$APPDIR/desktop-social-d834c6900e455e0855e894fa3ec4c6.jar\napp.classpath=$APPDIR/desktop-statistics-652766439f84cfb41a24599c81e59e.jar\napp.classpath=$APPDIR/foundation-desktop-1.11.1-a4787b8ca37ae91eb45fa9a21e1a4ce.jar\napp.classpath=$APPDIR/foundation-layout-desktop-1.11.1-283d2ac8235541447bbd8d60ab59521.jar\napp.classpath=$APPDIR/http-62405a3015854b5328f4106570ac5a38.jar\napp.classpath=$APPDIR/jaudiotagger-3.0.1-5ecc378fd3814cb1752d3f4ac53b82.jar\napp.classpath=$APPDIR/jbr-api-1.9.0-4ae6ce27bcafb233efdbf54395d03.jar\napp.classpath=$APPDIR/jna-jpms-5.17.0-f1b199707f6777dfd317946863f97991.jar\napp.classpath=$APPDIR/jna-platform-jpms-5.17.0-1358c9f34d3c816b5716c51770d39613.jar\napp.classpath=$APPDIR/json-20250517-5a492fae2d0d499487981f616f81567.jar\napp.classpath=$APPDIR/jsoup-1.22.2-e3ceba301c43333ac7715fab5595d85b.jar\napp.classpath=$APPDIR/jspecify-1.0.0-9133aba420d0ca3b01dbb6ae9992cf6.jar\napp.classpath=$APPDIR/jsr305-3.0.2-dd83accb899363c32b7d7a1b2e4ce40.jar\napp.classpath=$APPDIR/jvm-89a19e299d426a926e2ff39392ba010.jar\napp.classpath=$APPDIR/kotlin-reflect-2.3.21-b22404c8dce1522cf4c6a4309b1242.jar\napp.classpath=$APPDIR/kotlin-stdlib-2.4.10-5b757154baf259203dc5a025571bec14.jar\napp.classpath=$APPDIR/kotlinx-coroutines-core-jvm-1.11.0-41a5e9a2f2c9affb9d9ab254be5a984f.jar\napp.classpath=$APPDIR/kotlinx-coroutines-slf4j-1.11.0-aa9f8a4e70944e6a49f380574b7648a.jar\napp.classpath=$APPDIR/kotlinx-datetime-jvm-0.7.1-70b44e22ebc7eebfa53f7d1941af072.jar\napp.classpath=$APPDIR/kotlinx-io-bytestring-jvm-0.9.0-8527d04e723d4dbf24324fd478fdaab.jar\napp.classpath=$APPDIR/kotlinx-io-core-jvm-0.9.0-7dd3de7e14c1ef9cdd08bf69f4d491c.jar\napp.classpath=$APPDIR/kotlinx-serialization-core-jvm-1.11.0-cce19040b3217192d383e28af7ffcb58.jar\napp.classpath=$APPDIR/kotlinx-serialization-json-io-jvm-1.11.0-18fa3980a634626154439afcf274a88.jar\napp.classpath=$APPDIR/kotlinx-serialization-json-jvm-1.11.0-22c7504f2965bec48288d5efa4886c52.jar\napp.classpath=$APPDIR/ktor-client-cio-jvm-3.5.1-14883d1ac736d4627bf465be2f9227a7.jar\napp.classpath=$APPDIR/ktor-client-content-negotiation-jvm-3.5.1-a551f4541f6c36a62246b990abb43e5d.jar\napp.classpath=$APPDIR/ktor-client-core-jvm-3.5.1-d34eaefe2a3674d89ef2821a4fad2473.jar\napp.classpath=$APPDIR/ktor-client-encoding-jvm-3.5.1-a0d764e3416f9a55d273276378f8b198.jar\napp.classpath=$APPDIR/ktor-client-logging-jvm-3.5.1-832184f782f9de047b8f4285337272a.jar\napp.classpath=$APPDIR/ktor-client-okhttp-jvm-3.5.1-152b48249bfb98dff34a463eace0daad.jar\napp.classpath=$APPDIR/ktor-events-jvm-3.5.1-103d17f394f2472ca6a17e54b2236ad.jar\napp.classpath=$APPDIR/ktor-http-cio-jvm-3.5.1-9796fab5c3d593268826744c9feb88ad.jar\napp.classpath=$APPDIR/ktor-http-jvm-3.5.1-536fe02edcae8c6a65cdca960d39ff.jar\napp.classpath=$APPDIR/ktor-io-jvm-3.5.1-cc7481a8d6f57cf378032deb7a9a53e.jar\napp.classpath=$APPDIR/ktor-network-jvm-3.5.1-9fc89a892223f9c583b0e4e17bab.jar\napp.classpath=$APPDIR/ktor-network-tls-jvm-3.5.1-fde3d923406e649eee968e33d6ade5b.jar\napp.classpath=$APPDIR/ktor-serialization-jvm-3.5.1-133e2890a06f195922be9e666b65683.jar\napp.classpath=$APPDIR/ktor-serialization-kotlinx-json-jvm-3.5.1-9dc9453b37f67c8d4f3d33df8c99412.jar\napp.classpath=$APPDIR/ktor-serialization-kotlinx-jvm-3.5.1-be53c9187b489620b65e0af4ce7665.jar\napp.classpath=$APPDIR/ktor-server-cio-jvm-3.5.1-9048507de8984b0acd7dcc6d64cc780.jar\napp.classpath=$APPDIR/ktor-server-core-jvm-3.5.1-54a7b31bdf96082b291b0918637e62.jar\napp.classpath=$APPDIR/ktor-server-websockets-jvm-3.5.1-b9c29f9a082fb433be98fbee3b20f3.jar\napp.classpath=$APPDIR/ktor-sse-jvm-3.5.1-8c2fb41363b047284c68f65c4e57f933.jar\napp.classpath=$APPDIR/ktor-utils-jvm-3.5.1-d5ae10e038d27bc87826415fc3263b8b.jar\napp.classpath=$APPDIR/ktor-websocket-serialization-jvm-3.5.1-52e2feb8f57b479226e6723a17edb0ca.jar\napp.classpath=$APPDIR/ktor-websockets-jvm-3.5.1-bbeb704fe4c496cd47c71bc42f7cbb.jar\napp.classpath=$APPDIR/kugou-f2ec41145922332452f8e27133c2bb2.jar\napp.classpath=$APPDIR/lastfm-4f574d9410723266ba4a8b072cb1370.jar\napp.classpath=$APPDIR/libdatachannel-java-0.24.1.1-94e76a0a349f5ae6ce32ad54f622fe.jar\napp.classpath=$APPDIR/libdatachannel-java-arch-detect-0.24.1.1-6ea995291273998b461e24f77647973.jar\napp.classpath=$APPDIR/lifecycle-common-jvm-2.9.4-6430746dbcfa6c26a0d997b9c76f84c.jar\napp.classpath=$APPDIR/lifecycle-runtime-compose-desktop-2.9.4-8f8fe81afd5ce7cf3e8a38142f8aa2.jar\napp.classpath=$APPDIR/lifecycle-runtime-compose-desktop-2.9.6-497e8fcabac8a5f5ee68cb2a1c8e70a4.jar\napp.classpath=$APPDIR/lifecycle-runtime-desktop-2.9.4-c2c1ed6e1ecd2d037e07bfe64884c5.jar\napp.classpath=$APPDIR/lifecycle-viewmodel-desktop-2.9.4-df36d8fe3a9c84b3bd8529b166e73d0.jar\napp.classpath=$APPDIR/lifecycle-viewmodel-savedstate-desktop-2.9.4-cf8139ef2d41e155eece234f1b2a358.jar\napp.classpath=$APPDIR/linux-media-integration-a1985e72ca793d23ad5821c13d65e21c.jar\napp.classpath=$APPDIR/lrclib-b326964b7bde71c5605cf3ec63416bac.jar\napp.classpath=$APPDIR/material-desktop-1.11.0-25436e0596588ad39cc6841e571bd6.jar\napp.classpath=$APPDIR/material-icons-core-desktop-1.7.3-23eaca5d2a4caa3e4077a0e9fd549d68.jar\napp.classpath=$APPDIR/material-icons-extended-desktop-1.7.3-848bc0f13628d5b3accc94dd3afdfa27.jar\napp.classpath=$APPDIR/material-ripple-desktop-1.11.0-25262e12df3eab6a74d96e5c5f1e35d4.jar\napp.classpath=$APPDIR/material3-desktop-1.9.0-e8b6edb91fefebc65537db222e7bd1.jar\napp.classpath=$APPDIR/nanojson-e9d656ddb49a412a5a0a5d5ef20ca7ef09549996-1c9e71555834fbecbbf37bf425c3fd.jar\napp.classpath=$APPDIR/navigationevent-desktop-1.0.1-e0291c4f5d6a6b9038dae1d32950806e.jar\napp.classpath=$APPDIR/okhttp-dnsoverhttps-5.4.0-cbf8c35ac48db2ee3996ceed22acf9bb.jar\napp.classpath=$APPDIR/okhttp-jvm-5.4.0-f79f61c92f5dc7fd399b7e36731b7b9e.jar\napp.classpath=$APPDIR/okio-jvm-3.17.0-96ad357689fd2841747aec56e94a7162.jar\napp.classpath=$APPDIR/org.eclipse.jdt.annotation-2.4.100-e6fcce2bb49d4b69e761119ae3e1dc.jar\napp.classpath=$APPDIR/paxsenix-6563397ffd8f1ec246f8722b46e28eb2.jar\napp.classpath=$APPDIR/playback-core-df67e3b87fe967da63fae4eb465442e.jar\napp.classpath=$APPDIR/protobuf-javalite-4.36.1-469dfacc087d945b7a8ff8459f86868.jar\napp.classpath=$APPDIR/re2j-1.8-4240e655caa938c61ddbec8b92bfb061.jar\napp.classpath=$APPDIR/rhino-1.9.1-2f6285c08290535c30377c2124fcb646.jar\napp.classpath=$APPDIR/rhino-engine-1.8.1-a4e862e55ee6c44b43db60c199528cd.jar\napp.classpath=$APPDIR/runtime-annotation-jvm-1.11.2-6963b878fcc7f76320564cfd61b7e881.jar\napp.classpath=$APPDIR/runtime-desktop-1.11.1-f530f7ee1fb51ca01a95c1bbb0ef3a7d.jar\napp.classpath=$APPDIR/runtime-desktop-1.11.2-b26a4a152b09eaedc9359b8121752f8.jar\napp.classpath=$APPDIR/runtime-retain-desktop-1.11.2-1a6731c44f232c5d9e1fb10edac28de.jar\napp.classpath=$APPDIR/runtime-saveable-desktop-1.11.1-eea89111a01dbed26b76bf2f1fd3.jar\napp.classpath=$APPDIR/runtime-saveable-desktop-1.11.2-80f1ec1d671efb9ee47f426501a6620.jar\napp.classpath=$APPDIR/savedstate-compose-desktop-1.3.6-8de11644e97845eaa45d9e74fdec755.jar\napp.classpath=$APPDIR/savedstate-compose-desktop-1.4.0-84ed9710e312be7017fd7498fe747a.jar\napp.classpath=$APPDIR/savedstate-desktop-1.4.0-e2a50762f9c6de234b04b12926df6b3.jar\napp.classpath=$APPDIR/simpmusic-8fe84ac4e83d28f82da6442fe30ffb4.jar\napp.classpath=$APPDIR/skiko-awt-0.144.6-6b3e9f225137b9011f3a95ca950455.jar\napp.classpath=$APPDIR/skiko-awt-runtime-linux-x64-0.144.6-dcf62bb22d92dbf95e8333753c119b1d.jar\napp.classpath=$APPDIR/slf4j-api-2.0.18-fe2837bd49bfb7665741902fed2ca9.jar\napp.classpath=$APPDIR/slf4j-nop-2.0.17-fd3afdcef8427ba66cfbe2769c5e134.jar\napp.classpath=$APPDIR/spicylyrics-aa1a55324a7bdc89e44eb646811585e.jar\napp.classpath=$APPDIR/spotifycore-bfc63ef50d6f4455919ee4175c24f4d.jar\napp.classpath=$APPDIR/stream-resolver-8111681699c95f751a851b1a29679d.jar\napp.classpath=$APPDIR/ui-backhandler-desktop-1.11.1-628e5847a9bb5f2484c7a1764133b08.jar\napp.classpath=$APPDIR/ui-desktop-1.11.1-8b94f48ebc49294a7a48a96ddd90dab9.jar\napp.classpath=$APPDIR/ui-geometry-desktop-1.11.1-50f2f5ca194395b3639e4e26be66d2ae.jar\napp.classpath=$APPDIR/ui-graphics-desktop-1.11.1-9719c3b28df541492cffa726d5969d.jar\napp.classpath=$APPDIR/ui-text-desktop-1.11.1-c237f6ec36592e968436efc2f2ee3e4d.jar\napp.classpath=$APPDIR/ui-tooling-preview-desktop-1.11.1-b496665b26f319b702eea4c9e514f7d.jar\napp.classpath=$APPDIR/ui-unit-desktop-1.11.1-6974f16892c8d8d3723cb6de69a762de.jar\napp.classpath=$APPDIR/ui-util-desktop-1.11.1-4acc4435b9b1c62da975d3cc6425edd.jar\napp.classpath=$APPDIR/unison-a151c932d3175e2e65c8ead36b1d82bf.jar\napp.classpath=$APPDIR/vlcj-4.11.0-5e11eee85bf4a5fefc44b7646ba43d83.jar\napp.classpath=$APPDIR/vlcj-natives-4.8.3-b7745b2f9a723c7f83fe24adb7d70bb.jar\napp.classpath=$APPDIR/windows-media-integration-1c31baad82a82c78a20a1eaa3759ea.jar\napp.classpath=$APPDIR/youlyplus-fe6124ef92fff552b95d1d97210e063.jar\n\n[JavaOptions]\njava-options=-Djpackage.app-version=15.10.0\njava-options=-Dcompose.application.resources.dir=$APPDIR/resources\njava-options=-Dcompose.application.configure.swing.globals=true\njava-options=-Dfile.encoding=UTF-8\njava-options=-Dsun.java2d.dpiaware=true\njava-options=-Xms32m\njava-options=-Xmx768m\njava-options=-XX:ReservedCodeCacheSize=128m\njava-options=-XX:ParallelGCThreads=4\njava-options=-XX:ConcGCThreads=2\njava-options=-XX:G1ConcRefinementThreads=4\njava-options=-Dskiko.library.path=$APPDIR\n",
+    "native_build": "nativeRelease -PnativeImageBuildHeap=6g -PnativeImageBuildParallelism=4; default SIZE optimization; compiler budgets do not change application heap",
+    "native_compiler": "GraalVM Community 25.1.3+9.1 (Java 25.0.3+9), gcc 16.2.1",
+    "native_flags": [
+      "-Os",
+      "--gc=serial",
+      "-R:MaxHeapSize=128m",
+      "-H:MaxHeapFree=16m"
+    ],
+    "validation": {
+      "native_external_mpris_getall_player_and_root": true,
+      "native_synthetic_keyring_lifecycle": true,
+      "native_disposable_brave_http_websocket_botguard": true,
+      "jvm_same_platform_checks": true,
+      "unit_checks": {
+        "linux_media_tests": 42,
+        "linux_media_skips": 4,
+        "desktop_app_tests": 153,
+        "harness_tests": 36
+      },
+      "native_release_rejects_wrong_runtime_shim": true,
+      "native_appimage_external_mpris": true,
+      "native_appimage_keyring": true,
+      "native_appimage_brave_proof": true,
+      "native_appimage_ui_play_seek_pause_resume": true
+    },
+    "limitations": [
+      "No real Google account was used for native checks.",
+      "Direct GNOME shortcut assignment and held-key behavior were not exercised in the native build.",
+      "Legacy Rhino resolver path and Windows native MSI were not revalidated.",
+      "Both artifacts require the build host ABI and system libVLC/browser/keyring."
+    ],
+    "artifacts": {
+      "native_appimage": {
+        "filename": "ArchiveTune-15.10-graal-x86_64.AppImage",
+        "bytes": 142375416,
+        "sha256": "81eae5c4d05054de85d8b4f8404629b487d710adaedf1407f38e27748ec52526"
+      }
+    }
+  },
+  "configurations": {
+    "jvm": "OpenJDK 21.0.12.1; packaged jpackage launcher: -Xms32m -Xmx768m; default G1 GC; code cache 128m; ParallelGCThreads=4 ConcGCThreads=2 G1ConcRefinementThreads=4. Heap declared from ArchiveTune.cfg, not detected from argv.",
+    "native": "GraalVM Community 25.0.3+9 (25.1.3+9.1); SIZE optimization (-Os), compatibility CPU target, Serial GC, baked-in max heap 128m and MaxHeapFree=16m. Heap declared from build configuration."
+  },
+  "run_statuses": [
+    {
+      "variant": "jvm",
+      "warmup": true,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "native",
+      "warmup": true,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "jvm",
+      "warmup": false,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "native",
+      "warmup": false,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "native",
+      "warmup": false,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "jvm",
+      "warmup": false,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "jvm",
+      "warmup": false,
+      "status": "ok",
+      "exit_code": 0
+    },
+    {
+      "variant": "native",
+      "warmup": false,
+      "status": "ok",
+      "exit_code": 0
+    }
+  ],
+  "summary": {
+    "jvm": {
+      "runs": 3,
+      "ok_runs": 3,
+      "failed_runs": 0,
+      "usable": true,
+      "startup_ms": {
+        "samples": 3,
+        "min": 1995.0,
+        "median": 1999.0,
+        "p95": 2004.0,
+        "max": 2004.0
+      },
+      "process_names": [
+        "ArchiveTune"
+      ],
+      "max_process_count": 2,
+      "idle": {
+        "cpu_percent_one_core": {
+          "samples": 3,
+          "min": 1.18,
+          "median": 1.51,
+          "p95": 2.09,
+          "max": 2.09
+        },
+        "cpu_seconds": {
+          "samples": 3,
+          "min": 0.12,
+          "median": 0.15,
+          "p95": 0.21,
+          "max": 0.21
+        },
+        "rss_mib": {
+          "samples": 3,
+          "min": 344.59,
+          "median": 353.36,
+          "p95": 353.42,
+          "max": 353.42
+        },
+        "pss_mib": {
+          "samples": 3,
+          "min": 334.81,
+          "median": 343.64,
+          "p95": 343.69,
+          "max": 343.69
+        },
+        "uss_mib": {
+          "samples": 3,
+          "min": 332.16,
+          "median": 341.0,
+          "p95": 341.05,
+          "max": 341.05
+        }
+      },
+      "playback": {
+        "cpu_percent_one_core": {
+          "samples": 3,
+          "min": 3.01,
+          "median": 3.22,
+          "p95": 3.57,
+          "max": 3.57
+        },
+        "cpu_seconds": {
+          "samples": 3,
+          "min": 0.6,
+          "median": 0.64,
+          "p95": 0.71,
+          "max": 0.71
+        },
+        "rss_mib": {
+          "samples": 3,
+          "min": 375.05,
+          "median": 382.64,
+          "p95": 392.45,
+          "max": 392.45
+        },
+        "pss_mib": {
+          "samples": 3,
+          "min": 364.47,
+          "median": 372.2,
+          "p95": 381.93,
+          "max": 381.93
+        },
+        "uss_mib": {
+          "samples": 3,
+          "min": 361.37,
+          "median": 369.09,
+          "p95": 378.81,
+          "max": 378.81
+        }
+      },
+      "paused": {
+        "cpu_percent_one_core": {
+          "samples": 3,
+          "min": 0.96,
+          "median": 2.35,
+          "p95": 2.45,
+          "max": 2.45
+        },
+        "cpu_seconds": {
+          "samples": 3,
+          "min": 0.05,
+          "median": 0.12,
+          "p95": 0.12,
+          "max": 0.12
+        },
+        "rss_mib": {
+          "samples": 3,
+          "min": 384.55,
+          "median": 385.62,
+          "p95": 395.28,
+          "max": 395.28
+        },
+        "pss_mib": {
+          "samples": 3,
+          "min": 374.0,
+          "median": 375.18,
+          "p95": 384.75,
+          "max": 384.75
+        },
+        "uss_mib": {
+          "samples": 3,
+          "min": 370.88,
+          "median": 372.07,
+          "p95": 381.63,
+          "max": 381.63
+        }
+      },
+      "peak_rss_mib": 395.39,
+      "peak_pss_mib": 384.86,
+      "peak_uss_mib": 381.74
+    },
+    "native": {
+      "runs": 3,
+      "ok_runs": 3,
+      "failed_runs": 0,
+      "usable": true,
+      "startup_ms": {
+        "samples": 3,
+        "min": 188.0,
+        "median": 190.0,
+        "p95": 195.0,
+        "max": 195.0
+      },
+      "process_names": [
+        "ArchiveTune"
+      ],
+      "max_process_count": 1,
+      "idle": {
+        "cpu_percent_one_core": {
+          "samples": 3,
+          "min": 0.2,
+          "median": 0.3,
+          "p95": 0.36,
+          "max": 0.36
+        },
+        "cpu_seconds": {
+          "samples": 3,
+          "min": 0.02,
+          "median": 0.03,
+          "p95": 0.04,
+          "max": 0.04
+        },
+        "rss_mib": {
+          "samples": 3,
+          "min": 175.48,
+          "median": 175.75,
+          "p95": 175.89,
+          "max": 175.89
+        },
+        "pss_mib": {
+          "samples": 3,
+          "min": 165.8,
+          "median": 165.97,
+          "p95": 166.1,
+          "max": 166.1
+        },
+        "uss_mib": {
+          "samples": 3,
+          "min": 163.34,
+          "median": 163.47,
+          "p95": 163.58,
+          "max": 163.58
+        }
+      },
+      "playback": {
+        "cpu_percent_one_core": {
+          "samples": 3,
+          "min": 1.44,
+          "median": 1.45,
+          "p95": 1.58,
+          "max": 1.58
+        },
+        "cpu_seconds": {
+          "samples": 3,
+          "min": 0.29,
+          "median": 0.29,
+          "p95": 0.32,
+          "max": 0.32
+        },
+        "rss_mib": {
+          "samples": 3,
+          "min": 203.44,
+          "median": 203.66,
+          "p95": 203.95,
+          "max": 203.95
+        },
+        "pss_mib": {
+          "samples": 3,
+          "min": 192.06,
+          "median": 192.36,
+          "p95": 192.57,
+          "max": 192.57
+        },
+        "uss_mib": {
+          "samples": 3,
+          "min": 188.82,
+          "median": 188.98,
+          "p95": 189.18,
+          "max": 189.18
+        }
+      },
+      "paused": {
+        "cpu_percent_one_core": {
+          "samples": 3,
+          "min": 0.56,
+          "median": 0.57,
+          "p95": 1.03,
+          "max": 1.03
+        },
+        "cpu_seconds": {
+          "samples": 3,
+          "min": 0.03,
+          "median": 0.03,
+          "p95": 0.05,
+          "max": 0.05
+        },
+        "rss_mib": {
+          "samples": 3,
+          "min": 209.75,
+          "median": 210.21,
+          "p95": 210.3,
+          "max": 210.3
+        },
+        "pss_mib": {
+          "samples": 3,
+          "min": 198.47,
+          "median": 198.91,
+          "p95": 198.93,
+          "max": 198.93
+        },
+        "uss_mib": {
+          "samples": 3,
+          "min": 195.14,
+          "median": 195.54,
+          "p95": 195.54,
+          "max": 195.54
+        }
+      },
+      "peak_rss_mib": 210.61,
+      "peak_pss_mib": 199.3,
+      "peak_uss_mib": 195.92
+    }
+  },
+  "comparison": {
+    "startup_ms_median": {
+      "baseline": 1999.0,
+      "candidate": 190.0,
+      "delta": -1809.0,
+      "ratio": 0.095
+    },
+    "idle_cpu_percent_one_core_median": {
+      "baseline": 1.51,
+      "candidate": 0.3,
+      "delta": -1.21,
+      "ratio": 0.199
+    },
+    "playback_cpu_percent_one_core_median": {
+      "baseline": 3.22,
+      "candidate": 1.45,
+      "delta": -1.77,
+      "ratio": 0.45
+    },
+    "idle_rss_mib_median": {
+      "baseline": 353.36,
+      "candidate": 175.75,
+      "delta": -177.61,
+      "ratio": 0.497
+    },
+    "idle_pss_mib_median": {
+      "baseline": 343.64,
+      "candidate": 165.97,
+      "delta": -177.67,
+      "ratio": 0.483
+    },
+    "idle_uss_mib_median": {
+      "baseline": 341.0,
+      "candidate": 163.47,
+      "delta": -177.53,
+      "ratio": 0.479
+    },
+    "playback_rss_mib_median": {
+      "baseline": 382.64,
+      "candidate": 203.66,
+      "delta": -178.98,
+      "ratio": 0.532
+    },
+    "playback_pss_mib_median": {
+      "baseline": 372.2,
+      "candidate": 192.36,
+      "delta": -179.84,
+      "ratio": 0.517
+    },
+    "playback_uss_mib_median": {
+      "baseline": 369.09,
+      "candidate": 188.98,
+      "delta": -180.11,
+      "ratio": 0.512
+    },
+    "peak_rss_mib": {
+      "baseline": 395.39,
+      "candidate": 210.61,
+      "delta": -184.78,
+      "ratio": 0.533
+    },
+    "peak_pss_mib": {
+      "baseline": 384.86,
+      "candidate": 199.3,
+      "delta": -185.56,
+      "ratio": 0.518
+    },
+    "peak_uss_mib": {
+      "baseline": 381.74,
+      "candidate": 195.92,
+      "delta": -185.82,
+      "ratio": 0.513
+    }
+  },
+  "limitations": [
+    "CPU comes from /proc/<pid>/stat deltas polled every sample interval: a helper that lives for less than one interval can be missed, as can its last CPU increment before exit.",
+    "CPU percent is relative to one logical core (100% is one fully busy core, not one machine).",
+    "The tree RSS total counts a shared page once per process and therefore overstates the physical RAM; PSS divides shared pages among their sharers and USS is the private footprint.",
+    "PSS/USS come from /proc/<pid>/smaps_rollup; without that file the report carries null values instead of a partial total.",
+    "Only the tree this harness launched is measured; the user's own instance and other desktop services are excluded from the totals but still consume host resources.",
+    "The launcher wrapper (AppImage AppRun, jpackage launcher, shell script) is reported separately from the dominant CPU consumer, which is treated as the application process.",
+    "Warmups prime shared host caches; every measured run still has a fresh private XDG tree.",
+    "The harness never rewrites a command line: JVM flags and the native heap setting must be documented in arm notes when baked into a launcher or image; both arms must be built from the same source.",
+    "Anonymous background maintenance may run; the workload needs no account or DRM and uses a local muted file played through the real playback controller.",
+    "This is a process-level measurement: it says nothing about in-app latency or frame rate.",
+    "No real Google account was used for native checks.",
+    "Direct GNOME shortcut assignment and held-key behavior were not exercised in the native build.",
+    "Legacy Rhino resolver path and Windows native MSI were not revalidated.",
+    "Both artifacts require the build host ABI and system libVLC/browser/keyring.",
+    "Startup measures unpacked launchers; AppImage mounting/extraction time is excluded."
+  ]
+}

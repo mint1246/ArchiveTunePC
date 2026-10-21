@@ -60,7 +60,7 @@ tasks.register("nativeCheck") {
 tasks.register("nativeRelease") {
     group = "distribution"
     description = "Builds the size-optimized GraalVM Native Image for release packaging."
-    dependsOn(":desktop-native:stageNativeReleaseVlcRuntime")
+    dependsOn(":desktop-native:stageNativeRelease")
 }
 
 tasks.register("msiNative") {

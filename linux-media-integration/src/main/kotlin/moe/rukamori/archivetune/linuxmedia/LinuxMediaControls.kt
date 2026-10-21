@@ -5,6 +5,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
+import java.util.logging.Level
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -77,8 +78,9 @@ class LinuxMediaControls(
             } catch (failure: Exception) {
                 runCatching { opened?.close() }
                 if (!closed.get()) {
-                    _availability.value = LinuxMediaAvailability.UNAVAILABLE
                     logger.warning("Linux media controls unavailable: ${failure.javaClass.simpleName}")
+                    logger.log(Level.FINE, "Linux media controls initialization failed", failure)
+                    _availability.value = LinuxMediaAvailability.UNAVAILABLE
                 }
             }
         }

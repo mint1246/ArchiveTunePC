@@ -3,9 +3,10 @@ package moe.rukamori.archivetune.native
 import dev.nucleusframework.graalvm.GraalVmInitializer
 import java.nio.file.Path
 import moe.rukamori.archivetune.desktop.main as archiveTuneMain
+import moe.rukamori.archivetune.desktop.platform.runDesktopLinuxPlatformSmoke
 
 /**
- * GraalVM Native Image entry point for the Windows desktop distribution.
+ * GraalVM Native Image entry point for the desktop distribution.
  *
  * Nucleus needs to initialize its native-image substitutions before ArchiveTune touches AWT,
  * Compose, or Skiko. The production desktop entry point remains unchanged and is called directly
@@ -28,6 +29,11 @@ fun main(args: Array<String>) {
 
     if (args.firstOrNull() == "--canvas-smoke") {
         runNativeCanvasSmoke(args.drop(1))
+        return
+    }
+
+    if (args.firstOrNull() == "--linux-platform-smoke") {
+        runDesktopLinuxPlatformSmoke(args.drop(1))
         return
     }
 
