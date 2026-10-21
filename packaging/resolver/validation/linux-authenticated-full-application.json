@@ -1,0 +1,1248 @@
+{
+  "schema": "archivetune.authenticated-full-application-benchmark/1",
+  "measured_on": "2026-10-21",
+  "status": "complete",
+  "platform": {
+    "system": "Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "cpu_count": 16,
+    "python": "3.14.8",
+    "xvfb_version": "21.1.25-2"
+  },
+  "quality": "HIGH",
+  "authentication": {
+    "mode": "restored live YouTube session cloned per run from Secret Service",
+    "source_entry_present": true,
+    "source_entry_format_version": 4,
+    "source_entry_unchanged": true,
+    "live_browser_profile_used": false,
+    "session_writes_confined_to_clone": true,
+    "keyring_clone_isolated": true,
+    "keyring_clone_cleared": true,
+    "secret_values_in_report": false,
+    "anonymous_runs_accepted": false
+  },
+  "baseline_commit": "0817a502413c6e77871eb161ee5c18ad6c4486da",
+  "baseline_commit_source": "0817a5024",
+  "candidate_ref": null,
+  "candidate_commit": "d3755de5f88c9358a685fce7cea0863dd922990c",
+  "videos": [
+    "jNQXAC9IVRw",
+    "dQw4w9WgXcQ",
+    "aqz-KE-bpKQ"
+  ],
+  "repeats_per_video": 2,
+  "auth_probe_video": "BaW_jenozKc",
+  "java": {
+    "home": "/usr/lib/jvm/java-21-openjdk",
+    "executable": "/usr/lib/jvm/java-21-openjdk/bin/java",
+    "version": "openjdk version \"21.0.12.1\" 2026-08-18"
+  },
+  "jvm_flags": [
+    "-Xms32m",
+    "-Xmx768m",
+    "-XX:ReservedCodeCacheSize=128m",
+    "-XX:ParallelGCThreads=4",
+    "-XX:ConcGCThreads=2",
+    "-XX:G1ConcRefinementThreads=4",
+    "-Dfile.encoding=UTF-8",
+    "-Dsun.java2d.dpiaware=true",
+    "-Djava.awt.headless=false"
+  ],
+  "sampling": {
+    "sample_interval_ms": 25,
+    "pss_interval_ms": 100,
+    "rss_method": "At each 25 ms sample, sum RSS of every process in the application session/process group, its descendant closure and the persistent reparented-descendant registry; report the maximum simultaneous total.",
+    "pss_method": "Sum /proc/<pid>/smaps_rollup Pss for the same tracked set at PSS samples.",
+    "cpu_method": "Cumulative /proc/<pid>/stat utime+stime of the tracked tree, maximum observed.",
+    "helper_counting": "All browser renderer/gpu/network helpers are classified as browser and counted. The frozen yt-dlp PyInstaller binary runs as two processes with the same yt-dlp executable name (bootloader plus embedded CPython); both are counted as yt_dlp, so the embedded interpreter is represented by that count rather than a separate python-named process. yt-dlp's ffmpeg/ffprobe and qjs sidecars are counted as media/quickjs. Counts are maximum simultaneous processes per phase category, and the final cleanup samples expose any post-shutdown residue.",
+    "argv_collected": false
+  },
+  "method": {
+    "application": "real :desktopApp JVM, real Compose/AWT Window, real DesktopMusicServices",
+    "window": "waited for a visible/showing AWT Window, then 10 s settle before auth verification",
+    "offscreen": "private Xvfb display, 1440x900x24, software Skia; host DBUS preserved",
+    "isolation": "Each run uses a disposable HOME/ARCHIVETUNE_HOME/XDG/TMPDIR and a Secret Service entry keyed by that run's data/youtube-session.dpapi path. The live keyring entry is read only and the live browser profile is never copied or opened.",
+    "instrumentation": "Identical temporary Main.kt hook in disposable detached checkouts; delegated DesktopSessionProvider hides PO-token bindings while retaining cookie/visitor/DataSync, so BotGuard minting must launch the real headless Chromium provider.",
+    "playback": "A real resolved remote stream is loaded into the real VlcjPlaybackController at volume 0; play/advance/seek/pause/resume/stop are asserted from PlaybackSnapshot."
+  },
+  "instrumentation": {
+    "main_kt": "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/Main.kt",
+    "scope": "temporary hook in disposable detached checkouts only",
+    "baseline_sha256": "8ed946f9fd4abeef74180a3b8d9265634820b6d427fd2af621cab26185b0dee6",
+    "candidate_sha256": "8ed946f9fd4abeef74180a3b8d9265634820b6d427fd2af621cab26185b0dee6",
+    "identical": true
+  },
+  "baseline": {
+    "commit": "0817a502413c6e77871eb161ee5c18ad6c4486da",
+    "core_commit": "144fe5c33c9e2f1f8a6c8c84bb03a34c3c4d7b3c",
+    "backend": "legacy-browser",
+    "exit_code": 0,
+    "duration_ms": 28590,
+    "cpu_total_seconds_max": 12.14,
+    "cpu_app_seconds_max": 12.14,
+    "resolution": {
+      "attempts": 6,
+      "successes": 6,
+      "failures": 0,
+      "min_ms": 142,
+      "median_ms": 491.0,
+      "max_ms": 944
+    },
+    "streams": [
+      {
+        "video_id": "jNQXAC9IVRw",
+        "iteration": 0,
+        "elapsed_ms": 944,
+        "client_name": "VISIONOS",
+        "client_version": "0.1",
+        "mime": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "format": 140,
+        "bitrate": 130171,
+        "expiry_seconds": 21539
+      },
+      {
+        "video_id": "jNQXAC9IVRw",
+        "iteration": 1,
+        "elapsed_ms": 142,
+        "client_name": "VISIONOS",
+        "client_version": "0.1",
+        "mime": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "format": 140,
+        "bitrate": 130171,
+        "expiry_seconds": 21539
+      },
+      {
+        "video_id": "dQw4w9WgXcQ",
+        "iteration": 0,
+        "elapsed_ms": 796,
+        "client_name": "VISIONOS",
+        "client_version": "0.1",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 136544,
+        "expiry_seconds": 21539
+      },
+      {
+        "video_id": "dQw4w9WgXcQ",
+        "iteration": 1,
+        "elapsed_ms": 186,
+        "client_name": "VISIONOS",
+        "client_version": "0.1",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 136544,
+        "expiry_seconds": 21539
+      },
+      {
+        "video_id": "aqz-KE-bpKQ",
+        "iteration": 0,
+        "elapsed_ms": 848,
+        "client_name": "VISIONOS",
+        "client_version": "0.1",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 143908,
+        "expiry_seconds": 21539
+      },
+      {
+        "video_id": "aqz-KE-bpKQ",
+        "iteration": 1,
+        "elapsed_ms": 166,
+        "client_name": "VISIONOS",
+        "client_version": "0.1",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 143908,
+        "expiry_seconds": 21539
+      }
+    ],
+    "log_evidence": {
+      "playback_engine_available": true,
+      "vlc_runtime_not_found": false,
+      "out_of_memory_error": false,
+      "uncaught_exception": false
+    },
+    "authentication": {
+      "restored": {
+        "signed_in": true,
+        "restored_from_secure_store": true,
+        "has_login_cookie": true,
+        "has_visitor_data": true,
+        "has_data_sync": true,
+        "has_bound_po_token_before_strip": true
+      },
+      "account_request_verified": true,
+      "account_request_failure": null,
+      "guard_passed": true,
+      "authenticated_stream_successes": 6,
+      "browser_proof": {
+        "probe_video_id": "BaW_jenozKc",
+        "browser_teardown_observed": true,
+        "cold_attempts": 1,
+        "cold_successes": 1,
+        "cold_records": [
+          {
+            "video_id": "BaW_jenozKc",
+            "minted": true,
+            "elapsed_ms": 619,
+            "failure": null
+          }
+        ],
+        "delegated_mints": 6,
+        "delegated_minted": 6,
+        "browser_processes_observed": [
+          "brave"
+        ],
+        "browser_processes_in_post_idle": 0,
+        "browser_processes_in_shutdown_phase": 0,
+        "browser_processes_after_shutdown": []
+      }
+    },
+    "playback": {
+      "volume": 0.0,
+      "checks": {
+        "started": true,
+        "progressed": true,
+        "seeked": true,
+        "paused": true,
+        "resumed": true,
+        "stopped": true
+      },
+      "markers": [
+        {
+          "volume": 0,
+          "wall_ms": 1792564013392,
+          "type": "playback-begin"
+        },
+        {
+          "failure": null,
+          "wall_ms": 1792564013400,
+          "type": "playback-queue"
+        },
+        {
+          "duration_ms": 19064,
+          "position_ms": 0,
+          "is_playing": true,
+          "error_kind": null,
+          "wall_ms": 1792564013500,
+          "type": "playback-start",
+          "status": "READY"
+        },
+        {
+          "position_ms": 1350,
+          "advanced_ms": 1350,
+          "is_playing": true,
+          "wall_ms": 1792564015001,
+          "type": "playback-progress"
+        },
+        {
+          "position_ms": 5000,
+          "is_playing": true,
+          "wall_ms": 1792564015002,
+          "type": "playback-seek",
+          "status": "READY"
+        },
+        {
+          "position_ms": 5000,
+          "is_playing": false,
+          "play_when_ready": false,
+          "wall_ms": 1792564015002,
+          "type": "playback-pause",
+          "status": "READY"
+        },
+        {
+          "position_ms": 5000,
+          "is_playing": true,
+          "wall_ms": 1792564015003,
+          "type": "playback-resume",
+          "status": "READY"
+        },
+        {
+          "position_ms": 0,
+          "is_playing": false,
+          "wall_ms": 1792564015005,
+          "type": "playback-stop",
+          "status": "IDLE"
+        },
+        {
+          "wall_ms": 1792564015005,
+          "type": "playback-end"
+        }
+      ],
+      "all_checks_passed": true
+    },
+    "phases": {
+      "startup": {
+        "duration_ms": 1948,
+        "rss_mib": {
+          "samples": 78,
+          "min": 43.55,
+          "median": 254.44,
+          "p95": 344.68,
+          "max": 345.31
+        },
+        "pss_mib": {
+          "samples": 20,
+          "min": 26.71,
+          "median": 227.96,
+          "p95": 313.06,
+          "max": 313.2
+        },
+        "process_count": {
+          "samples": 78,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 345.31,
+            "max_pss_mib": 313.2,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "idle": {
+        "duration_ms": 8000,
+        "rss_mib": {
+          "samples": 320,
+          "min": 381.75,
+          "median": 391.75,
+          "p95": 393.75,
+          "max": 393.75
+        },
+        "pss_mib": {
+          "samples": 80,
+          "min": 350.05,
+          "median": 360.29,
+          "p95": 362.13,
+          "max": 362.14
+        },
+        "process_count": {
+          "samples": 320,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 393.75,
+            "max_pss_mib": 362.14,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "auth": {
+        "duration_ms": 754,
+        "rss_mib": {
+          "samples": 31,
+          "min": 393.75,
+          "median": 393.75,
+          "p95": 393.75,
+          "max": 393.88
+        },
+        "pss_mib": {
+          "samples": 8,
+          "min": 362.15,
+          "median": 362.15,
+          "p95": 362.47,
+          "max": 362.47
+        },
+        "process_count": {
+          "samples": 31,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 393.88,
+            "max_pss_mib": 362.47,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "cold_proof": {
+        "duration_ms": 624,
+        "rss_mib": {
+          "samples": 25,
+          "min": 405.56,
+          "median": 1230.19,
+          "p95": 1267.4,
+          "max": 1268.31
+        },
+        "pss_mib": {
+          "samples": 6,
+          "min": 374.2,
+          "median": 553.88,
+          "p95": 572.39,
+          "max": 572.39
+        },
+        "process_count": {
+          "samples": 25,
+          "min": 1.0,
+          "median": 10.0,
+          "p95": 10.0,
+          "max": 10.0
+        },
+        "max_processes": 10.0,
+        "categories": {
+          "browser": {
+            "max_process_count": 9,
+            "max_rss_mib": 862.75,
+            "max_pss_mib": 198.36,
+            "process_names": [
+              "brave"
+            ]
+          },
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 405.94,
+            "max_pss_mib": 374.2,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "extraction": {
+        "duration_ms": 3086,
+        "rss_mib": {
+          "samples": 124,
+          "min": 405.94,
+          "median": 448.88,
+          "p95": 1293.61,
+          "max": 1309.65
+        },
+        "pss_mib": {
+          "samples": 31,
+          "min": 375.72,
+          "median": 420.73,
+          "p95": 592.29,
+          "max": 615.14
+        },
+        "process_count": {
+          "samples": 124,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 10.0,
+          "max": 10.0
+        },
+        "max_processes": 10.0,
+        "categories": {
+          "browser": {
+            "max_process_count": 9,
+            "max_rss_mib": 875.47,
+            "max_pss_mib": 204.78,
+            "process_names": [
+              "brave"
+            ]
+          },
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 456.12,
+            "max_pss_mib": 424.4,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "playback": {
+        "duration_ms": 1613,
+        "rss_mib": {
+          "samples": 64,
+          "min": 456.88,
+          "median": 458.28,
+          "p95": 458.28,
+          "max": 458.28
+        },
+        "pss_mib": {
+          "samples": 16,
+          "min": 426.18,
+          "median": 426.73,
+          "p95": 426.76,
+          "max": 426.76
+        },
+        "process_count": {
+          "samples": 64,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 458.28,
+            "max_pss_mib": 426.76,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "post_idle": {
+        "duration_ms": 8001,
+        "rss_mib": {
+          "samples": 321,
+          "min": 458.28,
+          "median": 458.28,
+          "p95": 458.28,
+          "max": 458.53
+        },
+        "pss_mib": {
+          "samples": 80,
+          "min": 426.54,
+          "median": 426.54,
+          "p95": 426.54,
+          "max": 426.54
+        },
+        "process_count": {
+          "samples": 321,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 458.53,
+            "max_pss_mib": 426.54,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "shutdown": {
+        "duration_ms": 564,
+        "rss_mib": {
+          "samples": 24,
+          "min": 0.0,
+          "median": 450.98,
+          "p95": 450.98,
+          "max": 458.53
+        },
+        "pss_mib": {
+          "samples": 5,
+          "min": 422.39,
+          "median": 422.41,
+          "p95": 422.41,
+          "max": 422.41
+        },
+        "process_count": {
+          "samples": 24,
+          "min": 0.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 458.53,
+            "max_pss_mib": 422.41,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      }
+    },
+    "process_inventory": {
+      "max_simultaneous_process_count": 10,
+      "max_detached_from_app_group_count": 0,
+      "browser_processes_observed": [
+        "brave"
+      ],
+      "ytdlp_processes_observed": [],
+      "python_processes_observed": [],
+      "quickjs_processes_observed": [],
+      "detached_from_app_group_names": []
+    },
+    "helper_invariants": {
+      "browser_max_simultaneous": 9,
+      "ytdlp_max_simultaneous": null,
+      "ytdlp_processes_max_including_embedded_python": null,
+      "python_max_simultaneous": null,
+      "quickjs_max_simultaneous": null,
+      "media_max_simultaneous": null,
+      "helper_processes_observed": [
+        "brave"
+      ]
+    },
+    "zero_helpers": {
+      "browser_in_post_idle": 0,
+      "browser_after_shutdown": [],
+      "post_idle_helper_categories": {},
+      "shutdown_phase_helper_categories": {},
+      "after_shutdown_helper_categories": {},
+      "no_helpers_in_post_idle": true,
+      "no_helpers_in_shutdown_phase": true,
+      "no_helpers_after_shutdown": true,
+      "final_cleanup_process_names": []
+    },
+    "build": {
+      "injection": "injected",
+      "build_status": "built",
+      "main_kt_sha256": "8ed946f9fd4abeef74180a3b8d9265634820b6d427fd2af621cab26185b0dee6"
+    }
+  },
+  "candidate": {
+    "commit": "d3755de5f88c9358a685fce7cea0863dd922990c",
+    "core_commit": "144fe5c33c9e2f1f8a6c8c84bb03a34c3c4d7b3c",
+    "backend": "ytdlp",
+    "exit_code": 0,
+    "duration_ms": 72144,
+    "cpu_total_seconds_max": 22.45,
+    "cpu_app_seconds_max": 17.81,
+    "resolution": {
+      "attempts": 6,
+      "successes": 6,
+      "failures": 0,
+      "min_ms": 7288,
+      "median_ms": 7697.0,
+      "max_ms": 8476
+    },
+    "streams": [
+      {
+        "video_id": "jNQXAC9IVRw",
+        "iteration": 0,
+        "elapsed_ms": 8476,
+        "client_name": "YT_DLP",
+        "client_version": "2026.08.19",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 106064,
+        "expiry_seconds": 21594
+      },
+      {
+        "video_id": "jNQXAC9IVRw",
+        "iteration": 1,
+        "elapsed_ms": 7603,
+        "client_name": "YT_DLP",
+        "client_version": "2026.08.19",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 106064,
+        "expiry_seconds": 21593
+      },
+      {
+        "video_id": "dQw4w9WgXcQ",
+        "iteration": 0,
+        "elapsed_ms": 7894,
+        "client_name": "YT_DLP",
+        "client_version": "2026.08.19",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 128930,
+        "expiry_seconds": 21593
+      },
+      {
+        "video_id": "dQw4w9WgXcQ",
+        "iteration": 1,
+        "elapsed_ms": 7791,
+        "client_name": "YT_DLP",
+        "client_version": "2026.08.19",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 128930,
+        "expiry_seconds": 21594
+      },
+      {
+        "video_id": "aqz-KE-bpKQ",
+        "iteration": 0,
+        "elapsed_ms": 7288,
+        "client_name": "YT_DLP",
+        "client_version": "2026.08.19",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 128612,
+        "expiry_seconds": 21593
+      },
+      {
+        "video_id": "aqz-KE-bpKQ",
+        "iteration": 1,
+        "elapsed_ms": 7558,
+        "client_name": "YT_DLP",
+        "client_version": "2026.08.19",
+        "mime": "audio/webm; codecs=\"opus\"",
+        "format": 251,
+        "bitrate": 128612,
+        "expiry_seconds": 21594
+      }
+    ],
+    "log_evidence": {
+      "playback_engine_available": true,
+      "vlc_runtime_not_found": false,
+      "out_of_memory_error": false,
+      "uncaught_exception": false
+    },
+    "authentication": {
+      "restored": {
+        "signed_in": true,
+        "restored_from_secure_store": true,
+        "has_login_cookie": true,
+        "has_visitor_data": true,
+        "has_data_sync": true,
+        "has_bound_po_token_before_strip": true
+      },
+      "account_request_verified": true,
+      "account_request_failure": null,
+      "guard_passed": true,
+      "authenticated_stream_successes": 6,
+      "browser_proof": {
+        "probe_video_id": "BaW_jenozKc",
+        "browser_teardown_observed": true,
+        "cold_attempts": 1,
+        "cold_successes": 1,
+        "cold_records": [
+          {
+            "video_id": "BaW_jenozKc",
+            "minted": true,
+            "elapsed_ms": 678,
+            "failure": null
+          }
+        ],
+        "delegated_mints": 0,
+        "delegated_minted": 0,
+        "browser_processes_observed": [
+          "brave"
+        ],
+        "browser_processes_in_post_idle": 0,
+        "browser_processes_in_shutdown_phase": 0,
+        "browser_processes_after_shutdown": []
+      }
+    },
+    "playback": {
+      "volume": 0.0,
+      "checks": {
+        "started": true,
+        "progressed": true,
+        "seeked": true,
+        "paused": true,
+        "resumed": true,
+        "stopped": true
+      },
+      "markers": [
+        {
+          "volume": 0,
+          "wall_ms": 1792564093792,
+          "type": "playback-begin"
+        },
+        {
+          "failure": null,
+          "wall_ms": 1792564093796,
+          "type": "playback-queue"
+        },
+        {
+          "duration_ms": 19021,
+          "position_ms": 0,
+          "is_playing": true,
+          "error_kind": null,
+          "wall_ms": 1792564093896,
+          "type": "playback-start",
+          "status": "READY"
+        },
+        {
+          "position_ms": 1281,
+          "advanced_ms": 1281,
+          "is_playing": true,
+          "wall_ms": 1792564095397,
+          "type": "playback-progress"
+        },
+        {
+          "position_ms": 5000,
+          "is_playing": true,
+          "wall_ms": 1792564095398,
+          "type": "playback-seek",
+          "status": "READY"
+        },
+        {
+          "position_ms": 5000,
+          "is_playing": false,
+          "play_when_ready": false,
+          "wall_ms": 1792564095399,
+          "type": "playback-pause",
+          "status": "READY"
+        },
+        {
+          "position_ms": 5000,
+          "is_playing": true,
+          "wall_ms": 1792564095399,
+          "type": "playback-resume",
+          "status": "READY"
+        },
+        {
+          "position_ms": 0,
+          "is_playing": false,
+          "wall_ms": 1792564095401,
+          "type": "playback-stop",
+          "status": "IDLE"
+        },
+        {
+          "wall_ms": 1792564095401,
+          "type": "playback-end"
+        }
+      ],
+      "all_checks_passed": true
+    },
+    "phases": {
+      "startup": {
+        "duration_ms": 1942,
+        "rss_mib": {
+          "samples": 78,
+          "min": 43.78,
+          "median": 274.75,
+          "p95": 375.03,
+          "max": 375.03
+        },
+        "pss_mib": {
+          "samples": 20,
+          "min": 26.7,
+          "median": 250.18,
+          "p95": 337.55,
+          "max": 337.93
+        },
+        "process_count": {
+          "samples": 78,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 375.03,
+            "max_pss_mib": 337.93,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "idle": {
+        "duration_ms": 8000,
+        "rss_mib": {
+          "samples": 320,
+          "min": 385.62,
+          "median": 407.12,
+          "p95": 408.25,
+          "max": 408.25
+        },
+        "pss_mib": {
+          "samples": 80,
+          "min": 348.43,
+          "median": 369.74,
+          "p95": 371.04,
+          "max": 371.04
+        },
+        "process_count": {
+          "samples": 320,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 408.25,
+            "max_pss_mib": 371.04,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "auth": {
+        "duration_ms": 701,
+        "rss_mib": {
+          "samples": 28,
+          "min": 408.25,
+          "median": 408.25,
+          "p95": 408.25,
+          "max": 408.25
+        },
+        "pss_mib": {
+          "samples": 7,
+          "min": 371.05,
+          "median": 371.07,
+          "p95": 371.07,
+          "max": 371.07
+        },
+        "process_count": {
+          "samples": 28,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 408.25,
+            "max_pss_mib": 371.07,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "cold_proof": {
+        "duration_ms": 684,
+        "rss_mib": {
+          "samples": 28,
+          "min": 423.43,
+          "median": 1263.85,
+          "p95": 1300.64,
+          "max": 1301.55
+        },
+        "pss_mib": {
+          "samples": 7,
+          "min": 386.29,
+          "median": 574.04,
+          "p95": 592.36,
+          "max": 592.36
+        },
+        "process_count": {
+          "samples": 28,
+          "min": 1.0,
+          "median": 10.0,
+          "p95": 10.0,
+          "max": 10.0
+        },
+        "max_processes": 10.0,
+        "categories": {
+          "browser": {
+            "max_process_count": 9,
+            "max_rss_mib": 878.25,
+            "max_pss_mib": 206.29,
+            "process_names": [
+              "brave"
+            ]
+          },
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 423.93,
+            "max_pss_mib": 386.29,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "extraction": {
+        "duration_ms": 46613,
+        "rss_mib": {
+          "samples": 1864,
+          "min": 424.18,
+          "median": 625.95,
+          "p95": 759.8,
+          "max": 794.54
+        },
+        "pss_mib": {
+          "samples": 466,
+          "min": 387.16,
+          "median": 581.98,
+          "p95": 716.71,
+          "max": 738.68
+        },
+        "process_count": {
+          "samples": 1864,
+          "min": 1.0,
+          "median": 4.0,
+          "p95": 4.0,
+          "max": 4.0
+        },
+        "max_processes": 4.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 427.55,
+            "max_pss_mib": 390.36,
+            "process_names": [
+              "java"
+            ]
+          },
+          "media": {
+            "max_process_count": 1,
+            "max_rss_mib": 14.07,
+            "max_pss_mib": 7.53,
+            "process_names": [
+              "ffmpeg",
+              "ffprobe"
+            ]
+          },
+          "quickjs": {
+            "max_process_count": 1,
+            "max_rss_mib": 254.94,
+            "max_pss_mib": 249.66,
+            "process_names": [
+              "qjs"
+            ]
+          },
+          "yt_dlp": {
+            "max_process_count": 2,
+            "max_rss_mib": 126.25,
+            "max_pss_mib": 119.84,
+            "process_names": [
+              "yt-dlp"
+            ]
+          }
+        }
+      },
+      "playback": {
+        "duration_ms": 1609,
+        "rss_mib": {
+          "samples": 64,
+          "min": 428.05,
+          "median": 434.18,
+          "p95": 434.3,
+          "max": 434.3
+        },
+        "pss_mib": {
+          "samples": 16,
+          "min": 391.66,
+          "median": 396.79,
+          "p95": 396.93,
+          "max": 396.94
+        },
+        "process_count": {
+          "samples": 64,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 434.3,
+            "max_pss_mib": 396.94,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "post_idle": {
+        "duration_ms": 8000,
+        "rss_mib": {
+          "samples": 320,
+          "min": 434.36,
+          "median": 434.36,
+          "p95": 434.36,
+          "max": 434.36
+        },
+        "pss_mib": {
+          "samples": 80,
+          "min": 396.92,
+          "median": 396.92,
+          "p95": 397.01,
+          "max": 397.01
+        },
+        "process_count": {
+          "samples": 320,
+          "min": 1.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 434.36,
+            "max_pss_mib": 397.01,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      },
+      "shutdown": {
+        "duration_ms": 595,
+        "rss_mib": {
+          "samples": 25,
+          "min": 0.0,
+          "median": 420.04,
+          "p95": 420.04,
+          "max": 422.03
+        },
+        "pss_mib": {
+          "samples": 5,
+          "min": 389.42,
+          "median": 389.51,
+          "p95": 389.51,
+          "max": 389.51
+        },
+        "process_count": {
+          "samples": 25,
+          "min": 0.0,
+          "median": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "max_processes": 1.0,
+        "categories": {
+          "jvm": {
+            "max_process_count": 1,
+            "max_rss_mib": 422.03,
+            "max_pss_mib": 389.51,
+            "process_names": [
+              "java"
+            ]
+          }
+        }
+      }
+    },
+    "process_inventory": {
+      "max_simultaneous_process_count": 10,
+      "max_detached_from_app_group_count": 3,
+      "browser_processes_observed": [
+        "brave"
+      ],
+      "ytdlp_processes_observed": [
+        "yt-dlp"
+      ],
+      "python_processes_observed": [],
+      "quickjs_processes_observed": [
+        "qjs"
+      ],
+      "detached_from_app_group_names": [
+        "ffmpeg",
+        "ffprobe",
+        "qjs",
+        "yt-dlp"
+      ]
+    },
+    "helper_invariants": {
+      "browser_max_simultaneous": 9,
+      "ytdlp_max_simultaneous": 2,
+      "ytdlp_processes_max_including_embedded_python": 2,
+      "python_max_simultaneous": null,
+      "quickjs_max_simultaneous": 1,
+      "media_max_simultaneous": 1,
+      "helper_processes_observed": [
+        "brave",
+        "ffmpeg",
+        "ffprobe",
+        "qjs",
+        "yt-dlp"
+      ]
+    },
+    "zero_helpers": {
+      "browser_in_post_idle": 0,
+      "browser_after_shutdown": [],
+      "post_idle_helper_categories": {},
+      "shutdown_phase_helper_categories": {},
+      "after_shutdown_helper_categories": {},
+      "no_helpers_in_post_idle": true,
+      "no_helpers_in_shutdown_phase": true,
+      "no_helpers_after_shutdown": true,
+      "final_cleanup_process_names": []
+    },
+    "build": {
+      "injection": "injected",
+      "build_status": "built",
+      "main_kt_sha256": "8ed946f9fd4abeef74180a3b8d9265634820b6d427fd2af621cab26185b0dee6"
+    }
+  },
+  "comparison": {
+    "resolution": {
+      "baseline_successes": 6,
+      "baseline_attempts": 6,
+      "candidate_successes": 6,
+      "candidate_attempts": 6,
+      "baseline_median_ms": 491.0,
+      "candidate_median_ms": 7697.0
+    },
+    "phases": {
+      "startup": {
+        "baseline_rss_max_mib": 345.31,
+        "candidate_rss_max_mib": 375.03,
+        "baseline_pss_max_mib": 313.2,
+        "candidate_pss_max_mib": 337.93
+      },
+      "idle": {
+        "baseline_rss_max_mib": 393.75,
+        "candidate_rss_max_mib": 408.25,
+        "baseline_pss_max_mib": 362.14,
+        "candidate_pss_max_mib": 371.04
+      },
+      "cold_proof": {
+        "baseline_rss_max_mib": 1268.31,
+        "candidate_rss_max_mib": 1301.55,
+        "baseline_pss_max_mib": 572.39,
+        "candidate_pss_max_mib": 592.36
+      },
+      "extraction": {
+        "baseline_rss_max_mib": 1309.65,
+        "candidate_rss_max_mib": 794.54,
+        "baseline_pss_max_mib": 615.14,
+        "candidate_pss_max_mib": 738.68
+      },
+      "playback": {
+        "baseline_rss_max_mib": 458.28,
+        "candidate_rss_max_mib": 434.3,
+        "baseline_pss_max_mib": 426.76,
+        "candidate_pss_max_mib": 396.94
+      },
+      "post_idle": {
+        "baseline_rss_max_mib": 458.53,
+        "candidate_rss_max_mib": 434.36,
+        "baseline_pss_max_mib": 426.54,
+        "candidate_pss_max_mib": 397.01
+      },
+      "shutdown": {
+        "baseline_rss_max_mib": 458.53,
+        "candidate_rss_max_mib": 422.03,
+        "baseline_pss_max_mib": 422.41,
+        "candidate_pss_max_mib": 389.51
+      }
+    }
+  },
+  "observations": [
+    "Baseline 0817a502413c restored a login cookie=True, DataSync=True, account request verified=True; extracted 6/6 authenticated streams.",
+    "Baseline cold Browser/BotGuard proof: 1/1 mints; observed browser processes ['brave'].",
+    "Baseline playback controller checks (volume 0): started=True, progressed=True, seeked=True, paused=True, resumed=True, stopped=True",
+    "Candidate d3755de5f88c extracted 6/6 authenticated streams with the frozen yt-dlp/QuickJS toolchain.",
+    "Candidate playback controller checks (volume 0): started=True, progressed=True, seeked=True, paused=True, resumed=True, stopped=True"
+  ],
+  "limitations": [
+    "One run per version unless repeated explicitly; three public video IDs and two sequential repeats each.",
+    "The source keyring entry is read twice (before and after) only to prove it is unchanged; its hash is never stored or logged.",
+    "Raw application logs stay in a private 0700 work root and are not part of the report or commit.",
+    "PSS and CPU are sampled estimates; short-lived helpers can exit between reads.",
+    "The host is shared with the user's desktop applications, which are outside the tracked session.",
+    "Offscreen software Skia; GPU-backed rendering may differ.",
+    "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device."
+  ]
+}
