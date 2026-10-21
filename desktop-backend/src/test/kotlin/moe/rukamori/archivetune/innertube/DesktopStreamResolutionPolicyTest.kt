@@ -194,4 +194,34 @@ class DesktopStreamResolutionPolicyTest {
             assertFalse(failure.stackTraceToString().contains("signed-url-cookie-marker"))
         }
     }
+
+    @Test fun `live upstream fallback resolves historical problem videos after controlled native failures`() = runBlocking {
+        org.junit.Assume.assumeTrue("Opt-in public-video fallback check", System.getenv("ARCHIVETUNE_LIVE_YTDLP") == "1")
+        val root = Files.createTempDirectory("hybrid-live-fallback-")
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/rejected") { it.sendResponseHeaders(403, -1); it.close() }
+        server.start()
+        try {
+            val client = ArchiveTuneJvmClient(root.toFile(),
+                sessionProvider = DesktopSessionProvider { PlaybackAuthState() },
+                audioStreamExtractor = YtDlpDesktopStreamExtractor(root.toFile()),
+                streamResolutionMode = DesktopStreamResolutionMode.HYBRID)
+            val scenarios = listOf(
+                "dQw4w9WgXcQ" to playerResponse(directFormat.copy(url = "https://media.example/audio?n=fixture")),
+                "aqz-KE-bpKQ" to playerResponse(directFormat.copy(url = null, signatureCipher = "s=fixture")),
+                "jNQXAC9IVRw" to playerResponse(directFormat.copy(url = "http://127.0.0.1:${server.address.port}/rejected")),
+                "9bZkp7q19f0" to playerResponse(directFormat).copy(playabilityStatus = PlayerResponse.PlayabilityStatus("LOGIN_REQUIRED", "proof fixture")),
+            )
+            for ((id, response) in scenarios) {
+                client.streamPlayerRequest = { _, _, _, _, _ -> response }
+                // The failures above are controlled regression fixtures, not a claim that these
+                // videos still naturally fail VISIONOS today. The fallback and CDN are real.
+                val result = client.resolveAudioStream(id).getOrElse { throw AssertionError("Public fallback failed (${it.javaClass.simpleName})") }
+                assertEquals("YT_DLP", result.clientName)
+                assertTrue(result.mimeType.startsWith("audio/"))
+                assertTrue(result.requestHeaders.isNotEmpty())
+                assertTrue(result.expiresAtEpochMillis > System.currentTimeMillis() + 60_000)
+            }
+        } finally { server.stop(0); root.toFile().deleteRecursively() }
+    }
 }
