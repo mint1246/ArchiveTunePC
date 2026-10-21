@@ -7,6 +7,11 @@ yt-dlp resolver on the final `feature/ytdlp-resolver` candidate at
 UI/services/home startup, idle footprint, six real audio-stream resolutions,
 post-extraction idle, and every observed child process.
 
+The baseline is **not a working legacy playback comparison**. Both profiles were
+anonymous; all six legacy requests failed and its headless PoToken browser path was
+never entered. The results establish the candidate's anonymous extraction footprint,
+not a before/after memory or latency comparison for successful legacy playback.
+
 ## Result summary
 
 | Metric | Baseline `8e4bfb314` (legacy) | Final `5e5ecb786` (yt-dlp) |
@@ -85,6 +90,19 @@ worker **does embed CPython**, and its entire RSS is included under `yt_dlp`;
 zero separately named Python processes does **not** mean there is no Python
 runtime. The benchmark's own Python supervisor and Xvfb are external measurement
 infrastructure, not app-created processes.
+
+In the exact baseline, `DesktopSessionManager.ensurePlaybackAuth()` returns before
+`poTokenProvider.mint()` when `hasPlaybackLoginContext` is false. That context requires
+both a YouTube login cookie and a nonblank `dataSyncId`. A matching existing per-video
+proof can also avoid minting. When minting does run on a cache miss, the provider
+launches Chromium with `--headless=new`; this is part of playback proof generation,
+not only interactive sign-in. These anonymous runs therefore did **not** measure the
+legacy headless-browser cost. No conclusion about memory saved by replacing that
+browser path follows from the observed zero browser processes.
+
+A valid comparison of that path still requires successful legacy and candidate
+resolutions with equivalent authentication, cold proof caches, and evidence that the
+legacy headless browser actually launched. The existing account profile was not used.
 
 The per-category RSS values above are maxima observed for individual processes
 in each category across the run. They are not simultaneous totals and must not
@@ -260,8 +278,9 @@ pressure.
   this environment's anonymous home/library requests returned HTTP 400. The UI
   idle footprint is real, while server-content-dependent memory may differ from
   a signed-in session.
-- No sign-in flow was triggered. Browser/WebView memory for authentication is
-  unmeasured, and anonymous runs observed zero browser processes.
+- Anonymous profiles bypassed legacy playback PoToken generation before browser
+  launch. Its headless-browser memory and latency are unmeasured, as are interactive
+  sign-in browser costs. A successful authenticated legacy comparison remains open.
 - The production VLC runtime locator is Windows-only and did not initialize the
   installed system libVLC inside the app. Full application playback was not
   exercised. System libVLC is installed, and separate live callback integration
