@@ -183,6 +183,32 @@ export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/Archiv
 export ARCHIVETUNE_BUN="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/bun"
 ```
 
+## Bun package and playback verification
+
+Runtime candidate `04232ffa7` includes the Bun switch, private working directory,
+absolute temporary paths, inherited-option removal, and verified package sidecars.
+The final Linux AppImage was built from that exact commit and extracted successfully:
+
+- Artifact: `/tmp/opencode/appimage-bun-final/ArchiveTune-15.10-x86_64.AppImage`
+- Size: 221,383,160 bytes (211.13 MiB).
+- SHA-256: `25a2e57900897279e3f84306226f514e98d64f933ba0ca5981d5b3ee75b956fa`.
+- Packaged tools: yt-dlp 2026.08.19 and Bun 1.4.3; no QuickJS files.
+- Packaged EJS challenge smoke: Bun executed and solved the challenge without a
+  version bypass; yt-dlp's unsupported-version warning was expected.
+
+The Linux and Windows sidecar sets passed staging/hash verification; Windows was
+cross-staged on Linux and was not executed. Graal native sidecar staging passed,
+without a full native image or MSI build. The AppImage was not installed and did
+not replace the running user application.
+
+The integrated branch passed 26 resolver tests, 94 backend tests (one opt-in skip),
+53 playback tests (one opt-in skip), and desktop compilation. The resolver tests
+also passed with inherited `BUN_OPTIONS=--cwd=/nonexistent-parent-project` and
+`DO_NOT_TRACK=0`: subprocess fixtures require the options to be removed and tracking
+to be disabled. The real Bun/libVLC callback class passed both tests, including
+ranged playback, advancing time, seek, pause and resume. Signed-in Bun whole-app
+results are recorded separately when that run completes.
+
 ## Historical authenticated QuickJS application comparison
 
 The [authenticated report](packaging/resolver/validation/linux-authenticated-full-application.md)
