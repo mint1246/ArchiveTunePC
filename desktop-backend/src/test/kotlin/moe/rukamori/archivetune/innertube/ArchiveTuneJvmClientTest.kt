@@ -1,15 +1,21 @@
 package moe.rukamori.archivetune.innertube
 
+import moe.rukamori.archivetune.innertube.models.AccountInfo
 import moe.rukamori.archivetune.innertube.models.ResponseContext
 import moe.rukamori.archivetune.innertube.models.YouTubeClient
+import moe.rukamori.archivetune.innertube.models.YouTubeLocale
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import java.nio.file.Files
@@ -17,9 +23,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 
 class ArchiveTuneJvmClientTest {
+    private val originalLocale = YouTube.locale
     @After
     fun restoreNetworkGatekeeper() {
         NetworkGatekeeper.setConnectionBlocked(true)
+        YouTube.authState = PlaybackAuthState.EMPTY
+        YouTube.locale = originalLocale
     }
 
     @Test
@@ -397,6 +406,283 @@ class ArchiveTuneJvmClientTest {
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun candidateSessionIsValidatedWithoutPublishingItToTheSharedSession() = runBlocking {
+        val candidate = PlaybackAuthState(cookie = "SAPISID=candidate").normalized()
+        val endpoint =
+            FakeAccountEndpoint(
+                accountInfoResult = { Result.success(accountInfo()) },
+            )
+        val client = client(accountEndpoint = endpoint)
+        YouTube.authState = PlaybackAuthState.EMPTY
+        val sharedBefore = YouTube.authState.fingerprint
+
+        val verified = client.verifyAccountSession(candidate)
+
+        assertTrue(verified.isSuccess)
+        assertEquals("SAPISID=candidate", verified.getOrThrow().authState.cookie)
+        // The candidate is never published to the process-wide session: it becomes active only
+        // after the desktop session owner has persisted it.
+        assertEquals(sharedBefore, YouTube.authState.fingerprint)
+        assertEquals("SAPISID=candidate", endpoint.observedAuthStates.single().cookie)
+    }
+
+    @Test
+    fun concurrentSessionChangeCannotReplaceTheValidatedCookie() = runBlocking {
+        val candidate = PlaybackAuthState(cookie = "SAPISID=candidate").normalized()
+        val endpoint =
+            FakeAccountEndpoint(
+                accountInfoResult = {
+                    // Simulate a browse request that refreshes the shared session while the
+                    // validation request is still in flight.
+                    YouTube.authState = PlaybackAuthState(cookie = "SAPISID=other-session")
+                    Result.success(accountInfo())
+                },
+            )
+        val client = client(accountEndpoint = endpoint)
+
+        val verified = client.verifyAccountSession(candidate)
+
+        assertTrue(verified.isSuccess)
+        assertEquals("SAPISID=candidate", verified.getOrThrow().authState.cookie)
+        assertEquals("SAPISID=candidate", endpoint.observedAuthStates.single().cookie)
+        assertEquals("SAPISID=candidate", endpoint.observedChannelAuthStates.single().cookie)
+        assertEquals("SAPISID=candidate", endpoint.observedVisitorAuthStates.single().cookie)
+        assertEquals("SAPISID=other-session", YouTube.authState.cookie)
+    }
+
+    @Test
+    fun unavailableChannelListDoesNotRejectAnAuthenticatedSession() = runBlocking {
+        val candidate = PlaybackAuthState(cookie = "SAPISID=candidate").normalized()
+        val endpoint =
+            FakeAccountEndpoint(
+                accountInfoResult = { Result.success(accountInfo()) },
+                accountDataSyncIdResult = { Result.failure(IllegalStateException("channel list unavailable")) },
+                visitorContextResult = {
+                    Result.success(
+                        ResolvedVisitorContext(
+                            visitorData = "visitor",
+                            locale = YouTubeLocale(gl = "IL", hl = "en"),
+                            dataSyncId = "V19126125||Cgt2ZXN0ZW1faWQ",
+                        ),
+                    )
+                },
+            )
+        val client = client(accountEndpoint = endpoint)
+
+        val verified = client.verifyAccountSession(candidate)
+
+        assertTrue(verified.isSuccess)
+        val authState = verified.getOrThrow().authState
+        assertEquals("visitor", authState.visitorData)
+        assertEquals("V19126125||Cgt2ZXN0ZW1faWQ", authState.dataSyncId)
+        assertTrue(authState.hasPlaybackLoginContext)
+    }
+
+    @Test
+    fun anonymousBootstrapDataSyncIdIsNotUsedAsChannelContext() = runBlocking {
+        val candidate = PlaybackAuthState(cookie = "SAPISID=candidate").normalized()
+        val endpoint =
+            FakeAccountEndpoint(
+                accountInfoResult = { Result.success(accountInfo()) },
+                accountDataSyncIdResult = { Result.failure(IllegalStateException("channel list unavailable")) },
+                visitorContextResult = {
+                    Result.success(
+                        ResolvedVisitorContext(
+                            visitorData = "visitor",
+                            locale = YouTubeLocale(gl = "IL", hl = "en"),
+                            // The anonymous bootstrap page reports a delegated-only id.
+                            dataSyncId = "V19126125",
+                        ),
+                    )
+                },
+            )
+        val client = client(accountEndpoint = endpoint)
+
+        val verified = client.verifyAccountSession(candidate)
+
+        assertTrue(verified.isSuccess)
+        val authState = verified.getOrThrow().authState
+        assertNull(authState.dataSyncId)
+        assertFalse(authState.hasPlaybackLoginContext)
+    }
+
+    @Test
+    fun slowChannelEndpointCannotRejectAnAuthenticatedSessionOrBlockBootstrapFallback() = runBlocking {
+        val endpoint = FakeAccountEndpoint(
+            accountInfoResult = { Result.success(accountInfo()) },
+            accountDataSyncIdResult = {
+                delay(5_000)
+                Result.success("unused-channel")
+            },
+            visitorContextResult = { Result.success(ResolvedVisitorContext("visitor", originalLocale, "channel||user")) },
+        )
+        val client = client(endpoint).also { it.accountContextTimeoutMillis = 50 }
+
+        val result = client.verifyAccountSession(PlaybackAuthState(cookie = "SAPISID=candidate"))
+
+        assertTrue(result.isSuccess)
+        assertEquals("channel||user", result.getOrThrow().authState.dataSyncId)
+    }
+
+    @Test
+    fun rejectedAccountMenuFailsValidation() = runBlocking {
+        val candidate = PlaybackAuthState(cookie = "SAPISID=candidate").normalized()
+        val endpoint =
+            FakeAccountEndpoint(
+                accountInfoResult = { Result.failure(IllegalStateException("user may not be logged in")) },
+            )
+        val client = client(accountEndpoint = endpoint)
+        val previous = PlaybackAuthState(cookie = "SAPISID=active-session")
+        YouTube.authState = previous
+
+        val verified = client.verifyAccountSession(candidate)
+
+        assertTrue(verified.isFailure)
+        assertEquals(previous, YouTube.authState)
+    }
+
+    @Test
+    fun validationDeadlineReturnsATimeoutWithoutPublishingTheCandidate() = runBlocking {
+        val endpoint = FakeAccountEndpoint(accountInfoResult = {
+            delay(5_000)
+            Result.success(accountInfo())
+        })
+        val client = client(endpoint).also { it.accountValidationTimeoutMillis = 50 }
+        val previous = PlaybackAuthState(cookie = "SAPISID=active-session")
+        YouTube.authState = previous
+
+        val result = client.verifyAccountSession(PlaybackAuthState(cookie = "SAPISID=candidate"))
+
+        assertTrue(result.exceptionOrNull() is AccountValidationTimeoutException)
+        assertEquals(previous, YouTube.authState)
+    }
+
+    @Test
+    fun enrichmentDeadlineRetainsTheSuccessfullyAuthenticatedAccount() = runBlocking {
+        val endpoint = FakeAccountEndpoint(
+            accountInfoResult = { Result.success(accountInfo()) },
+            accountDataSyncIdResult = {
+                delay(5_000)
+                Result.success("unused-channel")
+            },
+        )
+        val client = client(endpoint).also { it.accountValidationTimeoutMillis = 50 }
+        val previous = PlaybackAuthState(cookie = "SAPISID=active-session")
+        YouTube.authState = previous
+
+        val result = client.verifyAccountSession(PlaybackAuthState(cookie = "SAPISID=candidate"))
+
+        assertTrue(result.isSuccess)
+        assertEquals("SAPISID=candidate", result.getOrThrow().authState.cookie)
+        assertEquals(previous, YouTube.authState)
+    }
+
+    @Test
+    fun cancellingValidationDoesNotPublishOrReplaceTheActiveSession() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val endpoint = FakeAccountEndpoint(accountInfoResult = {
+            entered.complete(Unit)
+            delay(5_000)
+            Result.success(accountInfo())
+        })
+        val client = client(endpoint)
+        val previous = PlaybackAuthState(cookie = "SAPISID=active-session")
+        YouTube.authState = previous
+        val validation = async { client.verifyAccountSession(PlaybackAuthState(cookie = "SAPISID=candidate")) }
+        entered.await()
+
+        validation.cancelAndJoin()
+
+        assertTrue(validation.isCancelled)
+        assertEquals(previous, YouTube.authState)
+    }
+
+    @Test
+    fun restoredSessionRepairsChannelContextFromTheAuthenticatedBootstrap() = runBlocking {
+        val initial = PlaybackAuthState(cookie = "SAPISID=restored", visitorData = "visitor")
+        var current = initial
+        val endpoint = FakeAccountEndpoint(
+            accountInfoResult = { error("Repair must not revalidate the account") },
+            visitorContextResult = { Result.success(ResolvedVisitorContext("visitor", originalLocale, "channel||user")) },
+        )
+        val client = client(endpoint)
+        client.bindSessionProvider(object : DesktopSessionProvider {
+            override fun currentAuthState(): PlaybackAuthState = current
+            override suspend fun persistAuthRepair(initialAuthState: PlaybackAuthState, repairedAuthState: PlaybackAuthState) {
+                current = repairedAuthState
+            }
+        })
+
+        // Preparation happens before the empty query is rejected, so no external search runs.
+        client.searchSummary("")
+
+        assertEquals("channel||user", current.dataSyncId)
+        assertTrue(current.hasPlaybackLoginContext)
+        assertEquals(initial.cookie, endpoint.observedVisitorAuthStates.single().cookie)
+    }
+
+    @Test
+    fun candidateWithoutLoginCookieIsRejectedBeforeAnyRequest() = runBlocking {
+        val endpoint =
+            FakeAccountEndpoint(
+                accountInfoResult = { Result.success(accountInfo()) },
+            )
+        val client = client(accountEndpoint = endpoint)
+
+        val verified = client.verifyAccountSession(PlaybackAuthState(visitorData = "visitor"))
+
+        assertTrue(verified.isFailure)
+        assertTrue(endpoint.observedAuthStates.isEmpty())
+    }
+
+    private fun client(accountEndpoint: DesktopAccountEndpoint): ArchiveTuneJvmClient =
+        ArchiveTuneJvmClient(
+            cacheDirectory = Files.createTempDirectory("archivetune-test-").toFile(),
+        ).also { it.accountEndpoint = accountEndpoint }
+
+    private fun accountInfo(): AccountInfo =
+        AccountInfo(
+            name = "Example",
+            email = "example@example.test",
+            channelHandle = "@example",
+            thumbnailUrl = null,
+        )
+
+    private class FakeAccountEndpoint(
+        private val accountInfoResult: suspend (PlaybackAuthState) -> Result<AccountInfo>,
+        private val accountDataSyncIdResult: suspend (PlaybackAuthState) -> Result<String> = {
+            Result.failure(IllegalStateException("channel list unavailable"))
+        },
+        private val visitorContextResult: (PlaybackAuthState) -> Result<ResolvedVisitorContext> = {
+            Result.failure(IllegalStateException("bootstrap page unavailable"))
+        },
+        private val visitorDataResult: () -> Result<String> = {
+            Result.failure(IllegalStateException("visitor data unavailable"))
+        },
+    ) : DesktopAccountEndpoint {
+        val observedAuthStates = CopyOnWriteArrayList<PlaybackAuthState>()
+        val observedChannelAuthStates = CopyOnWriteArrayList<PlaybackAuthState>()
+        val observedVisitorAuthStates = CopyOnWriteArrayList<PlaybackAuthState>()
+
+        override suspend fun accountInfo(authState: PlaybackAuthState): Result<AccountInfo> {
+            observedAuthStates += authState
+            return accountInfoResult(authState)
+        }
+
+        override suspend fun accountDataSyncId(authState: PlaybackAuthState): Result<String> {
+            observedChannelAuthStates += authState
+            return accountDataSyncIdResult(authState)
+        }
+
+        override suspend fun visitorContext(authState: PlaybackAuthState): Result<ResolvedVisitorContext> {
+            observedVisitorAuthStates += authState
+            return visitorContextResult(authState)
+        }
+
+        override suspend fun visitorData(): Result<String> = visitorDataResult()
     }
 
     private fun playerResponse(vararg formats: PlayerResponse.StreamingData.Format) =

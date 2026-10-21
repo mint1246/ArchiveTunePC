@@ -14,7 +14,7 @@ class YouTubeCookieJsonImporterTest {
             YouTubeCookieJsonImporter.parse(
                 """[
                   {"name":"SAPISID","value":"google-value","domain":".google.com","path":"/"},
-                  {"name":"SAPISID","value":"youtube-value","domain":".youtube.com","path":"/music","expirationDate":1900000000},
+                  {"name":"SAPISID","value":"youtube-value","domain":".youtube.com","path":"/","expirationDate":1900000000},
                   {"name":"PREF","value":"pref","domain":"music.youtube.com","path":"/"},
                   {"name":"tracking","value":"blocked","domain":"example.com","path":"/"}
                 ]""",
@@ -51,6 +51,48 @@ class YouTubeCookieJsonImporterTest {
             )
 
         assertEquals(YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES), result)
+    }
+
+    @Test
+    fun `unrelated YouTube hosts and paths cannot replace Music login cookies`() {
+        val result = YouTubeCookieJsonImporter.parse(
+            """[
+              {"name":"SAPISID","value":"music-session","domain":"music.youtube.com","hostOnly":true,"path":"/"},
+              {"name":"SAPISID","value":"parent-domain-session","domain":".youtube.com","path":"/"},
+              {"name":"SAPISID","value":"www-session","domain":"www.youtube.com","path":"/"},
+              {"name":"SAPISID","value":"other-host","domain":"studio.youtube.com","path":"/"},
+              {"name":"SAPISID","value":"other-path","domain":"music.youtube.com","path":"/account"},
+              {"name":"SID","value":"youtube-host-only","domain":"youtube.com","hostOnly":true,"path":"/"},
+              {"name":"SSID","value":"shared-session","domain":".youtube.com","hostOnly":false,"path":"/"}
+            ]""",
+            now,
+        )
+
+        val parsed = (result as YouTubeCookieJsonImportResult.Ready).parsed
+        assertEquals("SAPISID=music-session; SSID=shared-session", parsed.cookieHeader)
+    }
+
+    @Test
+    fun `host-only root domain cookies cannot authenticate Music`() {
+        val result = YouTubeCookieJsonImporter.parse(
+            """[{"name":"SAPISID","value":"root-host-only","domain":"youtube.com","hostOnly":true,"path":"/"}]""",
+            now,
+        )
+
+        assertEquals(YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES), result)
+    }
+
+    @Test
+    fun `partitioned cookies cannot replace the top-level session`() {
+        val result = YouTubeCookieJsonImporter.parse(
+            """[
+              {"name":"SAPISID","value":"top-level","domain":".youtube.com","path":"/"},
+              {"name":"SAPISID","value":"partitioned","domain":"music.youtube.com","path":"/","partitionKey":{"topLevelSite":"https://example.com"}}
+            ]""",
+            now,
+        )
+
+        assertEquals("SAPISID=top-level", (result as YouTubeCookieJsonImportResult.Ready).parsed.cookieHeader)
     }
 
     @Test

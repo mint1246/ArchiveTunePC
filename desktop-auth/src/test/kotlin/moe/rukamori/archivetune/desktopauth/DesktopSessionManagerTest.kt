@@ -7,6 +7,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
+import moe.rukamori.archivetune.innertube.AccountValidationTimeoutException
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -235,6 +237,110 @@ class DesktopSessionManagerTest {
         assertTrue(manager.restore() is DesktopAccountState.Unavailable)
         val result = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
         assertEquals(SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE), result)
+    }
+
+    @Test
+    fun `unexpected secure store failure fails closed instead of crashing the caller`() = runBlocking {
+        val store =
+            object : SecureSessionStore {
+                override fun read(): ByteArray? = null
+                override fun write(value: ByteArray) = throw IllegalStateException("keyring is locked")
+                override fun delete() = Unit
+            }
+        val manager = manager(store = store)
+
+        val result = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
+
+        assertEquals(SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE), result)
+        assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+        assertEquals(DesktopAccountState.SignedOut, manager.state.value)
+    }
+
+    @Test
+    fun `verifier cannot replace the supplied login cookie`() = runBlocking {
+        val store = MemoryStore()
+        val manager =
+            DesktopSessionManager(
+                secureStore = store,
+                verifier = DesktopSessionVerifier { candidate ->
+                    Result.success(
+                        VerifiedDesktopSession(
+                            authState = candidate.copy(cookie = "SAPISID=other-credential").normalized(),
+                            account = DesktopAccount("Example", null, null),
+                        ),
+                    )
+                },
+            )
+
+        val result = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=supplied"))
+
+        assertEquals(SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED), result)
+        assertNull(store.value)
+        assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+        assertEquals(DesktopAccountState.SignedOut, manager.state.value)
+    }
+
+    @Test
+    fun `failed import keeps an already active session intact`() = runBlocking {
+        val store = MemoryStore()
+        val manager =
+            DesktopSessionManager(
+                secureStore = store,
+                verifier = DesktopSessionVerifier { candidate ->
+                    if (candidate.cookie == "SAPISID=first") {
+                        Result.success(
+                            VerifiedDesktopSession(
+                                authState = candidate.copy(dataSyncId = "sync-id").normalized(),
+                                account = DesktopAccount("Example", null, null),
+                            ),
+                        )
+                    } else {
+                        Result.failure(IllegalStateException("Google rejected the session"))
+                    }
+                },
+            )
+        manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=first"))
+
+        val rejected = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=second"))
+
+        assertEquals(SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED), rejected)
+        assertEquals("SAPISID=first", manager.currentAuthState().cookie)
+        assertEquals("SAPISID=first", StoredDesktopSessionCodec.decode(store.value!!).authState.cookie)
+        assertTrue(manager.state.value is DesktopAccountState.SignedIn)
+    }
+
+    @Test
+    fun `network and timeout failures have distinct import results without retaining cookies`() = runBlocking {
+        val failures = listOf(
+            java.io.IOException("private network detail") to SessionImportFailure.NETWORK_UNAVAILABLE,
+            AccountValidationTimeoutException() to SessionImportFailure.VALIDATION_TIMEOUT,
+        )
+        for ((failure, expected) in failures) {
+            val store = MemoryStore()
+            val manager = DesktopSessionManager(store, DesktopSessionVerifier { Result.failure(failure) })
+
+            val result = manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=synthetic"))
+
+            assertEquals(SessionImportResult.Rejected(expected), result)
+            assertNull(store.value)
+            assertEquals(DesktopAccountState.SignedOut, manager.state.value)
+        }
+    }
+
+    @Test
+    fun `cancellation returned by verifier is not presented as rejected cookies`() = runBlocking {
+        val store = MemoryStore()
+        val manager = DesktopSessionManager(store, DesktopSessionVerifier {
+            Result.failure(CancellationException("Cancelled"))
+        })
+        var cancelled = false
+        try {
+            manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=synthetic"))
+        } catch (_: CancellationException) {
+            cancelled = true
+        }
+        assertTrue(cancelled)
+        assertNull(store.value)
     }
 
     @Test

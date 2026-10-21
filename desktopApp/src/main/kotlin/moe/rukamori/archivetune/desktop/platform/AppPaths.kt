@@ -117,14 +117,12 @@ data class AppPaths(
                 }
 
                 else -> {
-                    val configHome = environment.value("XDG_CONFIG_HOME")?.let(Path::of)
-                        ?: home.resolve(".config")
-                    val dataHome = environment.value("XDG_DATA_HOME")?.let(Path::of)
-                        ?: home.resolve(".local/share")
-                    val cacheHome = environment.value("XDG_CACHE_HOME")?.let(Path::of)
-                        ?: home.resolve(".cache")
-                    val stateHome = environment.value("XDG_STATE_HOME")?.let(Path::of)
-                        ?: home.resolve(".local/state")
+                    // XDG base-directory variables must be absolute. Empty/relative values
+                    // are ignored instead of silently putting writable app data under cwd.
+                    val configHome = environment.xdgHome("XDG_CONFIG_HOME", home.resolve(".config"))
+                    val dataHome = environment.xdgHome("XDG_DATA_HOME", home.resolve(".local/share"))
+                    val cacheHome = environment.xdgHome("XDG_CACHE_HOME", home.resolve(".cache"))
+                    val stateHome = environment.xdgHome("XDG_STATE_HOME", home.resolve(".local/state"))
                     fromRoots(
                         configRoot = configHome.resolve("archivetune"),
                         dataRoot = dataHome.resolve("archivetune"),
@@ -156,6 +154,9 @@ data class AppPaths(
 
         private fun Map<String, String>.value(name: String): String? =
             entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+
+        private fun Map<String, String>.xdgHome(name: String, fallback: Path): Path =
+            value(name)?.takeIf(String::isNotBlank)?.let(Path::of)?.takeIf(Path::isAbsolute) ?: fallback
 
         private fun systemProperties(): Map<String, String> =
             System.getProperties().stringPropertyNames().associateWith(System::getProperty)

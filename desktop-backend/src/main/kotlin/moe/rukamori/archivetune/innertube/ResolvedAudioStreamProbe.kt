@@ -30,8 +30,8 @@ class AudioStreamProbeHttpException(
  * the first bytes, then (when the total size is known) a tiny range at the end of the object before
  * returning the stream to the player.
  *
- * The probe follows no redirects and never includes the signed URL, headers, cookies, or tokens in
- * an exception message.
+ * The probe follows the same HTTP redirects as libVLC's range transport, and never includes the
+ * signed URL, headers, cookies, or tokens in an exception message.
  */
 fun probeResolvedAudioStream(stream: ResolvedAudioStream): Result<AudioStreamProbeResult> =
     runCatching {
@@ -88,8 +88,10 @@ private const val MAX_PROBE_BYTES = 1_024
 
 private val PROBE_CLIENT: OkHttpClient =
     OkHttpClient.Builder()
-        .followRedirects(false)
-        .followSslRedirects(false)
+        // VLC's VlcjCallbackMedia enables both redirect modes for the same media URL. Rejecting a
+        // playable 301/302 here would discard a stream the player can actually open.
+        .followRedirects(true)
+        .followSslRedirects(true)
         // This probe runs inside the per-client resolver race. A CDN that cannot serve the first
         // kilobyte promptly should lose to another YouTube client instead of stalling the wave.
         .connectTimeout(3, TimeUnit.SECONDS)

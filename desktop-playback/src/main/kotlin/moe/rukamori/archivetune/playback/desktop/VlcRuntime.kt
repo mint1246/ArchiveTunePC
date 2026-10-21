@@ -13,6 +13,20 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
 
+internal enum class VlcRuntimeOs {
+    WINDOWS, LINUX, OTHER;
+
+    companion object {
+        fun current(): VlcRuntimeOs = fromOsName(System.getProperty("os.name", ""))
+
+        internal fun fromOsName(name: String): VlcRuntimeOs = when {
+            name.lowercase(Locale.ROOT).startsWith("windows") -> WINDOWS
+            name.lowercase(Locale.ROOT).contains("linux") -> LINUX
+            else -> OTHER
+        }
+    }
+}
+
 /** The native files libVLC needs before VLCJ can create a [uk.co.caprica.vlcj.factory.MediaPlayerFactory]. */
 data class VlcRuntimeLayout(
     val root: Path,
@@ -27,11 +41,13 @@ data class VlcRuntimeConfiguration(
 )
 
 /**
- * Locates a self-contained libVLC tree. The packaged application path is preferred over a machine
- * VLC install; environment/property overrides exist for development and diagnostics only.
+ * Resolves packaged libVLC runtimes or the distribution's installed libVLC and plugin tree.
+ * Linux distributions commonly keep the shared objects in /usr/lib and plugins in /usr/lib/vlc/plugins.
+ * Overrides remain preferred so a packaged runtime can take precedence over the system version.
  */
 object VlcRuntimeLocator {
     fun find(configuration: VlcRuntimeConfiguration = VlcRuntimeConfiguration()): VlcRuntimeLayout? {
+        val os = VlcRuntimeOs.current()
         val candidates = buildList {
             configuration.directory?.let(::add)
             System.getProperty("archivetune.vlc.dir")
@@ -48,8 +64,9 @@ object VlcRuntimeLocator {
                     ?.takeIf(String::isNotBlank)
                     ?.let(Path::of)
             if (app != null) {
-                add(app.resolve("native").resolve("windows-x64").resolve("vlc"))
-                add(app.resolve("native").resolve("vlc"))
+                if (os == VlcRuntimeOs.WINDOWS) add(app.resolve("native/windows-x64/vlc"))
+                if (os == VlcRuntimeOs.LINUX) add(app.resolve("native/linux-x64/vlc"))
+                add(app.resolve("native/vlc"))
                 add(app.resolve("vlc"))
             }
 
@@ -58,86 +75,106 @@ object VlcRuntimeLocator {
             }.getOrNull()
             codeSource?.let { jarOrClasses ->
                 val base = if (Files.isRegularFile(jarOrClasses)) jarOrClasses.parent else jarOrClasses
-                add(base.resolve("resources/native/windows-x64/vlc"))
+                if (os == VlcRuntimeOs.WINDOWS) add(base.resolve("resources/native/windows-x64/vlc"))
+                if (os == VlcRuntimeOs.LINUX) add(base.resolve("resources/native/linux-x64/vlc"))
                 add(base.resolve("resources/native/vlc"))
                 add(base.resolve("vlc"))
             }
 
-            System.getenv("LOCALAPPDATA")
-                ?.takeIf(String::isNotBlank)
-                ?.let(Path::of)
-                ?.resolve("ArchiveTune")
-                ?.resolve("runtime")
-                ?.let(::add)
-            System.getenv("LOCALAPPDATA")
-                ?.takeIf(String::isNotBlank)
-                ?.let(Path::of)
-                ?.resolve("ArchiveTuneSpikes")
-                ?.resolve("runtime")
-                ?.let(::add)
-
-            if (isWindows()) {
-                add(Path.of("C:\\Program Files\\VideoLAN\\VLC"))
-                add(Path.of("C:\\Program Files (x86)\\VideoLAN\\VLC"))
+            when (os) {
+                VlcRuntimeOs.WINDOWS -> {
+                    System.getenv("LOCALAPPDATA")
+                        ?.takeIf(String::isNotBlank)
+                        ?.let(Path::of)
+                        ?.resolve("ArchiveTune/runtime")
+                        ?.let(::add)
+                    System.getenv("LOCALAPPDATA")
+                        ?.takeIf(String::isNotBlank)
+                        ?.let(Path::of)
+                        ?.resolve("ArchiveTuneSpikes/runtime")
+                        ?.let(::add)
+                    add(Path.of("C:\\Program Files\\VideoLAN\\VLC"))
+                    add(Path.of("C:\\Program Files (x86)\\VideoLAN\\VLC"))
+                }
+                VlcRuntimeOs.LINUX -> {
+                    // Both Arch/CachyOS and Debian-style multiarch libVLC layouts.
+                    add(Path.of("/usr/local/lib"))
+                    add(Path.of("/usr/local/lib64"))
+                    add(Path.of("/usr/local/lib/x86_64-linux-gnu"))
+                    add(Path.of("/usr/lib"))
+                    add(Path.of("/usr/lib64"))
+                    add(Path.of("/usr/lib/x86_64-linux-gnu"))
+                }
+                VlcRuntimeOs.OTHER -> Unit
             }
         }.map { it.toAbsolutePath().normalize() }.distinct()
 
         candidates.forEach { candidate ->
-            if (isLayoutRoot(candidate)) return layout(candidate)
+            inspectDirectory(candidate, os)?.let { return it }
             if (Files.isDirectory(candidate)) {
                 runCatching {
                     Files.list(candidate).use { stream ->
-                        stream.filter(Files::isDirectory).filter(::isLayoutRoot).findFirst().orElse(null)
+                        stream.filter(Files::isDirectory)
+                            .map { inspectDirectory(it, os) }
+                            .filter { it != null }
+                            .findFirst().orElse(null)
                     }
-                }.getOrNull()?.let { return layout(it) }
+                }.getOrNull()?.let { return it }
             }
         }
         return null
     }
 
     /**
-     * Must run before the first VLCJ/libVLC class initializes native bindings. It is intentionally
-     * idempotent so a single application-scoped backend can call it during lazy initialization.
+     * The JVM can find libvlc by its usual JNA library name once its containing directory is
+     * registered. Calling this before MediaPlayerFactory also works for system-installed VLC.
      */
     fun prepareNative(layout: VlcRuntimeLayout) {
         val root = layout.root.toString()
         System.setProperty("jna.library.path", root)
         System.setProperty("java.library.path", root)
-        // VLCJ resolves libvlc through JNA. Register both DLL names explicitly so packaged
-        // applications do not depend on a developer machine's PATH or registry state.
         NativeLibrary.addSearchPath("libvlc", root)
         NativeLibrary.addSearchPath("libvlccore", root)
     }
 
-    private fun isLayoutRoot(path: Path): Boolean =
-        Files.isRegularFile(path.resolve("libvlc.dll")) &&
-            Files.isRegularFile(path.resolve("libvlccore.dll")) &&
-            Files.isDirectory(path.resolve("plugins"))
-
-    private fun layout(root: Path): VlcRuntimeLayout =
-        VlcRuntimeLayout(
-            root = root,
-            libVlc = root.resolve("libvlc.dll"),
-            libVlcCore = root.resolve("libvlccore.dll"),
-            plugins = root.resolve("plugins"),
-        )
-
-    private fun isWindows(): Boolean =
-        System.getProperty("os.name").lowercase(Locale.ROOT).contains("win")
+    /** Pure filesystem check, shared with platform layout tests. */
+    internal fun inspectDirectory(directory: Path, os: VlcRuntimeOs): VlcRuntimeLayout? {
+        val root = directory.toAbsolutePath().normalize()
+        val (libVlcNames, libCoreNames) = when (os) {
+            VlcRuntimeOs.WINDOWS -> listOf("libvlc.dll") to listOf("libvlccore.dll")
+            VlcRuntimeOs.LINUX -> listOf("libvlc.so", "libvlc.so.5") to
+                listOf("libvlccore.so", "libvlccore.so.9")
+            VlcRuntimeOs.OTHER -> return null
+        }
+        val libVlc = libVlcNames.asSequence().map(root::resolve).firstOrNull(Files::isRegularFile) ?: return null
+        val libCore = libCoreNames.asSequence().map(root::resolve).firstOrNull(Files::isRegularFile) ?: return null
+        val plugins = buildList {
+            add(root.resolve("plugins"))
+            if (os == VlcRuntimeOs.LINUX) add(root.resolve("vlc/plugins"))
+        }.firstOrNull(Files::isDirectory) ?: return null
+        return VlcRuntimeLayout(root = root, libVlc = libVlc, libVlcCore = libCore, plugins = plugins)
+    }
 }
 
-internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(): Array<String> =
-    arrayOf(
-        "--no-video",
-        "--quiet",
-        // VLC 3's default Windows mmdevice output controls ISimpleAudioVolume, so two players in
-        // the same process share one session volume and fight each other during a crossfade.
-        // DirectSound gives each VLC player its own secondary sound buffer; DirectSound performs
-        // the actual mix and per-buffer volume changes do not modulate the other player.
-        "--aout=directsound",
-    )
+internal fun VlcRuntimeLayout.mediaPlayerFactoryOptions(
+    os: VlcRuntimeOs = VlcRuntimeOs.current(),
+): Array<String> = buildList {
+    add("--no-video")
+    add("--quiet")
+    if (os == VlcRuntimeOs.WINDOWS) {
+        // VLC 3's Windows mmdevice backend shares one session volume across crossfade players.
+        // DirectSound gives the players independent buffers and volume controls on Windows.
+        add("--aout=directsound")
+    }
+    // On Linux, let libVLC select the system output (PulseAudio/PipeWire or ALSA).
+}.toTypedArray()
 
 internal object VlcPitchBridge {
+    // This bridge reads a private VLC 3 Windows x64 struct field at offset 0x68. Linux builds
+    // have a different ABI; dereferencing that offset would risk a native process crash.
+    // A portable pitch implementation must first replace this Windows-only native bridge.
+    internal fun isSupportedOnCurrentPlatform(): Boolean = VlcRuntimeOs.current() == VlcRuntimeOs.WINDOWS
+
     private const val VLC_VAR_FLOAT = 0x0050
     private const val VLC_VAR_DOINHERIT = 0x8000
     private const val MEDIA_PLAYER_INPUT_RESOURCE_OFFSET = 0x68L
@@ -151,6 +188,7 @@ internal object VlcPitchBridge {
 
     /** Apply pitch to the *actual* active audio-output object used by VLC 3.0.21. */
     fun applyToActiveAudioOutput(mediaPlayer: uk.co.caprica.vlcj.player.base.MediaPlayer, semitones: Float): Boolean {
+        if (!isSupportedOnCurrentPlatform()) return false
         val mediaPlayerPointer = mediaPlayer.mediaPlayerInstance().pointer
         val inputResource = mediaPlayerPointer.getPointer(MEDIA_PLAYER_INPUT_RESOURCE_OFFSET) ?: return false
         val aout = inputResourceHoldAout.invokePointer(arrayOf<Any?>(inputResource)) ?: return false

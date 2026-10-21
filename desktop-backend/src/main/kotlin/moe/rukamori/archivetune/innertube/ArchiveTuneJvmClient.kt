@@ -7,12 +7,14 @@
 
 package moe.rukamori.archivetune.innertube
 
+import io.ktor.client.plugins.ResponseException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import moe.rukamori.archivetune.innertube.models.AlbumItem
 import moe.rukamori.archivetune.innertube.models.AccountInfo
 import moe.rukamori.archivetune.innertube.models.SongItem
@@ -47,6 +49,7 @@ import java.io.File
 import java.net.URI
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.logging.Logger
 
 /**
  * JVM entry point for ArchiveTune's real YouTube Music backend.
@@ -67,6 +70,17 @@ class ArchiveTuneJvmClient(
     private val failedStreamClientsUntil = ConcurrentHashMap<String, Long>()
     @Volatile
     private var lastSuccessfulStreamClientKey: String? = null
+
+    /**
+     * The account endpoints used by [verifyAccountSession].
+     *
+     * Injectable so the validation flow can be exercised without a live YouTube connection, and
+     * so every validation request can carry an explicit session snapshot.
+     */
+    @Volatile
+    internal var accountEndpoint: DesktopAccountEndpoint = YouTubeAccountEndpoint
+    internal var accountValidationTimeoutMillis: Long = 45_000L
+    internal var accountContextTimeoutMillis: Long = 8_000L
 
     init {
         require(cacheDirectory.path.isNotBlank()) { "Cipher cache directory is required" }
@@ -181,38 +195,81 @@ class ArchiveTuneJvmClient(
         YouTube.newReleaseAlbums()
     }
 
-    /** Verifies a user-supplied authenticated YouTube session without exposing its secret values. */
-    suspend fun verifyAccountSession(candidate: PlaybackAuthState): Result<VerifiedBackendAccount> =
-        try {
-            require(candidate.hasLoginCookie) { "YouTube login cookie is missing" }
-            val initial = candidate.normalized()
-            // Account metadata can be requested before a selected channel/DataSyncId is known.
-            YouTube.authState = initial.copy(dataSyncId = null)
-            val account = YouTube.accountInfo().getOrThrow()
-            val dataSyncId = YouTube.accountDataSyncId().getOrThrow()
-            // Match the browser's personalized-browse context: the region-encoded visitor
-            // identifier and the account region/language both come from the sw.js lookup. The raw
-            // VISITOR_INFO1_LIVE cookie is a different identifier and downgrades the feed.
-            val resolved =
-                YouTube.resolveVisitorContext().getOrNull()
-                    ?: YouTube.visitorData().getOrNull()?.let { visitor ->
-                        moe.rukamori.archivetune.innertube.ResolvedVisitorContext(
-                            visitorData = visitor,
-                            locale = YouTube.locale,
-                        )
-                    }
-            resolved?.let { YouTube.locale = it.locale }
-            // Always prefer the fresh sw.js visitor identifier. A persisted value may carry the
-            // raw VISITOR_INFO1_LIVE cookie from an older import, which downgrades browse results.
-            val visitorData = resolved?.visitorData ?: initial.visitorData
-            val verified = initial.copy(visitorData = visitorData, dataSyncId = dataSyncId).normalized()
-            YouTube.authState = verified
-            Result.success(VerifiedBackendAccount(verified, account))
+    // Log a fixed stage, the error class, and an HTTP status only. Never log exception messages,
+    // URLs, headers, request/response bodies, accounts, cookie names, or session data.
+    private val accountValidationLogger = Logger.getLogger("moe.rukamori.archivetune.desktop.auth")
+
+    private suspend fun <T> probeAccountValidationStage(
+        stage: String,
+        request: suspend () -> Result<T>,
+    ): T {
+        val result = request()
+        result.exceptionOrNull()?.let { failure ->
+            if (failure is CancellationException) throw failure
+            val status = (failure as? ResponseException)?.response?.status?.value
+            val category = when {
+                status != null -> "http"
+                failure is java.io.IOException -> "network"
+                else -> "processing"
+            }
+            accountValidationLogger.warning(
+                "account_validation stage=$stage result=failure category=$category status=${status ?: "none"} exception=${failure.javaClass.simpleName}",
+            )
+        }
+        val value = result.getOrThrow()
+        accountValidationLogger.info("account_validation stage=$stage result=success")
+        return value
+    }
+
+    private suspend fun <T> optionalAccountValidationStage(
+        stage: String,
+        request: suspend () -> Result<T>,
+    ): T? = try {
+        withTimeoutOrNull(accountContextTimeoutMillis) {
+            probeAccountValidationStage(stage, request)
+        }.also { value ->
+            if (value == null) accountValidationLogger.info("account_validation stage=$stage result=timeout")
+        }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Verifies a user-supplied authenticated YouTube session without exposing its secret values.
+     *
+     * The candidate is never published to the process-wide session and is never written to the
+     * secure store from here. Every request carries the candidate snapshot explicitly, so a
+     * concurrent browse request that refreshes the shared session cannot replace the cookie of an
+     * in-flight validation. The verified session becomes active only after the desktop session
+     * owner has persisted it.
+     */
+    suspend fun verifyAccountSession(candidate: PlaybackAuthState): Result<VerifiedBackendAccount> {
+        var authenticatedAccount: AccountInfo? = null
+        return try {
+            val verified = withTimeoutOrNull(accountValidationTimeoutMillis) {
+                require(candidate.hasLoginCookie) { "YouTube login cookie is missing" }
+                val initial = candidate.normalized()
+                // Only the account menu proves that Google accepted the cookie. Channel and
+                // visitor lookups enrich that authenticated session; they cannot authenticate it.
+                val account = probeAccountValidationStage("account_menu") {
+                    accountEndpoint.accountInfo(initial.copy(dataSyncId = null))
+                }
+                authenticatedAccount = account
+                VerifiedBackendAccount(resolveAccountContext(initial, refreshVisitor = true), account)
+            } ?: authenticatedAccount?.let {
+                // Optional enrichment must not invalidate an account Google already authenticated.
+                // A restored-session preparation can retry the missing context on the next use.
+                VerifiedBackendAccount(candidate.normalized(), it)
+            } ?: throw AccountValidationTimeoutException()
+            Result.success(verified)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
             Result.failure(failure)
         }
+    }
 
     suspend fun album(browseId: String): Result<AlbumPage> =
         run {
@@ -908,23 +965,37 @@ class ArchiveTuneJvmClient(
      */
     private suspend fun ensureSessionAuthContext(initial: PlaybackAuthState): PlaybackAuthState {
         if (!initial.hasLoginCookie) return initial
-        var repaired = initial
-
-        if (repaired.visitorData.isNullOrBlank()) {
-            YouTube.visitorData().getOrNull()
-                ?.takeIf(String::isNotBlank)
-                ?.let { repaired = repaired.copy(visitorData = it).normalized() }
-        }
-        if (!repaired.hasPlaybackLoginContext) {
-            YouTube.accountDataSyncId().getOrNull()
-                ?.takeIf(String::isNotBlank)
-                ?.let { repaired = repaired.copy(dataSyncId = it).normalized() }
-        }
+        if (!initial.visitorData.isNullOrBlank() && initial.hasPlaybackLoginContext) return initial
+        val repaired = withTimeoutOrNull(PLAYBACK_AUTH_PREP_TIMEOUT_MILLIS) {
+            resolveAccountContext(initial)
+        } ?: return initial
         if (repaired.fingerprint != initial.fingerprint) {
-            YouTube.authState = repaired
             persistProvidedSessionRepair(initial, repaired)
+            // A suspended repair must not restore an account that was signed out or switched.
+            if (sessionProvider != null) applyProvidedSession()
+            else if (YouTube.authState.cookie == initial.cookie) YouTube.authState = repaired
         }
         return repaired
+    }
+
+    /** Shared by imports and restored sessions, including the authenticated homepage fallback. */
+    private suspend fun resolveAccountContext(
+        initial: PlaybackAuthState,
+        refreshVisitor: Boolean = false,
+    ): PlaybackAuthState {
+        val probeState = initial.copy(dataSyncId = null)
+        val channel = initial.dataSyncId ?: optionalAccountValidationStage("accounts_list") {
+            accountEndpoint.accountDataSyncId(probeState)
+        }?.takeIf(String::isNotBlank)
+        val bootstrap = if (refreshVisitor || initial.visitorData.isNullOrBlank() || channel == null) {
+            optionalAccountValidationStage("visitor_context") { accountEndpoint.visitorContext(probeState) }
+        } else null
+        val visitor = bootstrap?.visitorData ?: initial.visitorData
+            ?: optionalAccountValidationStage("visitor_fallback") { accountEndpoint.visitorData() }
+        // The anonymous homepage can contain a delegated-only identifier. Only a full session
+        // identifier is usable as a fallback; an authenticated account menu is still required.
+        val bootstrapChannel = bootstrap?.dataSyncId?.takeIf { it.contains(DATA_SYNC_ID_SESSION_SEPARATOR) }
+        return initial.copy(visitorData = visitor, dataSyncId = channel ?: bootstrapChannel).normalized()
     }
 
     private suspend fun ensurePlaybackAuth(
@@ -1089,6 +1160,37 @@ class ArchiveTuneJvmClient(
 }
 
 /**
+ * The account endpoints used to prove and enrich a candidate session.
+ *
+ * Every call receives the exact session snapshot it must use, so a candidate session never has to
+ * be published to the process-wide session while it is being validated.
+ */
+internal interface DesktopAccountEndpoint {
+    /** Returns the signed-in account. This is the only proof that Google accepted the cookie. */
+    suspend fun accountInfo(authState: PlaybackAuthState): Result<AccountInfo>
+
+    /** Returns the selected channel context. This is account enrichment, not proof of sign-in. */
+    suspend fun accountDataSyncId(authState: PlaybackAuthState): Result<String>
+
+    /** Returns the visitor and locale context of the session's bootstrap page. */
+    suspend fun visitorContext(authState: PlaybackAuthState): Result<ResolvedVisitorContext>
+
+    /** Returns the anonymous visitor identifier used when the bootstrap page is unavailable. */
+    suspend fun visitorData(): Result<String>
+}
+
+/** The live YouTube implementation of [DesktopAccountEndpoint]. */
+internal object YouTubeAccountEndpoint : DesktopAccountEndpoint {
+    override suspend fun accountInfo(authState: PlaybackAuthState): Result<AccountInfo> = YouTube.accountInfo(authState)
+
+    override suspend fun accountDataSyncId(authState: PlaybackAuthState): Result<String> = YouTube.accountDataSyncId(authState)
+
+    override suspend fun visitorContext(authState: PlaybackAuthState): Result<ResolvedVisitorContext> = YouTube.resolveVisitorContext(authState)
+
+    override suspend fun visitorData(): Result<String> = YouTube.visitorData()
+}
+
+/**
  * Explicit desktop control for ArchiveTune's process-wide network gatekeeper.
  *
  * The official Android build currently defaults `BuildConfig.GATEKEEPER_ENABLED` to false, so
@@ -1237,6 +1339,25 @@ data class VerifiedBackendAccount(
     val account: AccountInfo,
 )
 
+class AccountValidationTimeoutException : IllegalStateException("YouTube account validation timed out")
+
+enum class AccountValidationFailureKind { NETWORK, TIMEOUT, INVALID_REQUEST, SERVICE_UNAVAILABLE, UNKNOWN }
+
+/** Classifies types/status only; server messages and cookie material never reach the import UI. */
+fun classifyAccountValidationFailure(failure: Throwable): AccountValidationFailureKind {
+    val causes = generateSequence(failure) { it.cause }.take(8).toList()
+    if (causes.any {
+            it is AccountValidationTimeoutException || it is io.ktor.client.plugins.HttpRequestTimeoutException ||
+                it is java.net.SocketTimeoutException ||
+                it is java.net.http.HttpTimeoutException
+        }) return AccountValidationFailureKind.TIMEOUT
+    val status = causes.filterIsInstance<ResponseException>().firstOrNull()?.response?.status?.value
+    if (status == 400) return AccountValidationFailureKind.INVALID_REQUEST
+    if (status == 429 || status != null && status >= 500) return AccountValidationFailureKind.SERVICE_UNAVAILABLE
+    if (causes.any { it is java.io.IOException }) return AccountValidationFailureKind.NETWORK
+    return AccountValidationFailureKind.UNKNOWN
+}
+
 fun interface StreamUrlResolver {
     suspend fun resolve(
         format: PlayerResponse.StreamingData.Format,
@@ -1350,4 +1471,7 @@ private const val SIGNATURE_TIMESTAMP_TIMEOUT_MILLIS = 5_000L
 private const val PLAYBACK_AUTH_PREP_TIMEOUT_MILLIS = 15_000L
 private const val MAX_PARALLEL_STREAM_CLIENTS = 4
 private const val FAILED_CLIENT_BACKOFF_MS = 10 * 60 * 1000L
+
+/** Separates the delegated session id from the signed-in session id of a DataSyncId value. */
+private const val DATA_SYNC_ID_SESSION_SEPARATOR = "||"
 private val RETRYABLE_STREAM_RESPONSE_CODES = setOf(403, 404, 410, 416)

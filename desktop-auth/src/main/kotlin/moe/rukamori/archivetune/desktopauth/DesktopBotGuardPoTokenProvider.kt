@@ -8,11 +8,15 @@ package moe.rukamori.archivetune.desktopauth
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -23,9 +27,12 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.attribute.PosixFilePermissions
 import java.time.Duration
 import java.util.Base64
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.CompletionException
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /** The same two proof values Android's BotGuard generator produces in one minting cycle. */
 data class DesktopPoTokenResult(
@@ -50,7 +57,8 @@ fun interface DesktopPlaybackPoTokenProvider {
  */
 class ChromiumBotGuardPoTokenProvider(
     private val browserFinder: () -> Path? = ::findSupportedChromiumBrowser,
-    private val tempRoot: Path = Paths.get(System.getProperty("java.io.tmpdir")),
+    private val tempRoot: Path = defaultBotGuardTempRoot(),
+    private val coldStartBudgetMillis: Long = COLD_START_TIMEOUT_MS,
 ) : DesktopPlaybackPoTokenProvider {
     private val mutex = Mutex()
     private var cached: CachedTokens? = null
@@ -66,18 +74,32 @@ class ChromiumBotGuardPoTokenProvider(
                     it.videoId == videoId &&
                         it.sessionId == sessionId &&
                         it.expiresAtMillis > System.currentTimeMillis() + TOKEN_EXPIRY_SAFETY_MS
-                }?.result
-                ?: try {
-                    withTimeout(COLD_START_TIMEOUT_MS) {
-                        mintOneShot(videoId, sessionId)
-                    }?.also { minted ->
-                        cached = minted
-                    }?.result
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (_: Exception) {
-                    null
+                }?.let { return@withLock it.result }
+            try {
+                // withTimeoutOrNull swallows only this provider's own deadline. A caller timeout or
+                // cancellation surfaces from the block as CancellationException and is rethrown below,
+                // so an enclosing playback request can still be abandoned.
+                val outcome =
+                    withTimeoutOrNull(coldStartBudgetMillis) {
+                        MintOutcome(mintOneShot(videoId, sessionId))
+                    }
+                if (outcome == null) {
+                    logger.fine("BotGuard token mint exceeded the ${coldStartBudgetMillis}ms cold-start budget")
+                    return@withLock null
                 }
+                val minted = outcome.tokens
+                if (minted == null) {
+                    logger.fine("BotGuard token mint produced no tokens")
+                    return@withLock null
+                }
+                cached = minted
+                minted.result
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                logger.log(Level.WARNING, "BotGuard token mint failed: ${error.javaClass.simpleName}")
+                null
+            }
         }
     }
 
@@ -86,13 +108,21 @@ class ChromiumBotGuardPoTokenProvider(
         sessionId: String,
     ): CachedTokens? =
         withContext(Dispatchers.IO) {
-            val browser = browserFinder() ?: return@withContext null
+            val browser = browserFinder() ?: run {
+                logger.fine("BotGuard browser was not found")
+                return@withContext null
+            }
             Files.createDirectories(tempRoot)
             val profile = Files.createTempDirectory(tempRoot, "archivetune-potoken-")
+            if (isLinuxOperatingSystem()) {
+                // The profile can contain BotGuard state; keep it private to this user even when
+                // the configured temp root is broader (for example an XDG cache directory).
+                Files.setPosixFilePermissions(profile, PosixFilePermissions.fromString("rwx------"))
+            }
+
             var process: Process? = null
             var pageClient: CdpClient? = null
             try {
-                val challenge = parseCreateChallenge(postBotGuard(CREATE_URL, JSONArray().put(REQUEST_KEY).toString()))
                 process =
                     ProcessBuilder(botGuardBrowserCommand(browser, profile))
                         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
@@ -102,13 +132,18 @@ class ChromiumBotGuardPoTokenProvider(
 
                 val endpoint = waitForDevTools(profile)
                 val pageTarget = waitForPageTarget(endpoint.port)
-                pageClient = CdpClient.connect(pageTarget.webSocketDebuggerUrl)
-                pageClient.call("Runtime.enable")
-                pageClient.call("Page.enable")
+                checkActive()
+                // Fetch the challenge once the browser process is already warming up; this overlaps
+                // network latency with Chromium startup instead of paying for both sequentially.
+                val challenge = parseCreateChallenge(postBotGuard(CREATE_URL, JSONArray().put(REQUEST_KEY).toString()))
+                val client = runInterruptible(Dispatchers.IO) { CdpClient.connect(pageTarget.webSocketDebuggerUrl) }
+                pageClient = client
+                client.callInterruptibly("Runtime.enable")
+                client.callInterruptibly("Page.enable")
 
                 val frameId =
-                    pageClient
-                        .call("Page.getFrameTree")
+                    client
+                        .callInterruptibly("Page.getFrameTree")
                         .getJSONObject("frameTree")
                         .getJSONObject("frame")
                         .getString("id")
@@ -116,16 +151,15 @@ class ChromiumBotGuardPoTokenProvider(
                     requireNotNull(javaClass.getResourceAsStream("/po_token.html")) {
                         "Desktop BotGuard resource is missing"
                     }.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-                pageClient.call(
+                client.callInterruptibly(
                     "Page.setDocumentContent",
                     JSONObject()
                         .put("frameId", frameId)
                         .put("html", html),
-                    timeoutSeconds = CDP_EVALUATION_TIMEOUT_SECONDS,
                 )
 
                 val botguardResponse =
-                    pageClient.evaluateAwait(
+                    client.evaluateAwait(
                         """
                         (async function() {
                             const result = await runBotGuard($challenge);
@@ -138,7 +172,8 @@ class ChromiumBotGuardPoTokenProvider(
 
                 val generateBody = JSONArray().put(REQUEST_KEY).put(botguardResponse).toString()
                 val (integrityToken, lifetimeSeconds) = parseIntegrityToken(postBotGuard(GENERATE_IT_URL, generateBody))
-                pageClient.evaluateAwait(
+                checkActive()
+                client.evaluateAwait(
                     """
                     (async function() {
                         globalThis.integrityToken = ${integrityToken.toJsUint8Array()};
@@ -148,8 +183,8 @@ class ChromiumBotGuardPoTokenProvider(
                     """.trimIndent(),
                 )
 
-                val sessionToken = pageClient.mintPoToken(sessionId)
-                val playerToken = pageClient.mintPoToken(videoId)
+                val sessionToken = client.mintPoToken(sessionId)
+                val playerToken = client.mintPoToken(videoId)
                 val expiresAtMillis =
                     System.currentTimeMillis() +
                         (lifetimeSeconds.coerceAtLeast(MIN_TOKEN_LIFETIME_SECONDS) * 1_000L)
@@ -161,15 +196,21 @@ class ChromiumBotGuardPoTokenProvider(
                 )
             } finally {
                 pageClient?.close()
-                stopManagedBrowser(process)
+                stopManagedBrowser(process, profile)
                 cleanupProfile(profile)
             }
         }
 
-    private fun postBotGuard(
+    /** Fails fast between blocking browser/DevTools stages once the mint deadline has passed. */
+    private suspend fun checkActive() {
+        currentCoroutineContext().ensureActive()
+    }
+
+    private suspend fun postBotGuard(
         url: String,
         jsonBody: String,
     ): String {
+        checkActive()
         val request =
             HttpRequest
                 .newBuilder(URI.create(url))
@@ -181,10 +222,31 @@ class ChromiumBotGuardPoTokenProvider(
                 .header("x-user-agent", "grpc-web-javascript/0.1")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build()
-        val response = HTTP.send(request, HttpResponse.BodyHandlers.ofString())
+        val response = sendAsync(request)
         check(response.statusCode() == 200) { "BotGuard HTTP ${response.statusCode()}" }
         return response.body()
     }
+
+    /**
+     * Awaits the HTTP exchange as a cancellable coroutine.
+     *
+     * `HttpClient.send` blocks the calling thread until the request finishes, which makes the
+     * provider's cold-start deadline ineffective on a slow network. Awaiting the future instead lets
+     * `withTimeoutOrNull` and an enclosing playback timeout cancel the mint immediately.
+     */
+    private suspend fun sendAsync(request: HttpRequest): HttpResponse<String> =
+        suspendCancellableCoroutine { continuation ->
+            val future = HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            continuation.invokeOnCancellation { future.cancel(true) }
+            future.whenComplete { response, error ->
+                if (!continuation.isActive) return@whenComplete
+                if (error == null) {
+                    continuation.resume(response) { _, _, _ -> }
+                } else {
+                    continuation.resumeWith(Result.failure((error as? CompletionException)?.cause ?: error))
+                }
+            }
+        }
 
     private suspend fun waitForDevTools(profile: Path): DevToolsEndpoint {
         val activePort = profile.resolve("DevToolsActivePort")
@@ -212,16 +274,24 @@ class ChromiumBotGuardPoTokenProvider(
         throw IllegalStateException("Desktop BotGuard page did not start")
     }
 
-    private fun findPageTarget(port: Int): PageTarget? {
+    private suspend fun findPageTarget(port: Int): PageTarget? {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://127.0.0.1:$port/json/list"))
-                .timeout(Duration.ofSeconds(3))
+                .timeout(DEVTOOLS_LIST_TIMEOUT)
                 .GET()
                 .build()
-        val response = HTTP.send(request, HttpResponse.BodyHandlers.ofString())
+        // DevToolsActivePort is written slightly before the HTTP endpoint starts accepting
+        // connections. Treat that startup window as "not ready yet" instead of aborting the mint.
+        val response = try {
+            sendAsync(request)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return null
+        }
         if (response.statusCode() !in 200..299) return null
-        val targets = JSONArray(response.body())
+        val targets = runCatching { JSONArray(response.body()) }.getOrNull() ?: return null
         return (0 until targets.length())
             .asSequence()
             .mapNotNull(targets::optJSONObject)
@@ -233,15 +303,24 @@ class ChromiumBotGuardPoTokenProvider(
             }
     }
 
-    private fun CdpClient.evaluateAwait(expression: String): Any? {
+    private suspend fun CdpClient.callInterruptibly(
+        method: String,
+        params: JSONObject? = null,
+    ): JSONObject =
+        // CdpClient.call blocks on a CompletableFuture. Running it interruptibly lets the provider's
+        // deadline (or a cancelled playback request) stop waiting instead of pinning the IO thread.
+        runInterruptible(Dispatchers.IO) {
+            call(method, params, timeoutSeconds = CDP_EVALUATION_TIMEOUT_SECONDS)
+        }
+
+    private suspend fun CdpClient.evaluateAwait(expression: String): Any? {
         val response =
-            call(
+            callInterruptibly(
                 "Runtime.evaluate",
                 JSONObject()
                     .put("expression", expression)
                     .put("awaitPromise", true)
                     .put("returnByValue", true),
-                timeoutSeconds = CDP_EVALUATION_TIMEOUT_SECONDS,
             )
         response.optJSONObject("exceptionDetails")?.let { details ->
             val text = details.optString("text", "JavaScript evaluation failed")
@@ -251,7 +330,7 @@ class ChromiumBotGuardPoTokenProvider(
         return response.optJSONObject("result")?.opt("value")
     }
 
-    private fun CdpClient.mintPoToken(identifier: String): String {
+    private suspend fun CdpClient.mintPoToken(identifier: String): String {
         val csv =
             evaluateAwait(
                 """
@@ -262,13 +341,42 @@ class ChromiumBotGuardPoTokenProvider(
                 """.trimIndent(),
             )?.toString()?.takeIf(String::isNotBlank)
                 ?: throw IllegalStateException("BotGuard returned an empty token")
-        val bytes = csv.split(',').map { it.trim().toInt().toByte() }.toByteArray()
-        return Base64.getEncoder().encodeToString(bytes).replace('+', '-').replace('/', '_')
+        return encodePoToken(csv)
     }
 
-    private fun stopManagedBrowser(process: Process?) {
-        val root = process?.toHandle() ?: return
-        val handles = root.descendants().toList() + root
+    private fun stopManagedBrowser(
+        process: Process?,
+        profile: Path,
+    ) {
+        val root = process?.toHandle()
+        val processTree =
+            buildList {
+                root?.let { handle ->
+                    add(handle)
+                    runCatching { handle.descendants().use { it.toList() } }.getOrDefault(emptyList()).let(::addAll)
+                }
+            }
+        // Chromium can reparent helper/zygote processes on Linux. Match the dedicated profile
+        // argument as well so no browser process survives and keeps the temporary profile locked.
+        val profileHandles =
+            if (isLinuxOperatingSystem()) {
+                val profileArgument = "--user-data-dir=${profile.toAbsolutePath().normalize()}"
+                runCatching {
+                    ProcessHandle.allProcesses().use { processes ->
+                        processes
+                            .filter(ProcessHandle::isAlive)
+                            .filter { handle ->
+                                handle.info().arguments().orElse(emptyArray()).any { argument ->
+                                    argument.equals(profileArgument, ignoreCase = true)
+                                }
+                            }.toList()
+                    }
+                }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        val handles = (processTree + profileHandles).distinctBy(ProcessHandle::pid)
+        if (handles.isEmpty()) return
         handles.filter(ProcessHandle::isAlive).forEach { runCatching { it.destroy() } }
         val deadline = System.nanoTime() + PROCESS_EXIT_GRACE.toNanos()
         while (handles.any(ProcessHandle::isAlive) && System.nanoTime() < deadline) {
@@ -297,23 +405,35 @@ class ChromiumBotGuardPoTokenProvider(
         val expiresAtMillis: Long,
     )
 
+    /** Distinguishes "budget expired" (null outcome) from "mint ran and found nothing". */
+    private data class MintOutcome(val tokens: CachedTokens?)
+
     private data class DevToolsEndpoint(val port: Int)
     private data class PageTarget(val webSocketDebuggerUrl: String)
 
     private companion object {
-        private val HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+        private val logger = Logger.getLogger("moe.rukamori.archivetune.desktop.auth.botguard")
+        private val HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(HTTP_CONNECT_TIMEOUT_SECONDS)).build()
         private const val CREATE_URL = "https://www.youtube.com/api/jnn/v1/Create"
         private const val GENERATE_IT_URL = "https://www.youtube.com/api/jnn/v1/GenerateIT"
         private const val REQUEST_KEY = "O43z0dpjhgX20SCx4KAo"
         private const val API_KEY = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw"
         private const val BOTGUARD_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.3"
+
+        // The backend caps playback-auth preparation at 15s (PLAYBACK_AUTH_PREP_TIMEOUT_MILLIS in
+        // ArchiveTuneJvmClient). This provider keeps its pre-existing cold-start safety net, but
+        // caller cancellation now propagates, so an enclosing playback deadline can abandon the mint
+        // immediately instead of waiting for this budget. Runtime evidence from the opt-in smoke test
+        // should drive any future reduction.
+        private const val COLD_START_TIMEOUT_MS = 45_000L
+        private const val HTTP_CONNECT_TIMEOUT_SECONDS = 5L
         private const val HTTP_TIMEOUT_SECONDS = 20L
         private const val CDP_EVALUATION_TIMEOUT_SECONDS = 25L
-        private const val COLD_START_TIMEOUT_MS = 45_000L
+        private val BROWSER_STARTUP_TIMEOUT = Duration.ofSeconds(15)
+        private val DEVTOOLS_LIST_TIMEOUT = Duration.ofSeconds(3)
         private const val TOKEN_EXPIRY_SAFETY_MS = 10 * 60 * 1_000L
         private const val MIN_TOKEN_LIFETIME_SECONDS = 60L
-        private val BROWSER_STARTUP_TIMEOUT = Duration.ofSeconds(15)
         private val PROCESS_EXIT_GRACE = Duration.ofSeconds(2)
         private const val PROCESS_EXIT_POLL_MILLIS = 50L
         private const val PROFILE_DELETE_ATTEMPTS = 20
@@ -324,24 +444,72 @@ class ChromiumBotGuardPoTokenProvider(
 internal fun botGuardBrowserCommand(
     browser: Path,
     profile: Path,
+    isLinux: Boolean = isLinuxOperatingSystem(),
+    runningAsRoot: Boolean = isRunningAsRoot(),
 ): List<String> =
-    listOf(
-        browser.toString(),
-        "--headless=new",
-        "--user-data-dir=$profile",
-        "--profile-directory=Default",
-        "--remote-debugging-port=0",
-        "--remote-debugging-address=127.0.0.1",
-        "--disable-sync",
-        "--disable-background-mode",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-features=EnableBoundSessionCredentials",
-        "--user-agent=$BOTGUARD_BROWSER_USER_AGENT",
-        "about:blank",
-    )
+    buildList {
+        add(browser.toString())
+        add("--headless=new")
+        add("--user-data-dir=$profile")
+        add("--profile-directory=Default")
+        add("--remote-debugging-port=0")
+        add("--remote-debugging-address=127.0.0.1")
+        add("--disable-sync")
+        add("--disable-background-mode")
+        add("--no-first-run")
+        add("--no-default-browser-check")
+        add("--disable-features=EnableBoundSessionCredentials")
+        if (isLinux) {
+            // Containers and some distros ship a tiny /dev/shm; Chromium's renderer would be killed
+            // mid-mint. The BotGuard helper only needs JavaScript, never GPU compositing, and the
+            // throwaway profile must not reach for a desktop keyring prompt.
+            add("--disable-dev-shm-usage")
+            add("--disable-gpu")
+            add("--password-store=basic")
+            // Running as root is common in dev containers, where Chromium otherwise refuses to start.
+            if (runningAsRoot) add("--no-sandbox")
+        }
+        add("--user-agent=$BOTGUARD_BROWSER_USER_AGENT")
+        add("about:blank")
+    }
 
-private fun parseCreateChallenge(rawResponse: String): String {
+/**
+ * Keeps BotGuard's throwaway profile out of shared `/tmp`.
+ *
+ * Snap and Flatpak builds mount private temporary directories, and some hardened distros mount
+ * `/tmp` noexec or wipe it aggressively. The user cache directory survives that and is still
+ * per-user by construction. Windows and macOS keep the JVM temporary directory.
+ */
+internal fun defaultBotGuardTempRoot(): Path {
+    val systemTemp = Paths.get(System.getProperty("java.io.tmpdir", "."))
+    if (!isLinuxOperatingSystem()) return systemTemp
+    val cacheRoot =
+        System.getenv("XDG_CACHE_HOME")
+            ?.takeIf(String::isNotBlank)
+            ?.let(Paths::get)
+            ?: System.getenv("HOME")
+                ?.takeIf(String::isNotBlank)
+                ?.let { Paths.get(it, ".cache") }
+            ?: return systemTemp
+    val usable =
+        runCatching {
+            Files.isDirectory(cacheRoot) && Files.isWritable(cacheRoot)
+        }.getOrDefault(false)
+    return if (usable) cacheRoot.resolve("ArchiveTune").resolve("botguard") else systemTemp
+}
+
+/** Chromium refuses to run as root unless `--no-sandbox` is passed explicitly. */
+internal fun isRunningAsRoot(): Boolean {
+    if (!isLinuxOperatingSystem()) return false
+    val uid =
+        runCatching {
+            Files.getAttribute(Paths.get("/proc/self"), "unix:uid") as? Int
+        }.getOrNull()
+    if (uid != null) return uid == 0
+    return System.getProperty("user.name").equals("root", ignoreCase = true)
+}
+
+internal fun parseCreateChallenge(rawResponse: String): String {
     val outer = JSONArray(rawResponse)
     val challenge =
         if (outer.length() > 1 && outer.opt(1) is String) {
@@ -362,9 +530,19 @@ private fun parseCreateChallenge(rawResponse: String): String {
         ).toString()
 }
 
-private fun parseIntegrityToken(rawResponse: String): Pair<ByteArray, Long> {
+internal fun parseIntegrityToken(rawResponse: String): Pair<ByteArray, Long> {
     val response = JSONArray(rawResponse)
     return decodeYouTubeBase64(response.getString(0)) to response.getLong(1)
+}
+
+/** Mirrors Android's `commaSeparatedBytesToBase64` and its YouTube-specific URL-safe alphabet. */
+internal fun encodePoToken(commaSeparatedBytes: String): String {
+    val bytes =
+        commaSeparatedBytes
+            .split(',')
+            .map { it.trim().toInt().toByte() }
+            .toByteArray()
+    return Base64.getEncoder().encodeToString(bytes).replace('+', '-').replace('/', '_')
 }
 
 private fun JSONArray.firstStringOrNull(): String? =
