@@ -718,13 +718,17 @@ class CpuTracker:
                     info = table.get(pid)
                     if info is None:
                         continue
-                    self.registry[(pid, info[3])] = info[4]
-                    total_ticks += info[4]
+                    key = (pid, info[3])
+                    self.registry[key] = max(self.registry.get(key, 0), info[4])
                     if pid == self.app_pid:
                         app_ticks = info[4]
+                # Completed helpers must keep contributing after they leave /proc. A maximum
+                # of only the currently live processes loses their CPU and can report zero
+                # browser cost once the JVM alone becomes the largest accumulated sample.
+                total_ticks = sum(self.registry.values())
                 self.max_total_seconds = max(self.max_total_seconds, total_ticks / CLOCK_TICKS)
                 self.max_app_seconds = max(self.max_app_seconds, app_ticks / CLOCK_TICKS)
-                self.stop_event.wait(0.5)
+                self.stop_event.wait(0.05)
         except Exception as failure:  # pragma: no cover - diagnostic path
             self.error = failure.__class__.__name__
 
@@ -1435,7 +1439,7 @@ def build_report(
                 "maximum simultaneous total."
             ),
             "pss_method": "Sum /proc/<pid>/smaps_rollup Pss for the same tracked set at PSS samples.",
-            "cpu_method": "Cumulative /proc/<pid>/stat utime+stime of the tracked tree, maximum observed.",
+            "cpu_method": "Sum of each tracked (pid,starttime) maximum observed /proc utime+stime, retaining exited processes. CPU sampled every 50 ms; unobserved processes and final ticks between samples can be missed.",
             "helper_counting": (
                 "All browser renderer/gpu/network helpers are classified as browser and counted. The frozen "
                 "yt-dlp PyInstaller binary runs as two processes with the same yt-dlp executable name "

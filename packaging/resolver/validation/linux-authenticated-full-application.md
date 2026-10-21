@@ -61,7 +61,10 @@ again through its real Chromium provider.
 | BotGuard browser teardown observed | yes | yes |
 | Browser helpers in post-idle / shutdown | 0 / 0 | 0 / 0 |
 
-The cold proof is deliberately separate from the extraction metrics. The
+The cold proof is deliberately separate from the extraction metrics. The candidate
+also invokes Chromium in this phase as an explicit control, although its normal
+yt-dlp extraction path does not use that provider. Its forced control peak is not
+an intrinsic cost of yt-dlp extraction. The
 baseline's extraction phase additionally launches Chromium for each video that
 is not already in the provider's one-entry cache; that is inherent to the
 legacy path and is visible in the baseline extraction peak below.
@@ -88,7 +91,9 @@ were no failures, no anonymous fallbacks, and no unresolved placeholders.
 Baseline uses one cold Chromium/BotGuard mint per video and then serves its
 second attempt from the provider's token cache. Candidate performs a full
 yt-dlp extraction on every attempt; it has no equivalent warm path in this
-measurement. The baseline median therefore mixes sub-200 ms warm resolutions
+measurement. Both arms call the backend directly, bypassing the application's
+resolved-URL cache; these are resolver timings, not repeated playback latency.
+The baseline median therefore mixes sub-200 ms warm resolutions
 with 0.8–0.9 s cold ones.
 
 ## Playback controller
@@ -112,14 +117,18 @@ both arms. All checks were asserted from `PlaybackSnapshot`:
 run was muted by design, so audible output on the user's device was not
 verified.
 
-## CPU, wall time, and memory
+## Wall time and memory
 
 | Metric | Baseline | Candidate |
 | --- | ---: | ---: |
 | Wall time | 28,590 ms | 72,144 ms |
-| Total tree CPU | 12.14 s | 22.45 s |
-| App JVM CPU | 12.14 s | 17.81 s |
-| Child-process CPU | 0 s | 4.64 s |
+
+CPU comparisons are excluded. The original optional CPU tracker lost exited helpers
+when choosing its largest live-process sample, so the reported zero baseline child
+CPU and both whole-tree totals were invalid. Those fields are null in the safe JSON;
+original diagnostic values are retained under `invalid_original_cpu_samples`. The
+tracker now accumulates per-process maxima across exited helpers for future runs.
+This change does not affect the separate RSS/PSS sampler or playback measurements.
 
 Phase memory is the maximum simultaneous sampled sum; RSS and PSS are reported
 separately because the process composition differs.
@@ -139,12 +148,12 @@ Interpretation:
 
 * The legacy path is much faster once its BotGuard token is warm, but every
   cold video needs a short-lived headless Chromium. That shows up as a
-  **1.27–1.30 GiB** cold/extraction tail and 9 browser helper processes.
+  **roughly 1.24–1.28 GiB RSS** cold/extraction peak and 9 browser helper processes.
 * The yt-dlp path is consistently slow per extraction (7.3–8.5 s) and uses more
-  total CPU and wall time, but it never needs a browser. Its extraction RSS is
-  lower (795 vs 1,310 MiB), while its summed PSS is higher (739 vs 615 MiB)
-  because the tracked set is a few long-lived processes with less shared
-  Chromium memory, not thousands of shared pages.
+  wall time. Its extraction path does not invoke the Chromium provider. Its extraction RSS is
+  lower (795 vs 1,310 MiB), while its peak PSS is higher (739 vs 615 MiB).
+  RSS counts shared pages once per process; PSS apportions them. These metrics
+  therefore do not establish a physical-memory saving for the candidate.
 * Playback and post-idle memory are slightly lower for the candidate
   (434 vs 458 MiB RSS).
 
@@ -166,7 +175,8 @@ The final cleanup sample contained no helper processes (`[]`), and
 ## Limitations
 
 * One run per arm, three videos, two sequential attempts per video.
-* PSS and CPU are sampled estimates; short-lived helpers can exit between reads.
+* PSS is sampled; short-lived helpers can exit between reads. CPU comparisons are
+  excluded because of the original tracker defect described above.
 * The host is shared with the user's desktop applications; only the tracked app
   session/process group and observed descendants are counted.
 * Offscreen Xvfb with software Skia; GPU-backed rendering may differ.
@@ -181,10 +191,9 @@ The final cleanup sample contained no helper processes (`[]`), and
 
 ```bash
 python3 scripts/benchmark-authenticated-application.py \
-  --baseline-dir /tmp/opencode/archivetune-auth-bench/baseline \
+  --baseline-commit 0817a502413c6e77871eb161ee5c18ad6c4486da \
   --candidate-commit d3755de5f88c9358a685fce7cea0863dd922990c \
-  --candidate-dir /tmp/opencode/archivetune-auth-bench/candidate \
-  --work-root /tmp/opencode/archivetune-auth-bench \
+  --work-root /tmp/opencode/archivetune-auth-bench-new-run \
   --ytdlp /path/to/frozen/yt-dlp \
   --quickjs /path/to/qjs \
   --app-timeout 480 \

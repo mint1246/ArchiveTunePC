@@ -54,7 +54,7 @@
     "pss_interval_ms": 100,
     "rss_method": "At each 25 ms sample, sum RSS of every process in the application session/process group, its descendant closure and the persistent reparented-descendant registry; report the maximum simultaneous total.",
     "pss_method": "Sum /proc/<pid>/smaps_rollup Pss for the same tracked set at PSS samples.",
-    "cpu_method": "Cumulative /proc/<pid>/stat utime+stime of the tracked tree, maximum observed.",
+    "cpu_method": "CPU totals excluded: the original tracker maximized the cumulative CPU of currently live processes instead of summing CPU across exited helpers. It could report zero child CPU despite observed Chromium. The harness is fixed for future runs; no corrected total can be recovered from this recorded artifact.",
     "helper_counting": "All browser renderer/gpu/network helpers are classified as browser and counted. The frozen yt-dlp PyInstaller binary runs as two processes with the same yt-dlp executable name (bootloader plus embedded CPython); both are counted as yt_dlp, so the embedded interpreter is represented by that count rather than a separate python-named process. yt-dlp's ffmpeg/ffprobe and qjs sidecars are counted as media/quickjs. Counts are maximum simultaneous processes per phase category, and the final cleanup samples expose any post-shutdown residue.",
     "argv_collected": false
   },
@@ -79,8 +79,8 @@
     "backend": "legacy-browser",
     "exit_code": 0,
     "duration_ms": 28590,
-    "cpu_total_seconds_max": 12.14,
-    "cpu_app_seconds_max": 12.14,
+    "cpu_total_seconds_max": null,
+    "cpu_app_seconds_max": null,
     "resolution": {
       "attempts": 6,
       "successes": 6,
@@ -607,7 +607,12 @@
       "injection": "injected",
       "build_status": "built",
       "main_kt_sha256": "8ed946f9fd4abeef74180a3b8d9265634820b6d427fd2af621cab26185b0dee6"
-    }
+    },
+    "invalid_original_cpu_samples": {
+      "max_concurrent_accumulated_seconds": 12.14,
+      "app_seconds": 12.14
+    },
+    "cpu_comparison_valid": false
   },
   "candidate": {
     "commit": "d3755de5f88c9358a685fce7cea0863dd922990c",
@@ -615,8 +620,8 @@
     "backend": "ytdlp",
     "exit_code": 0,
     "duration_ms": 72144,
-    "cpu_total_seconds_max": 22.45,
-    "cpu_app_seconds_max": 17.81,
+    "cpu_total_seconds_max": null,
+    "cpu_app_seconds_max": null,
     "resolution": {
       "attempts": 6,
       "successes": 6,
@@ -1173,7 +1178,12 @@
       "injection": "injected",
       "build_status": "built",
       "main_kt_sha256": "8ed946f9fd4abeef74180a3b8d9265634820b6d427fd2af621cab26185b0dee6"
-    }
+    },
+    "invalid_original_cpu_samples": {
+      "max_concurrent_accumulated_seconds": 22.45,
+      "app_seconds": 17.81
+    },
+    "cpu_comparison_valid": false
   },
   "comparison": {
     "resolution": {
@@ -1243,6 +1253,8 @@
     "PSS and CPU are sampled estimates; short-lived helpers can exit between reads.",
     "The host is shared with the user's desktop applications, which are outside the tracked session.",
     "Offscreen software Skia; GPU-backed rendering may differ.",
-    "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device."
+    "Playback runs muted at volume 0 and therefore does not verify audible output on the live user's device.",
+    "CPU totals excluded: the original tracker maximized the cumulative CPU of currently live processes instead of summing CPU across exited helpers. It could report zero child CPU despite observed Chromium. The harness is fixed for future runs; no corrected total can be recovered from this recorded artifact.",
+    "The separate candidate cold-proof phase explicitly invokes the existing Chromium provider as a control; yt-dlp extraction itself does not invoke that provider. Backend calls bypass the app URL cache in both arms."
   ]
 }

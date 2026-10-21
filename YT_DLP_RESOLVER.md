@@ -116,7 +116,8 @@ uses `lib/app/resources/resolver` on Linux and `app/resources/resolver` on Windo
 The AppImage wrapper rejects missing or non-Linux resolver sidecars. Linux staging,
 checksum verification, AppImage build/extraction and anonymous live callback playback
 were verified in the isolated integration worktree. Authenticated whole-application
-testing is being measured separately against the committed Linux baseline.
+playback and the comparison against the committed Linux baseline also passed,
+with muted output; the measurements below supersede the anonymous comparison.
 
 ## JavaScript runtime cost
 
@@ -161,6 +162,44 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew :desktopApp:verifyBundledResolv
 export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/yt-dlp"
 export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/qjs"
 ```
+
+## Authenticated application comparison
+
+The [authenticated report](packaging/resolver/validation/linux-authenticated-full-application.md)
+compares Linux baseline `0817a5024` with the integrated yt-dlp candidate `d3755de5f`;
+both use core `144fe5c` and identical temporary instrumentation. The candidate's
+production sources match this feature branch. The current account was verified
+through a real request. Each run restored an isolated copy of the saved keyring
+entry; the original entry was unchanged, and both copies were removed afterward.
+
+Both versions resolved **6/6** authenticated streams and passed the real application
+controller's playback, advancing position, seek, pause, resume and stop checks.
+Output was muted, so audible playback was not verified. The baseline really launched
+headless Brave, including renderer/GPU/network helpers, during extraction. A separate
+forced browser-proof control ran in both arms and is excluded from extraction costs.
+
+| Measurement | Linux legacy | yt-dlp + QuickJS |
+| --- | ---: | ---: |
+| Resolution median | 491 ms | 7697 ms |
+| First request per video, median | 848 ms | 7894 ms |
+| Repeat request per video, median | 166 ms | 7603 ms |
+| Extraction peak RSS | 1309.65 MiB | 794.54 MiB |
+| Extraction peak PSS | 615.14 MiB | 738.68 MiB |
+| Playback peak RSS | 458.28 MiB | 434.30 MiB |
+
+The legacy backend's proof cache accelerates repeats. These calls bypass the
+application's resolved-URL cache in both arms, so repeat timings are not repeated
+playback latency. The candidate had lower RSS but higher PSS: RSS repeats shared
+Chromium pages across processes, while PSS apportions them. This is not evidence
+of a physical-memory improvement. CPU comparisons from this whole-app run are
+excluded because its optional tracker lost exited helpers; the recorded totals
+cannot be repaired, and the harness is fixed for future runs. The independent
+runtime comparison uses separate CPU accounting.
+
+No helper processes remained during post-idle or after shutdown. This is one paired
+run on three public videos, with software rendering and the user's shared host.
+The result supports a working experiment, not a demonstrated speed or physical-memory
+advantage over the now-fixed Linux legacy implementation. No merge is performed.
 
 ## Anonymous application measurements (runtime candidate `5e5ecb786`)
 
@@ -255,8 +294,8 @@ playback-core suite passed 22 tests. After integrating the Linux fixes, the
 and desktop-playback passed 53 tests (one opt-in skip). Running its opt-in live
 callback class separately passed both tests, including real playback, deep seek,
 pause/resume and header delivery; see [the test notes](docs/YTDLP_VLC_TEST.md).
-These integration tests are distinct from the authenticated whole-application
-benchmark; current results from that benchmark will be recorded separately.
+The authenticated whole-application benchmark also passed both arms' playback
+checks, as described above; it uses isolated copies of the stored account.
 
 Independent final live tests also passed for `jNQXAC9IVRw`, `dQw4w9WgXcQ` and
 `aqz-KE-bpKQ`: all three returned head/tail HTTP 206, reached Playing in system
@@ -266,8 +305,9 @@ explicitly reported a QuickJS challenge and the bundled EJS source.
 Merge remains deferred until the application is exercised on its supported desktop
 runtime: local playback, resolved YouTube playback, seek/pause/resume, next-track
 preloading/cancellation, downloads and signed-in cookie authentication. Windows/GraalVM
-execution remains unverified. Authenticated full-application playback is being checked
-with isolated copies of the user's stored session, without modifying the live app.
+execution remains unverified. Authenticated full-application playback passed with
+muted output and isolated session copies; audible output, packaged signed-in UI flows,
+live queue preloading/cancellation and live downloads remain separate acceptance checks.
 
 Public sources: [yt-dlp EJS setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS),
 [yt-dlp 2026.08.19](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19),
