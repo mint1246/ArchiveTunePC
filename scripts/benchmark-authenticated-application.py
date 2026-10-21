@@ -1312,6 +1312,8 @@ def build_report(
                 "media_processes_observed": result["process_inventory"].get(
                     "media_processes_observed", []
                 ),
+                "all_process_names": result["process_inventory"].get("all_process_names", []),
+                "categories": result["process_inventory"].get("categories", {}),
                 "detached_from_app_group_names": result["process_inventory"][
                     "detached_from_app_group_names"
                 ],
@@ -1338,9 +1340,12 @@ def build_report(
             },
             "simultaneous_helper_memory": {
                 category: {
-                    "max_process_count": entry.get("max_process_count"),
-                    "max_rss_mib": entry.get("max_rss_mib"),
-                    "max_pss_mib": entry.get("max_pss_mib"),
+                    "max_simultaneous_process_count": entry.get("max_simultaneous_process_count"),
+                    "max_simultaneous_rss_mib": entry.get("max_simultaneous_rss_mib"),
+                    "max_simultaneous_pss_mib": entry.get("max_simultaneous_pss_mib"),
+                    "max_observed_rss_mib": entry.get("max_observed_rss_mib"),
+                    "max_observed_pss_mib": entry.get("max_observed_pss_mib"),
+                    "names": entry.get("names"),
                 }
                 for category, entry in (
                     result["process_inventory"].get("categories") or {}
