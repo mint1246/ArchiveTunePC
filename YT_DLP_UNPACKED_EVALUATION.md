@@ -214,7 +214,7 @@ Both arms resolved the same kind of result (format `251`, WebM/Opus, HTTP
 206 at the head and the tail) and both started the challenge solver exactly
 once per challenged request.
 
-The extraction control does **not** reproduce the final production argument vector: it uses bestaudio by protocol, omits the HIGH bitrate/vcodec filters, and omits `youtube:skip=hls,dash`. Both binaries receive the same control arguments, so the binary comparison remains useful; it is not the final optimized application measurement. A draft explanation that comma-separated skip values would be inert was incorrect: upstream parses those values. The main application matrix measures the actual production configuration.
+The extraction control does **not** reproduce the final production argument vector: it uses bestaudio by protocol, omits the HIGH bitrate preference, and omits `youtube:skip=hls,dash`. Both binaries receive the same control arguments, so the binary comparison remains useful; it is not the final optimized application measurement. A draft explanation that comma-separated skip values would be inert was incorrect: upstream parses those values. The main application matrix measures the actual production configuration.
 
 ### 3.4 The upstream Windows artifact (static only)
 

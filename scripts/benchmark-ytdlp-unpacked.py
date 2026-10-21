@@ -911,7 +911,7 @@ def build_report(args: argparse.Namespace, harness: Harness, runs: List[Extracti
             "manifest_exclusion": (
                 "Both arms use identical audio-only control flags, not the final production vector. "
                 "The protocol selector excludes manifest formats from selection but still permits "
-                "manifest fetching. These controls omit the production HIGH bitrate/vcodec filters "
+                "manifest fetching. These controls omit the production HIGH bitrate preference "
                 "and youtube:skip=hls,dash. Upstream does parse comma-separated skip values; "
                 "the earlier claim that they would be inert was incorrect."
             ),

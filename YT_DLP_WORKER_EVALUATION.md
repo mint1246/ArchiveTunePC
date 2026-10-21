@@ -14,9 +14,10 @@ no upstream yt-dlp extraction or challenge patch is proposed or used.
 **Verdict in one paragraph.** A persistent Python worker removes up to ~1 s of
 per-request overhead on the production-parity workload (measured wall p50
 2302 ms for the shipped frozen control against 1311 ms for the reusing
-worker), split into 448 ms of frozen-bundle start-up, 198 ms of Python
-process start-up and 345 ms of object-level caches (player JS, signature
-cache, HTTP connection pool). It does **not** remove the challenge solver:
+worker). Adjacent median differences are consistent with amortized bundle/import
+costs and object-level state (player JS, signature cache, HTTP connections), but
+are not an experimentally isolated causal decomposition: two sessions and unequal
+cold/warm sample counts are involved. It does **not** remove the challenge solver:
 Bun is started exactly once per challenged request in every configuration,
 including every warm repeat inside the reusing worker, and that solver is the
 largest remaining cost. The price is a resident process (92.8 MiB RSS /
@@ -380,8 +381,11 @@ not eliminate the expensive `n` challenge path.
 ### 3.10 Attribution of the wall-time gain
 
 On the `default_client` workload (wall p50), the gain of the reusing worker
-over the shipped control is 2302 ms -> 1311 ms, i.e. **991 ms**, and it splits
-into three parts:
+over the shipped control is 2302 ms -> 1311 ms, i.e. **991 ms**. The following are
+differences between observed medians, with plausible explanations, not additive
+causal stage timings. Process-per-request configurations have 9 default-client
+samples; persistent configurations have 18, including immediate repeats. The
+controls and two worker alternatives also span two sessions (§8).
 
 | step | wall p50 | delta | what it is |
 |---|---|---|---|
@@ -390,8 +394,8 @@ into three parts:
 | `persistent_python_new_ydl` | 1656 ms | **-198 ms** | the interpreter start-up, the `yt_dlp` import and the extractor registry, which a long-lived process pays once |
 | `persistent_python_reuse_ydl` | 1311 ms | **-345 ms** | object-level state: the reused extractor instance keeps the player JS (`_code_cache`), the signature/`n` cache (`_player_cache`) and the HTTP connection pool |
 
-The last step is **not** CPU: the CPU of the reusing worker is only 0.04 s
-lower than the new-object worker (0.15 s vs 0.19 s). It is waiting time, and
+The last step is mostly consistent with reduced waiting: CPU of the reusing worker is only 0.04 s
+lower than the new-object worker (0.15 s vs 0.19 s). This does not uniquely identify its cause;
 the upstream source shows what is being kept: the player JavaScript is
 downloaded once per extractor instance, and the `urllib3` pool of the request
 director is reused. This evaluation does not separate the two contributions
@@ -408,8 +412,8 @@ smaller.
 does not close the gap to the native path.**
 
 * It removes up to ~1 s of per-request overhead on the default-client
-  workload (991 ms of the measured 2302 ms), split between the frozen bundle's
-  start-up, the Python process start-up and the object-level caches.
+  workload (991 ms between the measured medians). Bundle/process startup and
+  object-level caches plausibly contribute; their individual savings are not isolated.
 * It does **not** remove the challenge solver: one Bun process per challenged
   request in every configuration, 0.93-1.66 s of reaped helper CPU and the
   largest single contributor to the peak memory (the Bun child dominates the
@@ -417,20 +421,19 @@ does not close the gap to the native path.**
 * On the challenged workload the best measured configuration is 2133 ms
   (reusing worker) against a control of 2827 ms. The native/legacy path that
   the application replaced was measured at ~395 ms. The gap is therefore
-  still dominated by the challenge solve, which upstream does not allow to be
-  cached.
+  still substantial. These anonymous CLI measurements are not a matched comparison
+  against the historical signed-in 395 ms application median. Upstream resubmits the
+  challenge on every extraction in the measured version.
 * The price is a resident process: 92.8 MiB RSS / 77.6 MiB PSS idle for the
   reusing worker, plus a changed cancel model (§5.3) and a credential
   lifecycle (§5.2).
 
-A hybrid therefore remains the most likely shape: keep the shipped frozen
-executable for the challenged path (where the Bun solve dominates and the
-start-up is irrelevant), and use a persistent worker for the unchallenged
-path, where the measured gain is largest relative to the request cost. A
-cheaper alternative for the same effect is to make the *control* cheaper
-(the upstream unpacked release file exists and avoids the self-extracting
-bundle), which would recover the 448 ms of the frozen bundle's start-up
-without any resident process.
+The application candidate instead uses an existing direct-URL fast path with
+short-lived upstream fallback; no persistent worker is shipped. That decision
+requires the matched application evidence, rather than this exploratory worker
+study alone. The official unpacked release is another startup optimization worth
+measuring: it avoids self-extraction, but its exact savings cannot be inferred
+from the different Python virtual-environment build tested here.
 
 ---
 
@@ -562,7 +565,7 @@ checksum-verified file. On a system that already has a Python runtime the
 added size is smaller, but the pinned virtual environment is what this
 evaluation measured.
 
-An alternative that gets the 448 ms of the frozen bundle's start-up without
+An alternative that could reduce startup without
 any resident process is to ship the **unpacked** upstream release file. The
 shipped executable is a PyInstaller bundle (verified locally: it carries the
 PyInstaller PKG archive markers), and the upstream release publishes a plain,
@@ -570,11 +573,9 @@ non self-extracting executable next to it; the parent task is evaluating that
 file as a cheap start-up control. That is a packaging change only and needs no
 worker; it was not measured here.
 
-GraalVM native image of yt-dlp is not a viable option: yt-dlp is not
-Graal-friendly (the extractor registry is loaded dynamically, the EJS package
-is optional at runtime) and the upstream project neither ships nor tests a
-native image. Making it work would need upstream patches, which this
-evaluation does not do.
+This evaluation does not build a native image of the Python extractor. ArchiveTune's
+GraalVM desktop build continues to package external official sidecars; no custom
+Python-to-native build or upstream extraction patch is introduced.
 
 ---
 

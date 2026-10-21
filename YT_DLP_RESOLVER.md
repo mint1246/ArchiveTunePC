@@ -4,16 +4,28 @@ Implemented on `feature/ytdlp-resolver` in its own worktree. No merge is perform
 The Linux porting checkout and its uncommitted changes remain untouched. Its committed
 Linux support updates are now incorporated into this experimental branch.
 
+The current architecture decision, matched four-mode distributions, worker/cache profiles, browser attribution, and fallback evidence are in [YT_DLP_OPTIMIZATION.md](YT_DLP_OPTIMIZATION.md). The comparisons later in this document are historical full-replacement runs.
+
 ## Application integration
 
-`ArchiveTuneJvmClient.resolveAudioStream` defaults to `YtDlpDesktopStreamExtractor`.
+`ArchiveTuneJvmClient.resolveAudioStream` defaults to a hybrid: a two-second attempt
+using the existing VISIONOS player response, then `YtDlpDesktopStreamExtractor` on
+failure. The fast path accepts only an already direct HTTP(S) audio URL without an
+`n` parameter or cipher. It does not initialize Mori/NewPipe, fetch player scripts,
+decipher signatures, or eagerly mint browser proof. Compatibility recovery belongs
+to upstream yt-dlp. A rejected CDN URL enters the existing per-video/session client
+backoff, so the retry goes upstream immediately. Signed-in HIGHEST requests bypass
+the non-cookie fast client to preserve account-specific format possibilities.
+Current desktop playback and downloads request HIGH; HIGHEST is an API control,
+not an existing desktop quality-setting flow. HIGH intentionally retains the
+native client policy, including its non-cookie handling of public content.
 Both playback (`DesktopMusicServices`) and downloads (`DesktopDownloadServices`) already
 use this API, including the metadata replacement path. Its `ResolvedAudioStream`
 contract is unchanged: direct URL, audio format, HTTP headers, expiry and session
 fingerprint. Existing queue preloading, completed-download lookup, URL-cache session
 invalidation, expiry safety window and libVLC callback transport continue to use it.
 
-The resolver selects audio-only progressive HTTP(S), excludes HLS/DASH manifests and
+The yt-dlp path selects audio-only progressive HTTP(S), skips fetching HLS/DASH manifests and
 muxed video, and maps LOW/HIGH/HIGHEST quality preferences to yt-dlp format selectors.
 HIGH prefers audio at or below 160 kbit/s; LOW prefers at or below 70 kbit/s. Each falls
 back to the best available direct audio if its preferred tier is absent. Unknown
@@ -28,9 +40,10 @@ Probes follow media redirects, matching the playback transport. Probe errors are
 network failures rather than unavailable-video failures. Downloads
 reuse this validation instead of probing the same yt-dlp URL again.
 
-A parallel, best-effort player metadata request supplies YouTube loudness metadata to
+The fast path retains loudness metadata from its player response. On the yt-dlp path,
+a parallel, best-effort player metadata request supplies YouTube loudness metadata to
 the existing normalization controls. It has a two-second limit and performs no stream
-extraction or deciphering; audio extraction remains solely yt-dlp. Anonymous metadata
+extraction or deciphering. Anonymous metadata
 uses the native client first, while signed-in metadata prefers the cookie-capable web
 client. A live check for `dQw4w9WgXcQ` returned perceptual loudness **−13.01 dB**
 through both old and new paths, preserving the existing gain calculation. This probe now has an asynchronous cancellable
@@ -45,9 +58,14 @@ The existing libVLC Googlevideo callback transport receives the complete require
 header map. Cookie, Authorization, Proxy-Authorization and transport-controlled headers
 are excluded from media requests. No extractor is embedded in the playback controller.
 
+`ARCHIVETUNE_STREAM_RESOLVER=hybrid|ytdlp|legacy` (or the
+`archivetune.streamResolver` JVM property) selects the policy for controlled checks.
+`ytdlp` always uses upstream; `legacy` retains the full old native implementation.
+The hybrid HIGH policy retains existing native format selection; some videos therefore
+return AAC where yt-dlp chooses Opus. These are not codec-matched measurements.
 Explicitly supplying `audioStreamExtractor = null` retains the legacy backend for
 controlled comparisons. Existing custom `StreamUrlResolver` injections also retain
-their legacy behavior. Production defaults do not silently fall back to NewPipe. After a media HTTP failure,
+their legacy behavior. The default hybrid never falls back to native deciphering. After a media HTTP failure,
 the existing transparent retry starts a fresh extraction; yt-dlp client selection
 does not enter the legacy client-key backoff/proof-refresh machinery.
 NewPipe remains a transitive shared-core dependency for Android and the comparison
@@ -62,7 +80,8 @@ with a redaction-safe installation error. Upstream yt-dlp validates the solver s
 version and hashes when it actually solves challenges. Live challenge tests provide the
 execution check; an installed package's version string alone is not that proof.
 
-Each request launches yt-dlp with `ProcessBuilder` arguments, without a shell. Bun
+Each upstream request launches yt-dlp with `ProcessBuilder` arguments, without a shell. A
+successful direct fast-path request launches neither yt-dlp nor Bun. Bun
 is selected explicitly through `--no-js-runtimes --js-runtimes bun:<path>`.
 The app requires Bun 1.4.3 or newer, so an old PATH installation cannot silently
 select pre-rewrite Bun. The pinned yt-dlp warns that Bun newer than 1.3.14 is
@@ -77,7 +96,7 @@ User configuration, plugins and remote solver downloads are disabled. Official f
 binaries bundle their own transient Python interpreter and EJS; system Python, Node
 and Deno are unnecessary. No Python or JS worker stays alive after a request.
 
-The desktop extractor allows two attempts of 20 seconds each, including extraction,
+After the optional two-second fast path, the desktop extractor allows two attempts of 20 seconds each, including extraction,
 metadata handoff and CDN probes, inside the existing 45-second backend budget.
 A timed-out first attempt is cancelled and cleaned up before the fresh second attempt.
 The remaining budget provides cleanup headroom; the caller's overall deadline still
@@ -90,7 +109,9 @@ Stdout and stderr drain concurrently with 16 MiB / 1 MiB limits. Raw JSON, diagn
 text, URLs and cookie values are never attached to exceptions or logs. The successful
 capability check is the only process-related state retained in memory.
 
-The existing session provider is consulted and refreshed as before. Its cookie header
+The existing session provider is consulted and refreshed as before. The VISIONOS client
+keeps its existing non-cookie behavior; failures reach yt-dlp with the full session,
+without stripping or replacing cookies. Its cookie header
 is converted to a secure `.youtube.com` Netscape cookie jar in an owner-only temporary
 directory (POSIX 0700; Windows user-temp inherited ACLs). Selected account `dataSyncId`
 is passed with yt-dlp's existing `youtube:data_sync_id` option. Cookies, account context
@@ -120,7 +141,7 @@ and the locale fix that sends `hl=en` with `gl=IL` instead of invalid `hl=en-IL`
 The login implementation is inherited from those commits; the resolver experiment
 does not replace it. The original `linux-port` worktree and branch are untouched.
 
-The integrated resolver keeps its yt-dlp default, private cookies, cancellation,
+The integrated resolver uses the hybrid policy, private cookies, cancellation,
 20-second attempt budgets, shared HTTP routing and complete media headers. Packaging
 uses `lib/app/resources/resolver` on Linux and `app/resources/resolver` on Windows.
 The AppImage wrapper rejects missing or non-Linux resolver sidecars. Linux staging,
@@ -200,7 +221,7 @@ cross-staged on Linux and was not executed. Graal native sidecar staging passed,
 without a full native image or MSI build. The AppImage was not installed and did
 not replace the running user application.
 
-The integrated branch passed 26 resolver tests, 94 backend tests (one opt-in skip),
+At runtime candidate `04232ffa7`, the integrated branch passed 26 resolver tests, 94 backend tests (one opt-in skip),
 53 playback tests (one opt-in skip), and desktop compilation. The resolver tests
 also passed with inherited `BUN_OPTIONS=--cwd=/nonexistent-parent-project` and
 `DO_NOT_TRACK=0`: subprocess fixtures require the options to be removed and tracking
@@ -210,7 +231,7 @@ tests additionally cover unsafe ZIP entries, duplicate/oversized members, digest
 failures, manifest tampering and stale runtimes. The stricter manifest verifier
 also passed against the extracted final AppImage without changing its payload.
 
-## Signed-in Bun application comparison
+## Historical signed-in Bun full-replacement comparison
 
 The [Bun whole-application report](packaging/resolver/validation/linux-bun-authenticated-full-application.md)
 compares committed Linux baseline `0817a5024` with runtime/package candidate
