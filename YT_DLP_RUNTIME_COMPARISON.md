@@ -4,12 +4,11 @@
 solver that the desktop resolver ships, or is a heavier runtime (Node / Deno /
 Bun) cheaper to *run*?
 
-**Answer, measured.** No. QuickJS-NG is the cheapest runtime to **ship**
-(2.44 MiB binary) but it is the most expensive to **run**: on the challenged
-video it costs **2.5x more wall time** and **3.0x more CPU** than Node, while
-saving only **48–115 MiB** of peak process-tree RSS. Node / Deno / Bun all
-solve the same challenge with the same bundled EJS 0.8.0 scripts, in roughly
-one third of the CPU time.
+**Answer, measured.** There is no single cheapest runtime across all costs.
+QuickJS-NG has the smallest binary (2.44 MiB) and lowest measured peak RAM,
+but challenged extraction took **2.5x the wall time** and **3.3x the CPU** of
+Node. Node reduced latency and CPU while using about **48 MiB more peak RAM**.
+The decision depends on package size, temporary memory and playback startup delay.
 
 Everything below is a measurement of the pinned tools in this repository. No
 engine claims are used as evidence.
@@ -20,7 +19,7 @@ Cold, serialized extractions of the **challenged** video `dQw4w9WgXcQ` with
 `player_client=web_embedded` (the runtime is load-bearing here), three
 successful extractions per runtime, same machine, same pinned yt-dlp:
 
-| Runtime | Version | Binary size | Wall time (median) | CPU time (median) | Peak tree RSS (max) | Runtime child RSS | Runtime child CPU |
+| Runtime | Version | Binary size | Wall time (median) | CPU time (median) | Peak tree RSS (max) | Runtime child RSS (sampled max) | Runtime child CPU (sampled max) |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **QuickJS-NG** | 0.17.0 | **2.44 MiB** | **7541 ms** | **5.97 s** | **359.0 MiB** | 256.6 MiB | 5.30 s |
 | Node | 26.11.1 | 52.78 MiB | 2988 ms | 1.79 s | 407.3 MiB | 302.1 MiB | 0.87 s |
@@ -33,36 +32,36 @@ no solver script executed):
 
 | Runtime | Δ wall | Δ CPU | Δ peak tree RSS |
 | --- | ---: | ---: | ---: |
-| **QuickJS-NG** | **+5365 ms** | **+5.21 s** | **+272.7 MiB** |
-| Node | +911 ms | +0.99 s | +321.0 MiB |
-| Deno | +811 ms | +1.20 s | +337.6 MiB |
-| Bun | +707 ms | +1.13 s | +365.1 MiB |
+| **QuickJS-NG** | **+5483 ms** | **+5.21 s** | **+272.7 MiB** |
+| Node | +928.5 ms | +1.00 s | +321.0 MiB |
+| Deno | +915 ms | +1.21 s | +337.6 MiB |
+| Bun | +750.5 ms | +1.19 s | +365.1 MiB |
 
-The control itself is identical for every runtime (1910–2176 ms wall,
+The control measurements are similar across runtimes (1910–2176 ms wall,
 0.76–0.90 s CPU, 85.5–86.3 MiB peak tree RSS in seven of eight runs; one
 Bun run peaked at 109.2 MiB because a third process was alive at that
-sample), which confirms that the difference above is the **JS runtime**, not
-the network or the extraction itself.
+sample). The solver-child CPU attribution supports a runtime cost difference;
+wall time still includes network variation. These controls do not prove that
+all wall-time differences come from the engine.
 
 ### Reading the table
 
-* **CPU and latency:** QuickJS-NG is the worst by a wide margin. It needs
-  5.30 s of CPU inside the solver process against 0.87 s for Node, because
-  QuickJS-NG has no JIT and interprets the ~1.5 MB minified YouTube player
-  bundle. Node (V8) and Deno (V8) and Bun (JSC) compile it.
-* **Peak RSS:** QuickJS-NG *is* the best, but only by 48–115 MiB of a
-  360–475 MiB tree, i.e. 11–24 %. The reason is that the V8/JSC runtimes
-  keep a compiled code cache and heap alive while the solver script runs.
-* **Ship cost:** QuickJS-NG is 22–37x smaller than the alternatives. That is
-  its only genuine advantage and it is a packaging advantage, not a
-  performance advantage.
-* The **unchallenged** control shows the runtime contributes nothing when
-  YouTube does not issue a challenge: every runtime costs the same 0.76–0.90 s
-  CPU and ~86 MiB peak RSS, and the solver script is executed zero times.
+* **CPU and latency:** QuickJS-NG took substantially more total CPU and wall
+  time in the challenged case. The solver child reached 5.30 s sampled CPU
+  versus 0.87 s for Node; those child figures are maxima, not medians.
+* **Peak RSS:** QuickJS-NG was lowest by 48–115 MiB (11–24%) in this sample.
+  This is a real memory advantage alongside its slower execution.
+* **Ship cost:** QuickJS-NG's binary was 22–37x smaller than the alternatives.
+  Binary sizes here are installed executables, not compressed installer sizes.
+* **Unchallenged control:** No solver script executed, and measurements were
+  similar across runtimes. This does not establish how often real users will
+  encounter challenged videos.
 
 ### Where the memory actually goes
 
-At the peak sample of a challenged extraction, the whole process tree is:
+The largest sampled per-process-class values across challenged runs are shown
+below. They can come from different samples and must not be summed to reconstruct
+a simultaneous peak; use the whole-tree figures above for that.
 
 | Process class | QuickJS-NG | Node | Deno | Bun |
 | --- | ---: | ---: | ---: | ---: |
@@ -224,29 +223,23 @@ it is a real factor for a shipped desktop application.
 
 Constrained to this evidence:
 
-1. **Do not switch the shipped runtime on performance grounds.** Node/Deno/Bun
-   are 2.5x faster and 3x cheaper in CPU for the challenge, but they cost
-   48–115 MiB *more* peak RSS and 22–37x more disk. The desktop application
-   already runs a JVM of ~300 MiB, so the runtime choice does not decide
-   whether the application fits in a memory budget.
-2. **Do switch away from Bun.** Bun is deprecated upstream, pinned to a single
-   supported version (1.3.14) that is the newest release, has the highest
-   peak RSS of the four (474.3 MiB), no permission restrictions, and no
-   speed advantage over Node or Deno.
-3. **If a faster extraction matters more than installer size**, Node
-   (52.78 MiB) is the best measured trade: lowest CPU of the four
-   (1.79 s), second-lowest peak RSS (407.3 MiB), and the smallest of the
-   three non-QuickJS binaries. Deno (2.00 s CPU, 423.8 MiB, 91.39 MiB) is
-   the upstream-recommended default and is statistically indistinguishable
-   from Node here, but it is 1.7x larger and its npm-capable EJS variant
-   needs `--remote-components ejs:npm`, which the production resolver
-   forbids.
-4. **QuickJS-NG is only the cheap choice while the challenge is rare.** With
-   the unchallenged control the four runtimes are indistinguishable
-   (0.76–0.90 s CPU, ~86 MiB). The 2.5x/3x QuickJS penalty only materialises
-   when YouTube actually issues the `n` challenge, which is exactly the case
-   the current `dQw4w9WgXcQ` numbers in `YT_DLP_APPLICATION_BENCHMARK.md`
-   (7.6 s) come from.
+1. **Keep the current experiment's QuickJS default while evaluating the tradeoff.**
+   It remains the smallest packaged runtime and lowest measured peak-RAM option.
+   These measurements do not justify calling it cheapest for CPU or latency.
+2. **Exclude Bun from a future default choice.** It is deprecated upstream,
+   capped at supported version 1.3.14, has no permission restrictions, and had
+   the highest peak RSS. Its slightly lower measured wall time is insufficient
+   to establish a stable latency advantage in this small sample.
+3. **For lower CPU and faster challenged extraction, evaluate Node.** It had the
+   lowest total CPU (1.79 s), second-lowest peak RSS (407.3 MiB), and smallest
+   non-QuickJS binary (52.78 MiB). Deno is also viable: it had similar timings,
+   a 423.8 MiB peak and 91.39 MiB binary, and is recommended upstream. Both
+   used bundled EJS successfully with remote components disabled; npm support
+   is not needed for either measured path.
+4. **Challenge frequency matters.** QuickJS's 2.5x wall-time / 3.3x total-CPU
+   penalty versus Node appeared on challenged extraction. The unchallenged
+   controls were similar. This sample does not estimate challenge frequency
+   across a user's library, account or network.
 5. **Ship-time caveat.** Replacing the bundled `qjs` with Node or Deno means
    shipping a 53–91 MiB runtime next to the 38.6 MiB frozen yt-dlp, and it
    must be a runtime the target machines actually have or a sidecar the
@@ -261,12 +254,11 @@ Constrained to this evidence:
   affect scheduling and page-cache pressure.
 * **Small sample.** Three successful challenged extractions per runtime and
   two controls. The absolute latencies vary with network state (the QuickJS
-  challenged runs ranged 7162–10097 ms), but the ordering was stable across
-  every repeat and every runtime.
-* **RSS is a lower bound.** Polling `/proc` every 20 ms can miss spikes that
-  live entirely between two samples, and shared pages are counted once per
-  mapping process. A PSS number would be lower still. The relative ordering
-  is what the comparison rests on.
+  challenged runs ranged 7162–10097 ms), but the large QuickJS gap was present in the repeats. The smaller differences
+  among Node, Deno and Bun should not be treated as statistically established.
+* **Sampled RSS is approximate.** Polling every 20 ms can miss spikes, while
+  RSS also counts shared pages in each process. It is not a strict lower bound
+  on unique physical memory. No PSS comparison was measured here.
 * **Peak RSS is not a steady-state footprint.** These are the maxima of a
   short-lived solver process, not the resident set of an idle runtime.
 * **Deno was measured with the bundled EJS variant** (`--no-npm
@@ -317,7 +309,9 @@ python3 scripts/benchmark-ytdlp-runtimes.py \
   existing `scripts/benchmark-ytdlp.py` and reuses its process-tree RSS
   sampler, hermetic environment builder, URL redaction, failure classifier
   and HTTP probe, and adds CPU accounting, per-process attribution, runtime
-  shims and the negative controls.
+  shims and the negative controls. Aggregate medians and attempt counts were
+  corrected from the unchanged raw runs: even sample sizes average their two
+  middle values, and attempts are counted once each.
 * `packaging/resolver/validation/linux-runtime-comparison.json` — the
   machine-readable result of the run described above.
 * `YT_DLP_RUNTIME_COMPARISON.md` — this report.

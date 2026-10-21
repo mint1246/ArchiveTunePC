@@ -60,6 +60,7 @@ import importlib.util
 import json
 import os
 import platform
+import statistics
 import re
 import resource
 import shutil
@@ -1002,17 +1003,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return {
             "runs": len(runs),
             "successful": len(ok_runs),
-            "attempts_total": sum(r.attempt for r in runs) if runs else 0,
+            "attempts_total": len(runs),
             "challenge_solved_runs": sum(1 for r in runs if r.challenge_solved),
             "runtime_script_invocations_total": sum(r.runtime_script_invocations for r in runs),
             "wall_ms_min": walls[0] if walls else None,
             "wall_ms_max": walls[-1] if walls else None,
-            "wall_ms_median": walls[len(walls) // 2] if walls else None,
-            "cpu_total_s_median": cpus[len(cpus) // 2] if cpus else None,
+            "wall_ms_median": statistics.median(walls) if walls else None,
+            "cpu_total_s_median": statistics.median(cpus) if cpus else None,
             "cpu_total_s_min": cpus[0] if cpus else None,
             "cpu_total_s_max": cpus[-1] if cpus else None,
             "peak_tree_rss_bytes_max": peaks[-1] if peaks else None,
-            "peak_tree_rss_bytes_median": peaks[len(peaks) // 2] if peaks else None,
+            "peak_tree_rss_bytes_median": statistics.median(peaks) if peaks else None,
             "peak_process_count_max": max((r.peak_process_count for r in runs), default=None),
             "http_read_ok_runs": sum(1 for r in ok_runs if (r.http_bytes_read or 0) > 0),
         }

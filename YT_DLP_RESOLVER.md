@@ -100,6 +100,22 @@ go there. Upstream 2026.08.19 disables its preprocessed-player disk cache, so th
 standard cache does not eliminate the expensive `n` challenge path. No upstream
 solver internals are patched to change that policy.
 
+## JavaScript runtime cost
+
+The [runtime comparison](YT_DLP_RUNTIME_COMPARISON.md) measures the same pinned
+yt-dlp/EJS with four supported engines, including mandatory challenge execution
+and negative controls. In three challenged runs per engine, QuickJS-NG had a
+7.541-second median versus Node's 2.988 seconds; total CPU medians were 5.97 and
+1.79 seconds. Peak resolver-tree RSS was 359.0 MiB for QuickJS versus 407.3 MiB
+for Node. These measurements exclude the application JVM.
+
+QuickJS has the smallest binary (2.44 MiB versus Node's 52.78 MiB) and lowest
+measured peak RAM, while Node reduces CPU and startup delay. Deno had similar
+latency to Node; Bun is deprecated upstream. No engine is cheapest across all
+costs. This branch retains the requested QuickJS-NG default; changing it needs
+an explicit packaging and product choice. The sample does not establish challenge
+frequency, Windows performance, or the cost of a persistent worker.
+
 ## Provisioning and packages
 
 See [packaging/resolver/README.md](packaging/resolver/README.md) for pinned hashes,
