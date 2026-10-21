@@ -44,6 +44,7 @@ dependencies {
     implementation(project(":desktop-audio-analysis"))
     implementation(project(":desktop-lyrics-ui"))
     implementation(project(":windows-media-integration"))
+    implementation(project(":linux-media-integration"))
     implementation(project(":desktop-downloads"))
     implementation(project(":lastfm"))
     implementation(compose.desktop.currentOs)
@@ -215,6 +216,9 @@ compose.desktop {
                 "java.net.http",
                 "java.sql",
                 "jdk.crypto.ec",
+                // D-Bus Unix-socket transport and EXTERNAL authentication on Linux.
+                "jdk.net",
+                "jdk.security.auth",
                 "jdk.unsupported",
             )
 

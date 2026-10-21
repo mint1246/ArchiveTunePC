@@ -751,6 +751,7 @@ fun FoundationDestinationContent(
     onStatisticsPreferenceChanged: () -> Unit = {},
     onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> },
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>? = null,
+    keybindStatus: kotlinx.coroutines.flow.StateFlow<String?>? = null,
     paxsenixApiKeyConfigured: () -> Boolean = { false },
     onPaxsenixApiKeyChanged: (String?) -> Unit = {},
     lyricsTranslationApiKeyConfigured: () -> Boolean = { false },
@@ -789,6 +790,7 @@ fun FoundationDestinationContent(
             onStatisticsPreferenceChanged,
             onBeatVisualPreferencesChanged,
             keybindPressedKeys,
+            keybindStatus,
             paxsenixApiKeyConfigured,
             onPaxsenixApiKeyChanged,
             lyricsTranslationApiKeyConfigured,
@@ -956,6 +958,7 @@ private fun FoundationSettings(
     onStatisticsPreferenceChanged: () -> Unit,
     onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit,
     keybindPressedKeys: kotlinx.coroutines.flow.StateFlow<List<Int>>?,
+    keybindStatus: kotlinx.coroutines.flow.StateFlow<String?>?,
     paxsenixApiKeyConfigured: () -> Boolean,
     onPaxsenixApiKeyChanged: (String?) -> Unit,
     lyricsTranslationApiKeyConfigured: () -> Boolean,
@@ -997,6 +1000,7 @@ private fun FoundationSettings(
         onStatisticsPreferenceChanged = onStatisticsPreferenceChanged,
         onBeatVisualPreferencesChanged = onBeatVisualPreferencesChanged,
         keybindPressedKeys = keybindPressedKeys,
+        keybindStatus = keybindStatus,
         paxsenixApiKeyConfigured = paxsenixKeyConfigured,
         onPaxsenixApiKeyChanged = { value ->
             onPaxsenixApiKeyChanged(value)

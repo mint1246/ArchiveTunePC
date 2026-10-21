@@ -123,6 +123,22 @@ An actual Google account is still needed to verify end-to-end sign-in and
 authenticated YouTube playback. Unit tests use synthetic credentials and do not
 contact account services.
 
+## Desktop shortcuts and media keys
+
+Linux media controls use MPRIS on the desktop session bus. GNOME/KDE can send
+play, pause, next, previous, and seek commands and show the current track.
+The app must run in the normal graphical session with its D-Bus environment.
+
+Global shortcuts use the XDG GlobalShortcuts portal. Press **Set** in settings,
+press and release a modifier-plus-key combination, and approve or configure the
+shortcut in the desktop dialog. The desktop owns the final global binding.
+Unsupported or declined registrations are shown in settings. Linux shortcut
+registration does not use the Windows keyboard-state poller.
+
+The bundled Java runtime includes Unix-domain socket support for D-Bus. The
+MIT license for dbus-java is included in the application resources under
+`licenses/dbus-java-LICENSE.txt`.
+
 ## Sign-in troubleshooting
 
 Linux locale tags such as `en_IL.UTF-8` are valid system settings, but YouTube

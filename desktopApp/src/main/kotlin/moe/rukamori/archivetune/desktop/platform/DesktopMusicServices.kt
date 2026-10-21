@@ -57,6 +57,9 @@ import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBinding
 import moe.rukamori.archivetune.windowsmedia.WindowsGlobalKeyBindings
 import moe.rukamori.archivetune.windowsmedia.WindowsMediaControls
 import moe.rukamori.archivetune.windowsmedia.windowsMediaUpdateKey
+import moe.rukamori.archivetune.linuxmedia.LinuxGlobalKeyBinding
+import moe.rukamori.archivetune.linuxmedia.LinuxGlobalKeyBindings
+import moe.rukamori.archivetune.linuxmedia.LinuxMediaControls
 import java.io.File
 import java.awt.Window
 import java.nio.file.Files
@@ -78,6 +81,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -224,6 +228,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     } else {
         null
     }
+    private val linuxMediaControls = if (System.getProperty("os.name").startsWith("Linux", ignoreCase = true)) {
+        LinuxMediaControls()
+    } else null
     private val keybindCommands = MutableSharedFlow<DesktopKeybindAction>(extraBufferCapacity = 64)
     private val _appKeybindActions = MutableSharedFlow<DesktopKeybindAction>(extraBufferCapacity = 16)
     val appKeybindActions = _appKeybindActions.asSharedFlow()
@@ -241,6 +248,12 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     } else {
         null
     }
+    private val linuxGlobalKeyBindings = if (System.getProperty("os.name").startsWith("Linux", ignoreCase = true)) {
+        LinuxGlobalKeyBindings(onAction = { actionId ->
+            DesktopKeybindAction.entries.firstOrNull { it.name == actionId }?.let(keybindCommands::tryEmit)
+        })
+    } else null
+    val keybindStatus: StateFlow<String?> = linuxGlobalKeyBindings?.status ?: MutableStateFlow(null)
     @Volatile private var partyPlaybackPolicyProvider: () -> DesktopPartyPlaybackPolicy = { DesktopPartyPlaybackPolicy() }
     @Volatile private var partyPlayPauseHandler: suspend () -> Boolean = { false }
     @Volatile private var partySkipNextHandler: suspend () -> Boolean = { false }
@@ -439,6 +452,19 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                 }
             }
         }
+        linuxMediaControls?.let { controls ->
+            val router = DesktopLinuxMediaCommandRouter(
+                playback,
+                policy = ::partyPlaybackPolicy,
+                partyToggle = { partyPlayPauseHandler() },
+                partyNext = { partySkipNextHandler() },
+                partyPrevious = { partySkipPreviousHandler() },
+                partySeek = { partySeekHandler(it) },
+            )
+            runtime.applicationScope.launch { controls.commands.collect(router::handle) }
+            runtime.applicationScope.launch { playback.state.collect(controls::update) }
+            controls.start()
+        }
         runtime.applicationScope.launch {
             keybindCommands.collect(::handleKeybindAction)
         }
@@ -456,6 +482,11 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     )
                 },
             )
+            linuxGlobalKeyBindings?.updateBindings(
+                settings.snapshot().keybinds.map { binding ->
+                    LinuxGlobalKeyBinding(binding.action.name, binding.virtualKeys.toSet(), binding.repeatWhileHeld)
+                },
+            )
         }.onFailure { failure ->
             runtime.logger.warning("Could not update global keybinds: ${failure.message}")
         }
@@ -465,6 +496,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         if (keybindCaptureActive == active) return
         keybindCaptureActive = active
         globalKeyBindings?.setCaptureActive(active)
+        linuxGlobalKeyBindings?.setCaptureActive(active)
         if (!active) _keybindPressedKeys.value = emptyList()
     }
 
@@ -955,7 +987,9 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         statisticsTracker.flush()
         statistics.close()
         globalKeyBindings?.close()
+        linuxGlobalKeyBindings?.close()
         windowsMediaControls?.close()
+        linuxMediaControls?.close()
         homeStore.close()
         albumIndex.close()
         stems.close()
