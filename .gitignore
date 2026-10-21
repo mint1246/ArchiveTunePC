@@ -22,6 +22,9 @@ out/
 build/
 docs/
 
+# Linux AppImage packaging output (packaging/linux/build-appimage.sh)
+/dist/
+
 # Temp 
 .temp/
 
