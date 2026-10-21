@@ -102,6 +102,10 @@ output-metadata.json
 # VS Code
 .vscode/
 
+# Python bytecode (developer benchmark harnesses import each other)
+__pycache__/
+*.py[cod]
+
 # Binary files and core dumps
 core
 core.*
