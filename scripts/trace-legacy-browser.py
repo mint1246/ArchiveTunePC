@@ -112,6 +112,7 @@ class ProcRow:
     threads: int
     rss_bytes: int
     cpu_ticks: int
+    state: str = "?"
 
 
 @dataclass
@@ -122,6 +123,7 @@ class TrackedProcess:
     first_wall_ms: int
     last_wall_ms: int
     parent_role: str
+    ppid: int = 0
     reparented: bool = False
     max_rss_bytes: int = 0
     max_pss_bytes: int = 0
@@ -159,10 +161,24 @@ def decode_argv(raw: bytes) -> list[str]:
 
 
 def extract_profile_path(argv: list[str]) -> str | None:
-    for argument in argv:
+    for argument in flag_tokens(argv):
         if argument.startswith("--user-data-dir="):
             return argument.split("=", 1)[1]
     return None
+
+
+def flag_tokens(argv: list[str]) -> list[str]:
+    """Normalize Chromium's space-joined process title back into flag tokens.
+
+    Chromium rewrites argv for its process title on Linux; a helper's
+    /proc/<pid>/cmdline can arrive as one space-separated string instead of
+    NUL-separated arguments.  Only allowlisted role flags are read from the
+    result, and the raw string is discarded.
+    """
+    tokens: list[str] = []
+    for token in argv:
+        tokens.extend(token.split())
+    return tokens
 
 
 def is_managed_profile(path: str | None) -> bool:
@@ -183,7 +199,7 @@ def parse_role(exe_basename: str, argv: list[str]) -> Role:
     type_value: str | None = None
     utility_subtype: str | None = None
     no_zygote_sandbox = False
-    for argument in argv:
+    for argument in flag_tokens(argv):
         if argument.startswith("--type="):
             type_value = argument.split("=", 1)[1].strip().lower()
         elif argument.startswith("--utility-sub-type="):
@@ -221,7 +237,7 @@ def observed_flags(argv: list[str]) -> dict[str, bool]:
         "single_process": False,
         "no_zygote": False,
     }
-    for argument in argv:
+    for argument in flag_tokens(argv):
         if argument.startswith("--headless"):
             values["headless"] = True
         elif argument == "--disable-gpu":
@@ -268,6 +284,7 @@ def read_process_table() -> dict[int, ProcRow]:
                 threads=int(fields[17]),
                 rss_bytes=max(0, int(fields[21])) * PAGE_SIZE,
                 cpu_ticks=int(fields[11]) + int(fields[12]),
+                state=fields[0],
             )
         except (OSError, ValueError, IndexError):
             continue
@@ -351,7 +368,7 @@ def discover_managed_roots(
         profile = extract_profile_path(argv)
         if not is_managed_profile(profile):
             continue
-        if not any(argument.startswith("--headless") for argument in argv):
+        if not any(argument.startswith("--headless") for argument in flag_tokens(argv)):
             continue
         # A managed profile alone is not enough; the profile basename must carry
         # the exact provider prefix, which the user's normal browser never has.
@@ -392,7 +409,11 @@ def select_tracked(
             if pid not in tracked and row.ppid in tracked:
                 tracked.add(pid)
                 changed = True
-    return {pid for pid in tracked if pid in table}
+    return {
+        pid
+        for pid in tracked
+        if pid in table and table[pid].state != "Z"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +516,7 @@ class BrowserTracker:
         live: set[int] = set()
         for pid, tracked in self.processes.items():
             row = table.get(pid)
-            if row is not None and row.starttime == tracked.starttime:
+            if row is not None and row.starttime == tracked.starttime and row.state != "Z":
                 live.add(pid)
         return live
 
@@ -562,6 +583,7 @@ class BrowserTracker:
                     first_wall_ms=now,
                     last_wall_ms=now,
                     parent_role=parent_role,
+                    ppid=row.ppid,
                     in_app_session=(
                         self.app_pid is not None and row.session == self.app_pid
                     ),
@@ -572,6 +594,11 @@ class BrowserTracker:
                 self.processes[pid] = existing
                 key = (parent_role, role.label())
                 self.role_edges[key] = self.role_edges.get(key, 0) + 1
+            elif existing.role.label() == "browser" and role.label() != "browser":
+                # A helper can be sampled just after fork and before its exec/argv
+                # rewrite.  Keep refining until it exposes a specific role.
+                existing.role = role
+            existing.ppid = row.ppid
             existing.last_wall_ms = now
             existing.max_rss_bytes = max(existing.max_rss_bytes, row.rss_bytes)
             existing.max_threads = max(existing.max_threads, row.threads)
@@ -588,9 +615,15 @@ class BrowserTracker:
     def snapshot(self) -> dict[str, Any]:
         now = int(time.time() * 1000)
         roles: dict[str, int] = {}
+        edges: dict[tuple[str, str], int] = {}
         for process in self.processes.values():
             label = process.role.label()
             roles[label] = roles.get(label, 0) + 1
+            parent = self.processes.get(process.ppid)
+            if parent is not None and parent.pid != process.pid:
+                process.parent_role = parent.role.label()
+            key = (process.parent_role, label)
+            edges[key] = edges.get(key, 0) + 1
         return {
             "schema": 1,
             "tool": "scripts/trace-legacy-browser.py",
@@ -618,7 +651,7 @@ class BrowserTracker:
             "roles": roles,
             "role_edges": [
                 {"parent": parent, "child": child, "count": count}
-                for (parent, child), count in sorted(self.role_edges.items())
+                for (parent, child), count in sorted(edges.items())
             ],
             "processes": [
                 process.record()
@@ -634,6 +667,58 @@ class BrowserTracker:
                 "environment_emitted": False,
             },
         }
+
+
+def aggregate_launches(launches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate controlled launches without carrying argv or profile paths."""
+    completed = [item for item in launches if "error" not in item]
+    role_counts = [dict(item.get("roles", {})) for item in completed]
+    peaks = [int(item.get("max_simultaneous_processes", 0)) for item in completed]
+    all_roles = sorted({role for counts in role_counts for role in counts})
+    ranges: dict[str, list[int]] = {}
+    for role in all_roles:
+        values = [counts.get(role, 0) for counts in role_counts]
+        ranges[role] = [min(values), max(values)]
+    always = [
+        role
+        for role in all_roles
+        if role_counts and all(counts.get(role, 0) > 0 for counts in role_counts)
+    ]
+    optional = [role for role in all_roles if role not in always]
+    edges: dict[tuple[str, str], int] = {}
+    for item in completed:
+        for edge in item.get("role_edges", []):
+            key = (str(edge.get("parent")), str(edge.get("child")))
+            edges[key] = edges.get(key, 0) + int(edge.get("count", 0))
+    stable_roles = bool(role_counts) and all(
+        counts == role_counts[0] for counts in role_counts
+    )
+    return {
+        "launches_requested": len(launches),
+        "launches_completed": len(completed),
+        "peaks": peaks,
+        "peak_min": min(peaks) if peaks else None,
+        "peak_max": max(peaks) if peaks else None,
+        "stable_peak": bool(peaks) and len(set(peaks)) == 1,
+        "role_counts_per_launch": role_counts,
+        "role_count_ranges": ranges,
+        "stable_role_counts": stable_roles,
+        "roles_in_every_launch": always,
+        "roles_optional": optional,
+        "role_edges": [
+            {"parent": parent, "child": child, "count": count}
+            for (parent, child), count in sorted(edges.items())
+        ],
+        "gpu_seen": "gpu" in all_roles,
+        "crashpad_seen": "crashpad" in all_roles,
+        "leftovers_total": sum(
+            int(item.get("lifecycle", {}).get("leftovers", 0)) for item in completed
+        ),
+        "all_profiles_removed": bool(completed)
+        and all(bool(item.get("launch", {}).get("profile_removed")) for item in completed),
+        "all_devtools_ready": bool(completed)
+        and all(bool(item.get("launch", {}).get("devtools_ready")) for item in completed),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +746,17 @@ def self_test() -> int:
         == "utility:network"
     )
     assert parse_role("brave", ["brave", "--type=renderer"]).label() == "renderer"
+    # Chromium can expose a helper argv as one space-joined process title.
+    assert (
+        parse_role(
+            "brave",
+            [
+                "brave --headless=new --type=renderer "
+                "--user-data-dir=/tmp/opencode/archivetune-potoken-selftest"
+            ],
+        ).label()
+        == "renderer"
+    )
     assert (
         parse_role("brave", ["brave", "--type=zygote", "--no-zygote-sandbox"]).label()
         == "zygote"
@@ -717,6 +813,31 @@ def self_test() -> int:
     rendered = _safe_dump(tracker.snapshot())
     for forbidden in (secret_profile, "--user-data-dir", "http://", "https://", "SAPISID"):
         assert forbidden not in rendered, forbidden
+
+    sample_launch = {
+        "max_simultaneous_processes": 9,
+        "roles": {"browser": 1, "zygote": 3, "renderer": 2, "gpu": 1},
+        "role_edges": [
+            {"parent": "external", "child": "browser", "count": 1},
+            {"parent": "browser", "child": "zygote", "count": 2},
+            {"parent": "zygote", "child": "gpu", "count": 1},
+        ],
+        "lifecycle": {"leftovers": 0},
+        "launch": {"profile_removed": True, "devtools_ready": True},
+    }
+    aggregate = aggregate_launches([sample_launch, sample_launch])
+    assert aggregate["stable_peak"] is True
+    assert aggregate["stable_role_counts"] is True
+    assert aggregate["peaks"] == [9, 9]
+    assert aggregate["gpu_seen"] is True
+    assert aggregate["crashpad_seen"] is False
+    assert aggregate["leftovers_total"] == 0
+    assert aggregate["all_profiles_removed"] is True
+    assert aggregate["role_edges"] == [
+        {"parent": "browser", "child": "zygote", "count": 4},
+        {"parent": "external", "child": "browser", "count": 2},
+        {"parent": "zygote", "child": "gpu", "count": 2},
+    ]
     print("SELFTEST OK")
     return 0
 
@@ -733,6 +854,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--app-pid", type=int, help="read-only attach to this application PID")
     mode.add_argument("--launch", action="store_true", help="launch one controlled helper")
+    mode.add_argument(
+        "--aggregate",
+        nargs="+",
+        metavar="JSON",
+        help="aggregate safe JSON files from controlled --launch runs",
+    )
     mode.add_argument("--self-test", action="store_true", help="run synthetic parser tests")
     parser.add_argument("--browser", default=str(DEFAULT_BROWSER))
     parser.add_argument("--profile-root", default=str(DEFAULT_PROFILE_ROOT))
@@ -873,6 +1000,35 @@ def run_attach(args: argparse.Namespace) -> int:
     return emit(result, args.output)
 
 
+def run_aggregate(args: argparse.Namespace) -> int:
+    launches: list[dict[str, Any]] = []
+    for raw_path in args.aggregate:
+        path = Path(raw_path)
+        try:
+            item = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"cannot read launch JSON {path.name}: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(item, dict):
+            print(f"launch JSON {path.name} is not an object", file=sys.stderr)
+            return 2
+        launches.append(item)
+    result = {
+        "schema": 1,
+        "tool": "scripts/trace-legacy-browser.py",
+        "mode": "aggregate",
+        "aggregate": aggregate_launches(launches),
+        "redaction": {
+            "argv_emitted": False,
+            "urls_emitted": False,
+            "cookies_emitted": False,
+            "profile_path_emitted": False,
+            "environment_emitted": False,
+        },
+    }
+    return emit(result, args.output)
+
+
 def emit(result: dict[str, Any], output: str | None) -> int:
     rendered = json.dumps(result, indent=2, sort_keys=True)
     if output:
@@ -888,6 +1044,8 @@ def main(argv: list[str]) -> int:
         return self_test()
     if args.launch:
         return run_launch(args)
+    if args.aggregate:
+        return run_aggregate(args)
     return run_attach(args)
 
 

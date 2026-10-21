@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "title": "Legacy extraction Chromium fan-out: derived causal and instrumentation analysis",
+  "title": "Legacy extraction Chromium fan-out: controlled role proof and harness path-length exclusion",
   "kind": "derived_analysis",
-  "status": "initial_attribution_pending_targeted_role_confirmation",
+  "status": "completed_controlled_role_proof_with_matrix_longpath_exclusion",
   "measured": "2026-10-21",
   "source_of_truth": {
     "safe_report": "packaging/resolver/validation/linux-bun-authenticated-full-application.md",
@@ -11,7 +11,9 @@
     "candidate_commit": "04232ffa7d2a9fc141789829975ab9d6183f371e",
     "core_commit": "144fe5c33c9e2f1f8a6c8c84bb03a34c3c4d7b3c",
     "instrumented_main_sha256": "87bd86847190ec96e9eb27836c46a473f5a7ab240f1e208a4787bb8403b4a00e",
-    "private_run_log": "baseline application.log, benchmark marker lines only; not committed and not reproduced here"
+    "private_run_log": "baseline application.log, benchmark marker lines only; not committed and not reproduced here",
+    "matrix_longpath_run": "resolver-matrix-final1/0-legacy long-path arm; safe marker metrics and crash-report substring counts only; retained as an ignored excluded artifact",
+    "matrix_harness_fix": "29ed69003; benchmark harness only, not product or login code"
   },
   "conclusions": {
     "nine_is_one_invocation": true,
@@ -20,14 +22,19 @@
     "legacy_extraction_chromium_invocations": 3,
     "chromium_invocations_basis": "three delegated mint calls had non-zero elapsed time and therefore missed the single-entry token cache; each cache miss performs exactly one ProcessBuilder start",
     "max_simultaneous_browser_processes": 9,
-    "browser_process_split_pending_roles": true,
+    "browser_process_split_pending_roles": false,
     "browser_processes_are_persistent": false,
     "helpers_are_required_for_observed_resolution": false,
     "observed_successful_client": "VISIONOS 0.1",
     "browser_work_is_transient": true,
     "browser_work_is_avoidable_when_bound_token_exists": true,
     "unrelated_user_browser_was_included": false,
-    "role_mix_confirmed": false
+    "role_mix_confirmed": true,
+    "controlled_launch_count": 3,
+    "controlled_role_mix_stable": true,
+    "matrix_longpath_arm_valid": false,
+    "matrix_longpath_cause": "harness_singleton_socket_path",
+    "matrix_longpath_arm_excluded": true
   },
   "legacy_extraction": {
     "arm": "baseline 0817a5024, legacy resolver, core 144fe5c3",
@@ -84,22 +91,184 @@
     "one_chromium_invocation": true,
     "process_count_per_invocation": 9,
     "names_observed": ["brave"],
-    "roles_confirmed": false,
-    "role_evidence": "The benchmark resolves /proc/<pid>/exe and reports only the basename, so all helpers collapse to 'brave'. Roles require --type and --utility-sub-type from argv; the tracer extracts only those allowlisted flags.",
-    "expected_roles": [
-      {"role": "browser", "expected": 1, "evidence": "root process without --type"},
-      {"role": "zygote", "expected": "1-2", "evidence": "Linux Chromium forks renderers through a zygote"},
-      {"role": "renderer", "expected": "1-2", "evidence": "about:blank page plus a possible spare renderer"},
-      {"role": "utility:network", "expected": 1, "evidence": "out-of-process network service"},
-      {"role": "utility:storage", "expected": "0-1", "evidence": "storage service"},
-      {"role": "crashpad", "expected": "0-1", "evidence": "chrome_crashpad_handler; not observed by the name-only benchmark"},
-      {"role": "gpu", "expected": 0, "evidence": "--disable-gpu is passed on Linux"}
-    ],
-    "expected_role_total_range": "6-9 browser-lineage processes; observed peak 9",
+    "roles_confirmed": true,
+    "role_evidence": "Three controlled launches used the exact non-root botGuardBrowserCommand and a fresh private profile. Roles were read only from --type and --utility-sub-type; Chromium's space-joined process titles were normalized before parsing.",
+    "observed_roles": {
+      "browser": 1,
+      "zygote": 3,
+      "renderer": 2,
+      "gpu": 1,
+      "utility:network": 1,
+      "utility:storage": 1
+    },
+    "observed_role_total": 9,
+    "roles_per_launch": "identical in 3 of 3 launches",
+    "crashpad_observed": false,
+    "gpu_observed": true,
+    "gpu_note": "--disable-gpu selects software rendering; it does not remove the GPU process on this Brave build.",
     "standard_fanout": true,
     "single_process_used": false,
     "no_zygote_used": false,
     "confirmation_tool": "scripts/trace-legacy-browser.py"
+  },
+  "role_mix_proof": {
+    "status": "measured",
+    "measured_utc": "2026-10-21T11:33:35Z",
+    "launches": 3,
+    "method": {
+      "profile": "fresh 0700 directory under /tmp/opencode with the archivetune-potoken- prefix; removed after each launch",
+      "command": "exact non-root Linux botGuardBrowserCommand",
+      "page": "about:blank",
+      "attach_to_application": false,
+      "auth_profile_used": false,
+      "cookies_or_tokens_passed": false,
+      "sample_interval_ms": 20
+    },
+    "per_launch": [
+      {
+        "launch_index": 1,
+        "peak": 9,
+        "distinct": 9,
+        "roles": {
+          "browser": 1, "zygote": 3, "renderer": 2,
+          "gpu": 1, "utility:network": 1, "utility:storage": 1
+        },
+        "teardown_ms": 39, "leftovers": 0,
+        "profile_removed": true, "devtools_ready": true
+      },
+      {
+        "launch_index": 2,
+        "peak": 9,
+        "distinct": 9,
+        "roles": {
+          "browser": 1, "zygote": 3, "renderer": 2,
+          "gpu": 1, "utility:network": 1, "utility:storage": 1
+        },
+        "teardown_ms": 38, "leftovers": 0,
+        "profile_removed": true, "devtools_ready": true
+      },
+      {
+        "launch_index": 3,
+        "peak": 9,
+        "distinct": 9,
+        "roles": {
+          "browser": 1, "zygote": 3, "renderer": 2,
+          "gpu": 1, "utility:network": 1, "utility:storage": 1
+        },
+        "teardown_ms": 38, "leftovers": 0,
+        "profile_removed": true, "devtools_ready": true
+      }
+    ],
+    "role_edges_totals": [
+      {"parent": "external", "child": "browser", "count": 3},
+      {"parent": "browser", "child": "zygote", "count": 6},
+      {"parent": "browser", "child": "utility:network", "count": 3},
+      {"parent": "zygote", "child": "zygote", "count": 3},
+      {"parent": "zygote", "child": "renderer", "count": 6},
+      {"parent": "zygote", "child": "gpu", "count": 3},
+      {"parent": "zygote", "child": "utility:storage", "count": 3}
+    ],
+    "stable_role_counts": true,
+    "stable_peak": true,
+    "crashpad_seen": false,
+    "gpu_seen": true,
+    "leftovers_total": 0,
+    "profiles_removed": true,
+    "devtools_ready_all": true,
+    "caveat": "Controlled process-shape proof of the exact command with about:blank. It does not execute BotGuard JavaScript or mint a token. The benchmark's nine-process peak matches; per-role counts during the real mint were not sampled."
+  },
+  "matrix_longpath_exclusion": {
+    "status": "confirmed_harness_path_length_failure_arm_excluded",
+    "evidence_scope": "Read-only observation of the first resolver-matrix legacy arm. No launch was performed for this finding, and the run log was later replaced by the fresh short-root rerun; the values below are the safe metrics captured for this excluded arm.",
+    "run_label": "resolver-matrix-final1/0-legacy long-path arm (excluded artifact)",
+    "observed": {
+      "extraction_attempts": 12,
+      "extraction_successes": 12,
+      "phase_elapsed_ms": 186190,
+      "resolve_elapsed_ms": {
+        "count": 12,
+        "sum": 186183,
+        "min": 15164,
+        "p50": 15203,
+        "max": 17008
+      },
+      "successful_clients": {
+        "VISIONOS": 11,
+        "ANDROID_VR": 1
+      },
+      "browser_process_peak": 4,
+      "sampled_child_cpu_seconds": 1.56,
+      "sampled_window_seconds": 180,
+      "delegated_playback_auth_markers": 0,
+      "cold_proof": {
+        "attempts": 1,
+        "successes": 0,
+        "minted": false,
+        "elapsed_ms": 15039,
+        "failure": null
+      },
+      "cleanup_browser_helpers_after": 0,
+      "auth_verify_success": true
+    },
+    "path_lengths": {
+      "tmpdir_bytes": 66,
+      "xdg_cache_home_bytes": 73,
+      "botguard_profile_root_bytes": 94,
+      "generated_profile_bytes": 125,
+      "chromium_singleton_socket_bytes": 171,
+      "unix_socket_path_limit_bytes": 108,
+      "over_limit_bytes": 63,
+      "controlled_profile_bytes": 43,
+      "controlled_singleton_socket_bytes": 89
+    },
+    "cause": "The harness placed XDG_CACHE_HOME under a long run root. defaultBotGuardTempRoot() therefore created the throwaway profile under that long root, and Chromium's SingletonSocket path exceeded the 108-byte UNIX socket limit.",
+    "diagnostic": {
+      "browser_stderr": "discarded by the provider",
+      "brave_crash_dumps": 13,
+      "crash_dumps_containing_singleton_socket": 13,
+      "crash_dumps_containing_too_long": 13,
+      "singleton_socket_substring_count": 39,
+      "too_long_substring_count": 52,
+      "crash_dumps_match_browser_attempts": true,
+      "raw_log_lines_emitted": false
+    },
+    "causal_chain": [
+      "The harness set HOME, XDG_CACHE_HOME, and TMPDIR to long run-local paths.",
+      "defaultBotGuardTempRoot() selected XDG_CACHE_HOME/ArchiveTune/botguard as the profile root.",
+      "The generated profile and Chromium's SingletonSocket path exceeded the 108-byte UNIX socket limit.",
+      "Chromium started a partial four-process tree but could not create the singleton socket and crashed before renderers or DevTools became ready.",
+      "waitForDevTools() consumed its 15 s startup budget; the provider returned null without a failure class.",
+      "The outer preparePlaybackAuth() 15 s timeout then cancelled the delegated mint path before a delegated-playback-auth marker.",
+      "All 12 resolve attempts still succeeded through native clients, but at the timeout floor; the cold proof independently reproduced the 15 s mint failure."
+    ],
+    "not_the_cause": [
+      "signature-timestamp resolution",
+      "NewPipe connect timeout",
+      "the stream resolver or product login flow",
+      "YouTube rejecting the public test streams"
+    ],
+    "why_cold_proof_is_decisive": "The cold proof exercises only the playback-auth browser mint, not signature timestamp or NewPipe; it took 15,039 ms and minted false, matching waitForDevTools' 15 s budget.",
+    "fix": {
+      "parent_reported_commit": "29ed69003",
+      "scope": "benchmark harness only",
+      "summary": "The authenticated harness now creates an atomic 0700 short HOME under /tmp, sets XDG_CACHE_HOME directly to that HOME, sets the Java temp directory to HOME/t, and removes the private HOME after clone cleanup.",
+      "profile_root_bytes_after_fix": 28,
+      "product_or_login_change_required": false,
+      "verification": "A fresh four-round short-root rerun was active when this report was prepared; its results are not part of this excluded arm."
+    },
+    "disclosure": {
+      "cold_proof_mints": "0/1",
+      "extraction_mints": "0/12 inferred; no delegated-playback-auth markers",
+      "resolutions": "12/12 succeeded through native clients",
+      "account_verified": true,
+      "public_streams_valid": true,
+      "arm_excluded_from": [
+        "resolver timing",
+        "browser-mint success",
+        "process-role evidence"
+      ],
+      "reason": "The delay and missing mint are a harness path-length failure, not a product result."
+    }
   },
   "scope": {
     "benchmark_tracking_model": [
@@ -234,17 +403,18 @@
     }
   ],
   "confirmation_plan": {
-    "status": "held_until_parent_go_to_avoid_cpu_network_interference",
+    "status": "controlled_role_mix_completed; matrix_longpath_arm_excluded; short_root_rerun_pending",
     "no_secret_required": true,
     "safe_self_test": "python3 scripts/trace-legacy-browser.py --self-test",
-    "controlled_launch": "python3 scripts/trace-legacy-browser.py --launch --hold-ms 1500 --output /tmp/opencode/legacy-browser-fanout.json",
-    "attach": "python3 scripts/trace-legacy-browser.py --app-pid <benchmark-app-pid> --timeout 30 --output /tmp/opencode/legacy-browser-attach.json",
+    "controlled_launch": "python3 scripts/trace-legacy-browser.py --launch --hold-ms 1200 --output /tmp/opencode/legacy-browser-role-mix-N.json",
+    "attach": "not required for this proof; no user application, auth profile, or session access was used",
     "acceptance_criteria": [
-      "max_simultaneous_processes around 9 for one invocation",
-      "one browser root and at least one zygote/renderer/utility edge",
-      "no gpu-process because --disable-gpu is passed",
-      "crashpad presence recorded as 0 or 1 rather than assumed",
-      "zero leftovers and profile removed after teardown",
+      "nine simultaneous processes for one invocation in 3 of 3 launches",
+      "identical role counts in 3 of 3 launches",
+      "browser root plus browser/zygote, zygote/renderer, zygote/GPU and zygote/storage ancestry edges",
+      "crashpad presence recorded as 0 rather than assumed",
+      "GPU process presence recorded rather than inferred from --disable-gpu",
+      "zero leftovers and profile removed after every teardown",
       "no argv, URL, cookie, profile path, or environment value in the JSON"
     ]
   },
@@ -258,8 +428,8 @@
     "allowed_process_fields": ["pid", "role", "parent_role", "timing", "RSS", "PSS", "thread count", "scope booleans"]
   },
   "open_questions": [
-    "Exact per-role counts for one Brave 155 headless invocation on this host.",
-    "Whether crashpad starts in headless mode or exits before the first sample.",
+    "Whether the fresh short-root matrix rerun restores the nine-process fan-out and a successful browser mint.",
+    "Whether BotGuard JavaScript adds a role or changes the about:blank role mix during a real mint.",
     "Whether the production warm policy would have skipped zero, one, or three of the observed mints.",
     "Whether WEB_REMIX actually needed the minted proof, or simply lost the race to VISIONOS.",
     "Whether the next-stream preloader triggers additional mints during playback outside the measured phase."
