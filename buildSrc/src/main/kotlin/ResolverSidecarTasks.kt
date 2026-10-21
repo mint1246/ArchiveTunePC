@@ -515,11 +515,20 @@ abstract class VerifyResolverSidecarsTask : DefaultTask() {
         }
 
         val manifest = readManifest(directory.resolve("manifest.properties"))
+        val ytDlpAsset = ResolverSidecars.assetFor(platform, ResolverSidecarKind.YT_DLP)
+        val bunAsset = ResolverSidecars.assetFor(platform, ResolverSidecarKind.BUN)
         val expectedManifest = mapOf(
             "format" to "archivetune-resolver-sidecars",
             "format.version" to "1",
             "platform" to platform,
+            "yt-dlp.version" to ytDlpAsset.version,
+            "yt-dlp.file" to ytDlpAsset.fileName,
+            "yt-dlp.url" to ytDlpAsset.url,
             "yt-dlp.sha256" to ytDlpSha256.get().lowercase(),
+            "yt-dlp.bundled-ejs.version" to ResolverSidecars.YT_DLP_BUNDLED_EJS_VERSION,
+            "bun.version" to bunAsset.version,
+            "bun.file" to bunAsset.fileName,
+            "bun.url" to bunAsset.url,
             "bun.sha256" to bunSha256.get().lowercase(),
             "bun.binary-sha256" to bunBinarySha256.get().lowercase(),
         )

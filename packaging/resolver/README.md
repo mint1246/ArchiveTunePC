@@ -14,12 +14,14 @@ the Linux AppImage wrapper.
 
 The runtime discovery contract is:
 
-1. Developer overrides: absolute paths in `ARCHIVETUNE_YTDLP` and
-   `ARCHIVETUNE_BUN`.
+1. Developer overrides: `archivetune.ytdlp` / `archivetune.bun` system properties,
+   then `ARCHIVETUNE_YTDLP` / `ARCHIVETUNE_BUN`. Explicit relative paths are resolved
+   before the child changes into its private request directory.
 2. JVM distribution: `<compose.application.resources.dir>/resolver`.
 3. GraalVM native distribution: `<executable parent>/resolver`, then
    `<executable parent>/../resolver`.
-4. `yt-dlp` / `bun` (or `yt-dlp.exe` / `bun.exe` on Windows) on `PATH`.
+4. `<user.dir>/.tools/resolver` for local development.
+5. `yt-dlp` / `bun` (or `yt-dlp.exe` / `bun.exe` on Windows) on `PATH`.
 
 Every staged resolver directory has this shape:
 
@@ -183,8 +185,8 @@ Staging deletes the whole destination first, so a stale `qjs`/`qjs.exe` from an
 older checkout cannot survive, and the verifier rejects any unexpected file.
 Downloads are cached under `desktopApp/build/resolver/downloads/<platform>/`;
 verified extracted Bun executables live under
-`desktopApp/build/resolver/extracted/<platform>/`. Both are regenerated only
-when the checksum-verified inputs change.
+`desktopApp/build/resolver/extracted/<platform>/`. Gradle up-to-date checks reuse
+unchanged inputs and outputs; these extraction tasks do not use the build cache.
 
 ## Build tasks
 
