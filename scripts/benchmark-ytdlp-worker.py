@@ -193,7 +193,11 @@ PERSISTENT_CONFIGS = ("persistent_python_new_ydl", "persistent_python_reuse_ydl"
 
 
 def percentile(values: Sequence[float], fraction: float) -> Optional[float]:
-    """Nearest-rank percentile; no interpolation, so small samples stay honest."""
+    """Historical sampled-rank estimator, without interpolation (Python round-to-even).
+
+    The exact convention is recorded in report.method.quantiles; it differs from
+    the conventional averaged median for some even sample sizes.
+    """
     if not values:
         return None
     ordered = sorted(values)
@@ -1787,6 +1791,7 @@ def build_report(args: argparse.Namespace, runs: List[RunResult],
         },
         "tools": tools,
         "method": {
+            "quantiles": 'Historical sample-rank estimator: sort values, use one-based rank max(1,min(n,int(round(fraction*n+0.5)))), with Python round-to-even, without interpolation. For measured persistent workload groups n=6 and n=18, p50 is the upper middle value, not the conventional averaged median. The matched application matrix separately uses statistics.median for p50 and nearest-rank p90/p95.',
             "description": (
                 "Four request models compared against the same videos with the same production "
                 "resolver flag set; serialized (one request at a time) and interleaved per round "

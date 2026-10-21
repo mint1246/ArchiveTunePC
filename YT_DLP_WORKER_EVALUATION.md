@@ -12,9 +12,9 @@ no upstream yt-dlp extraction or challenge patch is proposed or used.
   the resolver request path.
 
 **Verdict in one paragraph.** A persistent Python worker removes up to ~1 s of
-per-request overhead on the production-parity workload (measured wall p50
+per-request overhead on the production-parity workload (historical sampled-rank p50, convention in §3.2:
 2302 ms for the shipped frozen control against 1311 ms for the reusing
-worker). Adjacent median differences are consistent with amortized bundle/import
+worker). Adjacent rank-p50 differences are consistent with amortized bundle/import
 costs and object-level state (player JS, signature cache, HTTP connections), but
 are not an experimentally isolated causal decomposition: two sessions and unequal
 cold/warm sample counts are involved. It does **not** remove the challenge solver:
@@ -223,6 +223,15 @@ network. All 9 checks pass.
 
 ### 3.2 Latency, per workload
 
+**Percentile convention:** this historical study uses the sampled-rank formula
+`rank = max(1, min(n, int(round(fraction*n + 0.5))))` (one-based, Python round-to-even),
+without interpolation. For persistent groups of n=6/18, p50 is the upper middle
+value, rather than the conventional averaged median. Conventional wall medians
+for new/reused workers are 1653/1233 ms (`default_client`) and 2256/2047 ms
+(`forced_web_embedded`); process-per-request medians remain 2302/1854 and
+2827/2475 ms. The separate matched application matrix uses conventional medians.
+No raw attempt or historical summary value is changed by this clarification.
+
 Wall time of the whole request. `frozen_cli` and `fresh_python` start a
 process per request, so their number includes the process start-up; the
 persistent workers do **not** include their own start-up in the request
@@ -382,15 +391,15 @@ not eliminate the expensive `n` challenge path.
 
 On the `default_client` workload (wall p50), the gain of the reusing worker
 over the shipped control is 2302 ms -> 1311 ms, i.e. **991 ms**. The following are
-differences between observed medians, with plausible explanations, not additive
+differences between the historical rank-p50 values, with plausible explanations, not additive
 causal stage timings. Process-per-request configurations have 9 default-client
 samples; persistent configurations have 18, including immediate repeats. The
 controls and two worker alternatives also span two sessions (§8).
 
-| step | wall p50 | delta | what it is |
+| configuration | historical rank p50 | difference vs. preceding row | plausible contributor (not isolated) |
 |---|---|---|---|
 | `frozen_cli` | 2302 ms | - | the shipped control |
-| `fresh_python` | 1854 ms | **-448 ms** | the frozen bundle's per-request start-up (measured independently at 465 ms in §3.4) |
+| `fresh_python` | 1854 ms | **-448 ms** | different bundled/interpreter build and process setup; not an isolated bundle saving |
 | `persistent_python_new_ydl` | 1656 ms | **-198 ms** | the interpreter start-up, the `yt_dlp` import and the extractor registry, which a long-lived process pays once |
 | `persistent_python_reuse_ydl` | 1311 ms | **-345 ms** | object-level state: the reused extractor instance keeps the player JS (`_code_cache`), the signature/`n` cache (`_player_cache`) and the HTTP connection pool |
 

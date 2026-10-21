@@ -68,6 +68,20 @@
   ]
  },
  "method": {
+  "conventional_wall_medians_ms": {
+   "default_client": {
+    "fresh_python": 1854.163,
+    "frozen_cli": 2302.127,
+    "persistent_python_new_ydl": 1652.53,
+    "persistent_python_reuse_ydl": 1233.384
+   },
+   "forced_web_embedded": {
+    "fresh_python": 2475.226,
+    "frozen_cli": 2826.839,
+    "persistent_python_new_ydl": 2255.6175000000003,
+    "persistent_python_reuse_ydl": 2046.7655
+   }
+  },
   "cookies_used": false,
   "cpu_method": "cpu_total_s is the CPU of the whole request tree. For the process-per-request configurations it is the harness getrusage(RUSAGE_CHILDREN) delta, which on Linux is transitive and therefore includes the JavaScript runtime the child spawned. For the persistent workers the worker stays alive, so the worker reports its own getrusage(RUSAGE_SELF) delta plus its getrusage(RUSAGE_CHILDREN) delta; the latter includes the JavaScript runtime it spawned and reaped even though that helper is no longer in /proc.",
   "denominators": "Every attempt of every request is recorded and every attempt is counted. A retried request contributes all of its attempts to the latency, CPU and memory distributions, so a failure can never be hidden by a later success. The counts are reported as requests and attempts separately.",
@@ -88,6 +102,7 @@
   "pss_method": "Maximum sampled sum of process-tree PSS from /proc/<pid>/smaps_rollup; shared pages are divided between their users. 0 means the kernel does not expose smaps_rollup.",
   "quality": "HIGH",
   "quality_selector": "bestaudio[protocol=https][abr<=160]/bestaudio[protocol=http][abr<=160]/bestaudio[protocol=https]/bestaudio[protocol=http]",
+  "quantiles": "Historical sample-rank estimator: sort values, use one-based rank max(1,min(n,int(round(fraction*n+0.5)))), with Python round-to-even, without interpolation. For measured persistent workload groups n=6 and n=18, p50 is the upper middle value, not the conventional averaged median. The matched application matrix separately uses statistics.median for p50 and nearest-rank p90/p95.",
   "repeats_per_scenario": 3,
   "rss_method": "Maximum sampled sum of process-tree RSS over the whole tree; shared pages may be counted once per mapping process and short-lived spikes may be missed (lower bound).",
   "scenarios": [
