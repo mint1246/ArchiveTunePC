@@ -19,9 +19,10 @@ runtime keep their relative `lib/app` and `lib/runtime` layout.
 
 The image must contain the yt-dlp resolver sidecars staged by
 `stageBundledResolverSidecars` under
-`lib/app/resources/resolver` (`yt-dlp`, `qjs`, the manifest, notices, and
+`lib/app/resources/resolver` (`yt-dlp`, `bun`, the manifest, notices, and
 licenses). The script refuses to package an image whose sidecars are missing,
-not executable, or staged for a different platform. Run
+not executable, or staged for a different platform, and rejects a stale `qjs`
+left from the retired QuickJS packaging. Run
 `:desktopApp:createDistributable` (or its `stageBundledResolverSidecars`
 finalizer) before `--skip-build`; the Gradle image uses
 `lib/app/resources` on Linux rather than Windows' `app/resources`.

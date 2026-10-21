@@ -15,6 +15,7 @@ import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
@@ -25,14 +26,214 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 
 /**
- * Stages the checksum-verified yt-dlp and quickjs-ng executables, their notices,
- * and a machine-readable manifest into a distribution `resolver` directory.
+ * Extracts exactly one verified executable from a pinned upstream ZIP archive.
+ *
+ * The task never extracts a ZIP tree and never trusts entry paths: it streams
+ * the single expected member into a caller-selected output file, so a malicious
+ * archive cannot write outside the build directory (ZIP slip) or create a
+ * symlink. Every central-directory name is validated first, and the archive may
+ * contain nothing except that member and its directory parents.
+ *
+ * The extracted executable is hashed and compared with a committed digest, so
+ * verifying the downloaded ZIP checksum and the extracted binary checksum are
+ * separate, auditable steps.
+ */
+@DisableCachingByDefault(because = "Extraction materializes a verified executable in the build directory.")
+abstract class ExtractVerifiedArchiveEntryTask : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val sourceArchive: RegularFileProperty
+
+    @get:Input
+    abstract val archiveMember: Property<String>
+
+    @get:Input
+    abstract val expectedSha256: Property<String>
+
+    @get:OutputFile
+    abstract val outputFile: RegularFileProperty
+
+    @TaskAction
+    fun extract() {
+        val archive = sourceArchive.get().asFile
+        if (!archive.isFile || archive.length() == 0L) {
+            throw GradleException("Resolver archive is missing or empty: ${archive.absolutePath}")
+        }
+
+        val member = archiveMember.get()
+        validateMemberName(member)
+        val memberSegments = member.split('/')
+        val allowedDirectories = memberSegments.dropLast(1)
+            .indices
+            .map { index -> memberSegments.take(index + 1).joinToString("/") + "/" }
+            .toSet()
+
+        val destination = outputFile.get().asFile
+        destination.parentFile.mkdirs()
+        val temporary = destination.resolveSibling("${destination.name}.part")
+        temporary.delete()
+
+        try {
+            ZipFile(archive).use { zip ->
+                val entries = zip.entries().toList()
+                if (entries.isEmpty()) {
+                    throw GradleException("Resolver archive has no entries: ${archive.absolutePath}")
+                }
+                if (entries.size > MAX_ARCHIVE_ENTRIES) {
+                    throw GradleException(
+                        "Resolver archive has ${entries.size} entries, more than the $MAX_ARCHIVE_ENTRIES-entry " +
+                            "limit: ${archive.absolutePath}",
+                    )
+                }
+                var memberEntries = 0
+                val seenNames = mutableSetOf<String>()
+                entries.forEach { entry ->
+                    validateEntryName(entry.name)
+                    if (!seenNames.add(entry.name)) {
+                        throw GradleException(
+                            "Resolver archive contains duplicate entry '${entry.name}' in ${archive.absolutePath}",
+                        )
+                    }
+                    when {
+                        entry.name == member -> {
+                            if (entry.isDirectory) {
+                                throw GradleException(
+                                    "Resolver archive member '$member' is a directory in ${archive.absolutePath}",
+                                )
+                            }
+                            memberEntries += 1
+                        }
+
+                        entry.name in allowedDirectories -> {
+                            if (!entry.isDirectory) {
+                                throw GradleException(
+                                    "Resolver archive entry '${entry.name}' must be a directory in ${archive.absolutePath}",
+                                )
+                            }
+                        }
+
+                        else -> throw GradleException(
+                            "Resolver archive contains unexpected entry '${entry.name}' in ${archive.absolutePath}; " +
+                                "only '$member' and its parent directories are allowed",
+                        )
+                    }
+                }
+                if (memberEntries != 1) {
+                    throw GradleException(
+                        "Resolver archive must contain '$member' exactly once, found $memberEntries in " +
+                            "${archive.absolutePath}",
+                    )
+                }
+
+                val entry = zip.getEntry(member)
+                if (entry.size > MAX_EXTRACTED_BYTES) {
+                    throw GradleException(
+                        "Resolver archive member '$member' is too large (${entry.size} bytes) in ${archive.absolutePath}",
+                    )
+                }
+
+                val digest = MessageDigest.getInstance("SHA-256")
+                var written = 0L
+                zip.getInputStream(entry).use { input ->
+                    temporary.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            written += read
+                            if (written > MAX_EXTRACTED_BYTES) {
+                                throw GradleException(
+                                    "Resolver archive member '$member' exceeds the ${MAX_EXTRACTED_BYTES}-byte limit " +
+                                        "in ${archive.absolutePath}",
+                                )
+                            }
+                            digest.update(buffer, 0, read)
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                if (written == 0L) {
+                    throw GradleException("Resolver archive member '$member' is empty in ${archive.absolutePath}")
+                }
+
+                val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                val expected = expectedSha256.get().lowercase()
+                if (actual != expected) {
+                    throw GradleException(
+                        "Extracted resolver executable checksum mismatch for '$member': expected $expected, " +
+                            "got $actual (${archive.absolutePath})",
+                    )
+                }
+
+                try {
+                    Files.move(
+                        temporary.toPath(),
+                        destination.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE,
+                    )
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    // Some build file systems do not support atomic renames. The
+                    // output is still published in one replace operation.
+                    Files.move(
+                        temporary.toPath(),
+                        destination.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }
+            }
+            setPermissions(destination, executable = true)
+            destination.setLastModified(REPRODUCIBLE_TIMESTAMP_MILLIS)
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private fun validateMemberName(member: String) {
+        if (member.isBlank() || member.endsWith('/')) {
+            throw GradleException("Resolver archive member must name one regular file, got '$member'")
+        }
+        validateEntryName(member)
+    }
+
+    private fun setPermissions(file: File, executable: Boolean) {
+        val view = Files.getFileAttributeView(file.toPath(), PosixFileAttributeView::class.java) ?: return
+        Files.setPosixFilePermissions(
+            file.toPath(),
+            PosixFilePermissions.fromString(if (executable) "rwxr-xr-x" else "rw-r--r--"),
+        )
+    }
+
+    private fun validateEntryName(name: String) {
+        val directoryEntry = name.endsWith('/')
+        val normalized = if (directoryEntry) name.dropLast(1) else name
+        val segments = normalized.split('/')
+        if (normalized.isEmpty() || name.startsWith('/') || name.contains('\\') || name.contains(':') ||
+            name.any { it.code < 0x20 || it.code == 0x7f } ||
+            segments.any { it.isEmpty() || it == "." || it == ".." }
+        ) {
+            throw GradleException("Unsafe path in resolver archive: '$name'")
+        }
+    }
+
+    private companion object {
+        const val MAX_EXTRACTED_BYTES = 256L * 1024 * 1024
+        const val MAX_ARCHIVE_ENTRIES = 1_024
+        const val REPRODUCIBLE_TIMESTAMP_MILLIS = 946_684_800_000L
+    }
+}
+
+/**
+ * Stages the checksum-verified yt-dlp and Bun executables, their notices, and a
+ * machine-readable manifest into a distribution `resolver` directory.
  *
  * The task owns the whole destination directory: files from a previous platform
  * are removed before staging, so a Linux app image can never keep a stale
- * `yt-dlp.exe` (and vice versa).
+ * `yt-dlp.exe` (and vice versa), and a checked-out tree that still carries the
+ * retired QuickJS sidecar cannot leak it into a package.
  */
 @DisableCachingByDefault(
     because = "Staging writes executable sidecars and a small manifest into the application image.",
@@ -46,7 +247,7 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
     @get:Optional
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
-    abstract val quickJsBinary: RegularFileProperty
+    abstract val bunBinary: RegularFileProperty
 
     @get:Input
     abstract val platformId: Property<String>
@@ -64,13 +265,16 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
     abstract val bundledEjsVersion: Property<String>
 
     @get:Input
-    abstract val quickJsVersion: Property<String>
+    abstract val bunVersion: Property<String>
 
     @get:Input
-    abstract val quickJsUrl: Property<String>
+    abstract val bunUrl: Property<String>
 
     @get:Input
-    abstract val quickJsSha256: Property<String>
+    abstract val bunSha256: Property<String>
+
+    @get:Input
+    abstract val bunBinarySha256: Property<String>
 
     @get:Optional
     @get:Input
@@ -89,7 +293,7 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
 
     @TaskAction
     fun stage() {
-        if (!ytDlpBinary.isPresent || !quickJsBinary.isPresent) {
+        if (!ytDlpBinary.isPresent || !bunBinary.isPresent) {
             throw GradleException(
                 unsupportedReason.orNull ?: "Resolver sidecar binaries were not provided for this build.",
             )
@@ -106,8 +310,8 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
             executable = !windows,
         )
         copyFile(
-            source = quickJsBinary.get().asFile,
-            target = destination.resolve(if (windows) "qjs.exe" else "qjs"),
+            source = bunBinary.get().asFile,
+            target = destination.resolve(if (windows) "bun.exe" else "bun"),
             executable = !windows,
         )
         copyFile(
@@ -137,10 +341,11 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
         appendLine("yt-dlp.url=${ytDlpUrl.get()}")
         appendLine("yt-dlp.sha256=${ytDlpSha256.get().lowercase()}")
         appendLine("yt-dlp.bundled-ejs.version=${bundledEjsVersion.get()}")
-        appendLine("quickjs-ng.version=${quickJsVersion.get()}")
-        appendLine("quickjs-ng.file=${if (windows) "qjs.exe" else "qjs"}")
-        appendLine("quickjs-ng.url=${quickJsUrl.get()}")
-        appendLine("quickjs-ng.sha256=${quickJsSha256.get().lowercase()}")
+        appendLine("bun.version=${bunVersion.get()}")
+        appendLine("bun.file=${if (windows) "bun.exe" else "bun"}")
+        appendLine("bun.url=${bunUrl.get()}")
+        appendLine("bun.sha256=${bunSha256.get().lowercase()}")
+        appendLine("bun.binary-sha256=${bunBinarySha256.get().lowercase()}")
     }
 
     private fun replaceDirectory(directory: File) {
@@ -163,9 +368,7 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
             StandardCopyOption.REPLACE_EXISTING,
             StandardCopyOption.COPY_ATTRIBUTES,
         )
-        if (executable) {
-            setExecutable(target)
-        }
+        setPermissions(target, executable)
         normalizeTimestamp(target)
     }
 
@@ -187,20 +390,19 @@ abstract class StageResolverSidecarsTask : DefaultTask() {
                         StandardCopyOption.REPLACE_EXISTING,
                         StandardCopyOption.COPY_ATTRIBUTES,
                     )
-                    if (executable) {
-                        setExecutable(output.toFile())
-                    }
+                    setPermissions(output.toFile(), executable)
                     normalizeTimestamp(output.toFile())
                 }
             }
         }
     }
 
-    private fun setExecutable(file: File) {
-        val view = Files.getFileAttributeView(file.toPath(), PosixFileAttributeView::class.java)
-        if (view != null) {
-            Files.setPosixFilePermissions(file.toPath(), PosixFilePermissions.fromString("rwxr-xr-x"))
-        }
+    private fun setPermissions(file: File, executable: Boolean) {
+        val view = Files.getFileAttributeView(file.toPath(), PosixFileAttributeView::class.java) ?: return
+        Files.setPosixFilePermissions(
+            file.toPath(),
+            PosixFilePermissions.fromString(if (executable) "rwxr-xr-x" else "rw-r--r--"),
+        )
     }
 
     private fun normalizeTimestamp(file: File) {
@@ -240,7 +442,10 @@ abstract class VerifyResolverSidecarsTask : DefaultTask() {
     abstract val ytDlpSha256: Property<String>
 
     @get:Input
-    abstract val quickJsSha256: Property<String>
+    abstract val bunSha256: Property<String>
+
+    @get:Input
+    abstract val bunBinarySha256: Property<String>
 
     @get:Optional
     @get:Input
@@ -259,12 +464,12 @@ abstract class VerifyResolverSidecarsTask : DefaultTask() {
         val windows = platform.startsWith("windows-")
         val expectedFiles = setOf(
             if (windows) "yt-dlp.exe" else "yt-dlp",
-            if (windows) "qjs.exe" else "qjs",
+            if (windows) "bun.exe" else "bun",
             "manifest.properties",
             "THIRD_PARTY_NOTICES.md",
         )
         val ytDlp = directory.resolve(if (windows) "yt-dlp.exe" else "yt-dlp")
-        val quickJs = directory.resolve(if (windows) "qjs.exe" else "qjs")
+        val bun = directory.resolve(if (windows) "bun.exe" else "bun")
 
         expectedFiles.forEach { name ->
             val file = directory.resolve(name)
@@ -273,11 +478,13 @@ abstract class VerifyResolverSidecarsTask : DefaultTask() {
             }
         }
         verifyChecksum(ytDlp, ytDlpSha256.get(), "yt-dlp")
-        verifyChecksum(quickJs, quickJsSha256.get(), "quickjs-ng")
+        // The staged file is the executable extracted from the verified Bun ZIP,
+        // so this compares against the binary digest, not the archive digest.
+        verifyChecksum(bun, bunBinarySha256.get(), "bun")
 
         if (!windows) {
             verifyExecutable(ytDlp)
-            verifyExecutable(quickJs)
+            verifyExecutable(bun)
         }
 
         val licenses = directory.resolve("licenses")
@@ -286,7 +493,10 @@ abstract class VerifyResolverSidecarsTask : DefaultTask() {
         }
         val requiredLicenses = listOf(
             "yt-dlp-UNLICENSE.txt",
-            "quickjs-ng-MIT.txt",
+            "bun-LICENSE.md",
+            "bun-LGPL-2.0.txt",
+            "bun-LGPL-2.1.txt",
+            "bun-WEBKIT-NOTICE.md",
             "yt-dlp-THIRD_PARTY_LICENSES.txt",
             "yt-dlp-ejs-UNLICENSE.txt",
         )
@@ -310,7 +520,8 @@ abstract class VerifyResolverSidecarsTask : DefaultTask() {
             "format.version" to "1",
             "platform" to platform,
             "yt-dlp.sha256" to ytDlpSha256.get().lowercase(),
-            "quickjs-ng.sha256" to quickJsSha256.get().lowercase(),
+            "bun.sha256" to bunSha256.get().lowercase(),
+            "bun.binary-sha256" to bunBinarySha256.get().lowercase(),
         )
         expectedManifest.forEach { (key, value) ->
             if (manifest[key] != value) {

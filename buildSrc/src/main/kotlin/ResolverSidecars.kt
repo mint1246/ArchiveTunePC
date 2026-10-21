@@ -14,7 +14,7 @@ enum class ResolverSidecarKind(
     val manifestPrefix: String,
 ) {
     YT_DLP("yt-dlp", "YtDlp", "yt-dlp"),
-    QUICKJS("quickjs-ng", "QuickJs", "quickjs-ng"),
+    BUN("bun", "Bun", "bun"),
 }
 
 /**
@@ -22,6 +22,11 @@ enum class ResolverSidecarKind(
  *
  * [assetName] is the name published on GitHub, while [fileName] is the name the
  * desktop resolver looks for inside the bundled `resolver` directory.
+ *
+ * Some upstreams ship a raw executable, others (Bun) ship a ZIP. For archives,
+ * [sha256] covers the downloaded ZIP, [archiveMember] names the single regular
+ * file inside it, and [binarySha256] covers that extracted executable. For raw
+ * executables both digests are the same and [archiveMember] is null.
  */
 data class ResolverSidecarAsset(
     val kind: ResolverSidecarKind,
@@ -30,24 +35,29 @@ data class ResolverSidecarAsset(
     val assetName: String,
     val sha256: String,
     val url: String,
+    val archiveMember: String? = null,
+    val binarySha256: String = sha256,
 ) {
     val fileName: String
         get() = when (kind) {
             ResolverSidecarKind.YT_DLP ->
                 if (platformId.startsWith("windows-")) "yt-dlp.exe" else "yt-dlp"
 
-            ResolverSidecarKind.QUICKJS ->
-                if (platformId.startsWith("windows-")) "qjs.exe" else "qjs"
+            ResolverSidecarKind.BUN ->
+                if (platformId.startsWith("windows-")) "bun.exe" else "bun"
         }
+
+    val isArchive: Boolean
+        get() = archiveMember != null
 }
 
 /**
- * Single source of truth for the yt-dlp and quickjs-ng sidecars bundled with the
+ * Single source of truth for the yt-dlp and Bun sidecars bundled with the
  * experimental desktop resolver.
  *
  * The versions, URLs, and SHA-256 values below were verified against the
  * upstream GitHub release assets. Update this file, packaging/resolver/README.md,
- * and the staged manifest together.
+ * packaging/resolver/THIRD_PARTY_NOTICES.md, and the staged manifest together.
  */
 object ResolverSidecars {
     const val YT_DLP_VERSION = "2026.08.19"
@@ -55,25 +65,36 @@ object ResolverSidecars {
     /** yt-dlp 2026.08.19 ships this EJS solver bundled inside the frozen executable. */
     const val YT_DLP_BUNDLED_EJS_VERSION = "0.8.0"
 
-    const val QUICKJS_VERSION = "0.17.0"
-    private const val QUICKJS_TAG = "v$QUICKJS_VERSION"
+    const val BUN_VERSION = "1.4.3"
+    private const val BUN_TAG = "bun-v$BUN_VERSION"
 
     const val WINDOWS_X86_64 = "windows-x86_64"
     const val LINUX_X86_64 = "linux-x86_64"
 
     private const val YT_DLP_BASE_URL =
         "https://github.com/yt-dlp/yt-dlp/releases/download/$YT_DLP_VERSION"
-    private const val QUICKJS_BASE_URL =
-        "https://github.com/quickjs-ng/quickjs/releases/download/$QUICKJS_TAG"
+    private const val BUN_BASE_URL =
+        "https://github.com/oven-sh/bun/releases/download/$BUN_TAG"
 
     private const val YT_DLP_LINUX_SHA256 =
         "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a"
     private const val YT_DLP_WINDOWS_SHA256 =
         "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a"
-    private const val QUICKJS_LINUX_SHA256 =
-        "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5"
-    private const val QUICKJS_WINDOWS_SHA256 =
-        "2aeabf0092c3262d6b2609824418f7dd7ed1f1df939f73b2b15645230cac0d77"
+
+    // Official bun-linux-x64.zip from bun-v1.4.3. The GitHub release publishes
+    // this digest in its clearsigned SHASUMS256.txt. Bun's -baseline ZIP is a
+    // compatibility alias that contains this exact same executable, so the
+    // standard asset already targets Nehalem/SSE4.2 with runtime AVX2 dispatch.
+    private const val BUN_LINUX_ZIP_SHA256 =
+        "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18"
+    private const val BUN_LINUX_BINARY_SHA256 =
+        "7ce7d6b654eddeec20afddf2396317fba6dc19ab52788a27e894e1806bf8f24b"
+
+    // Official bun-windows-x64.zip from bun-v1.4.3.
+    private const val BUN_WINDOWS_ZIP_SHA256 =
+        "0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d"
+    private const val BUN_WINDOWS_BINARY_SHA256 =
+        "095db4abae203d42f29fdec26da4a882fcde6333cdd84e40c0c7828c0cf543f6"
 
     val supportedPlatforms: List<String> = listOf(WINDOWS_X86_64, LINUX_X86_64)
 
@@ -95,20 +116,24 @@ object ResolverSidecars {
             url = "$YT_DLP_BASE_URL/yt-dlp.exe",
         ),
         ResolverSidecarAsset(
-            kind = ResolverSidecarKind.QUICKJS,
+            kind = ResolverSidecarKind.BUN,
             platformId = LINUX_X86_64,
-            version = QUICKJS_VERSION,
-            assetName = "qjs-linux-x86_64",
-            sha256 = QUICKJS_LINUX_SHA256,
-            url = "$QUICKJS_BASE_URL/qjs-linux-x86_64",
+            version = BUN_VERSION,
+            assetName = "bun-linux-x64.zip",
+            sha256 = BUN_LINUX_ZIP_SHA256,
+            url = "$BUN_BASE_URL/bun-linux-x64.zip",
+            archiveMember = "bun-linux-x64/bun",
+            binarySha256 = BUN_LINUX_BINARY_SHA256,
         ),
         ResolverSidecarAsset(
-            kind = ResolverSidecarKind.QUICKJS,
+            kind = ResolverSidecarKind.BUN,
             platformId = WINDOWS_X86_64,
-            version = QUICKJS_VERSION,
-            assetName = "qjs-windows-x86_64.exe",
-            sha256 = QUICKJS_WINDOWS_SHA256,
-            url = "$QUICKJS_BASE_URL/qjs-windows-x86_64.exe",
+            version = BUN_VERSION,
+            assetName = "bun-windows-x64.zip",
+            sha256 = BUN_WINDOWS_ZIP_SHA256,
+            url = "$BUN_BASE_URL/bun-windows-x64.zip",
+            archiveMember = "bun-windows-x64/bun.exe",
+            binarySha256 = BUN_WINDOWS_BINARY_SHA256,
         ),
     )
 
@@ -125,8 +150,18 @@ object ResolverSidecars {
     fun downloadTaskName(asset: ResolverSidecarAsset): String =
         "downloadResolver${asset.kind.taskInfix}${platformTaskSuffix(asset.platformId)}"
 
+    fun extractTaskName(asset: ResolverSidecarAsset): String =
+        "extractResolver${asset.kind.taskInfix}${platformTaskSuffix(asset.platformId)}"
+
     fun downloadPath(asset: ResolverSidecarAsset): String =
         "resolver/downloads/${asset.platformId}/${asset.assetName}"
+
+    /**
+     * Verified, extracted executable produced by an archive asset. Raw assets
+     * are already their own executable, so callers use [downloadPath] instead.
+     */
+    fun extractedBinaryPath(asset: ResolverSidecarAsset): String =
+        "resolver/extracted/${asset.platformId}/${asset.fileName}"
 
     /**
      * Selects the sidecar platform for the current build.

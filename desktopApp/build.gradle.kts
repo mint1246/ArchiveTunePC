@@ -301,10 +301,37 @@ val resolverDownloadTasks = ResolverSidecars.assets.associate { asset ->
     }
 }
 
-fun resolverDownloadTask(platformId: String, kind: ResolverSidecarKind) =
-    resolverDownloadTasks.getValue(
-        ResolverSidecars.downloadTaskName(ResolverSidecars.assetFor(platformId, kind)),
-    )
+/*
+ * Bun ships a ZIP, so its executable is extracted as a separate verified step.
+ * Only the exact pinned member is streamed into the build directory; the ZIP
+ * tree is never unpacked, which keeps the staging path free of ZIP-slip and
+ * symlink surprises.
+ */
+val resolverExtractTasks = ResolverSidecars.assets.filter { it.isArchive }.associate { asset ->
+    val taskName = ResolverSidecars.extractTaskName(asset)
+    taskName to tasks.register<ExtractVerifiedArchiveEntryTask>(taskName) {
+        group = "distribution"
+        description =
+            "Extracts the verified ${asset.kind.displayName} ${asset.version} executable for ${asset.platformId} " +
+                "from ${asset.assetName}."
+        sourceArchive.set(
+            resolverDownloadTasks.getValue(ResolverSidecars.downloadTaskName(asset)).flatMap { it.outputFile },
+        )
+        archiveMember.set(asset.archiveMember!!)
+        expectedSha256.set(asset.binarySha256)
+        outputFile.set(layout.buildDirectory.file(ResolverSidecars.extractedBinaryPath(asset)))
+    }
+}
+
+/** The verified executable to stage: a raw download, or the extracted ZIP member. */
+fun resolverBinaryFile(platformId: String, kind: ResolverSidecarKind) =
+    ResolverSidecars.assetFor(platformId, kind).let { asset ->
+        if (asset.isArchive) {
+            resolverExtractTasks.getValue(ResolverSidecars.extractTaskName(asset)).flatMap { it.outputFile }
+        } else {
+            resolverDownloadTasks.getValue(ResolverSidecars.downloadTaskName(asset)).flatMap { it.outputFile }
+        }
+    }
 
 fun registerResolverStageTask(
     name: String,
@@ -312,10 +339,10 @@ fun registerResolverStageTask(
     runAfterTask: String,
 ) = tasks.register<StageResolverSidecarsTask>(name) {
     group = "distribution"
-    description = "Stages the checksum-verified yt-dlp and quickjs-ng sidecars into the desktop app image."
+    description = "Stages the checksum-verified yt-dlp and Bun sidecars into the desktop app image."
     platformId.set(resolverPlatformId ?: "unsupported")
     ytDlpVersion.set(ResolverSidecars.YT_DLP_VERSION)
-    quickJsVersion.set(ResolverSidecars.QUICKJS_VERSION)
+    bunVersion.set(ResolverSidecars.BUN_VERSION)
     bundledEjsVersion.set(ResolverSidecars.YT_DLP_BUNDLED_EJS_VERSION)
     thirdPartyNotices.set(resolverNoticesFile)
     licensesDirectory.set(resolverLicensesDir)
@@ -323,18 +350,20 @@ fun registerResolverStageTask(
     if (resolverPlatformId == null) {
         ytDlpUrl.set("")
         ytDlpSha256.set("")
-        quickJsUrl.set("")
-        quickJsSha256.set("")
+        bunUrl.set("")
+        bunSha256.set("")
+        bunBinarySha256.set("")
         unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
     } else {
         val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
-        val quickJs = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.QUICKJS)
+        val bun = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.BUN)
         ytDlpUrl.set(ytDlp.url)
         ytDlpSha256.set(ytDlp.sha256)
-        quickJsUrl.set(quickJs.url)
-        quickJsSha256.set(quickJs.sha256)
-        ytDlpBinary.set(resolverDownloadTask(resolverPlatformId, ResolverSidecarKind.YT_DLP).flatMap { it.outputFile })
-        quickJsBinary.set(resolverDownloadTask(resolverPlatformId, ResolverSidecarKind.QUICKJS).flatMap { it.outputFile })
+        bunUrl.set(bun.url)
+        bunSha256.set(bun.sha256)
+        bunBinarySha256.set(bun.binarySha256)
+        ytDlpBinary.set(resolverBinaryFile(resolverPlatformId, ResolverSidecarKind.YT_DLP))
+        bunBinary.set(resolverBinaryFile(resolverPlatformId, ResolverSidecarKind.BUN))
     }
     mustRunAfter(runAfterTask)
 }
@@ -345,17 +374,21 @@ fun registerResolverVerifyTask(
     stageTask: TaskProvider<out Task>,
 ) = tasks.register<VerifyResolverSidecarsTask>(name) {
     group = "verification"
-    description = "Verifies the bundled yt-dlp and quickjs-ng sidecars, checksums, and notices."
+    description = "Verifies the bundled yt-dlp and Bun sidecars, checksums, and notices."
     dependsOn(stageTask)
     sidecarDirectory.set(directory)
     platformId.set(resolverPlatformId ?: "unsupported")
     if (resolverPlatformId == null) {
         ytDlpSha256.set("")
-        quickJsSha256.set("")
+        bunSha256.set("")
+        bunBinarySha256.set("")
         unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
     } else {
-        ytDlpSha256.set(ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP).sha256)
-        quickJsSha256.set(ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.QUICKJS).sha256)
+        val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
+        val bun = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.BUN)
+        ytDlpSha256.set(ytDlp.sha256)
+        bunSha256.set(bun.sha256)
+        bunBinarySha256.set(bun.binarySha256)
     }
 }
 

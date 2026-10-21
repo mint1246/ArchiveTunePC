@@ -143,10 +143,10 @@ val resolverLicensesDir = rootProject.layout.projectDirectory.dir("packaging/res
 
 val stageNativeResolverSidecars = tasks.register<StageResolverSidecarsTask>("stageNativeResolverSidecars") {
     group = "distribution"
-    description = "Stages the checksum-verified yt-dlp and quickjs-ng sidecars beside the native executable."
+    description = "Stages the checksum-verified yt-dlp and Bun sidecars beside the native executable."
     platformId.set(resolverPlatformId ?: "unsupported")
     ytDlpVersion.set(ResolverSidecars.YT_DLP_VERSION)
-    quickJsVersion.set(ResolverSidecars.QUICKJS_VERSION)
+    bunVersion.set(ResolverSidecars.BUN_VERSION)
     bundledEjsVersion.set(ResolverSidecars.YT_DLP_BUNDLED_EJS_VERSION)
     thirdPartyNotices.set(resolverNoticesFile)
     licensesDirectory.set(resolverLicensesDir)
@@ -154,20 +154,22 @@ val stageNativeResolverSidecars = tasks.register<StageResolverSidecarsTask>("sta
     if (resolverPlatformId == null) {
         ytDlpUrl.set("")
         ytDlpSha256.set("")
-        quickJsUrl.set("")
-        quickJsSha256.set("")
+        bunUrl.set("")
+        bunSha256.set("")
+        bunBinarySha256.set("")
         unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
     } else {
         val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
-        val quickJs = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.QUICKJS)
+        val bun = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.BUN)
         ytDlpUrl.set(ytDlp.url)
         ytDlpSha256.set(ytDlp.sha256)
-        quickJsUrl.set(quickJs.url)
-        quickJsSha256.set(quickJs.sha256)
+        bunUrl.set(bun.url)
+        bunSha256.set(bun.sha256)
+        bunBinarySha256.set(bun.binarySha256)
         dependsOn(desktopAppProject.tasks.named(ResolverSidecars.downloadTaskName(ytDlp)))
-        dependsOn(desktopAppProject.tasks.named(ResolverSidecars.downloadTaskName(quickJs)))
+        dependsOn(desktopAppProject.tasks.named(ResolverSidecars.extractTaskName(bun)))
         ytDlpBinary.set(desktopAppProject.layout.buildDirectory.file(ResolverSidecars.downloadPath(ytDlp)))
-        quickJsBinary.set(desktopAppProject.layout.buildDirectory.file(ResolverSidecars.downloadPath(quickJs)))
+        bunBinary.set(desktopAppProject.layout.buildDirectory.file(ResolverSidecars.extractedBinaryPath(bun)))
     }
     mustRunAfter("packageGraalvmNative")
 }
@@ -259,17 +261,21 @@ val stageNativeDistribution = tasks.register<Sync>("stageNativeDistribution") {
 
 val verifyNativeResolverSidecars = tasks.register<VerifyResolverSidecarsTask>("verifyNativeResolverSidecars") {
     group = "verification"
-    description = "Verifies the yt-dlp and quickjs-ng sidecars carried into the native release directory."
+    description = "Verifies the yt-dlp and Bun sidecars carried into the native release directory."
     dependsOn(stageNativeDistribution)
     sidecarDirectory.set(nativeReleaseDir.map { it.dir("resolver") })
     platformId.set(resolverPlatformId ?: "unsupported")
     if (resolverPlatformId == null) {
         ytDlpSha256.set("")
-        quickJsSha256.set("")
+        bunSha256.set("")
+        bunBinarySha256.set("")
         unsupportedReason.set(ResolverSidecars.unsupportedPlatformMessage())
     } else {
-        ytDlpSha256.set(ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP).sha256)
-        quickJsSha256.set(ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.QUICKJS).sha256)
+        val ytDlp = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.YT_DLP)
+        val bun = ResolverSidecars.assetFor(resolverPlatformId, ResolverSidecarKind.BUN)
+        ytDlpSha256.set(ytDlp.sha256)
+        bunSha256.set(bun.sha256)
+        bunBinarySha256.set(bun.binarySha256)
     }
 }
 

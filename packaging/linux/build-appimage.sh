@@ -154,14 +154,19 @@ require_image() {
 require_resolver() {
   local resolver_dir=$IMAGE_DIR/lib/app/resources/resolver
   local name
-  for name in yt-dlp qjs manifest.properties THIRD_PARTY_NOTICES.md; do
+  for name in yt-dlp bun manifest.properties THIRD_PARTY_NOTICES.md; do
     [[ -f $resolver_dir/$name ]] \
       || die "resolver sidecar missing: $resolver_dir/$name (rebuild :desktopApp:createDistributable so stageBundledResolverSidecars runs)"
   done
   [[ -x $resolver_dir/yt-dlp ]] || die "resolver yt-dlp is not executable: $resolver_dir/yt-dlp"
-  [[ -x $resolver_dir/qjs ]] || die "resolver qjs is not executable: $resolver_dir/qjs"
+  [[ -x $resolver_dir/bun ]] || die "resolver bun is not executable: $resolver_dir/bun"
   grep -qx 'platform=linux-x86_64' "$resolver_dir/manifest.properties" \
     || die "resolver sidecars were not staged for linux-x86_64: $resolver_dir/manifest.properties"
+  grep -qx 'bun.file=bun' "$resolver_dir/manifest.properties" \
+    || die "resolver manifest does not describe the Linux Bun sidecar: $resolver_dir/manifest.properties"
+  # The retired QuickJS runtime must not survive in a package that ships Bun.
+  [[ ! -e $resolver_dir/qjs && ! -e $resolver_dir/qjs.exe ]] \
+    || die "stale QuickJS sidecar found beside the Bun runtime: $resolver_dir"
 }
 
 # Delete only the staging directory this script owns. Anything else is refused.
@@ -252,6 +257,8 @@ chmod 0755 -- "$APPDIR/AppRun"
   || die "staged launcher is missing or not executable"
 [[ -x $APPDIR/usr/lib/archivetune/lib/app/resources/resolver/yt-dlp ]] \
   || die "staged yt-dlp resolver sidecar is missing or not executable"
+[[ -x $APPDIR/usr/lib/archivetune/lib/app/resources/resolver/bun ]] \
+  || die "staged Bun resolver sidecar is missing or not executable"
 
 info "packaging with $APPIMAGETOOL"
 export ARCH
