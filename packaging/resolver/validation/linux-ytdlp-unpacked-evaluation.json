@@ -1,0 +1,5053 @@
+{
+  "artifacts": {
+    "archive": {
+      "matches_published_feed": true,
+      "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/yt-dlp_linux.zip",
+      "published_sha256": "32e72032766bef9199d99d15beb69fd52e46df8f8b06f0d8745db59e04d339e9",
+      "reused": true,
+      "sha256": "32e72032766bef9199d99d15beb69fd52e46df8f8b06f0d8745db59e04d339e9",
+      "size_bytes": 40516244,
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_linux.zip"
+    },
+    "archive_members": [
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 4693,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_ARC4.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 21032
+      },
+      {
+        "compressed_bytes": 7382,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_Salsa20.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 27016
+      },
+      {
+        "compressed_bytes": 8369,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_chacha20.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 30624
+      },
+      {
+        "compressed_bytes": 13951,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_pkcs1_decode.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 56536
+      },
+      {
+        "compressed_bytes": 26126,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_aes.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 106808
+      },
+      {
+        "compressed_bytes": 25234,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_aesni.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 106384
+      },
+      {
+        "compressed_bytes": 13114,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_arc2.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 46464
+      },
+      {
+        "compressed_bytes": 20005,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_blowfish.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 78640
+      },
+      {
+        "compressed_bytes": 22188,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_cast.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 57408
+      },
+      {
+        "compressed_bytes": 5880,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_cbc.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 23000
+      },
+      {
+        "compressed_bytes": 7499,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_cfb.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 26864
+      },
+      {
+        "compressed_bytes": 9142,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_ctr.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 31336
+      },
+      {
+        "compressed_bytes": 19654,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_des.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 71560
+      },
+      {
+        "compressed_bytes": 20126,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_des3.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 72520
+      },
+      {
+        "compressed_bytes": 3291,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_ecb.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 19016
+      },
+      {
+        "compressed_bytes": 36889,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_eksblowfish.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 181192
+      },
+      {
+        "compressed_bytes": 12959,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_ocb.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 45856
+      },
+      {
+        "compressed_bytes": 5069,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Cipher/_raw_ofb.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 22128
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 8480,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_BLAKE2b.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 27424
+      },
+      {
+        "compressed_bytes": 8031,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_BLAKE2s.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 26952
+      },
+      {
+        "compressed_bytes": 6419,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_MD2.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 23192
+      },
+      {
+        "compressed_bytes": 7363,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_MD4.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 27192
+      },
+      {
+        "compressed_bytes": 10627,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_MD5.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 32008
+      },
+      {
+        "compressed_bytes": 16085,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_RIPEMD160.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 60728
+      },
+      {
+        "compressed_bytes": 19729,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_SHA1.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 72064
+      },
+      {
+        "compressed_bytes": 14272,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_SHA224.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 45768
+      },
+      {
+        "compressed_bytes": 14321,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_SHA256.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 45832
+      },
+      {
+        "compressed_bytes": 16568,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_SHA384.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 54160
+      },
+      {
+        "compressed_bytes": 16828,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_SHA512.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 54200
+      },
+      {
+        "compressed_bytes": 14766,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_ghash_clmul.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 58376
+      },
+      {
+        "compressed_bytes": 6804,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_ghash_portable.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 25024
+      },
+      {
+        "compressed_bytes": 11939,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_keccak.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 41632
+      },
+      {
+        "compressed_bytes": 9689,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Hash/_poly1305.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 33424
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Math/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 69009,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Math/_modexp.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 220424
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Protocol/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 6916,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Protocol/_scrypt.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 26176
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/PublicKey/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 37183,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/PublicKey/_curve25519.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 130104
+      },
+      {
+        "compressed_bytes": 74664,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/PublicKey/_curve448.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 241824
+      },
+      {
+        "compressed_bytes": 699481,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/PublicKey/_ec_ws.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 967640
+      },
+      {
+        "compressed_bytes": 64644,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/PublicKey/_ed25519.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 223480
+      },
+      {
+        "compressed_bytes": 79636,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/PublicKey/_ed448.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 257712
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Util/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 3328,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Util/_cpuid_c.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 19304
+      },
+      {
+        "compressed_bytes": 3873,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/Cryptodome/Util/_strxor.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 20376
+      },
+      {
+        "compressed_bytes": 57247,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/THIRD_PARTY_LICENSES.txt",
+        "rejected_because": null,
+        "size_bytes": 243550
+      },
+      {
+        "compressed_bytes": 1414119,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/_brotli.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 5149096
+      },
+      {
+        "compressed_bytes": 117322,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/_cffi_backend.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 344680
+      },
+      {
+        "compressed_bytes": 421261,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/base_library.zip",
+        "rejected_because": null,
+        "size_bytes": 1394119
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/certifi/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 131827,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/certifi/cacert.pem",
+        "rejected_because": null,
+        "size_bytes": 240216
+      },
+      {
+        "compressed_bytes": 2,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/certifi/py.typed",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/charset_normalizer/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 73781,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/charset_normalizer/cd.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 169392
+      },
+      {
+        "compressed_bytes": 107792,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/charset_normalizer/md.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 321864
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/cryptography/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/cryptography/hazmat/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/cryptography/hazmat/bindings/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 4550119,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography/hazmat/bindings/_rust.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 14266112
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 6,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/INSTALLER",
+        "rejected_because": null,
+        "size_bytes": 4
+      },
+      {
+        "compressed_bytes": 1538,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/METADATA",
+        "rejected_because": null,
+        "size_bytes": 4343
+      },
+      {
+        "compressed_bytes": 5826,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/RECORD",
+        "rejected_because": null,
+        "size_bytes": 17965
+      },
+      {
+        "compressed_bytes": 2,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/REQUESTED",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 116,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/WHEEL",
+        "rejected_because": null,
+        "size_bytes": 146
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/licenses/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 137,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/licenses/LICENSE",
+        "rejected_because": null,
+        "size_bytes": 197
+      },
+      {
+        "compressed_bytes": 3949,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/licenses/LICENSE.APACHE",
+        "rejected_because": null,
+        "size_bytes": 11360
+      },
+      {
+        "compressed_bytes": 794,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/licenses/LICENSE.BSD",
+        "rejected_because": null,
+        "size_bytes": 1532
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/sboms/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 5626,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/sboms/cryptography-rust.cyclonedx.json",
+        "rejected_because": null,
+        "size_bytes": 45685
+      },
+      {
+        "compressed_bytes": 528,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/cryptography-50.0.0.dist-info/sboms/sbom.json",
+        "rejected_because": null,
+        "size_bytes": 1206
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 13359043,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi/_wrapper.abi3.so",
+        "rejected_because": null,
+        "size_bytes": 38491568
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 6,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/INSTALLER",
+        "rejected_because": null,
+        "size_bytes": 4
+      },
+      {
+        "compressed_bytes": 6309,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/METADATA",
+        "rejected_because": null,
+        "size_bytes": 17463
+      },
+      {
+        "compressed_bytes": 2012,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/RECORD",
+        "rejected_because": null,
+        "size_bytes": 4783
+      },
+      {
+        "compressed_bytes": 2,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/REQUESTED",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 118,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/WHEEL",
+        "rejected_because": null,
+        "size_bytes": 149
+      },
+      {
+        "compressed_bytes": 46,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/entry_points.txt",
+        "rejected_because": null,
+        "size_bytes": 49
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/licenses/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 648,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/licenses/LICENSE",
+        "rejected_because": null,
+        "size_bytes": 1106
+      },
+      {
+        "compressed_bytes": 12,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/curl_cffi-0.16.0.dist-info/top_level.txt",
+        "rejected_because": null,
+        "size_bytes": 10
+      },
+      {
+        "compressed_bytes": 31023,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libbz2.so.1",
+        "rejected_because": null,
+        "size_bytes": 68192
+      },
+      {
+        "compressed_bytes": 2169932,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libcrypto.so.3",
+        "rejected_because": null,
+        "size_bytes": 6066464
+      },
+      {
+        "compressed_bytes": 17012,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libffi.so.6",
+        "rejected_because": null,
+        "size_bytes": 32328
+      },
+      {
+        "compressed_bytes": 41224,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libgcc_s.so.1",
+        "rejected_because": null,
+        "size_bytes": 88720
+      },
+      {
+        "compressed_bytes": 82419,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/liblzma.so.5",
+        "rejected_because": null,
+        "size_bytes": 157440
+      },
+      {
+        "compressed_bytes": 78674,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libmpdec.so.4",
+        "rejected_because": null,
+        "size_bytes": 186544
+      },
+      {
+        "compressed_bytes": 2239757,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libpython3.14.so.1.0",
+        "rejected_because": null,
+        "size_bytes": 5782656
+      },
+      {
+        "compressed_bytes": 119967,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libreadline.so.6",
+        "rejected_because": null,
+        "size_bytes": 285136
+      },
+      {
+        "compressed_bytes": 821813,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libsqlite3.so",
+        "rejected_because": null,
+        "size_bytes": 1567256
+      },
+      {
+        "compressed_bytes": 446297,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libssl.so.3",
+        "rejected_because": null,
+        "size_bytes": 1048248
+      },
+      {
+        "compressed_bytes": 66179,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libtinfo.so.5",
+        "rejected_because": null,
+        "size_bytes": 174576
+      },
+      {
+        "compressed_bytes": 8407,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libuuid.so.1",
+        "rejected_because": null,
+        "size_bytes": 20064
+      },
+      {
+        "compressed_bytes": 48582,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libz.so.1",
+        "rejected_because": null,
+        "size_bytes": 90160
+      },
+      {
+        "compressed_bytes": 330918,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/libzstd.so.1",
+        "rejected_because": null,
+        "size_bytes": 796432
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/python3.14/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 25610,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_asyncio.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 72968
+      },
+      {
+        "compressed_bytes": 6334,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_bisect.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 27160
+      },
+      {
+        "compressed_bytes": 28497,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_blake2.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 64312
+      },
+      {
+        "compressed_bytes": 9574,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_bz2.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 27320
+      },
+      {
+        "compressed_bytes": 103795,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_codecs_cn.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 157752
+      },
+      {
+        "compressed_bytes": 36651,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_codecs_hk.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 161848
+      },
+      {
+        "compressed_bytes": 9606,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_codecs_iso2022.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 30776
+      },
+      {
+        "compressed_bytes": 97047,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_codecs_jp.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 272440
+      },
+      {
+        "compressed_bytes": 80592,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_codecs_kr.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 141368
+      },
+      {
+        "compressed_bytes": 64552,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_codecs_tw.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 116792
+      },
+      {
+        "compressed_bytes": 12945,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_csv.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 32768
+      },
+      {
+        "compressed_bytes": 57250,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_ctypes.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 140488
+      },
+      {
+        "compressed_bytes": 63306,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_decimal.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 186376
+      },
+      {
+        "compressed_bytes": 34496,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_elementtree.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 83704
+      },
+      {
+        "compressed_bytes": 22229,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_hashlib.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 67352
+      },
+      {
+        "compressed_bytes": 9422,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_heapq.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 26968
+      },
+      {
+        "compressed_bytes": 46990,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_hmac.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 109784
+      },
+      {
+        "compressed_bytes": 11965,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_interpqueues.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 31384
+      },
+      {
+        "compressed_bytes": 13545,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_interpreters.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 40184
+      },
+      {
+        "compressed_bytes": 19743,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_json.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 44280
+      },
+      {
+        "compressed_bytes": 16493,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_lzma.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 44216
+      },
+      {
+        "compressed_bytes": 9546,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_md5.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 27224
+      },
+      {
+        "compressed_bytes": 18955,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_multibytecodec.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 49616
+      },
+      {
+        "compressed_bytes": 6816,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_multiprocessing.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 23584
+      },
+      {
+        "compressed_bytes": 54664,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_pickle.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 127736
+      },
+      {
+        "compressed_bytes": 3140,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_posixshmem.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 14456
+      },
+      {
+        "compressed_bytes": 11523,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_posixsubprocess.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 30776
+      },
+      {
+        "compressed_bytes": 7141,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_queue.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 27416
+      },
+      {
+        "compressed_bytes": 6324,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_random.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 22864
+      },
+      {
+        "compressed_bytes": 7234,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_sha1.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 23128
+      },
+      {
+        "compressed_bytes": 26344,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_sha2.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 60888
+      },
+      {
+        "compressed_bytes": 14103,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_sha3.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 36952
+      },
+      {
+        "compressed_bytes": 43562,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_socket.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 119384
+      },
+      {
+        "compressed_bytes": 55403,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_sqlite3.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 142848
+      },
+      {
+        "compressed_bytes": 74840,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_ssl.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 233720
+      },
+      {
+        "compressed_bytes": 3579,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_statistics.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 14392
+      },
+      {
+        "compressed_bytes": 21630,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_struct.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 62624
+      },
+      {
+        "compressed_bytes": 2024,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_uuid.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 14392
+      },
+      {
+        "compressed_bytes": 19371,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/_zstd.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 53752
+      },
+      {
+        "compressed_bytes": 28003,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/array.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 69776
+      },
+      {
+        "compressed_bytes": 12424,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/binascii.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 31800
+      },
+      {
+        "compressed_bytes": 7427,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/fcntl.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 26776
+      },
+      {
+        "compressed_bytes": 5127,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/grp.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 18872
+      },
+      {
+        "compressed_bytes": 32154,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/math.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 73816
+      },
+      {
+        "compressed_bytes": 11915,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/mmap.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 31920
+      },
+      {
+        "compressed_bytes": 111112,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/pyexpat.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 250104
+      },
+      {
+        "compressed_bytes": 12195,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/readline.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 39768
+      },
+      {
+        "compressed_bytes": 6363,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/resource.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 23032
+      },
+      {
+        "compressed_bytes": 12958,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/select.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 36224
+      },
+      {
+        "compressed_bytes": 9865,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/termios.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 34968
+      },
+      {
+        "compressed_bytes": 329452,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/unicodedata.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 750448
+      },
+      {
+        "compressed_bytes": 18644,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/python3.14/lib-dynload/zlib.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 53656
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/websockets/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 12336,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets/speedups.cpython-314-x86_64-linux-gnu.so",
+        "rejected_because": null,
+        "size_bytes": 38232
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 6,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/INSTALLER",
+        "rejected_because": null,
+        "size_bytes": 4
+      },
+      {
+        "compressed_bytes": 2531,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/METADATA",
+        "rejected_because": null,
+        "size_bytes": 6342
+      },
+      {
+        "compressed_bytes": 3111,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/RECORD",
+        "rejected_because": null,
+        "size_bytes": 8282
+      },
+      {
+        "compressed_bytes": 2,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/REQUESTED",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 120,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/WHEEL",
+        "rejected_because": null,
+        "size_bytes": 186
+      },
+      {
+        "compressed_bytes": 44,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/entry_points.txt",
+        "rejected_because": null,
+        "size_bytes": 51
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/licenses/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 765,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/licenses/LICENSE",
+        "rejected_because": null,
+        "size_bytes": 1514
+      },
+      {
+        "compressed_bytes": 13,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/websockets-17.0.1.dist-info/top_level.txt",
+        "rejected_because": null,
+        "size_bytes": 11
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/yt_dlp_ejs/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/yt_dlp_ejs/yt/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 0,
+        "is_dir": true,
+        "is_symlink": false,
+        "name": "_internal/yt_dlp_ejs/yt/solver/",
+        "rejected_because": null,
+        "size_bytes": 0
+      },
+      {
+        "compressed_bytes": 2301,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/yt_dlp_ejs/yt/solver/core.min.js",
+        "rejected_because": null,
+        "size_bytes": 6945
+      },
+      {
+        "compressed_bytes": 46463,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "_internal/yt_dlp_ejs/yt/solver/lib.min.js",
+        "rejected_because": null,
+        "size_bytes": 151561
+      },
+      {
+        "compressed_bytes": 10418824,
+        "is_dir": false,
+        "is_symlink": false,
+        "name": "yt-dlp_linux",
+        "rejected_because": null,
+        "size_bytes": 10519128
+      }
+    ],
+    "candidate_binaries": [
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_ARC4.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_ARC4.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "2adb90541769f14a6f05824794ea1287ff228645e363046d4ba4e47df4a99455",
+        "size_bytes": 21032
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_Salsa20.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_Salsa20.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "ff9a06e126354cd518769ef2fa7541f82962a895c9306e52695da85281eba718",
+        "size_bytes": 27016
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_chacha20.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_chacha20.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "cb6d8f7369a9e0277728a4a587f31883bb2051c4f297abc84ecd1d82e15772bb",
+        "size_bytes": 30624
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_pkcs1_decode.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_pkcs1_decode.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "69dacc75daeb63332649180ef0512787f2730f2788f717d4b132c97c835fadea",
+        "size_bytes": 56536
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_aes.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_aes.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "f4265907fce6174d7e043039af0f244d650861a8b1c50d135b738602dde37578",
+        "size_bytes": 106808
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_aesni.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_aesni.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "1fd3c232c2ea188c6d6cc78a3527376ac6691ffe04c95ac420e6c5aa5bbc6b54",
+        "size_bytes": 106384
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_arc2.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_arc2.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9691029d4146c35f3d914c9cb79b788989ebaafd447a73176a555d3bfd6373d5",
+        "size_bytes": 46464
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_blowfish.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_blowfish.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "174cb4378cfb9cf286b7d189ed0113490879e96a01d2f892e5eead4e7c2d3d5c",
+        "size_bytes": 78640
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_cast.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_cast.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "91cfb82c3ff953b5d2749278b830eea64f58a8aa528c680353af12297ad56500",
+        "size_bytes": 57408
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_cbc.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_cbc.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "d23d8ecbf2a5e657dd7077e435c5cd9df5bf722c1e650f958cb6990345842374",
+        "size_bytes": 23000
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_cfb.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_cfb.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "3ecfbf0b55be47fc32b755f9c1797d2fa9877f01977af500c05efb4e430c4ab6",
+        "size_bytes": 26864
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_ctr.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_ctr.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "dbc8b7fa5ec053f0ef8d5ed5c5af85a5f492cf4236aca594c9f979fb8d965283",
+        "size_bytes": 31336
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_des.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_des.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "3fc55b04e0d3be6df43d2c7b0296113a0381d7c5f0df0c883b5c9be23c2f8ae2",
+        "size_bytes": 71560
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_des3.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_des3.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "4091cc675b754684ccafb55ef5d2865ae1b9e3750e1bae92a37cdfbcb8c04a4b",
+        "size_bytes": 72520
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_ecb.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_ecb.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "7d8dde22e0e9fb9ea2d467e81a9a7421f1f688359b9d6685c4c57f5dfe1100e2",
+        "size_bytes": 19016
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_eksblowfish.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_eksblowfish.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "164b6cb73f02f711bea36623d3629426bb0eda0f843f80b7a16c85f45b29f276",
+        "size_bytes": 181192
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_ocb.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_ocb.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "ac4b744938151389a70182391bb4f17ed28a626002fba31e78f101435e393e2d",
+        "size_bytes": 45856
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Cipher/_raw_ofb.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Cipher/_raw_ofb.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c4c711d7ac3c2c4d19a6ba0b3e7132ecab313873e5761df7af1a1115486890b6",
+        "size_bytes": 22128
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_BLAKE2b.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_BLAKE2b.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "5f40883e38d1e8597d68cb9201eb9842ebacf47930555bc93e9adc2fbd35a5b0",
+        "size_bytes": 27424
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_BLAKE2s.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_BLAKE2s.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "48e3dfd8293f72cc5ad942ee55c4908b3254a568bf0f1674279fc31a9b52ed68",
+        "size_bytes": 26952
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_MD2.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_MD2.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c7070cc973957f3489ae76f147b5925fc42aefdb243bd2972b66f821d0f3b75f",
+        "size_bytes": 23192
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_MD4.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_MD4.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "d9d6f81f240f396377e4a2d56a75a3e63bbcb5d27d0f451317cbbef3e4d6384e",
+        "size_bytes": 27192
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_MD5.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_MD5.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "978dfd0759da57bc5016840bd39dd57ddc132613d4b311a1cda543762ba2f3db",
+        "size_bytes": 32008
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_RIPEMD160.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_RIPEMD160.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "713c0925d73197071b1066a8faa1cabdbda9d79f0a2056608dc59d5c71b2709b",
+        "size_bytes": 60728
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_SHA1.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_SHA1.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9c2bfda92a78790e3c7e34c72ebbda5b7e8e8a2888b83d9aedb7c09aa1a38bef",
+        "size_bytes": 72064
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_SHA224.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_SHA224.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "542b0dc5b2f17a8358ecd0a49aa1b4e46601041280686347552273658ecb1307",
+        "size_bytes": 45768
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_SHA256.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_SHA256.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "b516067224d7d1f84b29388c545705753c557bd4916457ddf4c60452296b0951",
+        "size_bytes": 45832
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_SHA384.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_SHA384.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "fa694e6a1b638a9de3f10c59ffc06f20eda47a832fbdc6980e50f006674827f7",
+        "size_bytes": 54160
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_SHA512.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_SHA512.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "1279fda58eba3013152a5470abe872bc948587fc2251e905ceabd0e424e51ad8",
+        "size_bytes": 54200
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_ghash_clmul.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_ghash_clmul.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "5d985565f647a02c277c6ffe58e82778f55278f854e286f87d4b7d1920ae9701",
+        "size_bytes": 58376
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_ghash_portable.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_ghash_portable.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "bed27029d44068160d45c5867b2bbad2475a40c3875b66960acb801b67aa7c22",
+        "size_bytes": 25024
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_keccak.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_keccak.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "78e30b92f3c32ab063ccf462b3d1079fc8291a692242b502c33ff878287e522e",
+        "size_bytes": 41632
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Hash/_poly1305.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Hash/_poly1305.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c28f9ad6bf36ad3222ae7e86131d0b369305dc374668a5570b90bdfc1ebda572",
+        "size_bytes": 33424
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Math/_modexp.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Math/_modexp.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "93b056fe341952f08d2160cd7232bf5c5293fdf611cfc0a0f8958a9badc4d6a9",
+        "size_bytes": 220424
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Protocol/_scrypt.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Protocol/_scrypt.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "ea7f6da9fdfe0a78554cd3e6d4c6f9e28df8ec3819318a4b5d53831ea3079117",
+        "size_bytes": 26176
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/PublicKey/_curve25519.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/PublicKey/_curve25519.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "568bf98f6ec778ed8ad19c961eebdb8e94a0b9fcd548f08c42b025b58294ccca",
+        "size_bytes": 130104
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/PublicKey/_curve448.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/PublicKey/_curve448.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "7263eb36abcf5313cc430ea5c3947e43cc6c09f3fbe4f839f7897602efe13d11",
+        "size_bytes": 241824
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/PublicKey/_ec_ws.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/PublicKey/_ec_ws.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "434cd789c3b6c90c00378d64521a515542479fc7b96779fffb6e516d07b03f73",
+        "size_bytes": 967640
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/PublicKey/_ed25519.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/PublicKey/_ed25519.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "d26208c322f2e722a7d1c86658053dd19145008b4e6f5ca3a5abdbd74d528222",
+        "size_bytes": 223480
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/PublicKey/_ed448.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/PublicKey/_ed448.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "387053cc71f6b8f95634fca411a8949b459885debeda6edd35f5aaa8e3623cb2",
+        "size_bytes": 257712
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Util/_cpuid_c.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Util/_cpuid_c.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "2c161368e944064302b78048613ef26dbc4229861d2328bcd29c501c72cb1b3c",
+        "size_bytes": 19304
+      },
+      {
+        "executable": true,
+        "name": "_internal/Cryptodome/Util/_strxor.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/Cryptodome/Util/_strxor.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "81b046cf71a9fdfad4935d9af67f85dcb16dc911c9364b3caa0a44e453f795f9",
+        "size_bytes": 20376
+      },
+      {
+        "executable": true,
+        "name": "_internal/_brotli.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/_brotli.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "594764b391df3b9ff4fe89e4600bf1f7a1b8e935af01f98d840430759240bfc7",
+        "size_bytes": 5149096
+      },
+      {
+        "executable": true,
+        "name": "_internal/_cffi_backend.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/_cffi_backend.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "7d1eff7fbb874ee72228fd426103da2b9eef528979156077bdec736d5b4f61a2",
+        "size_bytes": 344680
+      },
+      {
+        "executable": true,
+        "name": "_internal/charset_normalizer/cd.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/charset_normalizer/cd.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "b4afb77a913613aff30e2398dd49b5dacd3ed723c94f0045319b13db1b1fa27c",
+        "size_bytes": 169392
+      },
+      {
+        "executable": true,
+        "name": "_internal/charset_normalizer/md.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/charset_normalizer/md.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "b07350ce741607a9269005c8b1d13d24024d8a5729999032c47de976418a865f",
+        "size_bytes": 321864
+      },
+      {
+        "executable": true,
+        "name": "_internal/cryptography/hazmat/bindings/_rust.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/cryptography/hazmat/bindings/_rust.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "895932bb26864b1af6088da5c85a890651b0700978e2141f58050950adf692e4",
+        "size_bytes": 14266112
+      },
+      {
+        "executable": true,
+        "name": "_internal/curl_cffi/_wrapper.abi3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/curl_cffi/_wrapper.abi3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c2e1cdeea774da4391f404070051b5df5ab7d2368115a63e5005c2ea56b6ad8e",
+        "size_bytes": 38491568
+      },
+      {
+        "executable": true,
+        "name": "_internal/libbz2.so.1",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libbz2.so.1",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a273e5044bbdaedf9c361c080e5d0005bba17465036f4418546abb30e93cb444",
+        "size_bytes": 68192
+      },
+      {
+        "executable": true,
+        "name": "_internal/libcrypto.so.3",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libcrypto.so.3",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "576715adeb81a33288dd1db4bcc25cb6854a55ec0e8f673b020e98123f44bb54",
+        "size_bytes": 6066464
+      },
+      {
+        "executable": true,
+        "name": "_internal/libffi.so.6",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libffi.so.6",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "af4ed7088fc6c9dd07628ba47534746412c051a4864189fb9308be5b8c1b2308",
+        "size_bytes": 32328
+      },
+      {
+        "executable": true,
+        "name": "_internal/libgcc_s.so.1",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libgcc_s.so.1",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "8f148d8b7ed050f93064fafca6df434706844cf8346d5feed8ecce8c67f39c68",
+        "size_bytes": 88720
+      },
+      {
+        "executable": true,
+        "name": "_internal/liblzma.so.5",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/liblzma.so.5",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "004595caeadc46cef395bcd75452e6208926f91622ab6537bc5aa14cee9dd890",
+        "size_bytes": 157440
+      },
+      {
+        "executable": true,
+        "name": "_internal/libmpdec.so.4",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libmpdec.so.4",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "e679b83d3fb51502400db71bb0c886012e519f3671b8b6a140d2667978d00b44",
+        "size_bytes": 186544
+      },
+      {
+        "executable": true,
+        "name": "_internal/libpython3.14.so.1.0",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libpython3.14.so.1.0",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "504c59144c2c00514f8e57bca91a78ae8dc8e7261088b469c27791dec9409562",
+        "size_bytes": 5782656
+      },
+      {
+        "executable": true,
+        "name": "_internal/libreadline.so.6",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libreadline.so.6",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "2c5f7b8d6d8a257f08a05f931d6f2c0806dacb368755083f203149ea45222140",
+        "size_bytes": 285136
+      },
+      {
+        "executable": true,
+        "name": "_internal/libsqlite3.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libsqlite3.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "09b69a8a63260eea2611b996bad54b95741f0738ba04aa5f708ed89f1b52b51f",
+        "size_bytes": 1567256
+      },
+      {
+        "executable": true,
+        "name": "_internal/libssl.so.3",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libssl.so.3",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "e706b511cfe33f6ae0ac47b608708d27753750e172a7b4aeb9ffa62d62d14bd8",
+        "size_bytes": 1048248
+      },
+      {
+        "executable": true,
+        "name": "_internal/libtinfo.so.5",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libtinfo.so.5",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "10270e321971666a3b27de37b591122ea1182fcf9e0aad250f82d5c8c399c346",
+        "size_bytes": 174576
+      },
+      {
+        "executable": true,
+        "name": "_internal/libuuid.so.1",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libuuid.so.1",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "f64cda11e1ee1edff303fb180a894f30de1944991a60d7234f88ae6918c062eb",
+        "size_bytes": 20064
+      },
+      {
+        "executable": true,
+        "name": "_internal/libz.so.1",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libz.so.1",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "4e3ca1c7bba1a94c25710fd51a3c4f219f459768cc948dcada941ad1431c0fbb",
+        "size_bytes": 90160
+      },
+      {
+        "executable": true,
+        "name": "_internal/libzstd.so.1",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/libzstd.so.1",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "683064b5b284b9f34e979d6c0651ee4116edcca367606b9e1093f25d50d99ce2",
+        "size_bytes": 796432
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_asyncio.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_asyncio.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "f34b00c21c4f2d31e975767d6c6755585e6d00526bec8fedc0974711da4d59f5",
+        "size_bytes": 72968
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_bisect.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_bisect.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "b8e4b710ab86a6230f19066922780b68fbc0eba2de1272c94de4bff99bbc19c7",
+        "size_bytes": 27160
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_blake2.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_blake2.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c37da0b04dcdb6ffecfdaf1fa05e13bd431bdd18a790a7aaef90b79074d84ba0",
+        "size_bytes": 64312
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_bz2.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_bz2.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9c5546fcb8cef199def2c96e5d356501d32585ab5237b7e27ec143678f59a4bb",
+        "size_bytes": 27320
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_codecs_cn.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_codecs_cn.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "4a277bde0dd4d90ccfc900d4777cdab7b58ab7a015e8f9fdf5446c503af7c844",
+        "size_bytes": 157752
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_codecs_hk.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_codecs_hk.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "aa982c87c3bd2a49e5f3bf4c0238f259ee50ce934aa6cf7e3fd3be2aee9e7033",
+        "size_bytes": 161848
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_codecs_iso2022.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_codecs_iso2022.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "635c6c4860677d9879a9ba95487aa41427cefd2617f7aa5def29f9fed22cd435",
+        "size_bytes": 30776
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_codecs_jp.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_codecs_jp.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "86d053df4c2b2edab9c55c514ff31990b1b5d4824a3189d86624e23c42c026e5",
+        "size_bytes": 272440
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_codecs_kr.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_codecs_kr.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "67e84146ae9a7a313bbaf1adfbf31995c344a7ec17b737000d00029bcf1602a8",
+        "size_bytes": 141368
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_codecs_tw.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_codecs_tw.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "7ef593cfa51a660e4dfdd8dc0080d4dcc956a7529a2c1b2f88d61ff205b60305",
+        "size_bytes": 116792
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_csv.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_csv.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "76ec819723151dbb8f9068e092de5bf13a60c573ea90b29dd35aa39c4ecb104e",
+        "size_bytes": 32768
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_ctypes.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_ctypes.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a6ff406c7f3aa99efa87a012b67406f5b2630e189042279906b1622a555f10dc",
+        "size_bytes": 140488
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_decimal.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_decimal.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "4b191027af58fc52989798dae96e4c39b7bf38076412e6009d8871cf043add38",
+        "size_bytes": 186376
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_elementtree.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_elementtree.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a1ca8cf429829bc5b892f9e81b17332d1c04d274f5ca83e88e1181e0008cef6c",
+        "size_bytes": 83704
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_hashlib.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_hashlib.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "e0002ed42eef85757ace565eb930e1fe5c084e44dc48bbe6f6acd2283415f5da",
+        "size_bytes": 67352
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_heapq.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_heapq.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "6b6a01046bfd9446dda16c43808b7c14933c6e23e28bf86b1c79866108db3704",
+        "size_bytes": 26968
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_hmac.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_hmac.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9c299419e84f25e676aa81e54c012d3ee7026a1cccec410942c28d76a03cb6cf",
+        "size_bytes": 109784
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_interpqueues.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_interpqueues.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "3dedac4ff696bf4e4bb9f66d8c270745aea9abc897f8021555080b00405b70c1",
+        "size_bytes": 31384
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_interpreters.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_interpreters.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "38cc43fc38564fc8e906ed146c94ab9c66970366c576a02c6809918f3cdadd7e",
+        "size_bytes": 40184
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_json.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_json.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a0aacb8e171315ef2861868cc691ac4a6b7fa87d4bb67baff5e1e22111454927",
+        "size_bytes": 44280
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_lzma.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_lzma.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9337fa54d075983c59dfa4942eaf3b09b10bb576ebf0bf5a53f686ed82d52a48",
+        "size_bytes": 44216
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_md5.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_md5.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "446bd9aa05351334767a9e4cd407b4cbe4f8efc81ad9468da4d7642fe93f2bc1",
+        "size_bytes": 27224
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_multibytecodec.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_multibytecodec.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "6ed4a290aaa586b2f91587cecd5a9cb4b1efc4d6ebf90853f01a19949347b740",
+        "size_bytes": 49616
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_multiprocessing.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_multiprocessing.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "71b268ea2d220ac0021479ccfbba3b3fd9b6639aee995504abe2a79914653eca",
+        "size_bytes": 23584
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_pickle.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_pickle.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "aeedff9b5cf9145d73b05e5c20d7426f2419474b9ef91eb60d1656495c893c1e",
+        "size_bytes": 127736
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_posixshmem.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_posixshmem.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c7bee7869acef2ed0f507c1f0bf23ea98fff8c224a5d2ca140f32d1e4db9e2d7",
+        "size_bytes": 14456
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_posixsubprocess.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_posixsubprocess.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "ee32211c8127ad615504306fa8d0fb46e8c6474abb43ef1f10e447d955c2b3f2",
+        "size_bytes": 30776
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_queue.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_queue.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a2c4d4bab30c9ea06027ccbb9f9fc67216147c51d403c4ccb740dbd904e5e892",
+        "size_bytes": 27416
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_random.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_random.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "946992e889dcedc07a9caa72ad47665337428fe0e11db65f41d463ab648ce066",
+        "size_bytes": 22864
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_sha1.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_sha1.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "284f850075307c5f21fec4deec5a5d99ff95ac81008e3f582be99cf56cd2b4b9",
+        "size_bytes": 23128
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_sha2.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_sha2.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "2a26a17ea30ad5c0393631c420a2e8feb14cbf137bd4e3239ec12b83e11c564f",
+        "size_bytes": 60888
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_sha3.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_sha3.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "284d0168b7ee432022f3fe4acfa1143279ce75f0db26268648d2285358526de6",
+        "size_bytes": 36952
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_socket.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_socket.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "565f844707b568b529495185f0f2d6b550d6a3f177a7d53e799e8f97b10e4433",
+        "size_bytes": 119384
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_sqlite3.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_sqlite3.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "5fdde4b8be3bf25f6afde8e0e1855bdba9bc18fba2d645697decb5669704a2c6",
+        "size_bytes": 142848
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_ssl.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_ssl.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "eac32ab88ded835edada770c40827cd0f37980d070fabebb7c3675d6f53c23ae",
+        "size_bytes": 233720
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_statistics.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_statistics.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a4fd8041829c39e68e4e94b627db3178d3348f67a35d5fe144df9ee64cff5bc6",
+        "size_bytes": 14392
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_struct.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_struct.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "1f9024282f451dbb2ced0133e75f9b30652ad04df2756e4f25a2278c7fae8765",
+        "size_bytes": 62624
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_uuid.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_uuid.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "a33ac085f79661bb8ed4640fb9c0f4343d3dad49aac287bad345f80ed00e0885",
+        "size_bytes": 14392
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/_zstd.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/_zstd.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "60a0cce985a4dc1c46b05027a42ea73c8b875b57d63b78e7ac556fd235d0e6d4",
+        "size_bytes": 53752
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/array.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/array.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "24482fb1a18144032016542ce1fead5077f80ddb2bbfd9ebf1616653968ac1ec",
+        "size_bytes": 69776
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/binascii.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/binascii.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "4660919f3c7d11064c8837a1c289c441197472368fae303e859d5b20974a4699",
+        "size_bytes": 31800
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/fcntl.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/fcntl.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c10c179fb9ce7a331877d669fbf083bdab65f44c4628d5412f8984b2e5366633",
+        "size_bytes": 26776
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/grp.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/grp.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "6dbb10a52b527d45a8ce1bc213c08ef3b36f5777cef5d188cd0be293ba52d6b6",
+        "size_bytes": 18872
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/math.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/math.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "c348a13345b394d9f3f21af44e02eca972a424df7793f725e6cf65a761c370f8",
+        "size_bytes": 73816
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/mmap.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/mmap.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "609d4f07fc36dec376cf3da0660eecece43d587f7da3e7502549f455c1096004",
+        "size_bytes": 31920
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/pyexpat.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/pyexpat.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "87d769ff0b498527c02dd21a947e574ce426038800b333c82082a846457a40d9",
+        "size_bytes": 250104
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/readline.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/readline.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "d9cd487d2287ea1d432274a84a4c7b1515f064293497e479fdf98f7ad59ed3c4",
+        "size_bytes": 39768
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/resource.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/resource.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "5e0e93fd6e4e238290a79dbf52e0fcb09771aaf007aa0021445dedf15b6a1d73",
+        "size_bytes": 23032
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/select.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/select.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "52fed648c047b4bc4ffaa0e7035ab84bd8c17053c51dd71581806ea67cb6c516",
+        "size_bytes": 36224
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/termios.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/termios.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "7730d0b1ecf5cb4d17a2ece360728690aba788742fe335bd36ae8dae205c73b5",
+        "size_bytes": 34968
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/unicodedata.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/unicodedata.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "505e695f8f43bfe203827f5fdedb83e9b43e4a8a2dd854832d8a82a53b9d5064",
+        "size_bytes": 750448
+      },
+      {
+        "executable": true,
+        "name": "_internal/python3.14/lib-dynload/zlib.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/python3.14/lib-dynload/zlib.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "feee0aaf2c7492b88b68b53191e986a7237dc749936fb18fda44622cbc658890",
+        "size_bytes": 53656
+      },
+      {
+        "executable": true,
+        "name": "_internal/websockets/speedups.cpython-314-x86_64-linux-gnu.so",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/_internal/websockets/speedups.cpython-314-x86_64-linux-gnu.so",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9a715bcb516601e27dc2dfbf1306834c49e77828f322b84c151e330655f90c6f",
+        "size_bytes": 38232
+      },
+      {
+        "executable": true,
+        "name": "yt-dlp_linux",
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/yt-dlp_linux",
+        "same_digest_as_shipped_onefile_binary": false,
+        "sha256": "9daa5228ec81576268728a7ca231a066fc7a21cae52a583392d42abb08e65b86",
+        "size_bytes": 10519128
+      }
+    ],
+    "checksum_feed": {
+      "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/SHA2-256SUMS",
+      "reused": true,
+      "sha256": "a63701f30755cb4d9317950d69703e9d751d490cb1b7059e1bb501a353fe7dcb",
+      "size_bytes": 1595,
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/SHA2-256SUMS"
+    },
+    "checksum_feed_entries": 19,
+    "extraction": {
+      "directories": {
+        "_internal": {
+          "files": 147,
+          "size_bytes": 85470495
+        }
+      },
+      "member_count": 148,
+      "top_level_members": [
+        {
+          "executable": true,
+          "name": "yt-dlp_linux",
+          "sha256": "9daa5228ec81576268728a7ca231a066fc7a21cae52a583392d42abb08e65b86",
+          "size_bytes": 10519128
+        }
+      ],
+      "total_size_bytes": 95989623
+    },
+    "selected_unpacked_binary": {
+      "candidate_count": 116,
+      "name": "yt-dlp_linux",
+      "note": "the upstream Linux zip is a PyInstaller onedir distribution: the program is the top-level executable and the interpreter, the packages and the EJS solver scripts live in the _internal directory",
+      "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/unpacked/yt-dlp_linux",
+      "same_digest_as_shipped_onefile_binary": false,
+      "selection_rule": "top-level ELF image whose name starts with yt-dlp",
+      "sha256": "9daa5228ec81576268728a7ca231a066fc7a21cae52a583392d42abb08e65b86",
+      "size_bytes": 10519128,
+      "top_level_candidates": [
+        "yt-dlp_linux"
+      ]
+    },
+    "shipped_onefile_binary_sha256": "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a",
+    "tools_dir": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked",
+    "windows": {
+      "archive": {
+        "matches_published_feed": true,
+        "path": "/home/mint/.t3/worktrees/ArchiveTuneLinux/t3-b5018c80/.tools/unpacked/yt-dlp_win.zip",
+        "published_sha256": "30b4c14aafab6082becff7881e41b76df46dc43ea7633479410a91e29da492bf",
+        "reused": true,
+        "sha256": "30b4c14aafab6082becff7881e41b76df46dc43ea7633479410a91e29da492bf",
+        "size_bytes": 18087041,
+        "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_win.zip"
+      },
+      "members": [
+        {
+          "compressed_bytes": 0,
+          "is_dir": true,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/",
+          "rejected_because": null,
+          "size_bytes": 0
+        },
+        {
+          "compressed_bytes": 0,
+          "is_dir": true,
+          "is_symlink": false,
+          "name": "_internal/yt_dlp_ejs/",
+          "rejected_because": null,
+          "size_bytes": 0
+        },
+        {
+          "compressed_bytes": 31097,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_asyncio.pyd",
+          "rejected_because": null,
+          "size_bytes": 65304
+        },
+        {
+          "compressed_bytes": 370209,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_brotli.cp310-win_amd64.pyd",
+          "rejected_because": null,
+          "size_bytes": 856576
+        },
+        {
+          "compressed_bytes": 45621,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_bz2.pyd",
+          "rejected_because": null,
+          "size_bytes": 83736
+        },
+        {
+          "compressed_bytes": 83752,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_cffi_backend.cp310-win_amd64.pyd",
+          "rejected_because": null,
+          "size_bytes": 179712
+        },
+        {
+          "compressed_bytes": 58715,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_ctypes.pyd",
+          "rejected_because": null,
+          "size_bytes": 123672
+        },
+        {
+          "compressed_bytes": 125825,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_decimal.pyd",
+          "rejected_because": null,
+          "size_bytes": 254744
+        },
+        {
+          "compressed_bytes": 59561,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_elementtree.pyd",
+          "rejected_because": null,
+          "size_bytes": 128280
+        },
+        {
+          "compressed_bytes": 30269,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_hashlib.pyd",
+          "rejected_because": null,
+          "size_bytes": 64792
+        },
+        {
+          "compressed_bytes": 90426,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_lzma.pyd",
+          "rejected_because": null,
+          "size_bytes": 158488
+        },
+        {
+          "compressed_bytes": 19466,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_multiprocessing.pyd",
+          "rejected_because": null,
+          "size_bytes": 34584
+        },
+        {
+          "compressed_bytes": 25805,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_overlapped.pyd",
+          "rejected_because": null,
+          "size_bytes": 49944
+        },
+        {
+          "compressed_bytes": 18092,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_queue.pyd",
+          "rejected_because": null,
+          "size_bytes": 31512
+        },
+        {
+          "compressed_bytes": 39028,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_socket.pyd",
+          "rejected_because": null,
+          "size_bytes": 79128
+        },
+        {
+          "compressed_bytes": 48392,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_sqlite3.pyd",
+          "rejected_because": null,
+          "size_bytes": 99096
+        },
+        {
+          "compressed_bytes": 67544,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_ssl.pyd",
+          "rejected_because": null,
+          "size_bytes": 160536
+        },
+        {
+          "compressed_bytes": 14935,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/_uuid.pyd",
+          "rejected_because": null,
+          "size_bytes": 25368
+        },
+        {
+          "compressed_bytes": 7772,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-console-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 7564,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-datetime-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 7453,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-debug-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21944
+        },
+        {
+          "compressed_bytes": 7654,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-errorhandling-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22096
+        },
+        {
+          "compressed_bytes": 7592,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-fibers-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 7537,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-fibers-l1-1-1.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 8833,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-file-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 26152
+        },
+        {
+          "compressed_bytes": 7605,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-file-l1-2-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 7612,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-file-l2-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21960
+        },
+        {
+          "compressed_bytes": 7473,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-handle-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21944
+        },
+        {
+          "compressed_bytes": 7813,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-heap-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 7656,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-interlocked-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 7907,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-kernel32-legacy-l1-1-1.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 7955,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-libraryloader-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 8569,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-localization-l1-2-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 7789,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-memory-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 7719,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-namedpipe-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22096
+        },
+        {
+          "compressed_bytes": 7772,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-processenvironment-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21968
+        },
+        {
+          "compressed_bytes": 8443,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-processthreads-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22096
+        },
+        {
+          "compressed_bytes": 7836,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-processthreads-l1-1-1.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 7561,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-profile-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 7714,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-rtlsupport-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21960
+        },
+        {
+          "compressed_bytes": 7666,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-string-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 8226,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-synch-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 7874,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-synch-l1-2-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 7938,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-sysinfo-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22072
+        },
+        {
+          "compressed_bytes": 7743,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-sysinfo-l1-2-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 7778,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-timezone-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 7463,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-core-util-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21944
+        },
+        {
+          "compressed_bytes": 7959,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-conio-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 9079,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-convert-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 26056
+        },
+        {
+          "compressed_bytes": 7806,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-environment-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 8461,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-filesystem-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22056
+        },
+        {
+          "compressed_bytes": 7957,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-heap-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22096
+        },
+        {
+          "compressed_bytes": 7924,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-locale-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22080
+        },
+        {
+          "compressed_bytes": 11324,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-math-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 30248
+        },
+        {
+          "compressed_bytes": 8028,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-process-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22096
+        },
+        {
+          "compressed_bytes": 9335,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-runtime-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 26152
+        },
+        {
+          "compressed_bytes": 9875,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-stdio-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 26168
+        },
+        {
+          "compressed_bytes": 10040,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-string-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 26176
+        },
+        {
+          "compressed_bytes": 8567,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-time-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 22096
+        },
+        {
+          "compressed_bytes": 7833,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/api-ms-win-crt-utility-l1-1-0.dll",
+          "rejected_because": null,
+          "size_bytes": 21952
+        },
+        {
+          "compressed_bytes": 265566,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/base_library.zip",
+          "rejected_because": null,
+          "size_bytes": 880569
+        },
+        {
+          "compressed_bytes": 1370444,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/libcrypto-1_1.dll",
+          "rejected_because": null,
+          "size_bytes": 3450648
+        },
+        {
+          "compressed_bytes": 18825,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/libffi-7.dll",
+          "rejected_because": null,
+          "size_bytes": 32792
+        },
+        {
+          "compressed_bytes": 259747,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/libssl-1_1.dll",
+          "rejected_because": null,
+          "size_bytes": 704792
+        },
+        {
+          "compressed_bytes": 99277,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/pyexpat.pyd",
+          "rejected_because": null,
+          "size_bytes": 198936
+        },
+        {
+          "compressed_bytes": 23669,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/python3.dll",
+          "rejected_because": null,
+          "size_bytes": 66328
+        },
+        {
+          "compressed_bytes": 2045440,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/python310.dll",
+          "rejected_because": null,
+          "size_bytes": 4458776
+        },
+        {
+          "compressed_bytes": 17606,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/select.pyd",
+          "rejected_because": null,
+          "size_bytes": 29976
+        },
+        {
+          "compressed_bytes": 827916,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/sqlite3.dll",
+          "rejected_because": null,
+          "size_bytes": 1511192
+        },
+        {
+          "compressed_bytes": 59233,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/THIRD_PARTY_LICENSES.txt",
+          "rejected_because": null,
+          "size_bytes": 248243
+        },
+        {
+          "compressed_bytes": 680467,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/ucrtbase.dll",
+          "rejected_because": null,
+          "size_bytes": 1361448
+        },
+        {
+          "compressed_bytes": 483525,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/unicodedata.pyd",
+          "rejected_because": null,
+          "size_bytes": 1123608
+        },
+        {
+          "compressed_bytes": 54116,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/VCRUNTIME140.dll",
+          "rejected_because": null,
+          "size_bytes": 98224
+        },
+        {
+          "compressed_bytes": 131001,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/certifi/cacert.pem",
+          "rejected_because": null,
+          "size_bytes": 240216
+        },
+        {
+          "compressed_bytes": 0,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/certifi/py.typed",
+          "rejected_because": null,
+          "size_bytes": 0
+        },
+        {
+          "compressed_bytes": 58545,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/charset_normalizer/cd.cp310-win_amd64.pyd",
+          "rejected_because": null,
+          "size_bytes": 114176
+        },
+        {
+          "compressed_bytes": 81744,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/charset_normalizer/md.cp310-win_amd64.pyd",
+          "rejected_because": null,
+          "size_bytes": 200192
+        },
+        {
+          "compressed_bytes": 4929,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_ARC4.pyd",
+          "rejected_because": null,
+          "size_bytes": 10752
+        },
+        {
+          "compressed_bytes": 6419,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_chacha20.pyd",
+          "rejected_because": null,
+          "size_bytes": 13312
+        },
+        {
+          "compressed_bytes": 5973,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_pkcs1_decode.pyd",
+          "rejected_because": null,
+          "size_bytes": 13312
+        },
+        {
+          "compressed_bytes": 20169,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_aes.pyd",
+          "rejected_because": null,
+          "size_bytes": 35328
+        },
+        {
+          "compressed_bytes": 7017,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_aesni.pyd",
+          "rejected_because": null,
+          "size_bytes": 15360
+        },
+        {
+          "compressed_bytes": 7614,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_arc2.pyd",
+          "rejected_because": null,
+          "size_bytes": 14848
+        },
+        {
+          "compressed_bytes": 10872,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_blowfish.pyd",
+          "rejected_because": null,
+          "size_bytes": 19456
+        },
+        {
+          "compressed_bytes": 16289,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_cast.pyd",
+          "rejected_because": null,
+          "size_bytes": 24064
+        },
+        {
+          "compressed_bytes": 5456,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_cbc.pyd",
+          "rejected_because": null,
+          "size_bytes": 11776
+        },
+        {
+          "compressed_bytes": 5758,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_cfb.pyd",
+          "rejected_because": null,
+          "size_bytes": 12288
+        },
+        {
+          "compressed_bytes": 6362,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_ctr.pyd",
+          "rejected_because": null,
+          "size_bytes": 14848
+        },
+        {
+          "compressed_bytes": 15156,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_des.pyd",
+          "rejected_because": null,
+          "size_bytes": 52736
+        },
+        {
+          "compressed_bytes": 15292,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_des3.pyd",
+          "rejected_because": null,
+          "size_bytes": 52736
+        },
+        {
+          "compressed_bytes": 4605,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_ecb.pyd",
+          "rejected_because": null,
+          "size_bytes": 10240
+        },
+        {
+          "compressed_bytes": 11516,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_eksblowfish.pyd",
+          "rejected_because": null,
+          "size_bytes": 20480
+        },
+        {
+          "compressed_bytes": 7733,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_ocb.pyd",
+          "rejected_because": null,
+          "size_bytes": 17920
+        },
+        {
+          "compressed_bytes": 5330,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_raw_ofb.pyd",
+          "rejected_because": null,
+          "size_bytes": 11776
+        },
+        {
+          "compressed_bytes": 6536,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Cipher/_Salsa20.pyd",
+          "rejected_because": null,
+          "size_bytes": 13824
+        },
+        {
+          "compressed_bytes": 7023,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_BLAKE2b.pyd",
+          "rejected_because": null,
+          "size_bytes": 14336
+        },
+        {
+          "compressed_bytes": 6825,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_BLAKE2s.pyd",
+          "rejected_because": null,
+          "size_bytes": 13824
+        },
+        {
+          "compressed_bytes": 5709,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_ghash_clmul.pyd",
+          "rejected_because": null,
+          "size_bytes": 12800
+        },
+        {
+          "compressed_bytes": 5681,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_ghash_portable.pyd",
+          "rejected_because": null,
+          "size_bytes": 12288
+        },
+        {
+          "compressed_bytes": 7521,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_keccak.pyd",
+          "rejected_because": null,
+          "size_bytes": 15360
+        },
+        {
+          "compressed_bytes": 6163,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_MD2.pyd",
+          "rejected_because": null,
+          "size_bytes": 14336
+        },
+        {
+          "compressed_bytes": 6362,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_MD4.pyd",
+          "rejected_because": null,
+          "size_bytes": 13824
+        },
+        {
+          "compressed_bytes": 7957,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_MD5.pyd",
+          "rejected_because": null,
+          "size_bytes": 15360
+        },
+        {
+          "compressed_bytes": 6834,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_poly1305.pyd",
+          "rejected_because": null,
+          "size_bytes": 13824
+        },
+        {
+          "compressed_bytes": 6600,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_RIPEMD160.pyd",
+          "rejected_because": null,
+          "size_bytes": 13824
+        },
+        {
+          "compressed_bytes": 9216,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_SHA1.pyd",
+          "rejected_because": null,
+          "size_bytes": 17920
+        },
+        {
+          "compressed_bytes": 10824,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_SHA224.pyd",
+          "rejected_because": null,
+          "size_bytes": 21504
+        },
+        {
+          "compressed_bytes": 10827,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_SHA256.pyd",
+          "rejected_because": null,
+          "size_bytes": 21504
+        },
+        {
+          "compressed_bytes": 11630,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_SHA384.pyd",
+          "rejected_because": null,
+          "size_bytes": 26112
+        },
+        {
+          "compressed_bytes": 11847,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Hash/_SHA512.pyd",
+          "rejected_because": null,
+          "size_bytes": 26112
+        },
+        {
+          "compressed_bytes": 16127,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Math/_modexp.pyd",
+          "rejected_because": null,
+          "size_bytes": 30720
+        },
+        {
+          "compressed_bytes": 5512,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Protocol/_scrypt.pyd",
+          "rejected_because": null,
+          "size_bytes": 12288
+        },
+        {
+          "compressed_bytes": 9656,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/PublicKey/_curve25519.pyd",
+          "rejected_because": null,
+          "size_bytes": 19456
+        },
+        {
+          "compressed_bytes": 22916,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/PublicKey/_curve448.pyd",
+          "rejected_because": null,
+          "size_bytes": 58880
+        },
+        {
+          "compressed_bytes": 638830,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/PublicKey/_ec_ws.pyd",
+          "rejected_because": null,
+          "size_bytes": 755200
+        },
+        {
+          "compressed_bytes": 12209,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/PublicKey/_ed25519.pyd",
+          "rejected_because": null,
+          "size_bytes": 23552
+        },
+        {
+          "compressed_bytes": 26631,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/PublicKey/_ed448.pyd",
+          "rejected_because": null,
+          "size_bytes": 74752
+        },
+        {
+          "compressed_bytes": 4569,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Util/_cpuid_c.pyd",
+          "rejected_because": null,
+          "size_bytes": 10240
+        },
+        {
+          "compressed_bytes": 4567,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/Cryptodome/Util/_strxor.pyd",
+          "rejected_because": null,
+          "size_bytes": 10240
+        },
+        {
+          "compressed_bytes": 13952,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi/_wrapper.pyd",
+          "rejected_because": null,
+          "size_bytes": 39424
+        },
+        {
+          "compressed_bytes": 212,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/DELVEWHEEL",
+          "rejected_because": null,
+          "size_bytes": 446
+        },
+        {
+          "compressed_bytes": 46,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/entry_points.txt",
+          "rejected_because": null,
+          "size_bytes": 49
+        },
+        {
+          "compressed_bytes": 6,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/INSTALLER",
+          "rejected_because": null,
+          "size_bytes": 4
+        },
+        {
+          "compressed_bytes": 6355,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/METADATA",
+          "rejected_because": null,
+          "size_bytes": 17867
+        },
+        {
+          "compressed_bytes": 2134,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/RECORD",
+          "rejected_because": null,
+          "size_bytes": 5010
+        },
+        {
+          "compressed_bytes": 0,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/REQUESTED",
+          "rejected_because": null,
+          "size_bytes": 0
+        },
+        {
+          "compressed_bytes": 12,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/top_level.txt",
+          "rejected_because": null,
+          "size_bytes": 10
+        },
+        {
+          "compressed_bytes": 100,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/WHEEL",
+          "rejected_because": null,
+          "size_bytes": 100
+        },
+        {
+          "compressed_bytes": 670,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi-0.16.0.dist-info/licenses/LICENSE",
+          "rejected_because": null,
+          "size_bytes": 1129
+        },
+        {
+          "compressed_bytes": 1900730,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/curl_cffi.libs/libcurl-impersonate-ec8ead0e422fe4ae62a99233a63f6007.dll",
+          "rejected_because": null,
+          "size_bytes": 3881472
+        },
+        {
+          "compressed_bytes": 5144,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets/speedups.cp310-win_amd64.pyd",
+          "rejected_because": null,
+          "size_bytes": 11264
+        },
+        {
+          "compressed_bytes": 44,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/entry_points.txt",
+          "rejected_because": null,
+          "size_bytes": 51
+        },
+        {
+          "compressed_bytes": 6,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/INSTALLER",
+          "rejected_because": null,
+          "size_bytes": 4
+        },
+        {
+          "compressed_bytes": 2633,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/METADATA",
+          "rejected_because": null,
+          "size_bytes": 6980
+        },
+        {
+          "compressed_bytes": 2964,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/RECORD",
+          "rejected_because": null,
+          "size_bytes": 7741
+        },
+        {
+          "compressed_bytes": 0,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/REQUESTED",
+          "rejected_because": null,
+          "size_bytes": 0
+        },
+        {
+          "compressed_bytes": 13,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/top_level.txt",
+          "rejected_because": null,
+          "size_bytes": 11
+        },
+        {
+          "compressed_bytes": 98,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/WHEEL",
+          "rejected_because": null,
+          "size_bytes": 101
+        },
+        {
+          "compressed_bytes": 794,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/websockets-16.1.1.dist-info/licenses/LICENSE",
+          "rejected_because": null,
+          "size_bytes": 1538
+        },
+        {
+          "compressed_bytes": 0,
+          "is_dir": true,
+          "is_symlink": false,
+          "name": "_internal/yt_dlp_ejs/yt/",
+          "rejected_because": null,
+          "size_bytes": 0
+        },
+        {
+          "compressed_bytes": 2299,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/yt_dlp_ejs/yt/solver/core.min.js",
+          "rejected_because": null,
+          "size_bytes": 6945
+        },
+        {
+          "compressed_bytes": 47447,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "_internal/yt_dlp_ejs/yt/solver/lib.min.js",
+          "rejected_because": null,
+          "size_bytes": 151561
+        },
+        {
+          "compressed_bytes": 7107827,
+          "is_dir": false,
+          "is_symlink": false,
+          "name": "yt-dlp.exe",
+          "rejected_because": null,
+          "size_bytes": 7266348
+        }
+      ],
+      "note": "static exploration only: the Windows artifact was not executed and not extracted",
+      "rejected_members": []
+    }
+  },
+  "cleanup": {
+    "leftover_processes": [],
+    "temporary_root_removed": true
+  },
+  "diagnostics": {
+    "frozen_cli": {
+      "bun_version_warnings": [],
+      "ejs_version": "0.8.0",
+      "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+      "exit_code": 1,
+      "extractors_loaded": 1744,
+      "js_runtimes": "bun-1.4.3",
+      "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+      "python_version": "3.14.7",
+      "solving_js_challenges": 0,
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-bun-shim-djdxxqmg/bun-shim', '--verbose', '--simulate', '--', 'archivetune-runtime-check:'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_exe) | [debug] Python 3.14.7 (CPython x86_64 64bit) - Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44 (OpenSSL 3.5.7 9 Jun 2026, glibc 2.44) | [debug] exe versions: ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6 | [debug] Optional libraries: Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0 | [debug] JS runtimes: bun-1.4.3 | [debug] Proxy map: {} | [debug] Request Handlers: urllib, requests, websockets, curl_cffi | [debug] Plugin directories: none (disabled) | [debug] Loaded 1744 extractors | ERROR: Unable to handle request: Unsupported url scheme: \"archivetune-runtime-check\" (requests, urllib, ",
+      "yt_dlp_build": "linux_exe",
+      "yt_dlp_source": "yt-dlp/yt-dlp",
+      "yt_dlp_version": "stable@2026.08.19"
+    },
+    "unpacked_zip": {
+      "bun_version_warnings": [],
+      "ejs_version": "0.8.0",
+      "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+      "exit_code": 1,
+      "extractors_loaded": 1744,
+      "js_runtimes": "bun-1.4.3",
+      "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+      "python_version": "3.14.7",
+      "solving_js_challenges": 0,
+      "stderr_excerpt": "[debug] Command-line config: ['--ignore-config', '--no-plugin-dirs', '--no-remote-components', '--no-cache-dir', '--no-js-runtimes', '--js-runtimes', 'bun:/tmp/archivetune-bun-shim-djdxxqmg/bun-shim', '--verbose', '--simulate', '--', 'archivetune-runtime-check:'] | [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI) | [debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp (linux_dir) | [debug] Python 3.14.7 (CPython x86_64 64bit) - Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44 (OpenSSL 3.5.7 9 Jun 2026, glibc 2.44) | [debug] exe versions: ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6 | [debug] Optional libraries: Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0 | [debug] JS runtimes: bun-1.4.3 | [debug] Proxy map: {} | [debug] Request Handlers: urllib, requests, websockets, curl_cffi | [debug] Plugin directories: none (disabled) | [debug] Loaded 1744 extractors | ERROR: Unable to handle request: Unsupported url scheme: \"archivetune-runtime-check\" (requests, urllib, ",
+      "yt_dlp_build": "linux_dir",
+      "yt_dlp_source": "yt-dlp/yt-dlp",
+      "yt_dlp_version": "stable@2026.08.19"
+    }
+  },
+  "duration_s": 54.69,
+  "generated_at_utc": "2026-10-21T12:22:39Z",
+  "headline": {
+    "frozen_cli": {
+      "cpu_total_p50_s": 1.845,
+      "peak_pss_p50_bytes": 392183808.0,
+      "peak_rss_p50_bytes": 396431360.0,
+      "solver_invocations_total": 6,
+      "wall_p50_ms": 2882.808,
+      "wall_p50_observed_difference_ms": 0.0,
+      "wall_p50_observed_difference_note": "the difference between two adjacent samples of the same session, not an effect size and not a causal claim"
+    },
+    "unpacked_zip": {
+      "cpu_total_p50_s": 1.677,
+      "peak_pss_p50_bytes": 381794304.0,
+      "peak_rss_p50_bytes": 384155648.0,
+      "solver_invocations_total": 6,
+      "wall_p50_ms": 2772.816,
+      "wall_p50_observed_difference_ms": -109.992,
+      "wall_p50_observed_difference_note": "the difference between two adjacent samples of the same session, not an effect size and not a causal claim"
+    }
+  },
+  "host": {
+    "cpu_count": 16,
+    "machine": "x86_64",
+    "platform": "Linux-7.2.9-2-cachyos-x86_64-with-glibc2.44",
+    "python": "3.14.8"
+  },
+  "method": {
+    "cookies_used": false,
+    "cpu_method": "getrusage(RUSAGE_CHILDREN) delta around each extraction",
+    "denominators": "both configurations are measured in the same session, with the same scenarios and the same number of attempts per scenario, so the denominators are equal. There is only one session; no attempt of one configuration is compared with an attempt of another session.",
+    "description": "The shipped self-extracting yt-dlp bundle against the upstream unpacked Linux artifact of the same release, with an identical argument set.",
+    "diagnostics_method": "the toolchain probe of the shipped resolver: --verbose --simulate with an unsupported scheme; it exits before any network request",
+    "diagnostics_note": "the diagnostics of the shipped toolchain probe were re-parsed from the excerpts stored in this report after the parser was corrected; the excerpts are the raw measurement data",
+    "extraction_method": "paired extractions per scenario with an identical argument set, serialized, interleaved; the head/tail range probe runs outside the measured window",
+    "format_selector": "bestaudio[protocol=https]/bestaudio[protocol=http]",
+    "interpretation": "The differences between the two binaries are an observation on one machine, not a causal claim. The sample is small, the first launch of each binary has a different page-cache state than the later ones, and the two binaries are not executed from an identical machine state. Adjacent percentiles must not be read as an effect size.",
+    "manifest_exclusion": "Both binaries received identical audio-only controls, not the final production vector: no HIGH bitrate/vcodec filters or youtube:skip=hls,dash. The protocol selector excludes manifests from selection, not fetching. Parent post-run correction: upstream parses comma-separated skip values; the draft claim they were inert was incorrect. Raw timings are unchanged.",
+    "policy": "This is a developer measurement. It changes no default, adds no persistence, no cache and no resident process, and it implies no caching policy.",
+    "post_run_review_note": "All three wall median differences favor onedir (-14/-302/-228 ms); magnitudes vary and CPU differences have mixed signs. Three attempts per scenario do not establish a stable effect size.",
+    "pss_method": "maximum sampled sum of process-tree PSS from /proc/<pid>/smaps_rollup",
+    "rss_method": "maximum sampled sum of process-tree RSS over the whole tree; shared pages may be counted once per mapping process and short-lived spikes may be missed",
+    "scenarios": [
+      {
+        "key": "challenged_default",
+        "player_client": null,
+        "video_id": "dQw4w9WgXcQ"
+      },
+      {
+        "key": "challenged_web_embedded",
+        "player_client": "web_embedded",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      {
+        "key": "simple_default",
+        "player_client": null,
+        "video_id": "jNQXAC9IVRw"
+      }
+    ],
+    "solver_count_method": "a shim in front of Bun logs every invocation; the runtime version probe is excluded",
+    "startup_method": "new-process start of each binary (--version), interleaved, wall time and getrusage(RUSAGE_CHILDREN) delta. NOT a cold boot: the operating system page cache is warm after the first launch, so the first launch of each binary is reported separately."
+  },
+  "new_process_startup": {
+    "frozen_cli": {
+      "cpu_s": {
+        "count": 5,
+        "max": 0.467,
+        "mean": 0.459,
+        "min": 0.45,
+        "p50": 0.457,
+        "p90": 0.467,
+        "p95": 0.467
+      },
+      "first_launch_cpu_s": 0.466154,
+      "first_launch_wall_ms": 467.60691899544327,
+      "page_cache_state": "the first launch may still read a cold page cache; every later launch reads a warm one. These are new-process measurements, not cold boots.",
+      "version_output": "2026.08.19",
+      "wall_ms": {
+        "count": 5,
+        "max": 468.32,
+        "mean": 460.547,
+        "min": 451.506,
+        "p50": 458.178,
+        "p90": 468.32,
+        "p95": 468.32
+      },
+      "wall_ms_excluding_first_launch": {
+        "count": 4,
+        "max": 468.32,
+        "mean": 458.782,
+        "min": 451.506,
+        "p50": 457.123,
+        "p90": 468.32,
+        "p95": 468.32
+      }
+    },
+    "unpacked_zip": {
+      "cpu_s": {
+        "count": 5,
+        "max": 0.288,
+        "mean": 0.283,
+        "min": 0.278,
+        "p50": 0.281,
+        "p90": 0.288,
+        "p95": 0.288
+      },
+      "first_launch_cpu_s": 0.28810399999999997,
+      "first_launch_wall_ms": 289.0030279959319,
+      "page_cache_state": "the first launch may still read a cold page cache; every later launch reads a warm one. These are new-process measurements, not cold boots.",
+      "version_output": "2026.08.19",
+      "wall_ms": {
+        "count": 5,
+        "max": 289.09,
+        "mean": 283.687,
+        "min": 279.393,
+        "p50": 281.48,
+        "p90": 289.09,
+        "p95": 289.09
+      },
+      "wall_ms_excluding_first_launch": {
+        "count": 4,
+        "max": 289.09,
+        "mean": 282.358,
+        "min": 279.393,
+        "p50": 279.471,
+        "p90": 289.09,
+        "p95": 289.09
+      }
+    }
+  },
+  "per_configuration": {
+    "frozen_cli": {
+      "attempts": 9,
+      "cpu_total_s": {
+        "count": 9,
+        "max": 2.497,
+        "mean": 1.638,
+        "min": 0.748,
+        "p50": 1.845,
+        "p90": 2.497,
+        "p95": 2.497
+      },
+      "failed": 0,
+      "peak_tree_pss_bytes": {
+        "count": 9,
+        "max": 432313344.0,
+        "mean": 297209628.444,
+        "min": 79357952.0,
+        "p50": 392183808.0,
+        "p90": 432313344.0,
+        "p95": 432313344.0
+      },
+      "peak_tree_rss_bytes": {
+        "count": 9,
+        "max": 441786368.0,
+        "mean": 303841735.111,
+        "min": 88174592.0,
+        "p50": 396431360.0,
+        "p90": 441786368.0,
+        "p95": 441786368.0
+      },
+      "per_scenario": {
+        "challenged_default": {
+          "attempts": 3,
+          "cpu_total_s": {
+            "count": 3,
+            "max": 1.926,
+            "mean": 1.869,
+            "min": 1.836,
+            "p50": 1.845,
+            "p90": 1.926,
+            "p95": 1.926
+          },
+          "peak_tree_pss_bytes": {
+            "count": 3,
+            "max": 410031104.0,
+            "mean": 393692501.333,
+            "min": 371446784.0,
+            "p50": 399599616.0,
+            "p90": 410031104.0,
+            "p95": 410031104.0
+          },
+          "peak_tree_rss_bytes": {
+            "count": 3,
+            "max": 416116736.0,
+            "mean": 400603818.667,
+            "min": 377245696.0,
+            "p50": 408449024.0,
+            "p90": 416116736.0,
+            "p95": 416116736.0
+          },
+          "solver_invocations_total": 3,
+          "successful": 3,
+          "wall_ms": {
+            "count": 3,
+            "max": 3027.64,
+            "mean": 2938.815,
+            "min": 2882.808,
+            "p50": 2905.996,
+            "p90": 3027.64,
+            "p95": 3027.64
+          }
+        },
+        "challenged_web_embedded": {
+          "attempts": 3,
+          "cpu_total_s": {
+            "count": 3,
+            "max": 2.497,
+            "mean": 2.291,
+            "min": 1.895,
+            "p50": 2.48,
+            "p90": 2.497,
+            "p95": 2.497
+          },
+          "peak_tree_pss_bytes": {
+            "count": 3,
+            "max": 432313344.0,
+            "mean": 415830698.667,
+            "min": 392183808.0,
+            "p50": 422994944.0,
+            "p90": 432313344.0,
+            "p95": 432313344.0
+          },
+          "peak_tree_rss_bytes": {
+            "count": 3,
+            "max": 441786368.0,
+            "mean": 421456554.667,
+            "min": 396431360.0,
+            "p50": 426151936.0,
+            "p90": 441786368.0,
+            "p95": 441786368.0
+          },
+          "solver_invocations_total": 3,
+          "successful": 3,
+          "wall_ms": {
+            "count": 3,
+            "max": 3082.968,
+            "mean": 3009.8,
+            "min": 2871.115,
+            "p50": 3075.317,
+            "p90": 3082.968,
+            "p95": 3082.968
+          }
+        },
+        "simple_default": {
+          "attempts": 3,
+          "cpu_total_s": {
+            "count": 3,
+            "max": 0.756,
+            "mean": 0.753,
+            "min": 0.748,
+            "p50": 0.755,
+            "p90": 0.756,
+            "p95": 0.756
+          },
+          "peak_tree_pss_bytes": {
+            "count": 3,
+            "max": 83483648.0,
+            "mean": 82105685.333,
+            "min": 79357952.0,
+            "p50": 83475456.0,
+            "p90": 83483648.0,
+            "p95": 83483648.0
+          },
+          "peak_tree_rss_bytes": {
+            "count": 3,
+            "max": 90112000.0,
+            "mean": 89464832.0,
+            "min": 88174592.0,
+            "p50": 90107904.0,
+            "p90": 90112000.0,
+            "p95": 90112000.0
+          },
+          "solver_invocations_total": 0,
+          "successful": 3,
+          "wall_ms": {
+            "count": 3,
+            "max": 2386.488,
+            "mean": 2216.735,
+            "min": 2044.317,
+            "p50": 2219.4,
+            "p90": 2386.488,
+            "p95": 2386.488
+          }
+        }
+      },
+      "solver_invocations_total": 6,
+      "successful": 9,
+      "wall_ms": {
+        "count": 9,
+        "max": 3082.968,
+        "mean": 2721.783,
+        "min": 2044.317,
+        "p50": 2882.808,
+        "p90": 3082.968,
+        "p95": 3082.968
+      }
+    },
+    "unpacked_zip": {
+      "attempts": 9,
+      "cpu_total_s": {
+        "count": 9,
+        "max": 2.343,
+        "mean": 1.522,
+        "min": 0.57,
+        "p50": 1.677,
+        "p90": 2.343,
+        "p95": 2.343
+      },
+      "failed": 0,
+      "peak_tree_pss_bytes": {
+        "count": 9,
+        "max": 436119552.0,
+        "mean": 302844472.889,
+        "min": 84015104.0,
+        "p50": 381794304.0,
+        "p90": 436119552.0,
+        "p95": 436119552.0
+      },
+      "peak_tree_rss_bytes": {
+        "count": 9,
+        "max": 439492608.0,
+        "mean": 308841130.667,
+        "min": 90214400.0,
+        "p50": 384155648.0,
+        "p90": 439492608.0,
+        "p95": 439492608.0
+      },
+      "per_scenario": {
+        "challenged_default": {
+          "attempts": 3,
+          "cpu_total_s": {
+            "count": 3,
+            "max": 2.343,
+            "mean": 2.097,
+            "min": 1.666,
+            "p50": 2.282,
+            "p90": 2.343,
+            "p95": 2.343
+          },
+          "peak_tree_pss_bytes": {
+            "count": 3,
+            "max": 432156672.0,
+            "mean": 424725162.667,
+            "min": 417495040.0,
+            "p50": 424523776.0,
+            "p90": 432156672.0,
+            "p95": 432156672.0
+          },
+          "peak_tree_rss_bytes": {
+            "count": 3,
+            "max": 438198272.0,
+            "mean": 429871104.0,
+            "min": 420921344.0,
+            "p50": 430493696.0,
+            "p90": 438198272.0,
+            "p95": 438198272.0
+          },
+          "solver_invocations_total": 3,
+          "successful": 3,
+          "wall_ms": {
+            "count": 3,
+            "max": 2892.883,
+            "mean": 2865.216,
+            "min": 2810.306,
+            "p50": 2892.46,
+            "p90": 2892.883,
+            "p95": 2892.883
+          }
+        },
+        "challenged_web_embedded": {
+          "attempts": 3,
+          "cpu_total_s": {
+            "count": 3,
+            "max": 2.334,
+            "mean": 1.896,
+            "min": 1.677,
+            "p50": 1.677,
+            "p90": 2.334,
+            "p95": 2.334
+          },
+          "peak_tree_pss_bytes": {
+            "count": 3,
+            "max": 436119552.0,
+            "mean": 393446741.333,
+            "min": 362426368.0,
+            "p50": 381794304.0,
+            "p90": 436119552.0,
+            "p95": 436119552.0
+          },
+          "peak_tree_rss_bytes": {
+            "count": 3,
+            "max": 439492608.0,
+            "mean": 397452629.333,
+            "min": 368709632.0,
+            "p50": 384155648.0,
+            "p90": 439492608.0,
+            "p95": 439492608.0
+          },
+          "solver_invocations_total": 3,
+          "successful": 3,
+          "wall_ms": {
+            "count": 3,
+            "max": 2810.909,
+            "mean": 2770.017,
+            "min": 2726.326,
+            "p50": 2772.816,
+            "p90": 2810.909,
+            "p95": 2810.909
+          }
+        },
+        "simple_default": {
+          "attempts": 3,
+          "cpu_total_s": {
+            "count": 3,
+            "max": 0.577,
+            "mean": 0.572,
+            "min": 0.57,
+            "p50": 0.57,
+            "p90": 0.577,
+            "p95": 0.577
+          },
+          "peak_tree_pss_bytes": {
+            "count": 3,
+            "max": 98891776.0,
+            "mean": 90361514.667,
+            "min": 84015104.0,
+            "p50": 88177664.0,
+            "p90": 98891776.0,
+            "p95": 98891776.0
+          },
+          "peak_tree_rss_bytes": {
+            "count": 3,
+            "max": 114933760.0,
+            "mean": 99199658.667,
+            "min": 90214400.0,
+            "p50": 92450816.0,
+            "p90": 114933760.0,
+            "p95": 114933760.0
+          },
+          "solver_invocations_total": 0,
+          "successful": 3,
+          "wall_ms": {
+            "count": 3,
+            "max": 2077.233,
+            "mean": 1991.088,
+            "min": 1904.688,
+            "p50": 1991.343,
+            "p90": 2077.233,
+            "p95": 2077.233
+          }
+        }
+      },
+      "solver_invocations_total": 6,
+      "successful": 9,
+      "wall_ms": {
+        "count": 9,
+        "max": 2892.883,
+        "mean": 2542.107,
+        "min": 1904.688,
+        "p50": 2772.816,
+        "p90": 2892.883,
+        "p95": 2892.883
+      }
+    }
+  },
+  "runs": [
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 1.9263,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 410031104,
+      "peak_tree_rss_bytes": 416116736,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 0,
+      "scenario": "challenged_default",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1126,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3027.64
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 2.3426,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 432156672,
+      "peak_tree_rss_bytes": 438198272,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 0,
+      "scenario": "challenged_default",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1129,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2892.883
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 2.48,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 432313344,
+      "peak_tree_rss_bytes": 441786368,
+      "player_client": "web_embedded",
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 0,
+      "scenario": "challenged_web_embedded",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21600,
+        "url_has_n_parameter": true,
+        "url_length": 1215,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3075.317
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 1.6768,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 381794304,
+      "peak_tree_rss_bytes": 384155648,
+      "player_client": "web_embedded",
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 0,
+      "scenario": "challenged_web_embedded",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": true,
+        "url_length": 1204,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2772.816
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 0.756,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 0,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 83475456,
+      "peak_tree_rss_bytes": 90107904,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 0,
+      "scenario": "simple_default",
+      "solver_invocations": 0,
+      "summary": {
+        "abr": 106.064,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 252182,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1138,
+        "vcodec": "none",
+        "video_id": "jNQXAC9IVRw"
+      },
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2386.488
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 0.5701,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 0,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 1,
+      "peak_tree_pss_bytes": 88177664,
+      "peak_tree_rss_bytes": 92450816,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 0,
+      "scenario": "simple_default",
+      "solver_invocations": 0,
+      "summary": {
+        "abr": 106.064,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 252182,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1120,
+        "vcodec": "none",
+        "video_id": "jNQXAC9IVRw"
+      },
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 1904.688
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 1.845,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 399599616,
+      "peak_tree_rss_bytes": 408449024,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 1,
+      "scenario": "challenged_default",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21598,
+        "url_has_n_parameter": false,
+        "url_length": 1140,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2882.808
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 2.2823,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 424523776,
+      "peak_tree_rss_bytes": 430493696,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 1,
+      "scenario": "challenged_default",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21598,
+        "url_has_n_parameter": false,
+        "url_length": 1130,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2892.46
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 2.4971,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 422994944,
+      "peak_tree_rss_bytes": 426151936,
+      "player_client": "web_embedded",
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 1,
+      "scenario": "challenged_web_embedded",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": true,
+        "url_length": 1242,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 3082.968
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 2.3337,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 436119552,
+      "peak_tree_rss_bytes": 439492608,
+      "player_client": "web_embedded",
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 1,
+      "scenario": "challenged_web_embedded",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": true,
+        "url_length": 1211,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2810.909
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 0.7555,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 0,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 83483648,
+      "peak_tree_rss_bytes": 90112000,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 1,
+      "scenario": "simple_default",
+      "solver_invocations": 0,
+      "summary": {
+        "abr": 106.064,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 252182,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1143,
+        "vcodec": "none",
+        "video_id": "jNQXAC9IVRw"
+      },
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2044.317
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 0.5765,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 0,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 84015104,
+      "peak_tree_rss_bytes": 90214400,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 1,
+      "scenario": "simple_default",
+      "solver_invocations": 0,
+      "summary": {
+        "abr": 106.064,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 252182,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1126,
+        "vcodec": "none",
+        "video_id": "jNQXAC9IVRw"
+      },
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 1991.343
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 1.8363,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 371446784,
+      "peak_tree_rss_bytes": 377245696,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 2,
+      "scenario": "challenged_default",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1150,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2905.996
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 1.6656,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 417495040,
+      "peak_tree_rss_bytes": 420921344,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 2,
+      "scenario": "challenged_default",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21598,
+        "url_has_n_parameter": false,
+        "url_length": 1152,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2810.306
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 1.8947,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 392183808,
+      "peak_tree_rss_bytes": 396431360,
+      "player_client": "web_embedded",
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 2,
+      "scenario": "challenged_web_embedded",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": true,
+        "url_length": 1250,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2871.115
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 1.6766,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 1,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 362426368,
+      "peak_tree_rss_bytes": 368709632,
+      "player_client": "web_embedded",
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 2,
+      "scenario": "challenged_web_embedded",
+      "solver_invocations": 1,
+      "summary": {
+        "abr": 128.93,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 3433755,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21600,
+        "url_has_n_parameter": true,
+        "url_length": 1234,
+        "vcodec": "none",
+        "video_id": "dQw4w9WgXcQ"
+      },
+      "video_id": "dQw4w9WgXcQ",
+      "wall_ms": 2726.326
+    },
+    {
+      "configuration": "frozen_cli",
+      "cpu_total_s": 0.7479,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 0,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 3,
+      "peak_tree_pss_bytes": 79357952,
+      "peak_tree_rss_bytes": 88174592,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 2,
+      "scenario": "simple_default",
+      "solver_invocations": 0,
+      "summary": {
+        "abr": 106.064,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 252182,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1118,
+        "vcodec": "none",
+        "video_id": "jNQXAC9IVRw"
+      },
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2219.4
+    },
+    {
+      "configuration": "unpacked_zip",
+      "cpu_total_s": 0.5704,
+      "diagnostics": {
+        "bun_version_warnings": [],
+        "ejs_version": "0.8.0",
+        "exe_versions": "ffmpeg 9.0.2 (setts), ffprobe 9.0.2, rtmpdump 2.6",
+        "js_runtimes": "bun-1.4.3",
+        "optional_libraries": "Cryptodome-3.23.0, brotli-1.2.0, certifi-2026.07.22, curl_cffi-0.16.0, mutagen-1.48.1, requests-2.34.2, secretstorage-3.5.0, sqlite3-3.53.4, urllib3-2.7.0, websockets-17.0.1, yt_dlp_ejs-0.8.0",
+        "solving_js_challenges": 0,
+        "yt_dlp_version": "version"
+      },
+      "exit_code": 0,
+      "failure_class": "NOT_RUN",
+      "ok": true,
+      "peak_process_count": 2,
+      "peak_tree_pss_bytes": 98891776,
+      "peak_tree_rss_bytes": 114933760,
+      "player_client": null,
+      "probe": {
+        "attempted": true,
+        "bytes_read": 65536,
+        "content_type": "audio/webm",
+        "error": null,
+        "magic_hex": "1a45dfa3",
+        "ranged_response": true,
+        "status": 206,
+        "tail_bytes_read": 65536,
+        "tail_status": 206
+      },
+      "round": 2,
+      "scenario": "simple_default",
+      "solver_invocations": 0,
+      "summary": {
+        "abr": 106.064,
+        "acodec": "opus",
+        "ext": "webm",
+        "filesize": 252182,
+        "format_id": "251",
+        "header_names": [
+          "accept",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent"
+        ],
+        "protocol": "https",
+        "url_expires_in_s": 21599,
+        "url_has_n_parameter": false,
+        "url_length": 1130,
+        "vcodec": "none",
+        "video_id": "jNQXAC9IVRw"
+      },
+      "video_id": "jNQXAC9IVRw",
+      "wall_ms": 2077.233
+    }
+  ],
+  "schema": "archivetune.ytdlp.unpacked-evaluation/1",
+  "upstream_sources": [
+    {
+      "fact": "The upstream release publishes the Linux artifacts and a SHA2-256SUMS feed next to them; the feed is the reference for the archive digest.",
+      "title": "yt-dlp 2026.08.19 release assets (yt-dlp_linux.zip, SHA2-256SUMS)",
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19"
+    },
+    {
+      "fact": "The shipped desktop resolver starts yt-dlp once per request with --ignore-config --no-plugin-dirs --no-remote-components --no-js-runtimes --js-runtimes bun:<path> --no-cache-dir and a format selector; the toolchain check uses --verbose --simulate with an unsupported scheme.",
+      "title": "ArchiveTune stream-resolver/src/main/kotlin/.../YtDlpStreamResolver.kt",
+      "url": "https://github.com/Rukamori/ArchiveTuneLinux"
+    }
+  ]
+}
