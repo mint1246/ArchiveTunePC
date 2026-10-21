@@ -5,6 +5,34 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import kotlin.test.*
 
 class GlobalShortcutsPortalSmokeTest {
+    @Test fun `activation and deactivation are decoded across a real bus connection`() {
+        assumeTrue(System.getenv("ARCHIVETUNE_PORTAL_SIGNAL_SMOKE") == "1", "Opt-in D-Bus signal smoke")
+        val activated = java.util.concurrent.LinkedBlockingQueue<String>()
+        val deactivated = java.util.concurrent.LinkedBlockingQueue<String>()
+        DbusGlobalShortcutsPortal().use { portal ->
+            portal.setListener(object : GlobalShortcutsListener {
+                override fun onActivated(shortcutId: String) { activated.add(shortcutId) }
+                override fun onDeactivated(shortcutId: String) { deactivated.add(shortcutId) }
+            })
+            val connect = portal.javaClass.getDeclaredMethod("ensureConnection").apply { isAccessible = true }
+            assertNotNull(connect.invoke(portal))
+            // An isolated synthetic session: no desktop shortcut, request, or user setting changes.
+            val session = "/org/freedesktop/portal/desktop/session/archivetune_signal_test_${System.nanoTime()}"
+            portal.javaClass.getDeclaredField("sessionHandle").apply { isAccessible = true }.set(portal, session)
+            org.freedesktop.dbus.connections.impl.DBusConnectionBuilder.forSessionBus().withShared(false).build().use { sender ->
+                for (member in listOf("Activated", "Deactivated")) {
+                    sender.sendMessage(sender.messageFactory.createSignal(
+                        null, "/org/freedesktop/portal/desktop", "org.freedesktop.portal.GlobalShortcuts",
+                        member, "osta{sv}", org.freedesktop.dbus.DBusPath(session), "VOLUME_DOWN",
+                        org.freedesktop.dbus.types.UInt64(123L), emptyMap<String, org.freedesktop.dbus.types.Variant<*>>(),
+                    ))
+                }
+                assertEquals("VOLUME_DOWN", activated.poll(3, java.util.concurrent.TimeUnit.SECONDS))
+                assertEquals("VOLUME_DOWN", deactivated.poll(3, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        }
+    }
+
     @Test fun `desktop portal registers the installed app and creates a session without prompting`() {
         assumeTrue(System.getenv("ARCHIVETUNE_PORTAL_SMOKE") == "1", "Opt-in portal session smoke")
         DbusGlobalShortcutsPortal(diagnostic = ::println).use { portal ->

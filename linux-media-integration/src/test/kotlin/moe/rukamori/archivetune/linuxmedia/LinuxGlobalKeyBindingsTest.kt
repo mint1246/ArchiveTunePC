@@ -71,22 +71,30 @@ class LinuxGlobalKeyBindingsTest {
     }
 
     @Test
-    fun `the capture suspends the activations`() {
-        val portal = FakePortal()
+    fun `capture releases the desktop grab and rebinds when recording finishes`() {
+        val first = FakePortal()
+        val second = FakePortal()
+        val portals = java.util.concurrent.ConcurrentLinkedQueue(listOf(first, second))
         val actions = mutableListOf<String>()
-        val bindings = LinuxGlobalKeyBindings(onAction = { actions += it }, portalFactory = { portal })
-
-        bindings.updateBindings(listOf(LinuxGlobalKeyBinding("NEXT", setOf(0x11, 0x4E))))
-        assertTrue(portal.bindLatch.await(5, TimeUnit.SECONDS), "the portal was never asked to bind")
-
-        bindings.setCaptureActive(true)
-        portal.activate("NEXT")
-        assertTrue(actions.isEmpty(), "a recorded shortcut must not trigger an action")
-
-        bindings.setCaptureActive(false)
-        portal.activate("NEXT")
-        assertEquals(listOf("NEXT"), actions)
-        bindings.close()
+        val bindings = LinuxGlobalKeyBindings(onAction = { actions += it }, portalFactory = { portals.remove() })
+        try {
+            bindings.updateBindings(listOf(LinuxGlobalKeyBinding("NEXT", setOf(0x11, 0x4E))))
+            assertTrue(first.bindLatch.await(5, TimeUnit.SECONDS))
+            bindings.setCaptureActive(true)
+            assertTrue(first.closed, "The old global grab would consume keys before the local recorder")
+            first.activate("NEXT")
+            assertTrue(actions.isEmpty())
+            // A settings update while capture is active must not re-grab the keys.
+            bindings.updateBindings(listOf(LinuxGlobalKeyBinding("NEXT", setOf(0x11, 0x59))))
+            assertEquals(1L, second.bindLatch.count)
+            bindings.setCaptureActive(false)
+            assertTrue(second.bindLatch.await(5, TimeUnit.SECONDS))
+            assertEquals("CTRL+y", second.bound.single().trigger)
+            first.activate("NEXT")
+            assertTrue(actions.isEmpty(), "An obsolete portal must not dispatch actions")
+            second.activate("NEXT")
+            assertEquals(listOf("NEXT"), actions)
+        } finally { bindings.close() }
     }
 
     @Test

@@ -147,6 +147,13 @@ shortcut in the desktop dialog. The desktop owns the final global binding.
 Unsupported or declined registrations are shown in settings. Linux shortcut
 registration does not use the Windows keyboard-state poller.
 
+On GNOME, the XKB `grp:alt_shift_toggle` option consumes Alt+Shift even when
+Ctrl is also held, so Ctrl+Shift+Alt shortcuts may switch languages instead.
+Use exact shortcuts in GNOME's `switch-input-source` setting (for example
+`<Alt>Shift_L` and `<Shift>Alt_L`) instead of that XKB toggle if both features
+are needed. Preserve existing input-source shortcuts when changing this setting.
+ArchiveTune does not change desktop keyboard preferences itself.
+
 The bundled Java runtime includes Unix-domain socket support for D-Bus. The
 MIT license for dbus-java is included in the application resources under
 `licenses/dbus-java-LICENSE.txt`.

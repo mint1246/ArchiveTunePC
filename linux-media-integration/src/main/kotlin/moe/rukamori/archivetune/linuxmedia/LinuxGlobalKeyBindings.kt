@@ -75,23 +75,30 @@ class LinuxGlobalKeyBindings(
             next
         }
         repeats.keys.toList().forEach(::cancelRepeat)
-        binder.execute { bind(revision) }
+        if (!captureActive) binder.execute { bind(revision) }
     }
 
     /**
-     * Suspends the global shortcuts while a shortcut is being recorded.
-     *
-     * The portal keeps delivering activations while the settings surface is open, and those would
-     * trigger playback commands in the middle of a recording.
+     * Releases desktop grabs while recording. Merely ignoring activations still lets GNOME
+     * consume the ordinary key, so the focused recorder would only see the modifiers.
      */
     fun setCaptureActive(active: Boolean) {
-        captureActive = active
-        if (active) repeats.keys.toList().forEach(::cancelRepeat)
+        val (revision, released) = synchronized(lock) {
+            if (closed || captureActive == active) return
+            captureActive = active
+            this.revision += 1L
+            val previous = portal
+            portal = null
+            this.revision to previous
+        }
+        repeats.keys.toList().forEach(::cancelRepeat)
+        released?.let { runCatching { it.close() } }
+        if (!active) binder.execute { bind(revision) }
     }
 
     private fun bind(revision: Long) {
         val snapshot = synchronized(lock) {
-            if (closed || revision != this.revision) return
+            if (closed || captureActive || revision != this.revision) return
             bindings
         }
         val unsupported = snapshot.filterNot { LinuxShortcutTriggers.isSupported(it.virtualKeys) }
@@ -147,7 +154,7 @@ class LinuxGlobalKeyBindings(
         val created = runCatching { portalFactory() }.getOrNull() ?: return null
         created.setListener(listenerFor(revision))
         val (accepted, previous) = synchronized(lock) {
-            if (closed || revision != this.revision) {
+            if (closed || captureActive || revision != this.revision) {
                 false to null
             } else {
                 val current = portal

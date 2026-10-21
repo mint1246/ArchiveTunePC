@@ -154,10 +154,10 @@ fun DesktopSettingsPanel(
     // modifiers plus a single key while the settings surface has to show the keys as they are
     // pressed.
     val linuxKeyCapture = remember { LinuxKeyCapture() }
-    val linuxPressedKeys by linuxKeyCapture.pressedKeys.collectAsState()
-    val linuxCancellations by linuxKeyCapture.cancellations.collectAsState()
+    val linuxRecording by linuxKeyCapture.state.collectAsState()
+    var linuxCaptureSession by remember { mutableStateOf(0L) }
     val isLinuxDesktop = remember { isLinuxDesktop() }
-    val observedKeybindKeys = if (isLinuxDesktop) linuxPressedKeys else serviceKeybindKeys
+    val observedKeybindKeys = if (isLinuxDesktop) linuxRecording.bestChord else serviceKeybindKeys
     var settings by remember(settingsStore) { mutableStateOf(settingsStore.snapshot()) }
     val emptyLastFmState = remember { MutableStateFlow(DesktopLastFmState()) }
     val lastFm by (lastFmStateFlow ?: emptyLastFmState).collectAsState()
@@ -198,28 +198,19 @@ fun DesktopSettingsPanel(
         }
     }
 
-    // The Linux capture listens for the keys of the focused window, so it only runs while a
-    // shortcut is being recorded.
-    LaunchedEffect(recordingKeybindAction, isLinuxDesktop) {
-        if (isLinuxDesktop && recordingKeybindAction != null) {
-            linuxKeyCapture.start()
-        } else {
-            linuxKeyCapture.stop()
-        }
-    }
-
     fun setRecordingKeybindAction(action: DesktopKeybindAction?) {
         val wasRecording = recordingKeybindAction != null
-        recordingKeybindAction = action
         val isRecording = action != null
-        if (wasRecording != isRecording) onKeybindCaptureChanged(isRecording)
+        // Release any existing desktop grab before attaching the local recorder.
+        if (isRecording && !wasRecording) onKeybindCaptureChanged(true)
+        if (isLinuxDesktop) {
+            if (action == null) linuxKeyCapture.stop()
+            else linuxCaptureSession = linuxKeyCapture.start()
+        }
+        recordingKeybindAction = action
+        if (wasRecording && !isRecording) onKeybindCaptureChanged(false)
     }
 
-    // A recording that was dropped, for example because the window lost the focus, must not save
-    // the keys that were pressed before.
-    LaunchedEffect(linuxCancellations) {
-        if (linuxCancellations > 0L) setRecordingKeybindAction(null)
-    }
     fun update(transform: (DesktopSettings) -> DesktopSettings) {
         settings = settingsStore.update(transform)
     }
@@ -235,6 +226,22 @@ fun DesktopSettingsPanel(
             )
         }
         onKeybindsChanged()
+    }
+
+    // Completed chords are retained by the event-thread recorder. Compose can skip every
+    // intermediate press/release frame of a mouse macro without losing any of its keys.
+    LaunchedEffect(linuxRecording) {
+        if (isLinuxDesktop && linuxRecording.session == linuxCaptureSession) {
+            val action = recordingKeybindAction
+            val chord = linuxRecording.completedChord
+            if (action != null && chord != null) {
+                val binding = settings.keybinds.firstOrNull { it.action == action }
+                updateKeybind(DesktopKeybind(action, chord, binding?.repeatWhileHeld == true))
+                setRecordingKeybindAction(null)
+            } else if (linuxRecording.cancelled) {
+                setRecordingKeybindAction(null)
+            }
+        }
     }
 
     fun clearKeybind(action: DesktopKeybindAction) {
@@ -1023,6 +1030,7 @@ fun DesktopSettingsPanel(
                         binding = binding,
                         recording = recordingKeybindAction == action,
                         observedKeys = observedKeybindKeys,
+                        completeOnRelease = !isLinuxDesktop,
                         onRecordingChanged = { recording ->
                             setRecordingKeybindAction(action.takeIf { recording })
                         },
@@ -1073,6 +1081,7 @@ private fun KeybindRow(
     binding: DesktopKeybind?,
     recording: Boolean,
     observedKeys: List<Int>,
+    completeOnRelease: Boolean = true,
     onRecordingChanged: (Boolean) -> Unit,
     onRecorded: (List<Int>) -> Unit,
     onRepeatChanged: (Boolean) -> Unit,
@@ -1094,7 +1103,7 @@ private fun KeybindRow(
                 bestChord = keys
                 chordPreview = keys
             }
-        } else if (bestChord.isNotEmpty()) {
+        } else if (completeOnRelease && bestChord.isNotEmpty()) {
             val completed = bestChord
             bestChord = emptyList()
             chordPreview = emptyList()

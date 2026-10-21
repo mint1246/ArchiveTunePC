@@ -1,9 +1,4 @@
-/*
- * ArchiveTune (2026)
- * © Rukamori — github.com/rukamori
- * GPL-3.0 License | Contributors: see git history
- */
-
+/* ArchiveTune (2026), GPL-3.0. See LICENSE. */
 package moe.rukamori.archivetune.linuxmedia
 
 import java.awt.AWTEvent
@@ -13,124 +8,82 @@ import java.awt.KeyboardFocusManager
 import java.awt.Toolkit
 import java.awt.Window
 import java.awt.event.AWTEventListener
+import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.WindowEvent
+import java.util.concurrent.FutureTask
 import javax.swing.SwingUtilities
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Records a shortcut while ArchiveTune is focused.
- *
- * The capture is local on purpose: the global shortcut portal can only express modifiers plus a
- * single key, so the settings surface records the chord that the user presses and reports it to
- * the application. Recorded keys are consumed so they cannot trigger a playback command while the
- * shortcut is being recorded.
- */
+/** Captures and finishes a chord on the AWT event thread, independently of Compose frame timing. */
 class LinuxKeyCapture : KeyEventDispatcher, AutoCloseable {
-    private val _pressedKeys = MutableStateFlow<List<Int>>(emptyList())
-
-    /** The keys that are held right now, as the virtual-key ids the settings file uses. */
-    val pressedKeys: StateFlow<List<Int>> = _pressedKeys.asStateFlow()
-
-    private val _cancellations = MutableStateFlow(0L)
-
-    /**
-     * Counts the recordings that were dropped instead of being saved.
-     *
-     * A recording is dropped when the window loses the focus, because the keys the user pressed
-     * before that are only a part of the shortcut they wanted to record.
-     */
-    val cancellations: StateFlow<Long> = _cancellations.asStateFlow()
-
-    private val tracker = LinuxChordTracker()
-    @Volatile private var active = false
+    private val recorder = LinuxShortcutRecorder()
+    private val _state = MutableStateFlow(recorder.state)
+    val state = _state.asStateFlow()
     private var captureWindow: Window? = null
-    private var focusListener: AWTEventListener? = null
-
-    /** True while the capture is listening for key events. */
-    val isActive: Boolean
-        get() = active
-
-    /** Starts recording. Calling it again while the capture runs does nothing. */
-    fun start() {
-        if (active) return
-        if (GraphicsEnvironment.isHeadless()) return
-        active = true
-        tracker.reset()
-        publish(emptySet())
-        captureWindow = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
-        val listener = AWTEventListener { event -> handleWindowEvent(event) }
-        focusListener = listener
-        runCatching { Toolkit.getDefaultToolkit().addAWTEventListener(listener, LISTENER_MASK) }
-        SwingUtilities.invokeLater { attachDispatcher() }
+    private val focusListener = AWTEventListener { event ->
+        if (event is WindowEvent &&
+            event.id in listOf(WindowEvent.WINDOW_LOST_FOCUS, WindowEvent.WINDOW_DEACTIVATED) &&
+            (captureWindow == null || event.window === captureWindow)
+        ) stop()
     }
 
-    /**
-     * Stops recording and forgets the keys that were held.
-     *
-     * [cancelled] tells the caller that the recording was dropped rather than finished, so a
-     * partial chord is never saved. A dropped recording keeps the pressed keys visible, because an
-     * empty key set would look like a finished chord to the settings surface.
-     */
-    fun stop(cancelled: Boolean = false) {
-        if (!active) return
-        active = false
-        tracker.reset()
-        if (cancelled) {
-            _cancellations.value += 1L
-        } else {
-            publish(emptySet())
+    /** Attach immediately when Set is clicked, so a fast following mouse macro is not missed. */
+    fun start(): Long = onEventThread {
+        detach()
+        val state = recorder.start()
+        _state.value = state
+        if (!GraphicsEnvironment.isHeadless()) {
+            val manager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            captureWindow = manager.activeWindow
+            manager.addKeyEventDispatcher(this)
+            Toolkit.getDefaultToolkit().addAWTEventListener(
+                focusListener,
+                AWTEvent.WINDOW_EVENT_MASK or AWTEvent.WINDOW_FOCUS_EVENT_MASK,
+            )
         }
-        focusListener?.let { listener -> runCatching { Toolkit.getDefaultToolkit().removeAWTEventListener(listener) } }
-        focusListener = null
-        captureWindow = null
-        runCatching { KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(this) }
+        state.session
     }
 
-    /** The chord that was recorded, or an empty set when nothing was recorded yet. */
-    fun recordedChord(): Set<Int> = tracker.bestChord()
+    fun stop() = onEventThread {
+        _state.value = recorder.cancel()
+        detach()
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (!active) return false
+        if (!recorder.active) return false
+        if (event.id == KeyEvent.KEY_TYPED) return true
         val key = awtToPersistedKey(event.keyCode) ?: return false
-        return when (event.id) {
-            KeyEvent.KEY_PRESSED -> {
-                publish(tracker.keyDown(key))
-                true
-            }
-
-            KeyEvent.KEY_RELEASED -> {
-                publish(tracker.keyUp(key))
-                true
-            }
-
-            else -> false
+        val state = when (event.id) {
+            KeyEvent.KEY_PRESSED -> recorder.press(key, modifiers(event.modifiersEx))
+            KeyEvent.KEY_RELEASED -> recorder.release(key)
+            else -> return false
         }
+        _state.value = state
+        if (!recorder.active) detach()
+        return true
     }
 
-    override fun close() {
-        stop()
+    override fun close() = stop()
+
+    private fun detach() {
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(this)
+        if (!GraphicsEnvironment.isHeadless()) Toolkit.getDefaultToolkit().removeAWTEventListener(focusListener)
+        captureWindow = null
     }
 
-    private fun attachDispatcher() {
-        if (!active) return
-        runCatching { KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(this) }
+    private fun modifiers(mask: Int): Set<Int> = buildSet {
+        if (mask and InputEvent.CTRL_DOWN_MASK != 0) add(LinuxVirtualKeys.CONTROL)
+        if (mask and InputEvent.SHIFT_DOWN_MASK != 0) add(LinuxVirtualKeys.SHIFT)
+        if (mask and InputEvent.ALT_DOWN_MASK != 0) add(LinuxVirtualKeys.ALT)
+        if (mask and InputEvent.META_DOWN_MASK != 0) add(LinuxVirtualKeys.WINDOWS)
     }
 
-    private fun handleWindowEvent(event: AWTEvent) {
-        if (event !is WindowEvent) return
-        if (event.id != WindowEvent.WINDOW_LOST_FOCUS && event.id != WindowEvent.WINDOW_DEACTIVATED) return
-        val window = captureWindow
-        if (window == null || event.window === window) stop(cancelled = true)
-    }
-
-    private fun publish(keys: Set<Int>) {
-        _pressedKeys.value = keys.sorted()
-    }
-
-    private companion object {
-        val LISTENER_MASK: Long = AWTEvent.WINDOW_EVENT_MASK or AWTEvent.WINDOW_FOCUS_EVENT_MASK
+    private fun <T> onEventThread(block: () -> T): T {
+        if (SwingUtilities.isEventDispatchThread()) return block()
+        val task = FutureTask(block)
+        SwingUtilities.invokeAndWait(task)
+        return task.get()
     }
 }
