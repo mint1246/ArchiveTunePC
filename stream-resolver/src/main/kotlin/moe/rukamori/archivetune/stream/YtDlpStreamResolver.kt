@@ -36,7 +36,7 @@ enum class YtDlpFailure {
 
 class YtDlpException(val kind: YtDlpFailure) : IllegalStateException(
     when (kind) {
-        YtDlpFailure.TOOLCHAIN -> "Install compatible yt-dlp with EJS and quickjs-ng, or repair the bundled resolver"
+        YtDlpFailure.TOOLCHAIN -> "Install compatible yt-dlp with EJS and Bun 1.4.3+, or repair the bundled resolver"
         YtDlpFailure.TIMEOUT -> "YouTube stream resolution timed out"
         YtDlpFailure.AUTH_REQUIRED -> "Sign in is required for this YouTube track"
         YtDlpFailure.UNAVAILABLE -> "This YouTube video is unavailable"
@@ -48,11 +48,11 @@ class YtDlpException(val kind: YtDlpFailure) : IllegalStateException(
     },
 )
 
-data class YtDlpToolchain(val ytDlpVersion: String, val quickJsVersion: String, val ejsVersion: String)
+data class YtDlpToolchain(val ytDlpVersion: String, val bunVersion: String, val ejsVersion: String)
 
 data class YtDlpConfiguration(
     val executable: String = resolverExecutable("yt-dlp", "ARCHIVETUNE_YTDLP"),
-    val quickJsExecutable: String = resolverExecutable("qjs", "ARCHIVETUNE_QUICKJS"),
+    val bunExecutable: String = resolverExecutable("bun", "ARCHIVETUNE_BUN"),
     val timeoutMs: Long = 35_000,
     val temporaryRoot: Path = Path.of(System.getProperty("java.io.tmpdir")),
     /** Public signature/player cache managed by yt-dlp; cookies and signed URLs stay request-local. */
@@ -146,8 +146,8 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
     }
 
     private fun commonArguments() = listOf(
-        configuration.executable, "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
-        "--no-js-runtimes", "--js-runtimes", "quickjs:${configuration.quickJsExecutable}",
+        absoluteExecutable(configuration.executable), "--ignore-config", "--no-plugin-dirs", "--no-remote-components",
+        "--no-js-runtimes", "--js-runtimes", "bun:${absoluteExecutable(configuration.bunExecutable)}",
         "--no-cache-dir",
     )
 
@@ -200,10 +200,10 @@ class YtDlpStreamResolver(private val configuration: YtDlpConfiguration = YtDlpC
 
 internal fun parseToolchain(diagnostics: String): YtDlpToolchain {
     val version = Regex("yt-dlp version [^@\\r\\n]+@([0-9.]+)").find(diagnostics)?.groupValues?.get(1)
-    val quickJs = Regex("JS runtimes:.*?quickjs-ng-([0-9.]+)").find(diagnostics)?.groupValues?.get(1)
+    val bun = Regex("JS runtimes:.*?\\bbun-([0-9]+\\.[0-9]+\\.[0-9]+)(?:[ ,\\r\\n]|$)").find(diagnostics)?.groupValues?.get(1)
     val ejs = Regex("yt_dlp_ejs-([0-9.]+)").find(diagnostics)?.groupValues?.get(1)
-    if (version == null || quickJs == null || ejs == null) throw YtDlpException(YtDlpFailure.TOOLCHAIN)
-    return YtDlpToolchain(version, quickJs, ejs)
+    if (version == null || bun == null || !isSupportedBunVersion(bun) || ejs == null) throw YtDlpException(YtDlpFailure.TOOLCHAIN)
+    return YtDlpToolchain(version, bun, ejs)
 }
 
 internal fun formatSelector(quality: StreamAudioQuality, excludedFormatIds: Set<String> = emptySet()): String {
@@ -246,7 +246,7 @@ internal fun classifyYtDlpError(diagnostic: String): YtDlpFailure {
 internal fun hasYtDlpToolchainFailure(diagnostic: String): Boolean {
     val text = diagnostic.lowercase(Locale.ROOT)
     return listOf("no supported javascript runtime", "no usable challenge solver", "failed to load challenge solver",
-        "hash mismatch on challenge solver", "error running quickjs process").any { it in text }
+        "hash mismatch on challenge solver", "error running bun process").any { it in text }
 }
 
 internal fun parseYtDlpAudio(json: String, videoId: String, nowMs: Long = System.currentTimeMillis()): YtDlpAudioStream = try {
@@ -336,10 +336,20 @@ private fun sweepAbandonedRequests(root: Path, current: Path) {
         } }
     }
 }
+// Bun 1.4 is the Rust rewrite; older PATH installations must not silently select the old runtime.
+private fun isSupportedBunVersion(version: String): Boolean {
+    val parts = version.split('.').map { it.toIntOrNull() ?: return false }
+    return parts.size == 3 && (parts[0] > 1 || parts[0] == 1 && (parts[1] > 4 || parts[1] == 4 && parts[2] >= 3))
+}
+
+// Preserve explicit relative overrides when the child starts in its private request directory.
+private fun absoluteExecutable(path: String): String =
+    if ('/' in path || '\\' in path) File(path).absolutePath else path
+
 private val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
 
 private fun resolverExecutable(name: String, environmentKey: String): String {
-    System.getProperty("archivetune.${if (name == "qjs") "quickjs" else "ytdlp"}")?.takeIf { it.isNotBlank() }?.let { return it }
+    System.getProperty("archivetune.${if (name == "bun") "bun" else "ytdlp"}")?.takeIf { it.isNotBlank() }?.let { return it }
     System.getenv(environmentKey)?.takeIf { it.isNotBlank() }?.let { return it }
     val executable = name + if (System.getProperty("os.name").startsWith("Windows", true)) ".exe" else ""
     val commandDirectory = ProcessHandle.current().info().command().orElse(null)?.let { File(it).parentFile }

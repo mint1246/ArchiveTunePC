@@ -33,7 +33,7 @@ tasks.test {
         "ARCHIVETUNE_LIVE_YTDLP" to "archivetune.liveYtdlp",
         "ARCHIVETUNE_LIVE_YTDLP_VIDEO" to "archivetune.liveYtdlpVideo",
         "ARCHIVETUNE_YTDLP" to "archivetune.ytdlp",
-        "ARCHIVETUNE_QUICKJS" to "archivetune.quickjs",
+        "ARCHIVETUNE_BUN" to "archivetune.bun",
     ).forEach { (environmentName, propertyName) ->
         val forwarded = providers.environmentVariable(environmentName).orNull
             ?: providers.systemProperty(propertyName).orNull

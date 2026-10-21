@@ -105,13 +105,13 @@ class YtDlpDesktopStreamExtractorTest {
                 #!/bin/sh
                 case "${'$'}*" in
                   *archivetune-runtime-check:*)
-                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n' >&2
+                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: bun-1.4.3\n' >&2
                     exit 1 ;;
                 esac
                 cat "${'$'}(dirname "${'$'}0")/response.json"
             """.trimIndent())
             fixture.toFile().setExecutable(true)
-            val extractor = YtDlpDesktopStreamExtractor(YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)), audioConfigProvider = { _, _ -> null })
+            val extractor = YtDlpDesktopStreamExtractor(YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", temporaryRoot = root)), audioConfigProvider = { _, _ -> null })
             val result = extractor.resolve("jNQXAC9IVRw", JvmAudioQuality.HIGHEST, PlaybackAuthState())
             assertEquals("YT_DLP", result.clientName)
             assertEquals("2026.08.19", result.clientVersion)
@@ -171,7 +171,7 @@ class YtDlpDesktopStreamExtractorTest {
                 root=${'$'}(dirname "${'$'}0")
                 case "${'$'}*" in
                   *archivetune-runtime-check:*)
-                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n' >&2
+                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: bun-1.4.3\n' >&2
                     exit 1 ;;
                 esac
                 printf '%s\n' "${'$'}@" >> "${'$'}root/arguments"
@@ -180,7 +180,7 @@ class YtDlpDesktopStreamExtractorTest {
             fixture.toFile().setExecutable(true)
             val audioConfig = moe.rukamori.archivetune.innertube.models.response.PlayerResponse.PlayerConfig.AudioConfig(6.5, 7.0)
             val extractor = YtDlpDesktopStreamExtractor(
-                YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)),
+                YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", temporaryRoot = root)),
                 audioConfigProvider = { _, _ -> audioConfig })
             val stream = extractor.resolve("jNQXAC9IVRw", JvmAudioQuality.HIGHEST, PlaybackAuthState())
             assertEquals(140, stream.format.itag)
@@ -219,7 +219,7 @@ class YtDlpDesktopStreamExtractorTest {
                 root=${'$'}(dirname "${'$'}0")
                 case "${'$'}*" in
                   *archivetune-runtime-check:*)
-                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n' >&2
+                    printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: bun-1.4.3\n' >&2
                     exit 1 ;;
                 esac
                 printf 'attempt\n' >> "${'$'}root/attempts"
@@ -231,7 +231,7 @@ class YtDlpDesktopStreamExtractorTest {
             """.trimIndent())
             fixture.toFile().setExecutable(true)
             val extractor = YtDlpDesktopStreamExtractor(
-                YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", temporaryRoot = root)),
+                YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", temporaryRoot = root)),
                 attemptTimeoutMs = 1_500, audioConfigProvider = { _, _ -> null })
             val result = withTimeout(5_000) { extractor.resolve("jNQXAC9IVRw", JvmAudioQuality.HIGH, PlaybackAuthState()) }
             assertEquals("YT_DLP", result.clientName)

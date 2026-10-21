@@ -69,12 +69,12 @@ class YtDlpStreamResolverTest {
         assertTrue(result.format.mimeType.startsWith("audio/mp4"))
     }
 
-    @Test fun `requires actual ng runtime and EJS capabilities rather than version alone`() {
+    @Test fun `requires actual Rust Bun runtime and EJS capabilities rather than version alone`() {
         val diagnostics = "[debug] yt-dlp version stable@2026.08.19 from yt-dlp/yt-dlp\n" +
-            "[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n"
-        assertEquals(YtDlpToolchain("2026.08.19", "0.17.0", "0.8.0"), parseToolchain(diagnostics))
-        listOf(diagnostics.replace("yt_dlp_ejs-0.8.0", ""), diagnostics.replace("quickjs-ng", "quickjs"),
-            diagnostics.replace("quickjs-ng-0.17.0", "none")).forEach {
+            "[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: bun-1.4.3\n"
+        assertEquals(YtDlpToolchain("2026.08.19", "1.4.3", "0.8.0"), parseToolchain(diagnostics))
+        listOf(diagnostics.replace("yt_dlp_ejs-0.8.0", ""), diagnostics.replace("bun-1.4.3", "bun-1.3.14"),
+            diagnostics.replace("bun-1.4.3", "none"), diagnostics.replace("bun-1.4.3", "quickjs-ng-0.17.0"), diagnostics.replace("bun-1.4.3", "bun-1.4.2")).forEach {
             assertEquals(YtDlpFailure.TOOLCHAIN, assertFailsWith<YtDlpException> { parseToolchain(it) }.kind)
         }
     }
@@ -105,8 +105,10 @@ class YtDlpStreamResolverTest {
     @Test fun `successful exit cannot silently lose its required runtime or EJS`() {
         assertTrue(hasYtDlpToolchainFailure("WARNING: No supported JavaScript runtime could be found"))
         assertTrue(hasYtDlpToolchainFailure("WARNING: No usable challenge solver lib script available"))
-        assertTrue(hasYtDlpToolchainFailure("Error running QuickJS process (returncode: 3)"))
+        assertTrue(hasYtDlpToolchainFailure("Error running Bun process (returncode: 3)"))
         assertFalse(hasYtDlpToolchainFailure("WARNING: unrelated metadata is missing"))
+        // The pinned yt-dlp warns about Rust Bun, but still invokes it without a bypass.
+        assertFalse(hasYtDlpToolchainFailure("WARNING: bun version 1.4.3 is not supported! 1.3.14 is the last supported bun version."))
     }
 
     @Test fun `cookie bridge preserves equals signs and scopes cookies to secure youtube requests`() {
@@ -134,7 +136,7 @@ class YtDlpStreamResolverTest {
         val root = Files.createTempDirectory("resolver-cancel-test-")
         try {
             val fixture = createFixture(root, "sleep")
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 10_000, root))
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 10_000, root))
             val task = async { resolver.resolve(videoId, cookie = "SID=private-value") }
             withTimeout(5000) { while (!Files.exists(root.resolve("started"))) delay(20) }
             val pid = Files.readString(root.resolve("pid")).trim().toLong()
@@ -150,10 +152,10 @@ class YtDlpStreamResolverTest {
         val root = Files.createTempDirectory("resolver-timeout-test-")
         try {
             val fixture = createFixture(root, "sleep")
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 500, root))
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 500, root))
             val failure = assertFailsWith<YtDlpException> { resolver.resolve(videoId) }
             assertEquals(YtDlpFailure.TIMEOUT, failure.kind)
-            val other = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 10_000, root))
+            val other = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 10_000, root))
             assertFailsWith<CancellationException> { withTimeout(500) { other.resolve(videoId) } }
         } finally { root.toFile().deleteRecursively() }
     }
@@ -163,13 +165,19 @@ class YtDlpStreamResolverTest {
         val root = Files.createTempDirectory("resolver space test ")
         try {
             val fixture = createFixture(root, "success")
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs path with spaces", 5000, root, root.resolve("player cache")))
+            val relativeFixture = Path.of("").toAbsolutePath().relativize(fixture).toString()
+            val relativeBun = "./bun path with spaces"
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(relativeFixture, relativeBun, 5000, root, root.resolve("player cache")))
             val result = resolver.resolve(videoId, cookie = "SID=private-value",
                 proxyUrl = "http://test-user:private-proxy@localhost:8080", dataSyncId = "123||456")
             assertEquals(videoId, result.videoId)
             val args = Files.readString(root.resolve("args"))
             assertTrue(args.contains("--ignore-config\n--no-plugin-dirs\n--no-remote-components\n--no-js-runtimes\n"))
-            assertTrue(args.contains("quickjs:qjs path with spaces\n"))
+            assertTrue(args.contains("bun:${Path.of(relativeBun).toAbsolutePath()}\n"))
+            val childDirectory = Path.of(Files.readString(root.resolve("cwd")).trim())
+            assertEquals(root, childDirectory.parent)
+            assertTrue(childDirectory.fileName.toString().startsWith("archivetune-resolver-"))
+            assertFalse(Files.exists(childDirectory))
             assertTrue(args.contains("--cache-dir\n${root.resolve("player cache")}\n"))
             assertTrue(Files.isDirectory(root.resolve("player cache")))
             assertFalse(args.contains("private-value"))
@@ -188,7 +196,7 @@ class YtDlpStreamResolverTest {
         val root = Files.createTempDirectory("resolver-parallel-test-")
         try {
             val fixture = createFixture(root, "success")
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root))
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 5000, root))
             val first = async { resolver.resolve(videoId, cookie = "SID=first") }
             val second = async { resolver.resolve(videoId, cookie = "SID=second") }
             assertEquals(videoId, first.await().videoId)
@@ -203,7 +211,7 @@ class YtDlpStreamResolverTest {
         try {
             for ((mode, expected) in listOf("fail" to YtDlpFailure.AUTH_REQUIRED, "flood" to YtDlpFailure.INVALID_OUTPUT)) {
                 val fixture = createFixture(root, mode)
-                val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root))
+                val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 5000, root))
                 val failure = assertFailsWith<YtDlpException> { resolver.resolve(videoId, cookie = "SID=private-value") }
                 assertEquals(expected, failure.kind)
                 assertFalse(failure.stackTraceToString().contains("private-value"))
@@ -217,7 +225,7 @@ class YtDlpStreamResolverTest {
         val root = Files.createTempDirectory("resolver-runtime-change-")
         try {
             val fixture = createFixture(root, "success")
-            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root))
+            val resolver = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 5000, root))
             resolver.resolve(videoId)
             createFixture(root, "runtime-missing")
             val failure = assertFailsWith<YtDlpException> { resolver.resolve(videoId, cookie = "SID=private-value") }
@@ -236,7 +244,7 @@ class YtDlpStreamResolverTest {
             Files.createDirectory(root.resolve("keep"))
             Files.writeString(root.resolve("keep/untouched"), "preserve")
             val fixture = createFixture(root, "symlink")
-            YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root)).resolve(videoId)
+            YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 5000, root)).resolve(videoId)
             assertEquals("preserve", Files.readString(root.resolve("keep/untouched")))
         } finally { root.toFile().deleteRecursively() }
     }
@@ -257,7 +265,7 @@ class YtDlpStreamResolverTest {
                 channel.lock().use {
                     Files.setLastModifiedTime(active, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 120_000))
                     val fixture = createFixture(root, "success")
-                    YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root)).resolve(videoId)
+                    YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 5000, root)).resolve(videoId)
                     assertFalse(Files.exists(orphan))
                     assertTrue(Files.isDirectory(active))
                     assertTrue(Files.isDirectory(recent))
@@ -271,7 +279,7 @@ class YtDlpStreamResolverTest {
         val root = Files.createTempDirectory("resolver-orphan-test-")
         try {
             val fixture = createFixture(root, "exit-parent")
-            val result = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "qjs", 5000, root)).resolve(videoId)
+            val result = YtDlpStreamResolver(YtDlpConfiguration(fixture.toString(), "bun", 5000, root)).resolve(videoId)
             assertEquals(videoId, result.videoId)
             val pid = Files.readString(root.resolve("pid")).trim().toLong()
             withTimeout(3000) { while (ProcessHandle.of(pid).map { it.isAlive && !isZombie(pid) }.orElse(false)) delay(20) }
@@ -289,10 +297,11 @@ class YtDlpStreamResolverTest {
             case "${'$'}*" in
               *archivetune-runtime-check:*)
                 echo checked >> "${'$'}root/verifications"
-                printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: quickjs-ng-0.17.0\n' >&2
+                printf '[debug] yt-dlp version stable@2026.08.19 from fixture\n[debug] Optional libraries: yt_dlp_ejs-0.8.0\n[debug] JS runtimes: bun-1.4.3\n' >&2
                 exit 1 ;;
             esac
             printf '%s\n' "${'$'}@" > "${'$'}root/args"
+            pwd > "${'$'}root/cwd"
             previous=''
             for arg in "${'$'}@"; do
               if [ "${'$'}previous" = '--cookies' ]; then

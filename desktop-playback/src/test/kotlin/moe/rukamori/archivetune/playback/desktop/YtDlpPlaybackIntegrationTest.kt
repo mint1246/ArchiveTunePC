@@ -49,11 +49,11 @@ import kotlin.test.assertTrue
  * ```
  * ARCHIVETUNE_LIVE_YTDLP=1 \
  * ARCHIVETUNE_YTDLP=/path/to/yt-dlp \
- * ARCHIVETUNE_QUICKJS=/path/to/qjs \
+ * ARCHIVETUNE_BUN=/path/to/bun \
  * ./gradlew :desktop-playback:test --tests '*YtDlpPlaybackIntegrationTest*'
  * ```
  *
- * `archivetune.ytdlp` / `archivetune.quickjs` system properties are accepted as an alternative to
+ * `archivetune.ytdlp` / `archivetune.bun` system properties are accepted as an alternative to
  * the environment variables. Without the opt-in the live test is skipped through a JUnit assumption
  * instead of silently passing.
  *
@@ -68,7 +68,7 @@ class YtDlpPlaybackIntegrationTest {
         // The production resolver looks the toolchain up through these very properties, so pinning
         // them keeps the test on the configured binaries no matter how the opt-in was provided.
         System.setProperty("archivetune.ytdlp", environment.ytDlpExecutable.toAbsolutePath().toString())
-        System.setProperty("archivetune.quickjs", environment.quickJsExecutable.toAbsolutePath().toString())
+        System.setProperty("archivetune.bun", environment.bunExecutable.toAbsolutePath().toString())
 
         val cacheDirectory = Files.createTempDirectory("archivetune-live-ytdlp-")
         val client = ArchiveTuneJvmClient(cacheDirectory.toFile())
@@ -446,7 +446,7 @@ class YtDlpPlaybackIntegrationTest {
     private data class LiveResolverEnvironment(
         val videoId: String,
         val ytDlpExecutable: Path,
-        val quickJsExecutable: Path,
+        val bunExecutable: Path,
     )
 
     private data class LocalRangeRequest(
@@ -568,7 +568,7 @@ class YtDlpPlaybackIntegrationTest {
             return LiveResolverEnvironment(
                 videoId = liveVideoId(),
                 ytDlpExecutable = requireExecutable("ARCHIVETUNE_YTDLP", "archivetune.ytdlp"),
-                quickJsExecutable = requireExecutable("ARCHIVETUNE_QUICKJS", "archivetune.quickjs"),
+                bunExecutable = requireExecutable("ARCHIVETUNE_BUN", "archivetune.bun"),
             )
         }
     }

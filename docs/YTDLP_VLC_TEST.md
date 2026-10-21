@@ -8,7 +8,7 @@
 path. It exercises the real production code, not a mock:
 
 1. `ArchiveTuneJvmClient.resolveAudioStream(...)` (desktop backend, `YtDlpDesktopStreamExtractor`
-   → `YtDlpStreamResolver` → a real `yt-dlp` + `quickjs-ng` subprocess) resolves a public video
+   → `YtDlpStreamResolver` → a real `yt-dlp` + `Bun 1.4.3` subprocess) resolves a public video
    into a direct CDN audio URL plus the headers the CDN requires.
 2. The resolved URL and headers are handed to the **existing** ranged callback transport
    `VlcjRangeHttpTransport` / `VlcjRangeCallbackMedia`.
@@ -42,13 +42,13 @@ opt-in is present:
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
 export ARCHIVETUNE_LIVE_YTDLP=1
 export ARCHIVETUNE_YTDLP=/path/to/yt-dlp
-export ARCHIVETUNE_QUICKJS=/path/to/qjs
+export ARCHIVETUNE_BUN=/path/to/bun
 ./gradlew :desktop-playback:test --tests '*YtDlpPlaybackIntegrationTest*'
 ```
 
 * `ARCHIVETUNE_LIVE_YTDLP=1` — enables the live test.
-* `ARCHIVETUNE_YTDLP` / `ARCHIVETUNE_QUICKJS` — the resolver binaries. The matching system
-  properties `archivetune.ytdlp` / `archivetune.quickjs` work as an alternative, e.g.
+* `ARCHIVETUNE_YTDLP` / `ARCHIVETUNE_BUN` — the resolver binaries. The matching system
+  properties `archivetune.ytdlp` / `archivetune.bun` work as an alternative, e.g.
   `./gradlew :desktop-playback:test -Darchivetune.ytdlp=/path/to/yt-dlp`.
 * `ARCHIVETUNE_LIVE_YTDLP_VIDEO` — optional video id override (default `dQw4w9WgXcQ`).
 

@@ -28,7 +28,8 @@ internal suspend fun runResolverProcess(command: List<String>, temporaryDirector
         val grouped = setsid != null && kill != null
         val process = try {
             ProcessBuilder(if (grouped) listOf(setsid!!, "--") + command else command).apply {
-                // QuickJS's temporary JS files and PyInstaller's unpack directory are request-local too.
+                // Keep Bun's project/.env discovery and all runtime unpacking inside this private request.
+                directory(temporaryDirectory.toFile())
                 environment()["TMPDIR"] = temporaryDirectory.toString()
                 environment()["TMP"] = temporaryDirectory.toString()
                 environment()["TEMP"] = temporaryDirectory.toString()

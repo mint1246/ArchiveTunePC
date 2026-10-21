@@ -1,4 +1,4 @@
-# Experimental desktop yt-dlp + quickjs-ng resolver
+# Experimental desktop yt-dlp + Bun resolver
 
 Implemented on `feature/ytdlp-resolver` in its own worktree. No merge is performed.
 The Linux porting checkout and its uncommitted changes remain untouched. Its committed
@@ -56,14 +56,21 @@ path; this experiment does not modify submodule source or remove unrelated core 
 ## Runtime and authentication lifecycle
 
 The pinned toolchain is yt-dlp **2026.08.19**, bundled **yt_dlp_ejs 0.8.0**, and
-**quickjs-ng 0.17.0**. Startup diagnostics are checked once per resolver instance for
+**Bun 1.4.3** (the Rust rewrite). Startup diagnostics are checked once per resolver instance for
 all three components, with other JS runtimes disabled. A missing/broken toolchain fails
 with a redaction-safe installation error. Upstream yt-dlp validates the solver scripts'
 version and hashes when it actually solves challenges. Live challenge tests provide the
 execution check; an installed package's version string alone is not that proof.
 
-Each request launches yt-dlp with `ProcessBuilder` arguments, without a shell. QuickJS
-is selected explicitly through `--no-js-runtimes --js-runtimes quickjs:<path>`.
+Each request launches yt-dlp with `ProcessBuilder` arguments, without a shell. Bun
+is selected explicitly through `--no-js-runtimes --js-runtimes bun:<path>`.
+The app requires Bun 1.4.3 or newer, so an old PATH installation cannot silently
+select pre-rewrite Bun. The pinned yt-dlp warns that Bun newer than 1.3.14 is
+unsupported, but executes 1.4.3 without a bypass. This is an experimentally verified
+combination, not an upstream support guarantee. It uses bundled EJS, `--no-install`
+and no remote components. Bun has no sandbox; the request's private directory
+prevents project `.env`/`bunfig.toml` discovery, but does not isolate the process
+from the user's permissions.
 User configuration, plugins and remote solver downloads are disabled. Official frozen
 binaries bundle their own transient Python interpreter and EJS; system Python, Node
 and Deno are unnecessary. No Python or JS worker stays alive after a request.
@@ -92,8 +99,9 @@ request directory before any cookie is written. On startup, unlocked abandoned
 directories from the same user are swept; directories newer than one minute and
 active locks are retained to avoid racing a peer acquiring its lock. Unmarked
 legacy directories are retained for 24 hours.
-Cleanup failure has a redacted I/O error rather than an unavailable-video classification. Signed-in live tests
-were not run: no existing account session was accessed.
+Cleanup failure has a redacted I/O error rather than an unavailable-video classification.
+Signed-in application playback has been exercised with isolated copies of the existing
+account session; cookie-only/restricted media remains unverified.
 
 Public signature-cache data may be stored under the application's supplied cache
 folder, in `yt-dlp/`. Credentials, signed stream URLs and temporary EJS scripts do not
@@ -131,8 +139,9 @@ for Node. These measurements exclude the application JVM.
 QuickJS has the smallest binary (2.44 MiB versus Node's 52.78 MiB) and lowest
 measured peak RAM, while Node reduces CPU and startup delay. Deno had similar
 latency to Node in that initial comparison. No engine is cheapest across all
-costs. This branch retains the requested QuickJS-NG default; changing it needs
-an explicit packaging and product choice. The sample does not establish challenge
+costs. Following the runtime comparison and the user's choice, this branch now ships
+Bun 1.4.3 to reduce challenge-solving latency. QuickJS measurements below describe
+the earlier candidate. The sample does not establish challenge
 frequency, Windows performance, or the cost of a persistent worker.
 
 The [Rust Bun follow-up](YT_DLP_RUST_BUN_COMPARISON.md) tested Bun 1.4.3 with
@@ -149,8 +158,8 @@ See [packaging/resolver/README.md](packaging/resolver/README.md) for pinned hash
 licenses, update procedure and staging tasks. Both Windows x86_64 and Linux x86_64
 sidecars are downloaded from official release assets and checksum-verified.
 
-Discovery order is the `archivetune.ytdlp` / `archivetune.quickjs` system properties,
-`ARCHIVETUNE_YTDLP` / `ARCHIVETUNE_QUICKJS`, packaged `resolver/` directories, the local
+Discovery order is the `archivetune.ytdlp` / `archivetune.bun` system properties,
+`ARCHIVETUNE_YTDLP` / `ARCHIVETUNE_BUN`, packaged `resolver/` directories, the local
 `.tools/resolver/` development directory, then PATH. Packaged JVM resources use
 `app/resources/resolver/` on Windows and `lib/app/resources/resolver/` on Linux; GraalVM native distributions carry `resolver/` alongside the
 executable (or its containing `bin/` directory). Discovery uses process metadata and
@@ -168,15 +177,15 @@ Development setup using the staged Linux tools:
 ```bash
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew :desktopApp:verifyBundledResolverSidecars
 export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/yt-dlp"
-export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/qjs"
+export ARCHIVETUNE_BUN="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/bun"
 ```
 
-## Authenticated application comparison
+## Historical authenticated QuickJS application comparison
 
 The [authenticated report](packaging/resolver/validation/linux-authenticated-full-application.md)
 compares Linux baseline `0817a5024` with the integrated yt-dlp candidate `d3755de5f`;
 both use core `144fe5c` and identical temporary instrumentation. The candidate's
-production sources match this feature branch. The current account was verified
+production sources predate the Bun runtime switch. The current account was verified
 through a real request. Each run restored an isolated copy of the saved keyring
 entry; the original entry was unchanged, and both copies were removed afterward.
 
@@ -321,6 +330,7 @@ live queue preloading/cancellation and live downloads remain separate acceptance
 
 Public sources: [yt-dlp EJS setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS),
 [yt-dlp 2026.08.19](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19),
-[QuickJS-NG v0.17.0](https://github.com/quickjs-ng/quickjs/releases/tag/v0.17.0),
+[Bun 1.4.3](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3),
+[yt-dlp Bun invocation](https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/extractor/youtube/jsc/_builtin/bun.py),
 [upstream EJS cache policy](https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/extractor/youtube/jsc/_builtin/ejs.py),
 [upstream selected-account option](https://github.com/yt-dlp/yt-dlp/blob/2026.08.19/yt_dlp/extractor/youtube/_base.py).
