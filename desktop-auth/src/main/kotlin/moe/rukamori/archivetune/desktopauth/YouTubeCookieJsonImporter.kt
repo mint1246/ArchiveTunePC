@@ -90,7 +90,7 @@ object YouTubeCookieJsonImporter {
             // Match Android's CookieManager.getCookie(YouTube URL) behavior: only cookies that
             // belong to YouTube are eligible for the Cookie header sent to music.youtube.com.
             // Google-domain cookies are browser-login state, not YouTube request cookies.
-            if (!candidate.domain.isPermittedYouTubeDomain()) return@forEachIndexed
+            if (!candidate.appliesToMusicRoot()) return@forEachIndexed
             if (!candidate.name.isSafeCookieName() || !candidate.value.isSafeCookieValue()) {
                 encounteredUnsafeValue = true
                 return@forEachIndexed
@@ -158,6 +158,9 @@ object YouTubeCookieJsonImporter {
         (0 until length()).mapNotNull { opt(it) as? JSONObject }
 
     private fun parseCookie(value: JSONObject, sourceIndex: Int): ImportedCookie? {
+        // A partitioned cookie belongs to a separate browser context. The portable header has no
+        // partition key, so it cannot safely substitute for a top-level Music session cookie.
+        if (value.opt("partitionKey")?.let { it != JSONObject.NULL } == true || value.optBoolean("partitioned", false)) return null
         val name = value.optString("name").trim().takeIf(String::isNotEmpty) ?: return null
         val cookieValue = value.opt("value")?.takeUnless { it == JSONObject.NULL }?.toString() ?: return null
         val domain = value.optString("domain", DEFAULT_IMPLIED_DOMAIN).normalizeDomain() ?: return null
@@ -167,6 +170,7 @@ object YouTubeCookieJsonImporter {
             value = cookieValue,
             domain = domain,
             path = path,
+            hostOnly = value.optBoolean("hostOnly", false),
             expiresAtEpochMillis = value.firstExpiry(),
             sourceIndex = sourceIndex,
         )
@@ -198,8 +202,12 @@ object YouTubeCookieJsonImporter {
     private fun String.normalizeDomain(): String? =
         trim().lowercase(Locale.US).removePrefix(".").takeIf { it.isNotBlank() && it.none(Char::isWhitespace) }
 
-    private fun String.isPermittedYouTubeDomain(): Boolean =
-        this == "youtube.com" || this.endsWith(".youtube.com")
+    // A full browser export can contain a fresher same-name cookie from www.youtube.com or
+    // studio.youtube.com. It must not replace the cookie the browser sends to Music. The shared
+    // header is also used for the Music homepage, so only root-path cookies are applicable.
+    private fun ImportedCookie.appliesToMusicRoot(): Boolean =
+        path == "/" &&
+            (domain == DEFAULT_IMPLIED_DOMAIN || (domain == "youtube.com" && !hostOnly))
 
     private fun String.displayDomain(): String = ".$this"
 
@@ -213,6 +221,7 @@ object YouTubeCookieJsonImporter {
         val value: String,
         val domain: String,
         val path: String,
+        val hostOnly: Boolean,
         val expiresAtEpochMillis: Long?,
         val sourceIndex: Int,
     )

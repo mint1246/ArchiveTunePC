@@ -15,6 +15,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
+import moe.rukamori.archivetune.innertube.AccountValidationFailureKind
+import moe.rukamori.archivetune.innertube.classifyAccountValidationFailure
 import moe.rukamori.archivetune.innertube.DesktopSessionProvider
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.models.AccountInfo
@@ -80,6 +82,10 @@ enum class SessionImportFailure {
     MISSING_LOGIN_COOKIE,
     EXPIRED,
     VALIDATION_FAILED,
+    NETWORK_UNAVAILABLE,
+    VALIDATION_TIMEOUT,
+    INVALID_REQUEST,
+    SERVICE_UNAVAILABLE,
     SECURE_STORAGE_UNAVAILABLE,
 }
 
@@ -127,7 +133,7 @@ data class VerifiedDesktopSession(
 
 private sealed interface VerificationResult {
     data class Verified(val session: VerifiedDesktopSession) : VerificationResult
-    data object Rejected : VerificationResult
+    data class Rejected(val reason: SessionImportFailure) : VerificationResult
 }
 
 class ArchiveTuneSessionVerifier(
@@ -325,11 +331,17 @@ class DesktopSessionManager(
             return SessionImportResult.Rejected(SessionImportFailure.EXPIRED)
         }
 
-        val verification = verifySafely(candidate)
-        val verified = (verification as? VerificationResult.Verified)?.session
-            ?: return SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED)
+        val verified = when (val verification = verifySafely(candidate)) {
+            is VerificationResult.Verified -> verification.session
+            is VerificationResult.Rejected -> return SessionImportResult.Rejected(verification.reason)
+        }
         val verifiedAuthState = verified.authState.normalized()
         if (!verifiedAuthState.hasLoginCookie) {
+            return SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED)
+        }
+        // The verifier may enrich the session, but it must never swap the credential the user
+        // supplied. A different cookie in the verified session is a trust violation, not a renewal.
+        if (verifiedAuthState.cookie != candidate.cookie) {
             return SessionImportResult.Rejected(SessionImportFailure.VALIDATION_FAILED)
         }
         val stored =
@@ -342,6 +354,10 @@ class DesktopSessionManager(
             try {
                 secureStore.write(StoredDesktopSessionCodec.encode(stored))
             } catch (_: SecureStoreUnavailableException) {
+                return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
+            } catch (_: Exception) {
+                // A keyring or encoding failure must fail the import, never crash the caller and
+                // never leave a half-imported session behind.
                 return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
             }
             active = stored
@@ -488,13 +504,25 @@ class DesktopSessionManager(
         try {
             verifier.verify(candidate).fold(
                 onSuccess = { VerificationResult.Verified(it) },
-                onFailure = { VerificationResult.Rejected },
+                onFailure = ::verificationRejected,
             )
         } catch (cancellation: CancellationException) {
             throw cancellation
-        } catch (_: Exception) {
-            VerificationResult.Rejected
+        } catch (failure: Exception) {
+            verificationRejected(failure)
         }
+
+    private fun verificationRejected(failure: Throwable): VerificationResult.Rejected {
+        if (failure is CancellationException) throw failure
+        val reason = when (classifyAccountValidationFailure(failure)) {
+            AccountValidationFailureKind.NETWORK -> SessionImportFailure.NETWORK_UNAVAILABLE
+            AccountValidationFailureKind.TIMEOUT -> SessionImportFailure.VALIDATION_TIMEOUT
+            AccountValidationFailureKind.INVALID_REQUEST -> SessionImportFailure.INVALID_REQUEST
+            AccountValidationFailureKind.SERVICE_UNAVAILABLE -> SessionImportFailure.SERVICE_UNAVAILABLE
+            AccountValidationFailureKind.UNKNOWN -> SessionImportFailure.VALIDATION_FAILED
+        }
+        return VerificationResult.Rejected(reason)
+    }
 
     private suspend fun requestCookieReplacement(
         current: StoredDesktopSession,

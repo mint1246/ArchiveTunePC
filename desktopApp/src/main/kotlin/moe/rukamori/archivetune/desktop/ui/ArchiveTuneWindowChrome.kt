@@ -34,12 +34,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -75,6 +78,7 @@ fun WindowScope.ArchiveTuneWindowChrome(
 ) {
     val maximized = windowState.placement == WindowPlacement.Maximized
     val lastFloatingBounds = remember(window) { mutableStateOf<Rectangle?>(null) }
+    val dragRegionOffsetInWindow = remember(window) { mutableStateOf(Offset.Zero) }
     val toggleMaximize = {
         if (windowState.placement == WindowPlacement.Maximized) {
             // A session can start maximized without AWT having a useful normal-bounds rectangle.
@@ -91,6 +95,9 @@ fun WindowScope.ArchiveTuneWindowChrome(
     }
     val dragModifier = remember(window, windowState) {
         Modifier
+            .onGloballyPositioned { coordinates ->
+                dragRegionOffsetInWindow.value = coordinates.positionInWindow()
+            }
             .pointerInput(windowState) {
                 detectTapGestures(onDoubleTap = {
                     toggleMaximize()
@@ -106,10 +113,23 @@ fun WindowScope.ArchiveTuneWindowChrome(
                 var nativeScaleY: Double? = null
                 var restoreAnchor: WindowDragRestoreAnchor? = null
                 var restoreSize: Dimension? = null
+                var draggedPixels = Offset.Zero
+                var floatingDragStartPixels = Offset.Zero
+                var fallbackPointerStart: Point? = null
                 detectDragGestures(
-                    onDragStart = {
+                    onDragStart = { gestureStart ->
+                        draggedPixels = Offset.Zero
+                        floatingDragStartPixels = Offset.Zero
+                        val transform = window.graphicsConfiguration?.defaultTransform
+                        val nativePointer = if (isWindowsHost()) pointerLocation() else null
+                        fallbackPointerStart = nativePointer ?: windowPointFromPixels(
+                            window.location,
+                            dragRegionOffsetInWindow.value + gestureStart,
+                            transform?.scaleX ?: 1.0,
+                            transform?.scaleY ?: 1.0,
+                        )
                         if (windowState.placement == WindowPlacement.Maximized) {
-                            val pointer = pointerLocation() ?: return@detectDragGestures
+                            val pointer = fallbackPointerStart ?: return@detectDragGestures
                             // Windows restores a maximized window once a title-bar drag passes the
                             // drag threshold, keeping the same point of the restored title bar under
                             // the cursor. Do the same rather than making maximized windows immovable.
@@ -136,22 +156,21 @@ fun WindowScope.ArchiveTuneWindowChrome(
                                 startWindowLocation = null
                                 startPointerLocation = null
                             } else {
-                                // Only the non-Windows/fallback path depends on AWT MouseInfo. The
-                                // previous code fetched it before even attempting Win32, so one
-                                // transient null pointer sample made an otherwise valid drag inert.
-                                val pointer = pointerLocation() ?: return@detectDragGestures
+                                // Fallback movement uses the Compose drag displacement when
+                                // global mouse coordinates are missing or restricted.
                                 nativeGeometry = null
                                 nativeStartWindowBounds = null
                                 nativeStartPointerLocation = null
                                 nativeScaleX = null
                                 nativeScaleY = null
                                 startWindowLocation = window.location
-                                startPointerLocation = pointer
+                                startPointerLocation = nativePointer
                             }
                         }
                     },
-                    onDrag = { change, _ ->
+                    onDrag = { change, dragAmount ->
                         change.consume()
+                        draggedPixels += dragAmount
                         val geometry = nativeGeometry
                         val nativeBounds = nativeStartWindowBounds
                         val nativePointerStart = nativeStartPointerLocation
@@ -192,8 +211,21 @@ fun WindowScope.ArchiveTuneWindowChrome(
                                 return@detectDragGestures
                             }
                         }
-                        val pointer = pointerLocation() ?: return@detectDragGestures
+                        // On Wayland, AWT cannot always query global cursor coordinates.
+                        // Pointer events still include the drag displacement, so window chrome
+                        // remains movable even when MouseInfo returns null.
+                        val transform = window.graphicsConfiguration?.defaultTransform
+                        val pointer = (if (isWindowsHost()) pointerLocation() else null)
+                            ?: fallbackPointerStart?.let { start ->
+                            windowPointFromPixels(
+                                start,
+                                draggedPixels,
+                                transform?.scaleX ?: 1.0,
+                                transform?.scaleY ?: 1.0,
+                            )
+                        }
                         restoreAnchor?.let { anchor ->
+                            if (pointer == null) return@detectDragGestures
                             val restoredSize = restoreSize ?: fallbackRestoredSize(anchor.maximizedBounds, window.minimumSize)
                             val restoredLocation = restoredDragLocation(
                                 pointer = pointer,
@@ -212,18 +244,28 @@ fun WindowScope.ArchiveTuneWindowChrome(
                             lastFloatingBounds.value = Rectangle(window.bounds)
                             startWindowLocation = restoredLocation
                             startPointerLocation = pointer
+                            floatingDragStartPixels = draggedPixels
                             restoreAnchor = null
                             restoreSize = null
                             return@detectDragGestures
                         }
 
                         val initialWindow = startWindowLocation
-                        val initialPointer = startPointerLocation
-                        if (initialWindow != null && initialPointer != null) {
-                            window.location = Point(
-                                initialWindow.x + pointer.x - initialPointer.x,
-                                initialWindow.y + pointer.y - initialPointer.y,
-                            )
+                        if (initialWindow != null) {
+                            val initialPointer = startPointerLocation
+                            window.location = if (isWindowsHost() && initialPointer != null && pointer != null) {
+                                Point(
+                                    initialWindow.x + pointer.x - initialPointer.x,
+                                    initialWindow.y + pointer.y - initialPointer.y,
+                                )
+                            } else {
+                                windowPointFromPixels(
+                                    initialWindow,
+                                    draggedPixels - floatingDragStartPixels,
+                                    transform?.scaleX ?: 1.0,
+                                    transform?.scaleY ?: 1.0,
+                                )
+                            }
                         }
                     },
                     onDragEnd = {
@@ -263,6 +305,9 @@ fun WindowScope.ArchiveTuneWindowChrome(
                         nativeScaleY = null
                         restoreAnchor = null
                         restoreSize = null
+                        fallbackPointerStart = null
+                        draggedPixels = Offset.Zero
+                        floatingDragStartPixels = Offset.Zero
                     },
                     onDragCancel = {
                         startWindowLocation = null
@@ -274,6 +319,9 @@ fun WindowScope.ArchiveTuneWindowChrome(
                         nativeScaleY = null
                         restoreAnchor = null
                         restoreSize = null
+                        fallbackPointerStart = null
+                        draggedPixels = Offset.Zero
+                        floatingDragStartPixels = Offset.Zero
                     },
                 )
             }
@@ -362,31 +410,41 @@ private fun WindowScope.WindowResizeHandle(
             )
             .pointerHoverIcon(PointerIcon(direction.resizeCursor()))
             .pointerInput(direction, windowState.placement) {
-                var startBounds: java.awt.Rectangle? = null
+                var startBounds: Rectangle? = null
                 var startPointerLocation: Point? = null
+                var draggedPixels = Offset.Zero
                 detectDragGestures(
                     onDragStart = {
                         if (windowState.placement != WindowPlacement.Maximized) {
                             startBounds = window.bounds
                             startPointerLocation = pointerLocation()
+                            draggedPixels = Offset.Zero
                         }
                     },
-                    onDrag = { change, _ ->
+                    onDrag = { change, dragAmount ->
                         change.consume()
                         if (windowState.placement == WindowPlacement.Maximized) return@detectDragGestures
                         val bounds = startBounds
-                        val initialPointer = startPointerLocation
-                        val pointer = pointerLocation()
-                        if (bounds != null && initialPointer != null && pointer != null) {
-                            window.resizeFrom(
-                                bounds,
-                                Point(pointer.x - initialPointer.x, pointer.y - initialPointer.y),
-                                direction,
-                            )
+                        draggedPixels += dragAmount
+                        if (bounds != null) {
+                            val initialPointer = startPointerLocation
+                            val pointer = if (isWindowsHost()) pointerLocation() else null
+                            val transform = window.graphicsConfiguration?.defaultTransform
+                            val delta = if (pointer != null && initialPointer != null) {
+                                Point(pointer.x - initialPointer.x, pointer.y - initialPointer.y)
+                            } else {
+                                windowPointFromPixels(
+                                    Point(0, 0),
+                                    draggedPixels,
+                                    transform?.scaleX ?: 1.0,
+                                    transform?.scaleY ?: 1.0,
+                                )
+                            }
+                            window.resizeFrom(bounds, delta, direction)
                         }
                     },
-                    onDragEnd = { startPointerLocation = null; startBounds = null },
-                    onDragCancel = { startPointerLocation = null; startBounds = null },
+                    onDragEnd = { startPointerLocation = null; startBounds = null; draggedPixels = Offset.Zero },
+                    onDragCancel = { startPointerLocation = null; startBounds = null; draggedPixels = Offset.Zero },
                 )
             },
     )
@@ -407,6 +465,15 @@ private fun ResizeDirection.resizeCursor(): Cursor =
     )
 
 private fun pointerLocation(): Point? = runCatching { MouseInfo.getPointerInfo()?.location }.getOrNull()
+
+private fun isWindowsHost(): Boolean = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+
+/** Translate Compose pointer pixels to the AWT window-coordinate space, preserving fractional drags. */
+internal fun windowPointFromPixels(start: Point, pixels: Offset, scaleX: Double, scaleY: Double): Point =
+    Point(
+        start.x + (pixels.x / scaleX.coerceAtLeast(0.01)).roundToInt(),
+        start.y + (pixels.y / scaleY.coerceAtLeast(0.01)).roundToInt(),
+    )
 
 private fun Window.isActuallyMaximized(): Boolean =
     (this as? Frame)?.let { frame -> frame.extendedState and Frame.MAXIMIZED_BOTH != 0 } ?: false

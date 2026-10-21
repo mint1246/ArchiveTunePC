@@ -15,6 +15,7 @@ val windowsPackageVersion = version.toString().let { value ->
     if (value.count { it == '.' } == 1) "$value.0" else value
 }
 val windowsInstallationPath = "ArchiveTune App"
+val buildingForWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
 val buildingWithOpenJ9 =
     System.getProperty("java.vm.name").contains("OpenJ9", ignoreCase = true) ||
@@ -192,15 +193,21 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            if (buildingForWindows) {
+                targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            } else {
+                targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
+            }
             packageName = "ArchiveTune"
             packageVersion = windowsPackageVersion
             description = "A private, feature-rich YouTube Music client and music player."
             copyright = "Copyright © 2026 Rukamori and ArchiveTune contributors"
             vendor = "ArchiveTune"
             licenseFile.set(rootProject.file("LICENSE"))
-            // Copied beside the application so the in-process VLCJ backend can find libVLC and its plugins.
-            appResourcesRootDir.set(rootProject.layout.projectDirectory.dir("packaging/vlc/common"))
+            // The bundled VLC runtime contains Windows DLLs. Linux uses the system libVLC.
+            if (buildingForWindows) {
+                appResourcesRootDir.set(rootProject.layout.projectDirectory.dir("packaging/vlc/common"))
+            }
             modules(
                 "java.desktop",
                 "java.logging",
@@ -210,6 +217,10 @@ compose.desktop {
                 "jdk.crypto.ec",
                 "jdk.unsupported",
             )
+
+            linux {
+                iconFile.set(desktopIconPng)
+            }
 
             windows {
                 iconFile.set(generatedWindowsIcon)
@@ -229,6 +240,12 @@ compose.desktop {
 
 val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/ArchiveTune")
 val releaseAppImageDir = layout.buildDirectory.dir("compose/binaries/main-release/app/ArchiveTune")
+// Compose/jpackage places app resources in app/resources on Windows and lib/app/resources on
+// Linux, and the generated launcher exposes that directory as compose.application.resources.dir.
+val appImageResourcesDir =
+    appImageDir.map { it.dir(if (buildingForWindows) "app/resources" else "lib/app/resources") }
+val releaseAppImageResourcesDir =
+    releaseAppImageDir.map { it.dir(if (buildingForWindows) "app/resources" else "lib/app/resources") }
 val bundledVlcSourceDir = rootProject.layout.projectDirectory.dir("packaging/vlc/common/native/windows-x64/vlc")
 val audioAnalysisProject = evaluationDependsOn(":desktop-audio-analysis")
 val audioAnalysisDll = audioAnalysisProject.layout.buildDirectory.file("native/windows-x64/archivetune-audio-analysis.dll")
@@ -344,22 +361,22 @@ fun registerResolverVerifyTask(
 
 val stageBundledResolverSidecars = registerResolverStageTask(
     name = "stageBundledResolverSidecars",
-    destination = appImageDir.map { it.dir("app/resources/resolver") },
+    destination = appImageResourcesDir.map { it.dir("resolver") },
     runAfterTask = "createDistributable",
 )
 val stageBundledResolverSidecarsRelease = registerResolverStageTask(
     name = "stageBundledResolverSidecarsRelease",
-    destination = releaseAppImageDir.map { it.dir("app/resources/resolver") },
+    destination = releaseAppImageResourcesDir.map { it.dir("resolver") },
     runAfterTask = "createReleaseDistributable",
 )
 val verifyBundledResolverSidecars = registerResolverVerifyTask(
     name = "verifyBundledResolverSidecars",
-    directory = appImageDir.map { it.dir("app/resources/resolver") },
+    directory = appImageResourcesDir.map { it.dir("resolver") },
     stageTask = stageBundledResolverSidecars,
 )
 val verifyBundledResolverSidecarsRelease = registerResolverVerifyTask(
     name = "verifyBundledResolverSidecarsRelease",
-    directory = releaseAppImageDir.map { it.dir("app/resources/resolver") },
+    directory = releaseAppImageResourcesDir.map { it.dir("resolver") },
     stageTask = stageBundledResolverSidecarsRelease,
 )
 
@@ -477,81 +494,84 @@ fun installerJpackageArgs(
     "--win-dir-chooser",
 )
 
-val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
-    group = "package"
-    description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, stageBundledResolverSidecars, verifyBundledResolverSidecars, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
-    environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
-    commandLine(
-        listOf(jpackageExecutable) +
-            installerJpackageArgs("msi", appImageDir, layout.buildDirectory.dir("compose/binaries/main/msi")),
-    )
-}
+if (buildingForWindows) {
+    val packageMsiUpgradable = tasks.register<Exec>("packageMsiUpgradable") {
+        group = "package"
+        description = "Builds the MSI with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
+        dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, stageBundledResolverSidecars, verifyBundledResolverSidecars, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+        environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
+        commandLine(
+            listOf(jpackageExecutable) +
+                installerJpackageArgs("msi", appImageDir, layout.buildDirectory.dir("compose/binaries/main/msi")),
+        )
+    }
 
-val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
-    group = "package"
-    description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
-    dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, stageBundledResolverSidecars, verifyBundledResolverSidecars, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
-    environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
-    commandLine(
-        listOf(jpackageExecutable) +
-            installerJpackageArgs("exe", appImageDir, layout.buildDirectory.dir("compose/binaries/main/exe")),
-    )
-}
+    val packageExeUpgradable = tasks.register<Exec>("packageExeUpgradable") {
+        group = "package"
+        description = "Builds the EXE with install-over-existing upgrade behaviour (replaces any previously installed ArchiveTune instead of failing)."
+        dependsOn("createDistributable", stageBundledVlcRuntime, stageBundledAudioAnalysis, verifyBundledVlcRuntime, stageBundledResolverSidecars, verifyBundledResolverSidecars, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+        environment("PATH", wixToolsetDir.get().asFile.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: ""))
+        commandLine(
+            listOf(jpackageExecutable) +
+                installerJpackageArgs("exe", appImageDir, layout.buildDirectory.dir("compose/binaries/main/exe")),
+        )
+    }
 
-val openJ9JpackageExecutable =
-    openJ9HomeForRelease?.let { File(it, "bin/jpackage.exe").absolutePath } ?: jpackageExecutable
+    val openJ9JpackageExecutable =
+        openJ9HomeForRelease?.let { File(it, "bin/jpackage.exe").absolutePath } ?: jpackageExecutable
 
-val packageOpenJ9MsiUpgradable = tasks.register<Exec>("packageOpenJ9MsiUpgradable") {
-    group = "package"
-    description = "Builds an upgradable MSI from the fast OpenJ9 JIT app image without ProGuard."
-    dependsOn(createOpenJ9Distributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
-    environment(
-        "PATH",
-        buildString {
-            openJ9HomeForRelease?.let {
-                append(File(it, "bin").absolutePath)
+    val packageOpenJ9MsiUpgradable = tasks.register<Exec>("packageOpenJ9MsiUpgradable") {
+        group = "package"
+        description = "Builds an upgradable MSI from the fast OpenJ9 JIT app image without ProGuard."
+        dependsOn(createOpenJ9Distributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+        environment(
+            "PATH",
+            buildString {
+                openJ9HomeForRelease?.let {
+                    append(File(it, "bin").absolutePath)
+                    append(File.pathSeparator)
+                }
+                append(wixToolsetDir.get().asFile.absolutePath)
                 append(File.pathSeparator)
-            }
-            append(wixToolsetDir.get().asFile.absolutePath)
-            append(File.pathSeparator)
-            append(System.getenv("PATH") ?: "")
-        },
-    )
-    commandLine(
-        listOf(openJ9JpackageExecutable) +
-            installerJpackageArgs(
-                "msi",
-                appImageDir,
-                layout.buildDirectory.dir("compose/binaries/main/msi"),
-            ),
-    )
-}
+                append(System.getenv("PATH") ?: "")
+            },
+        )
+        commandLine(
+            listOf(openJ9JpackageExecutable) +
+                installerJpackageArgs(
+                    "msi",
+                    appImageDir,
+                    layout.buildDirectory.dir("compose/binaries/main/msi"),
+                ),
+        )
+    }
 
-val packageOpenJ9ReleaseMsiUpgradable = tasks.register<Exec>("packageOpenJ9ReleaseMsiUpgradable") {
-    group = "package"
-    description = "Builds an upgradable MSI from the shrunk OpenJ9 JIT/ProGuard app image."
-    dependsOn(createOpenJ9ReleaseDistributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
-    environment(
-        "PATH",
-        buildString {
-            openJ9HomeForRelease?.let {
-                append(File(it, "bin").absolutePath)
+    val packageOpenJ9ReleaseMsiUpgradable = tasks.register<Exec>("packageOpenJ9ReleaseMsiUpgradable") {
+        group = "package"
+        description = "Builds an upgradable MSI from the shrunk OpenJ9 JIT/ProGuard app image."
+        dependsOn(createOpenJ9ReleaseDistributable, generateWindowsIcon, rootProject.tasks.named("unzipWix"))
+        environment(
+            "PATH",
+            buildString {
+                openJ9HomeForRelease?.let {
+                    append(File(it, "bin").absolutePath)
+                    append(File.pathSeparator)
+                }
+                append(wixToolsetDir.get().asFile.absolutePath)
                 append(File.pathSeparator)
-            }
-            append(wixToolsetDir.get().asFile.absolutePath)
-            append(File.pathSeparator)
-            append(System.getenv("PATH") ?: "")
-        },
-    )
-    commandLine(
-        listOf(openJ9JpackageExecutable) +
-            installerJpackageArgs(
-                "msi",
-                releaseAppImageDir,
-                layout.buildDirectory.dir("compose/binaries/main-release/msi"),
-            ),
-    )
+                append(System.getenv("PATH") ?: "")
+            },
+        )
+        commandLine(
+            listOf(openJ9JpackageExecutable) +
+                installerJpackageArgs(
+                    "msi",
+                    releaseAppImageDir,
+                    layout.buildDirectory.dir("compose/binaries/main-release/msi"),
+                ),
+        )
+    }
+
 }
 
 val verifyBundledVlcRuntime = tasks.register<VerifyBundledVlcRuntimeTask>("verifyBundledVlcRuntime") {
@@ -561,20 +581,34 @@ val verifyBundledVlcRuntime = tasks.register<VerifyBundledVlcRuntimeTask>("verif
     appDirectory.set(layout.buildDirectory.dir("compose/binaries/main/app"))
 }
 
-tasks.matching {
-    it.name == "createDistributable" ||
-        it.name == "createReleaseDistributable" ||
-        it.name == "packageMsi" ||
-        it.name == "packageExe" ||
-        it.name == "packageDistributionForCurrentOS"
-}.configureEach {
-    dependsOn(generateWindowsIcon)
-}
+// Windows-only packagers execute .exe and PowerShell tools when staging VLC/Essentia.
+// Leave Compose's Linux distributable and package tasks independent of those tools.
+if (buildingForWindows) {
+    tasks.matching {
+        it.name == "createDistributable" ||
+            it.name == "createReleaseDistributable" ||
+            it.name == "packageMsi" ||
+            it.name == "packageExe" ||
+            it.name == "packageDistributionForCurrentOS"
+    }.configureEach {
+        dependsOn(generateWindowsIcon)
+    }
 
-tasks.matching { it.name == "createDistributable" }.configureEach {
-    finalizedBy(stageBundledVlcRuntime, stageBundledAudioAnalysis, stageBundledResolverSidecars)
-}
+    tasks.matching { it.name == "createDistributable" }.configureEach {
+        finalizedBy(stageBundledVlcRuntime, stageBundledAudioAnalysis, stageBundledResolverSidecars)
+    }
 
-tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
-    finalizedBy(stageBundledVlcRuntimeRelease, stageBundledAudioAnalysisRelease, stageBundledResolverSidecarsRelease)
+    tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
+        finalizedBy(stageBundledVlcRuntimeRelease, stageBundledAudioAnalysisRelease, stageBundledResolverSidecarsRelease)
+    }
+} else {
+    // Linux app images cannot use the Windows VLC/Essentia staging tasks. The resolver sidecars
+    // are cross-platform and must still land under lib/app/resources/resolver.
+    tasks.matching { it.name == "createDistributable" }.configureEach {
+        finalizedBy(stageBundledResolverSidecars)
+    }
+
+    tasks.matching { it.name == "createReleaseDistributable" }.configureEach {
+        finalizedBy(stageBundledResolverSidecarsRelease)
+    }
 }

@@ -7,6 +7,7 @@
 package moe.rukamori.archivetune.desktop.platform
 
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -33,14 +34,32 @@ class AppPathsTest {
     }
 
     @Test
-    fun `explicit home override keeps all mutable state under one controlled root`() {
+    fun `linux ignores empty or relative XDG paths instead of writing under cwd`() {
         val paths = AppPaths.resolve(
-            environment = mapOf("ARCHIVETUNE_HOME" to "C:/ArchiveTune-Test"),
+            environment = mapOf(
+                "XDG_CONFIG_HOME" to "",
+                "XDG_DATA_HOME" to "relative/data",
+                "XDG_CACHE_HOME" to "/var/tmp/archivetune-cache",
+                "XDG_STATE_HOME" to "  ",
+            ),
+            properties = mapOf("os.name" to "Linux", "user.home" to "/home/listener"),
+        )
+
+        assertEquals("/home/listener/.config/archivetune", paths.config.toString())
+        assertEquals("/home/listener/.local/share/archivetune", paths.data.toString())
+        assertEquals("/var/tmp/archivetune-cache/archivetune", paths.cache.toString())
+        assertEquals("/home/listener/.local/state/archivetune/logs", paths.logs.toString())
+    }
+
+    @Test
+    fun `explicit home override keeps all mutable state under one controlled root`() {
+        val override = Path.of(System.getProperty("java.io.tmpdir"), "ArchiveTune-Test").toAbsolutePath().normalize()
+        val paths = AppPaths.resolve(
+            environment = mapOf("ARCHIVETUNE_HOME" to override.toString()),
             properties = mapOf("os.name" to "Windows 11", "user.home" to "C:/Users/listener"),
         )
 
-        val normalized = paths.config.parent.toString().replace('\\', '/')
-        assertEquals("C:/ArchiveTune-Test", normalized)
+        assertEquals(override, paths.config.parent)
         assertEquals(paths.config.parent, paths.data.parent)
         assertEquals(paths.data.parent, paths.cache.parent)
         assertEquals(paths.cache.parent, paths.logs.parent)

@@ -8,7 +8,7 @@ import moe.rukamori.archivetune.innertube.classifyStreamResolutionFailure
 import moe.rukamori.archivetune.innertube.utils.sha1
 import moe.rukamori.archivetune.desktopauth.ArchiveTuneSessionVerifier
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
-import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
+import moe.rukamori.archivetune.desktopauth.secureSessionStore
 import moe.rukamori.archivetune.desktopauth.ManagedChromiumLoginSource
 import moe.rukamori.archivetune.lyrics.JvmLyricsClient
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
@@ -92,7 +92,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private val managedYouTubeBrowser = ManagedChromiumLoginSource(runtime.paths.data.resolve("youtube-browser-profile"))
     /** The backend consults this provider immediately before each request, including downloads. */
     val account = DesktopSessionManager(
-        secureStore = DpapiFileSessionStore(runtime.paths.data.resolve("youtube-session.dpapi")),
+        secureStore = secureSessionStore(runtime.paths.data.resolve("youtube-session.dpapi")),
         verifier = ArchiveTuneSessionVerifier(backend),
         interactiveLoginSource = managedYouTubeBrowser,
         cookieRefresher = managedYouTubeBrowser,
@@ -164,16 +164,16 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     private val neuralChordAnalyzer = DesktopNeuralChordAnalyzer(runtime, playback)
     val paxsenixCredentialService = DesktopPaxsenixCredentialService(
-        DpapiFileSessionStore(runtime.paths.data.resolve("paxsenix-lyrics.dpapi")),
+        secureSessionStore(runtime.paths.data.resolve("paxsenix-lyrics.dpapi")),
     )
     val lyricsTranslationService = DesktopLyricsTranslationService(
         settings,
-        DpapiFileSessionStore(runtime.paths.data.resolve("lyrics-translation.dpapi")),
+        secureSessionStore(runtime.paths.data.resolve("lyrics-translation.dpapi")),
         JvmLyricsTranslationCache(runtime.paths.cache.resolve("lyrics-translations.json")),
     )
     val lastFm = DesktopLastFmService(
         settings = settings,
-        credentialStore = DpapiFileSessionStore(runtime.paths.data.resolve("lastfm.dpapi")),
+        credentialStore = secureSessionStore(runtime.paths.data.resolve("lastfm.dpapi")),
         parentScope = runtime.applicationScope,
     )
     private val lyricsPresenter = lazy {

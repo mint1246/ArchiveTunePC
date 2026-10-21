@@ -1044,6 +1044,7 @@ private fun AnonymousAccountCard() {
 @Composable
 private fun DesktopAccountCard(account: DesktopSessionManager) {
     val accountState by account.state.collectAsState()
+    val closeBrowserToFinish = System.getProperty("os.name").startsWith("Linux", ignoreCase = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var showImport by remember { mutableStateOf(false) }
     var handoffNotice by remember { mutableStateOf<String?>(null) }
@@ -1075,7 +1076,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                         }
                         is DesktopAccountState.Unavailable -> {
                             Text("Secure account storage unavailable", style = MaterialTheme.typography.titleMedium)
-                            Text("ArchiveTune will remain in anonymous mode until Windows secure storage is available.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(secureAccountStorageHelp(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -1092,7 +1093,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    enabled = !managedLoginCompleting,
+                    enabled = !managedLoginCompleting && !(closeBrowserToFinish && managedLoginRunning),
                     onClick = {
                         actionError = null
                         if (managedLoginRunning) {
@@ -1100,10 +1101,18 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                                 actionError = "The managed sign-in browser is not ready yet. Try again in a moment."
                             } else {
                                 managedLoginCompleting = true
-                                handoffNotice = "Finishing sign-in and importing your YouTube Music session…"
+                                handoffNotice = if (closeBrowserToFinish) {
+                                    "Close the ArchiveTune sign-in browser window to finish importing your session."
+                                } else {
+                                    "Finishing sign-in and importing your YouTube Music session…"
+                                }
                             }
                         } else {
-                            handoffNotice = "A separate ArchiveTune sign-in browser will open with browser sync disabled. Finish Google sign-in and make sure YouTube Music is signed in, then click Done signing in here. ArchiveTune will close only that temporary browser and read the session afterward."
+                            handoffNotice = if (closeBrowserToFinish) {
+                                "A separate ArchiveTune sign-in browser will open. Finish Google sign-in and wait until YouTube Music is signed in, then close that browser window. ArchiveTune will import your session automatically."
+                            } else {
+                                "A separate ArchiveTune sign-in browser will open with browser sync disabled. Finish Google sign-in and make sure YouTube Music is signed in, then click Done signing in here. ArchiveTune will close only that temporary browser and read the session afterward."
+                            }
                             managedLoginRunning = true
                             scope.launch {
                                 try {
@@ -1111,7 +1120,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                                         onSuccess = { result ->
                                             when (result) {
                                                 is SessionImportResult.Success -> {
-                                                    handoffNotice = "YouTube Music account signed in and stored with Windows protection."
+                                                    handoffNotice = "YouTube Music account signed in and saved in secure system storage."
                                                 }
                                                 is SessionImportResult.Rejected -> {
                                                     actionError = sessionImportMessage(result.reason)
@@ -1133,6 +1142,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                     Text(
                         when {
                             managedLoginCompleting -> "Finishing…"
+                            closeBrowserToFinish && managedLoginRunning -> "Signing in…"
                             managedLoginRunning -> "Done signing in"
                             else -> "Sign in with browser"
                         },
@@ -1144,6 +1154,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
                 ) { Text("Import Cookie-Editor JSON") }
                 if (accountState is DesktopAccountState.SignedIn || accountState is DesktopAccountState.Expired) {
                     TextButton(
+                        enabled = !managedLoginRunning,
                         onClick = {
                             actionError = null
                             scope.launch {
@@ -1166,7 +1177,7 @@ private fun DesktopAccountCard(account: DesktopSessionManager) {
             onDismiss = { showImport = false },
             onCompleted = {
                 showImport = false
-                handoffNotice = "Account session validated and stored with Windows protection."
+                handoffNotice = "Account session validated and saved in secure system storage."
             },
         )
     }
@@ -1325,7 +1336,7 @@ private fun cookieJsonMessage(reason: YouTubeCookieJsonFailure): String =
         YouTubeCookieJsonFailure.EMPTY -> "Paste a cookie JSON export or choose a .json file."
         YouTubeCookieJsonFailure.TOO_LARGE -> "That export is too large to import safely."
         YouTubeCookieJsonFailure.MALFORMED_JSON -> "The selected text is not a supported JSON export."
-        YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES -> "No live YouTube-domain cookies were found."
+        YouTubeCookieJsonFailure.NO_SUPPORTED_COOKIES -> "No live cookies usable by music.youtube.com were found. Export that site's cookies while signed in."
         YouTubeCookieJsonFailure.MISSING_LOGIN_COOKIE -> "The export does not contain a usable YouTube login cookie."
         YouTubeCookieJsonFailure.UNSAFE_COOKIE_VALUE -> "The export contains an unsafe cookie value and was rejected."
         YouTubeCookieJsonFailure.HEADER_TOO_LARGE -> "The selected login cookies are too large to import safely."
@@ -1335,8 +1346,19 @@ private fun sessionImportMessage(reason: SessionImportFailure): String =
     when (reason) {
         SessionImportFailure.MISSING_LOGIN_COOKIE -> "A valid YouTube login cookie is required."
         SessionImportFailure.EXPIRED -> "That session export is already expired."
-        SessionImportFailure.VALIDATION_FAILED -> "Google could not validate that session. Sign in again and import a fresh session."
-        SessionImportFailure.SECURE_STORAGE_UNAVAILABLE -> "Windows secure storage is unavailable, so ArchiveTune did not retain this session."
+        SessionImportFailure.VALIDATION_FAILED -> "Could not validate the YouTube Music session. Check your connection and that Music is signed in, then try again."
+        SessionImportFailure.NETWORK_UNAVAILABLE -> "Could not reach YouTube Music. Check your connection or proxy, then try again."
+        SessionImportFailure.VALIDATION_TIMEOUT -> "YouTube Music session validation timed out. Please try again."
+        SessionImportFailure.INVALID_REQUEST -> "YouTube Music rejected the app's account request. Check for an ArchiveTune update."
+        SessionImportFailure.SERVICE_UNAVAILABLE -> "YouTube Music is busy or temporarily unavailable. Please try again later."
+        SessionImportFailure.SECURE_STORAGE_UNAVAILABLE -> secureAccountStorageHelp()
+    }
+
+private fun secureAccountStorageHelp(): String =
+    if (System.getProperty("os.name").startsWith("Linux", ignoreCase = true)) {
+        "Secure account storage is unavailable. Install libsecret's secret-tool and unlock your desktop keyring, then try again."
+    } else {
+        "Secure account storage is unavailable. Check your system's credential storage, then try again."
     }
 
 @Composable

@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.innertube.cache.DesktopRequestPriority
 import moe.rukamori.archivetune.innertube.cache.DesktopResourceCoordinator
@@ -56,6 +58,7 @@ class DesktopSearchRepository(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val sessionLock = Any()
+    private val scopeMutex = Mutex()
     private val sessions = object : LinkedHashMap<String, SearchSnapshot>(maxMemoryQueries + 1, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SearchSnapshot>?): Boolean =
             size > maxMemoryQueries
@@ -213,8 +216,10 @@ class DesktopSearchRepository(
         return decoded
     }
 
-    private suspend fun ensureScope(accountScope: String, force: Boolean = false) {
-        if (!force && _state.value.accountScope == accountScope) return
+    private suspend fun ensureScope(accountScope: String, force: Boolean = false) = scopeMutex.withLock {
+        // Initialization and the first query both load history. A late initializer must not reset
+        // a query that has already started loading or displayed its results.
+        if (!force && _state.value.accountScope == accountScope) return@withLock
         val history = readHistory(accountScope)
         _state.value = DesktopSearchState(accountScope = accountScope, history = history)
     }

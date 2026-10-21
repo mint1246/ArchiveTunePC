@@ -1,5 +1,6 @@
 package moe.rukamori.archivetune.desktop.ui
 
+import androidx.compose.ui.geometry.Offset
 import java.awt.Dimension
 import java.awt.Point
 import java.awt.Rectangle
@@ -104,6 +105,32 @@ class ArchiveTuneWindowChromeTest {
         assertEquals(
             Rectangle(-1408, 350, 1024, 576),
             fallbackRestoredBounds(Rectangle(-1536, 278, 1280, 720), Dimension(640, 480)),
+        )
+    }
+
+    @Test
+    fun `fallback pointer coordinates include drag region offset and negative window origin`() {
+        val draggedAreaOrigin = Offset(240f, 36f)
+        val dragStart = Offset(80f, 12f)
+        assertEquals(
+            Point(-1280, 56),
+            windowPointFromPixels(
+                start = Point(-1440, 24),
+                pixels = draggedAreaOrigin + dragStart,
+                scaleX = 2.0,
+                scaleY = 1.5,
+            ),
+        )
+    }
+
+    @Test
+    fun `fractional scale accumulates tiny drag movements without truncating each event`() {
+        val cumulativePixels = (0 until 9).fold(Offset.Zero) { total, _ ->
+            total + Offset(0.5f, 1f)
+        }
+        assertEquals(
+            Point(203, 106),
+            windowPointFromPixels(Point(200, 100), cumulativePixels, scaleX = 1.5, scaleY = 1.5),
         )
     }
 

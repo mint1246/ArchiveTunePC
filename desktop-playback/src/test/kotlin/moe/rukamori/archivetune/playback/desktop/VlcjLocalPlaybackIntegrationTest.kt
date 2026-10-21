@@ -50,6 +50,9 @@ import uk.co.caprica.vlcj.player.base.callback.AudioCallback
 class VlcjLocalPlaybackIntegrationTest {
     @Test
     fun `pitch bridge actually shifts decoded audio`() {
+        // The native pitch bridge relies on a private Windows VLC 3 x64 structure layout.
+        // It must never dereference that layout on Linux.
+        if (!VlcPitchBridge.isSupportedOnCurrentPlatform()) return
         val runtime = VlcRuntimeLocator.find() ?: return
         val wave = createWaveFile(durationSeconds = 2, channels = 1)
         try {
@@ -388,6 +391,8 @@ class VlcjLocalPlaybackIntegrationTest {
 
     @Test
     fun `pitch is reapplied when playback advances to the next queue item`() = runBlocking {
+        // This native pitch bridge is Windows-specific and deliberately disabled on Linux.
+        if (!VlcPitchBridge.isSupportedOnCurrentPlatform()) return@runBlocking
         val runtime = VlcRuntimeLocator.find() ?: return@runBlocking
         val firstWave = createWaveFile(durationSeconds = 2)
         val secondWave = createWaveFile(durationSeconds = 2)

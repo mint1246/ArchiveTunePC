@@ -55,7 +55,7 @@ import moe.rukamori.archivetune.desktop.social.DesktopSocialSessionStore
 import moe.rukamori.archivetune.desktop.social.SocialAccountState
 import moe.rukamori.archivetune.desktop.social.SocialPresence
 import moe.rukamori.archivetune.desktop.social.SocialRealtimeEvent
-import moe.rukamori.archivetune.desktopauth.DpapiFileSessionStore
+import moe.rukamori.archivetune.desktopauth.secureSessionStore
 import moe.rukamori.archivetune.desktop.state.DesktopDestination
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneDesktopApp
 import moe.rukamori.archivetune.desktop.ui.ArchiveTuneWindowChrome
@@ -88,7 +88,7 @@ fun main() {
             scope = runtime.applicationScope,
             api = DesktopSocialApi(),
             sessionStore = DesktopSocialSessionStore(
-                DpapiFileSessionStore(runtime.paths.data.resolve("social-session.dpapi")),
+                secureSessionStore(runtime.paths.data.resolve("social-session.dpapi")),
             ),
         ),
     )
@@ -232,13 +232,16 @@ fun main() {
                 exitApplication()
             }
 
+            // GNOME/Wayland can map a translucent XWayland AWT window without painting it.
+            // Prefer a standard opaque window on Linux until transparent Compose surfaces are verified.
+            val linuxWindow = System.getProperty("os.name").startsWith("Linux", ignoreCase = true)
             Window(
                 onCloseRequest = ::closeApplication,
                 state = windowState,
                 title = "ArchiveTune",
                 icon = painterResource("icons/archivetune.png"),
-                undecorated = true,
-                transparent = true,
+                undecorated = !linuxWindow,
+                transparent = !linuxWindow,
                 resizable = true,
             ) {
                 var showLyrics by remember { mutableStateOf(false) }
