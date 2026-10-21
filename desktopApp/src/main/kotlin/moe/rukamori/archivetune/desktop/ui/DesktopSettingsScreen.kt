@@ -90,6 +90,7 @@ import moe.rukamori.archivetune.desktop.sponsorblock.normalizeDesktopSponsorBloc
 import moe.rukamori.archivetune.desktop.state.DesktopThemePreference
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.lyrics.BuiltInLyricsProviders
+import moe.rukamori.archivetune.linuxmedia.LinuxKeyCapture
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.desktop.DesktopAudioEffects
 import moe.rukamori.archivetune.playback.desktop.DesktopAudioOutputControl
@@ -139,13 +140,24 @@ fun DesktopSettingsPanel(
     onLastFmScrobblingChanged: (Boolean) -> Unit = {},
     onLastFmNowPlayingChanged: (Boolean) -> Unit = {},
     keybindPressedKeys: StateFlow<List<Int>>? = null,
+    keybindStatus: StateFlow<String?>? = null,
     account: DesktopSessionManager?,
     accountContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val emptyKeybindPressedKeys = remember { MutableStateFlow<List<Int>>(emptyList()) }
-    val observedKeybindKeys by (keybindPressedKeys ?: emptyKeybindPressedKeys).collectAsState()
+    val serviceKeybindKeys by (keybindPressedKeys ?: emptyKeybindPressedKeys).collectAsState()
+    val emptyKeybindStatus = remember { MutableStateFlow<String?>(null) }
+    val globalKeybindStatus by (keybindStatus ?: emptyKeybindStatus).collectAsState()
+    // Linux records the shortcut locally, because the global shortcut portal can only express
+    // modifiers plus a single key while the settings surface has to show the keys as they are
+    // pressed.
+    val linuxKeyCapture = remember { LinuxKeyCapture() }
+    val linuxPressedKeys by linuxKeyCapture.pressedKeys.collectAsState()
+    val linuxCancellations by linuxKeyCapture.cancellations.collectAsState()
+    val isLinuxDesktop = remember { isLinuxDesktop() }
+    val observedKeybindKeys = if (isLinuxDesktop) linuxPressedKeys else serviceKeybindKeys
     var settings by remember(settingsStore) { mutableStateOf(settingsStore.snapshot()) }
     val emptyLastFmState = remember { MutableStateFlow(DesktopLastFmState()) }
     val lastFm by (lastFmStateFlow ?: emptyLastFmState).collectAsState()
@@ -180,7 +192,20 @@ fun DesktopSettingsPanel(
     )
 
     DisposableEffect(Unit) {
-        onDispose { onKeybindCaptureChanged(false) }
+        onDispose {
+            onKeybindCaptureChanged(false)
+            linuxKeyCapture.close()
+        }
+    }
+
+    // The Linux capture listens for the keys of the focused window, so it only runs while a
+    // shortcut is being recorded.
+    LaunchedEffect(recordingKeybindAction, isLinuxDesktop) {
+        if (isLinuxDesktop && recordingKeybindAction != null) {
+            linuxKeyCapture.start()
+        } else {
+            linuxKeyCapture.stop()
+        }
     }
 
     fun setRecordingKeybindAction(action: DesktopKeybindAction?) {
@@ -190,6 +215,11 @@ fun DesktopSettingsPanel(
         if (wasRecording != isRecording) onKeybindCaptureChanged(isRecording)
     }
 
+    // A recording that was dropped, for example because the window lost the focus, must not save
+    // the keys that were pressed before.
+    LaunchedEffect(linuxCancellations) {
+        if (linuxCancellations > 0L) setRecordingKeybindAction(null)
+    }
     fun update(transform: (DesktopSettings) -> DesktopSettings) {
         settings = settingsStore.update(transform)
     }
@@ -967,11 +997,23 @@ fun DesktopSettingsPanel(
                     Column(Modifier.weight(1f)) {
                         Text("Global shortcuts", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Use any key combination, including 3+ keys. Shortcuts keep working while other keys are held, and continuous actions can repeat.",
+                            if (isLinuxDesktop) {
+                                "System-wide shortcuts use modifiers plus one key, for example Ctrl+Shift+K. " +
+                                    "Press Set, hold the keys together and release them to record a shortcut."
+                            } else {
+                                "Use any key combination, including 3+ keys. Shortcuts keep working while other keys are held, and continuous actions can repeat."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                }
+                globalKeybindStatus?.let { status ->
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
                 Spacer(Modifier.size(6.dp))
                 DesktopKeybindAction.entries.forEachIndexed { index, action ->
@@ -1003,11 +1045,16 @@ fun DesktopSettingsPanel(
             }
         }
 
-        Text("Windows and startup", style = MaterialTheme.typography.headlineMedium)
+        Text("Window and startup", style = MaterialTheme.typography.headlineMedium)
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Media keys", style = MaterialTheme.typography.titleMedium)
-                Text("Windows media keys are enabled automatically when the native integration is available.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (isLinuxDesktop) "Media keys and desktop playback controls use your desktop’s media player integration."
+                    else "Windows media keys are enabled automatically when the native integration is available.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text("Window size, position, maximized state, theme and last destination are restored on the next launch.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -1107,6 +1154,10 @@ private fun KeybindRow(
     }
 }
 
+/** True on the Linux desktop, where the global shortcuts are bound through the desktop portal. */
+private fun isLinuxDesktop(): Boolean =
+    System.getProperty("os.name").startsWith("Linux", ignoreCase = true)
+
 private fun formatKeyChord(keys: List<Int>): String = keys.joinToString(" + ") { key ->
     when (key) {
         0x10 -> "Shift"
@@ -1153,11 +1204,11 @@ private val DesktopKeybindAction.keybindDescription: String
         DesktopKeybindAction.PLAY_PAUSE,
         DesktopKeybindAction.NEXT,
         DesktopKeybindAction.PREVIOUS,
-        -> "Alternative to the Windows media keys."
+        -> "Alternative to hardware media keys."
         DesktopKeybindAction.VOLUME_UP,
         DesktopKeybindAction.VOLUME_DOWN,
         -> "Changes ArchiveTune's own player volume by 2%."
-        DesktopKeybindAction.MUTE_TOGGLE -> "Mutes ArchiveTune without changing Windows system volume."
+        DesktopKeybindAction.MUTE_TOGGLE -> "Mutes ArchiveTune without changing system volume."
         DesktopKeybindAction.SEEK_FORWARD,
         DesktopKeybindAction.SEEK_BACKWARD,
         -> "Moves through the current track in 5 second steps."

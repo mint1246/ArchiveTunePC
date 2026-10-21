@@ -765,6 +765,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 onStatisticsPreferenceChanged = services::refreshStatisticsEligibility,
                 onBeatVisualPreferencesChanged = onBeatVisualPreferencesChanged,
                 keybindPressedKeys = services.keybindPressedKeys,
+                keybindStatus = services.keybindStatus,
                 modifier = modifier,
             )
         }

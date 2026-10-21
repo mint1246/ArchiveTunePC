@@ -2,6 +2,8 @@
 
 The implemented recommendation is **HYBRID**: keep the existing direct VISIONOS audio response as a bounded fast path, and delegate every challenge, cipher, rejected media URL, or native failure to unmodified upstream yt-dlp + Bun. Do not remove the legacy implementation yet. Full upstream replacement is working, but the measured latency and physical-memory cost remain substantially above native. No persistent Python or JavaScript worker is shipped.
 
+**Integration update (2026-10-21):** user approval supersedes the original no-merge gate. The integration includes Linux commit `cebf6fbda` (playback recovery, shortcuts and media controls), retaining its race/seek fixes, D-Bus module and runtime support. Resolver/backend/playback/Linux-media/desktopApp suites and live resolver/playback checks passed on the combined source. Existing uncommitted lyrics/tab-analysis work stays outside the merge commit. References below to no merge describe the measurement period.
+
 This is the current decision report. Earlier QuickJS/Bun reports describe historical full-replacement candidates. The [raw matched application data](packaging/resolver/validation/linux-resolver-matrix.json) and [matrix harness](scripts/benchmark-resolver-matrix.py) are the authority for the tables below.
 
 ## Matched application results
@@ -86,7 +88,7 @@ Legacy eagerly asks the session manager for per-video Web BotGuard proof before 
 1. Try the existing VISIONOS player response for at most two seconds; accept only a direct audio URL without n/cipher/signatureCipher. Preserve native quality, headers, expiry and audioConfig; validate CDN ranges. Respect existing client backoff.
 2. On any native failure, rejection, or timeout, take a fresh session snapshot and run unmodified upstream yt-dlp + Bun. Keep cookies/account context intact. Do not run Mori/NewPipe or maintain signature transforms on the default path.
 3. Propagate caller cancellation without starting fallback. Keep existing playback/download/cache/preload interfaces and libVLC callback transport. Existing URL cache remains session- and expiry-aware.
-4. Retain explicit `hybrid`, `ytdlp`, and `legacy` modes for diagnostics/comparison; no legacy code is removed and no branch is merged.
+4. Retain explicit `hybrid`, `ytdlp`, and `legacy` modes for diagnostics/comparison; no legacy code is removed and the merge does not remove that diagnostic control.
 
 This retains a small native request/format-selection fast path, which can itself break. Its failures are contained by upstream fallback. It does not preserve the old burden of maintaining changing YouTube decipher/challenge code. If YouTube stops returning direct formats, the application becomes slower rather than relying on new local transforms.
 
@@ -136,4 +138,4 @@ The final Linux AppImage was built from exact ref `fb434722e` after verifying al
 
 The [packaged-sidecar live smoke](packaging/resolver/validation/linux-hybrid-packaged-smoke.json) then forced `web_embedded` challenge solving on dQw4w9WgXcQ using only the extracted AppImage binaries. Bundled EJS 0.8.0 executed through Bun, selected audio-only HTTPS Opus 251 with four headers, and returned HTTP 206 / 65,536 bytes at both head and tail. The expected upstream unsupported-Bun-version warning appeared; no version bypass was used. No process group survived, the private temporary root was removed, and no cookies or account data were read. This is a functionality smoke, not another timed benchmark.
 
-Windows runtime/Job Object containment, full Windows MSI/GraalVM execution, ARM/macOS, restricted/cookie-only media, audible output, full manual queue/download acceptance, and concurrent-preload memory stress remain unverified. These limitations do not block this isolated experimental branch, and no install or merge has occurred.
+Windows runtime/Job Object containment, full Windows MSI/GraalVM execution, ARM/macOS, restricted/cookie-only media, audible output, full manual queue/download acceptance, and concurrent-preload memory stress remain unverified. These limitations remain acceptance items after the approved Linux merge. No installed application is replaced.

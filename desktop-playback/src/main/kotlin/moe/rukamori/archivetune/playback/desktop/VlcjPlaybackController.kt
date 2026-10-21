@@ -104,6 +104,7 @@ class VlcjPlaybackController(
         { it.shouldUseApplicationHttpTransport() }
     private val _state = MutableStateFlow(PlaybackSnapshot(pitchSemitones = initialSafePitchSemitones))
     private val _events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 32)
+    private val mediaGuard = PlaybackMediaGuard()
     private val audioOutputSelection = DesktopAudioOutputSelection(initialAudioOutputDeviceId)
     private val latestPositionMs = AtomicLong(0L)
     private var positionTicker: Job? = null
@@ -142,7 +143,6 @@ class VlcjPlaybackController(
     private val httpRecoveryGeneration = AtomicLong(NO_RECOVERY_GENERATION)
     private var recoveryAttemptedMediaId: String? = null
     private var prematureFinishRetriedMediaId: String? = null
-    private var pendingSeek: Pair<Long, Long>? = null
     private var suppressStoppedEvents = 0
     @Volatile private var externalAudioRendererActive = false
     @Volatile private var pitchSemitones = initialSafePitchSemitones
@@ -416,9 +416,12 @@ class VlcjPlaybackController(
         positionTicker = scope.launch {
             while (true) {
                 delay(POSITION_POLL_INTERVAL_MS)
-                val position = latestPositionMs.get()
                 commandMutex.withLock {
                     if (!closed.get() && activeGeneration == generation) {
+                        // Read the position while the lock is held. Reading it before the lock
+                        // lets a seek that lands in between publish the pre-seek position again,
+                        // which makes the progress jump back to where the track was before.
+                        val position = latestPositionMs.get()
                         _state.update { snapshot ->
                             snapshot.copy(
                                 positionMs = position.coerceAtMostPositive(snapshot.durationMs),
@@ -511,7 +514,7 @@ class VlcjPlaybackController(
         commandMutex.withLock {
             advanceLoadGeneration()
             activeGeneration = null
-            pendingSeek = null
+            mediaGuard.clearPendingSeek()
             stopActiveFileLocked()
             _state.update {
                 it.copy(
@@ -534,12 +537,18 @@ class VlcjPlaybackController(
                 if (duration > 0L) requested.coerceAtMost(duration) else requested
             }
             latestPositionMs.set(safePosition)
-            if (activeGeneration != null && _state.value.status in setOf(
-                    PlaybackStatus.RESOLVING,
-                    PlaybackStatus.LOADING,
-                )
-            ) {
-                pendingSeek = (activeGeneration ?: generation) to safePosition
+            // The user took control of the position, so every terminal event that is still in
+            // flight belongs to an older attempt and must not reload the track.
+            mediaGuard.noteUserSeek(safePosition)
+            // An explicit seek is the user taking over, so the automatic retry budget of the
+            // current media is restored. Without this a recovered track would fail on the next
+            // premature end of stream instead of getting its single retry.
+            prematureFinishRetriedMediaId = null
+            if (!activeMediaAlreadyStartedLocked()) {
+                // The media is still resolving or loading, and the load that is already running
+                // restores its own start position once it opens. Remember the requested position
+                // so that load starts there instead of at the stale start position.
+                mediaGuard.queuePendingSeek(generation, safePosition)
             }
             _state.update {
                 it.copy(
@@ -550,6 +559,12 @@ class VlcjPlaybackController(
             player?.controls()?.setTime(safePosition)
             if (kotlin.math.abs(pitchSemitones) >= 0.001f) pitchNeedsApply = true
         }
+    }
+
+    /** True when the media of the active generation already reached the playing state. */
+    private fun activeMediaAlreadyStartedLocked(): Boolean {
+        val active = activeGeneration ?: return false
+        return active == generation && mediaGuard.hasStarted(active)
     }
 
     override suspend fun seekToItem(index: Int, positionMs: Long) {
@@ -924,9 +939,12 @@ class VlcjPlaybackController(
                 pitchNeedsApply = true
                 outputGain.setSource(resolved)
                 httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
-                pendingSeek = pendingSeek?.takeIf { it.first == request.generation }
-                    ?: (request.generation to request.startPositionMs)
-                latestPositionMs.set(request.startPositionMs)
+                // A user seek that arrived while this load was still resolving wins over the
+                // start position the load was created with.
+                val startPositionMs = mediaGuard.pendingSeekFor(request.generation)
+                    ?: request.startPositionMs
+                mediaGuard.queuePendingSeek(request.generation, startPositionMs)
+                latestPositionMs.set(startPositionMs)
                 val callbackMedia =
                     if (applicationHttpTransportPredicate(resolved)) {
                         rangeHttpTransport.media(
@@ -1131,22 +1149,32 @@ class VlcjPlaybackController(
                 }
             }
 
-            override fun playing(mediaPlayer: MediaPlayer) = dispatch {
-                withActivePlayerLocked(mediaPlayer) {
-                    if (pitchNeedsApply && VlcPitchBridge.applyToActiveAudioOutput(mediaPlayer, pitchSemitones)) {
-                        pitchNeedsApply = false
+            override fun playing(mediaPlayer: MediaPlayer) {
+                // Note the start while the callback arrives: libVLC delivers `playing` before
+                // `finished` on the same event thread, so the end-of-stream handler must already
+                // know that this media started.
+                if (!closed.get() && player === mediaPlayer) {
+                    activeGeneration?.let { mediaGuard.noteMediaStarted(it) }
+                }
+                dispatch {
+                    withActivePlayerLocked(mediaPlayer) {
+                        if (pitchNeedsApply && VlcPitchBridge.applyToActiveAudioOutput(mediaPlayer, pitchSemitones)) {
+                            pitchNeedsApply = false
+                        }
+                        cancelLoadWatchdog()
+                        mediaGuard.consumePendingSeek(generation)?.takeIf { it > 0L }?.let {
+                            // The engine applies the seek asynchronously, so arm the
+                            // acknowledgement window before the native seek is issued.
+                            mediaGuard.armSeekAcknowledgement(it)
+                            mediaPlayer.controls().setTime(it)
+                            latestPositionMs.set(it)
+                            if (kotlin.math.abs(pitchSemitones) >= 0.001f) pitchNeedsApply = true
+                        }
+                        queue.current?.metadata?.id?.let { mediaId ->
+                            if (recoveryAttemptedMediaId == mediaId) recoveryAttemptedMediaId = null
+                        }
+                        _state.update { it.copy(status = PlaybackStatus.READY, error = null) }
                     }
-                    cancelLoadWatchdog()
-                    pendingSeek?.takeIf { it.first == generation }?.second?.takeIf { it > 0L }?.let {
-                        mediaPlayer.controls().setTime(it)
-                        latestPositionMs.set(it)
-                        if (kotlin.math.abs(pitchSemitones) >= 0.001f) pitchNeedsApply = true
-                    }
-                    pendingSeek = null
-                    queue.current?.metadata?.id?.let { mediaId ->
-                        if (recoveryAttemptedMediaId == mediaId) recoveryAttemptedMediaId = null
-                    }
-                    _state.update { it.copy(status = PlaybackStatus.READY, error = null) }
                 }
             }
 
@@ -1161,6 +1189,13 @@ class VlcjPlaybackController(
                 commandMutex.withLock {
                     if (suppressStoppedEvents > 0) {
                         suppressStoppedEvents--
+                    } else if (mediaGuard.consumeEndOfStreamArrival(activeGeneration)) {
+                        // libVLC emits stopped immediately after the natural finished event. The
+                        // end-of-stream handler owns that transition, so the trailing stopped
+                        // event must not clear playWhenReady and pause the next track.
+                        logger.fine(
+                            "Ignoring the stopped event that follows the natural end of the stream",
+                        )
                     } else if (
                         isActiveEventLocked(mediaPlayer) &&
                         crossfadeSuppressFinishedRunId != null
@@ -1185,25 +1220,56 @@ class VlcjPlaybackController(
                 }
             }
 
-            override fun finished(mediaPlayer: MediaPlayer) = dispatch {
-                val request = commandMutex.withLock {
-                    if (!isActiveEventLocked(mediaPlayer)) return@withLock null
-                    // Once the incoming player is audible, the crossfade coroutine owns the
-                    // transition. Do not throw this EOF away though: if the crossfade misses its
-                    // handoff deadline, this is the only natural-end event VLC will emit.
-                    crossfadeSuppressFinishedRunId?.let { runId ->
-                        deferredFinishedRunId = runId
-                        deferredFinishedGeneration = generation
-                        return@withLock null
+            override fun finished(mediaPlayer: MediaPlayer) {
+                // Capture the media identity while the callback arrives. libVLC posts this on its
+                // own event thread and the controller handles it on a coroutine, so the media
+                // that produced the event can be replaced before it is processed.
+                val identity = mediaGuard.captureIdentity(activeGeneration)
+                identity?.let { mediaGuard.noteEndOfStreamArrived(it.generation) }
+                dispatch {
+                    val request = commandMutex.withLock {
+                        if (identity == null) return@withLock null
+                        if (!isActiveEventLocked(mediaPlayer)) return@withLock null
+                        if (!mediaGuard.describesActiveMedia(identity, generation, activeGeneration)) {
+                            logger.fine("Ignoring an obsolete libVLC finished event of a replaced media item")
+                            return@withLock null
+                        }
+                        if (mediaGuard.supersededByUserSeek(identity)) {
+                            // The user seeked after this event was raised. The seek is the
+                            // corrective action, so the event must not reload the track.
+                            logger.fine("Ignoring a libVLC finished event that a newer user seek superseded")
+                            return@withLock null
+                        }
+                        if (!mediaGuard.hasStarted(identity.generation)) {
+                            // A media that never started playing cannot have reached its end, so
+                            // this event belongs to the media that was replaced.
+                            logger.fine("Ignoring a libVLC finished event of media that never started playing")
+                            return@withLock null
+                        }
+                        // Once the incoming player is audible, the crossfade coroutine owns the
+                        // transition. Do not throw this EOF away though: if the crossfade misses its
+                        // handoff deadline, this is the only natural-end event VLC will emit.
+                        crossfadeSuppressFinishedRunId?.let { runId ->
+                            deferredFinishedRunId = runId
+                            deferredFinishedGeneration = generation
+                            return@withLock null
+                        }
+                        finishActivePlaybackLocked()
                     }
-                    finishActivePlaybackLocked()
+                    request?.let(::enqueueLoad)
                 }
-                request?.let(::enqueueLoad)
             }
 
-            override fun error(mediaPlayer: MediaPlayer) = dispatch {
-                commandMutex.withLock {
-                    if (isActiveEventLocked(mediaPlayer)) {
+            override fun error(mediaPlayer: MediaPlayer) {
+                val identity = mediaGuard.captureIdentity(activeGeneration)
+                dispatch {
+                    commandMutex.withLock {
+                        if (identity == null) return@withLock
+                        if (!isActiveEventLocked(mediaPlayer)) return@withLock
+                        if (!mediaGuard.describesActiveMedia(identity, generation, activeGeneration)) {
+                            logger.fine("Ignoring an obsolete libVLC error of a replaced media item")
+                            return@withLock
+                        }
                         if (httpRecoveryGeneration.get() == generation) {
                             logger.info(
                                 "Suppressing libVLC engine error while HTTP stream recovery is in progress " +
@@ -1229,7 +1295,11 @@ class VlcjPlaybackController(
 
             override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
                 if (!closed.get() && player === mediaPlayer) {
-                    latestPositionMs.set(newTime.coerceAtLeast(0L))
+                    // A seek is applied asynchronously, so the engine can report the pre-seek
+                    // position once more. Ignoring that stale value keeps the reported position
+                    // on the position the user asked for instead of jumping back.
+                    val position = mediaGuard.acceptNativePosition(newTime.coerceAtLeast(0L)) ?: return
+                    latestPositionMs.set(position)
                     // The first `playing` callback can arrive a little before VLC exposes the new
                     // track's aout. Keep the pitch armed and retry on the next time tick instead of
                     // silently leaving every later queue item at its original pitch.
@@ -1248,14 +1318,21 @@ class VlcjPlaybackController(
                 }
             }
 
-            override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) = dispatch {
-                withActivePlayerLocked(mediaPlayer) {
-                    _state.update {
-                        it.copy(
-                            durationMs = newLength.coerceAtLeast(0L),
-                            positionMs = it.positionMs.coerceAtMostPositive(newLength),
-                            bufferedPositionMs = it.bufferedPositionMs.coerceAtMostPositive(newLength),
-                        )
+            override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
+                // Record the decoded length while the callback arrives so a fast end of stream
+                // cannot be mistaken for a truncated stream because the callback was handled late.
+                if (!closed.get() && player === mediaPlayer && newLength > 0L) {
+                    activeGeneration?.let { mediaGuard.recordDecodedDuration(it, newLength) }
+                }
+                dispatch {
+                    withActivePlayerLocked(mediaPlayer) {
+                        _state.update {
+                            it.copy(
+                                durationMs = newLength.coerceAtLeast(0L),
+                                positionMs = it.positionMs.coerceAtMostPositive(newLength),
+                                bufferedPositionMs = it.bufferedPositionMs.coerceAtMostPositive(newLength),
+                            )
+                        }
                     }
                 }
             }
@@ -1270,17 +1347,44 @@ class VlcjPlaybackController(
         cancelLoadWatchdog()
         val previous = queue.current
         val snapshot = _state.value
-        val positionMs = maxOf(snapshot.positionMs, latestPositionMs.get())
-        val expectedDurationMs =
-            previous?.metadata?.durationHintMs?.takeIf { it > 0L }
-                ?: snapshot.durationMs.takeIf { it > 0L }
+        // Ask the engine for the freshest position. The published snapshot is refreshed by the
+        // position ticker and can still lag behind the real end of the media.
+        val nativeTimeMs = runCatching { player?.status()?.time() ?: 0L }
+            .getOrDefault(0L)
+            .coerceAtLeast(0L)
+        val positionMs = maxOf(nativeTimeMs, snapshot.positionMs, latestPositionMs.get())
+        // libVLC knows the length of the media it actually decoded. The catalog duration hint
+        // describes the library entry, and an approximate or simply wrong hint turns a normal end
+        // of stream into a bogus "stream ended unexpectedly" failure. Prefer the decoded length
+        // and only fall back to the snapshot and then to the hint when the engine never reported
+        // a length. A stream that really ends before its decoded length is still reported as a
+        // premature end of stream.
+        val decodedDurationMs = mediaGuard.decodedDurationMs(generation)
+            ?: runCatching { player?.status()?.length() ?: 0L }
+                .getOrDefault(0L)
+                .coerceAtLeast(0L)
+                .takeIf { it > 0L }
+        val expectedDurationMs = decodedDurationMs
+            ?: snapshot.durationMs.takeIf { it > 0L }
+            ?: previous?.metadata?.durationHintMs?.takeIf { it > 0L }
+        val durationSource = when {
+            decodedDurationMs != null -> "decoded"
+            snapshot.durationMs > 0L -> "snapshot"
+            previous?.metadata?.durationHintMs?.let { it > 0L } == true -> "catalog-hint"
+            else -> "unknown"
+        }
         val endedPrematurely =
             expectedDurationMs != null &&
                 positionMs + PREMATURE_FINISH_TOLERANCE_MS < expectedDurationMs
         if (endedPrematurely && previous != null) {
             logger.warning(
                 "Ignoring premature libVLC finished event for ${previous.logLabel()}: " +
-                    "positionMs=$positionMs expectedDurationMs=$expectedDurationMs",
+                    "positionMs=$positionMs nativeTimeMs=$nativeTimeMs " +
+                    "latestPositionMs=${latestPositionMs.get()} " +
+                    "decodedDurationMs=${decodedDurationMs ?: "unknown"} " +
+                    "snapshotDurationMs=${snapshot.durationMs} " +
+                    "hintDurationMs=${previous.metadata.durationHintMs} " +
+                    "expectedDurationMs=$expectedDurationMs durationSource=$durationSource",
             )
             if (prematureFinishRetriedMediaId != previous.metadata.id) {
                 prematureFinishRetriedMediaId = previous.metadata.id
@@ -1309,6 +1413,9 @@ class VlcjPlaybackController(
             activeGeneration = null
             return null
         }
+        // A natural end of stream must not stop the queue. libVLC emits a trailing stopped event
+        // that can clear playWhenReady before this handler runs, so restore the intent here.
+        _state.update { it.copy(playWhenReady = true) }
         return prepareSelectionLocked(previous, selected, TransitionReason.AUTO_ADVANCE)
     }
 
@@ -1804,6 +1911,9 @@ class VlcjPlaybackController(
         activeCallbackMedia = callbackMedia
         activeResolvedSource = resolved
         activeGeneration = generation
+        // The promoted player is already audible, so its media counts as started even though it
+        // never emitted a playing callback for this controller.
+        mediaGuard.noteMediaStarted(generation)
         // The secondary player's initial `playing` callback is only a best-effort pitch apply.
         // Re-assert it at promotion, then let the active time-tick retry path finish the job if
         // VLC has not exposed the promoted aout yet.
@@ -1855,6 +1965,7 @@ class VlcjPlaybackController(
             val item: PlaybackItem,
             val source: ResolvedPlaybackSource,
             val positionMs: Long,
+            val seekRevision: Long,
         )
 
         val context = commandMutex.withLock {
@@ -1899,6 +2010,7 @@ class VlcjPlaybackController(
                 item = item,
                 source = source,
                 positionMs = _state.value.positionMs,
+                seekRevision = mediaGuard.seekRevision(),
             )
         } ?: return
 
@@ -1938,11 +2050,20 @@ class VlcjPlaybackController(
                 return@withLock null
             }
 
+            // The recovery callback suspended while the transport was re-resolved. The user can
+            // seek during that window, and that newer position must win over the position that
+            // was current when the failure was detected.
+            val resumePositionMs = if (mediaGuard.seekRevision() != context.seekRevision) {
+                mediaGuard.lastUserSeekPositionMs()
+            } else {
+                currentPlaybackPositionLocked()
+            }
+
             logger.info(
-                "Retrying ${context.item.logLabel()} from ${context.positionMs}ms after HTTP $httpStatus " +
-                    "using a different YouTube stream client",
+                "Retrying ${context.item.logLabel()} from ${resumePositionMs}ms after HTTP $httpStatus " +
+                    "using a different YouTube stream client (failure detected at ${context.positionMs}ms)",
             )
-            val request = prepareReloadLocked(TransitionReason.RETRY, context.positionMs)
+            val request = prepareReloadLocked(TransitionReason.RETRY, resumePositionMs)
             httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
             request
         }
@@ -1962,6 +2083,17 @@ class VlcjPlaybackController(
                 "for generation=$failedGeneration",
         )
         dispatch { recoverAfterStreamHttpFailure(failedGeneration, httpStatus) }
+    }
+
+    /**
+     * Raise the same stream failure the native HTTP transport raises for a retryable status.
+     *
+     * Desktop tests use this to drive the recovery path without a signed stream, so the recovery
+     * behaviour can be verified deterministically.
+     */
+    internal fun simulateStreamHttpFailure(httpStatus: Int) {
+        val failedGeneration = activeGeneration ?: return
+        scheduleStreamHttpRecovery(failedGeneration, httpStatus, "simulated stream failure")
     }
 
     private fun dispatch(block: suspend () -> Unit) {
@@ -2010,6 +2142,9 @@ class VlcjPlaybackController(
     private fun advanceLoadGeneration(cancelCrossfade: Boolean = true) {
         if (cancelCrossfade) cancelCrossfadeLocked(resetAttempt = true)
         generation++
+        // A queued start position belongs to the load generation that requested it. The new
+        // generation owns its own start position now.
+        mediaGuard.clearPendingSeek()
         loadJobOwner.cancelCurrent()
     }
 
@@ -2067,7 +2202,10 @@ class VlcjPlaybackController(
         outputGain.setSource(null)
         activeCallbackMedia = null
         httpRecoveryGeneration.set(NO_RECOVERY_GENERATION)
-        pendingSeek = null
+        // The decoded length, the started flag, and the pending end-of-stream announcement belong
+        // to the media that is torn down here. The queued start position does not: the load that
+        // is already running may still have to apply the position the user asked for.
+        mediaGuard.resetMedia()
         cancelLoadWatchdog()
         player?.let { activePlayer ->
             if (hadActiveMedia) suppressStoppedEvents++

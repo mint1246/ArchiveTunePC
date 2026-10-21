@@ -1,7 +1,8 @@
 # Experimental desktop yt-dlp + Bun resolver
 
-Implemented on `feature/ytdlp-resolver` in its own worktree. No merge is performed.
-The Linux porting checkout and its uncommitted changes remain untouched. Its committed
+Implemented on `feature/ytdlp-resolver` in its own worktree. Following user approval,
+merge integration includes Linux playback/media-control commit `cebf6fbda`. The Linux
+checkout’s existing uncommitted work is preserved separately from the merge. Its committed
 Linux support updates are now incorporated into this experimental branch.
 
 The current architecture decision, matched four-mode distributions, worker/cache profiles, browser attribution, and fallback evidence are in [YT_DLP_OPTIMIZATION.md](YT_DLP_OPTIMIZATION.md). The comparisons later in this document are historical full-replacement runs.
@@ -139,7 +140,8 @@ The committed Linux authentication/playback update `070ec6914` and AppImage upda
 Service storage and Chromium discovery, system libVLC discovery and audio output,
 and the locale fix that sends `hl=en` with `gl=IL` instead of invalid `hl=en-IL`.
 The login implementation is inherited from those commits; the resolver experiment
-does not replace it. The original `linux-port` worktree and branch are untouched.
+does not replace it. Original isolation was maintained during development; the later
+user-approved merge preserves the Linux checkout’s uncommitted work.
 
 The integrated resolver uses the hybrid policy, private cookies, cancellation,
 20-second attempt budgets, shared HTTP routing and complete media headers. Packaging

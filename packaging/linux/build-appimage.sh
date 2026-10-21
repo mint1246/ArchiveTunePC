@@ -148,8 +148,7 @@ require_image() {
   [[ -f $ICON_SOURCE ]] || die "missing launcher icon: $ICON_SOURCE"
 }
 
-# yt-dlp is the default desktop stream resolver, so an image without its staged sidecars
-# would install an AppImage that cannot play YouTube audio. The Gradle stage task writes these
+# The hybrid resolver requires yt-dlp for compatibility fallback. The Gradle stage task writes these
 # beside the launcher's compose.application.resources.dir under lib/app/resources.
 require_resolver() {
   local resolver_dir=$IMAGE_DIR/lib/app/resources/resolver
