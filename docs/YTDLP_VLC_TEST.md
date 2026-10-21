@@ -69,9 +69,10 @@ missing executable paths fail the live test instead of silently skipping it.
 
 ## Linux notes
 
-* The production `VlcRuntimeLocator` is Windows-only and hardcodes `--aout=directsound`, so it
-  is **not** used here. The test creates a plain `MediaPlayerFactory("--no-video", "--quiet",
-  "--aout=dummy")` that binds the system libVLC through JNA/ldconfig.
+* This test was added before Linux runtime discovery was integrated. The production locator
+  now supports system Linux libVLC and gates Windows audio options by platform. The test still
+  creates its own `MediaPlayerFactory("--no-video", "--quiet", "--aout=dummy")` through
+  JNA/ldconfig, so it verifies the resolver/callback contract independently of app startup.
 * `VlcjRangeCallbackMedia` and `VlcjRangeHttpTransport` are used exactly as production uses them;
   the test does not patch production runtime discovery.
 * The test never touches an account session: the client is created with an empty

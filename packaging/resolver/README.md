@@ -33,10 +33,11 @@ resolver/
     yt-dlp-ejs-UNLICENSE.txt
 ```
 
-Inside a Compose Desktop app image the directory is therefore:
+Inside a Compose Desktop app image the directory depends on the platform:
 
 ```text
-ArchiveTune/app/resources/resolver/
+Windows: ArchiveTune/app/resources/resolver/
+Linux:   ArchiveTune/lib/app/resources/resolver/
 ```
 
 Inside the GraalVM native release directory it is a sibling of the executable:
@@ -54,8 +55,9 @@ ArchiveTune/
 SHA-256 values. The runtime does not need it, but it makes support reports and
 release verification unambiguous.
 
-Both installers carry the staged tree automatically: jpackage packages the JVM
-app image's `app/resources`, and the native WiX build harvests everything below
+Installers carry the staged tree automatically: jpackage packages the platform's
+app resource directory, the Linux AppImage wrapper copies and validates that image,
+and the native WiX build harvests everything below
 the GraalVM release directory with `heat.exe`. No installer file list needs to
 be updated when the sidecar set changes.
 
@@ -149,11 +151,11 @@ supported by this packaging yet.
 
 The verifier intentionally does not execute the sidecars, so it works when
 staging resources for another target platform. Smoke-test the host-native pair
-after staging:
+after staging (Linux paths below; use `app/resources` on Windows):
 
 ```bash
-desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/yt-dlp --version
-desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/qjs --version
+desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/yt-dlp --version
+desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/qjs --version
 ```
 
 ## Reproducibility and updates

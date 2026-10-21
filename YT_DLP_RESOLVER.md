@@ -1,7 +1,8 @@
 # Experimental desktop yt-dlp + quickjs-ng resolver
 
 Implemented on `feature/ytdlp-resolver` in its own worktree. No merge is performed.
-Android's shared extraction policies and the Linux porting checkout remain separate.
+The Linux porting checkout and its uncommitted changes remain untouched. Its committed
+Linux support updates are now incorporated into this experimental branch.
 
 ## Application integration
 
@@ -100,6 +101,23 @@ go there. Upstream 2026.08.19 disables its preprocessed-player disk cache, so th
 standard cache does not eliminate the expensive `n` challenge path. No upstream
 solver internals are patched to change that policy.
 
+## Integrated Linux support
+
+The committed Linux authentication/playback update `070ec6914` and AppImage update
+`0817a5024` are incorporated, with core pinned to `144fe5c`. This brings Linux Secret
+Service storage and Chromium discovery, system libVLC discovery and audio output,
+and the locale fix that sends `hl=en` with `gl=IL` instead of invalid `hl=en-IL`.
+The login implementation is inherited from those commits; the resolver experiment
+does not replace it. The original `linux-port` worktree and branch are untouched.
+
+The integrated resolver keeps its yt-dlp default, private cookies, cancellation,
+20-second attempt budgets, shared HTTP routing and complete media headers. Packaging
+uses `lib/app/resources/resolver` on Linux and `app/resources/resolver` on Windows.
+The AppImage wrapper rejects missing or non-Linux resolver sidecars. Linux staging,
+checksum verification, AppImage build/extraction and anonymous live callback playback
+were verified in the isolated integration worktree. Authenticated whole-application
+testing is being measured separately against the committed Linux baseline.
+
 ## JavaScript runtime cost
 
 The [runtime comparison](YT_DLP_RUNTIME_COMPARISON.md) measures the same pinned
@@ -125,7 +143,7 @@ sidecars are downloaded from official release assets and checksum-verified.
 Discovery order is the `archivetune.ytdlp` / `archivetune.quickjs` system properties,
 `ARCHIVETUNE_YTDLP` / `ARCHIVETUNE_QUICKJS`, packaged `resolver/` directories, the local
 `.tools/resolver/` development directory, then PATH. Packaged JVM resources use
-`app/resources/resolver/`; GraalVM native distributions carry `resolver/` alongside the
+`app/resources/resolver/` on Windows and `lib/app/resources/resolver/` on Linux; GraalVM native distributions carry `resolver/` alongside the
 executable (or its containing `bin/` directory). Discovery uses process metadata and
 filesystem APIs, not reflection or embedded scripting engines.
 
@@ -133,15 +151,15 @@ Linux JVM staging/verification and native sidecar staging were run. Windows side
 were cross-staged and verified on Linux, including their `.exe` names and hashes.
 The normal JVM desktop application compiles with the integrated resolver. A full
 Windows MSI/GraalVM native image was not built or executed on this Linux host.
-The inherited build still has Windows-only native libraries/installer tasks; this
-branch does not port those components. macOS/ARM sidecars are not packaged here.
+The Windows-only native/installer tasks remain platform-gated. The integrated Linux
+JVM image and AppImage use system libVLC and the host desktop dependencies. macOS/ARM sidecars are not packaged here.
 
 Development setup using the staged Linux tools:
 
 ```bash
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew :desktopApp:verifyBundledResolverSidecars
-export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/yt-dlp"
-export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/app/resources/resolver/qjs"
+export ARCHIVETUNE_YTDLP="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/yt-dlp"
+export ARCHIVETUNE_QUICKJS="$PWD/desktopApp/build/compose/binaries/main/app/ArchiveTune/lib/app/resources/resolver/qjs"
 ```
 
 ## Anonymous application measurements (runtime candidate `5e5ecb786`)
@@ -164,9 +182,9 @@ confirmed browser execution remains open.
 No browser was launched during these anonymous runs, and no tracked process remained
 after shutdown. The temporary helpers account for most of the extraction peak;
 post-extraction memory returns near idle. Full application playback, authentication
-browser memory, and signed-in browsing were not measured. The production VLC locator
-is Windows-only, although the installed system libVLC passed independent live callback
-tests. Anonymous home/library requests returned HTTP 400. See the report for the
+browser memory, and signed-in browsing were not measured. Those measurements predate the integrated Linux update and used the old Windows-only
+VLC locator. The current branch has Linux VLC discovery; the installed system library
+also passed independent live callback tests. Anonymous home/library requests returned HTTP 400. See the report for the
 sampling limits, process breakdown, exact revisions, raw artifacts and repeat command.
 
 ## Initial resolver-only measurements (2026-10-21, candidate c5cb2e578)
@@ -229,16 +247,16 @@ headers and cancellable probes. POSIX process fixtures explicitly skip on non-PO
 hosts; JSON/policy/backend contract tests remain portable.
 
 The resolver suite passes 26 tests (19 new process/policy tests plus 7 shared-policy
-tests); the backend suite passes 81 tests. Targeted caller tests for queue preloading,
+tests); the integrated backend suite passes 94 tests (one opt-in skip). Targeted caller tests for queue preloading,
 cache-session changes, completed-download preference, download attempts and queue
 persistence pass 24 tests; the download manager suite passes 14. The existing
-playback-core (22 tests) and
-desktop-playback (46 tests, including the opt-in live callback test) suites pass on
-Linux. The live test also checks a deep seek, pause/resume and exact header delivery;
-see [the test notes](docs/YTDLP_VLC_TEST.md). Their old native
-controller tests silently return when the Windows-only runtime locator finds no runtime;
-that is **not** evidence of full Linux application playback. This branch deliberately
-leaves the Linux port's runtime discovery/audio-output work to its own worktree.
+playback-core suite passed 22 tests. After integrating the Linux fixes, the
+`desktop-auth` suite passed 97 tests (three opt-in skips), core passed 15 tests,
+and desktop-playback passed 53 tests (one opt-in skip). Running its opt-in live
+callback class separately passed both tests, including real playback, deep seek,
+pause/resume and header delivery; see [the test notes](docs/YTDLP_VLC_TEST.md).
+These integration tests are distinct from the authenticated whole-application
+benchmark; current results from that benchmark will be recorded separately.
 
 Independent final live tests also passed for `jNQXAC9IVRw`, `dQw4w9WgXcQ` and
 `aqz-KE-bpKQ`: all three returned head/tail HTTP 206, reached Playing in system
@@ -248,8 +266,8 @@ explicitly reported a QuickJS challenge and the bundled EJS source.
 Merge remains deferred until the application is exercised on its supported desktop
 runtime: local playback, resolved YouTube playback, seek/pause/resume, next-track
 preloading/cancellation, downloads and signed-in cookie authentication. Windows/GraalVM
-execution and authenticated live playback remain acceptance items even when the
-independent Linux libVLC callback integration succeeds.
+execution remains unverified. Authenticated full-application playback is being checked
+with isolated copies of the user's stored session, without modifying the live app.
 
 Public sources: [yt-dlp EJS setup](https://github.com/yt-dlp/yt-dlp/wiki/EJS),
 [yt-dlp 2026.08.19](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19),
