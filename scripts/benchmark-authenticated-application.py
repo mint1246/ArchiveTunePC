@@ -888,11 +888,14 @@ def run_application(
         )
         return result
     finally:
-        cleared = session_store.clear_clone(clone_path)
-        shutil.rmtree(home, ignore_errors=True)
-        if result is not None:
-            result["session_clone"]["clone_key_cleared"] = cleared
-            result["cleanup"]["private_home_removed"] = not home.exists()
+        cleared = False
+        try:
+            cleared = session_store.clear_clone(clone_path)
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+            if result is not None:
+                result["session_clone"]["clone_key_cleared"] = cleared
+                result["cleanup"]["private_home_removed"] = not home.exists()
 
 
 def _run_inner(

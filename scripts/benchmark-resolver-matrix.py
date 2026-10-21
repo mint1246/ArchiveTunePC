@@ -46,7 +46,7 @@ def distribution(values):
             "p95": values[math.ceil(.95 * len(values)) - 1], "max": values[-1]}
 
 
-def hook(videos, repeats, probe, auth_policy):
+def hook(videos, repeats, probe, auth_policy, native_failure_fixture=False):
     block = AUTH.instrumentation_block(videos, repeats, probe)
     if block.count('"bitrate" to stream.bitrate,') != 1:
         raise RuntimeError("Quality hook anchor changed")
@@ -59,6 +59,21 @@ def hook(videos, repeats, probe, auth_policy):
         raise RuntimeError("Video-order hook anchor changed")
     block = block.replace(f"val videos = listOf({literal})",
                           f'val videos = System.getenv("ARCHIVETUNE_BENCH_VIDEOS")?.split(",") ?: listOf({literal})')
+    if native_failure_fixture:
+        anchor = '        emit("extraction-begin", "videos" to videos.size, "repeats" to repeats)'
+        if block.count(anchor) != 1:
+            raise RuntimeError("Native fault fixture anchor changed")
+        # Test-only fault in a disposable Main.kt, never a production resolver flag.
+        # Reflection keeps the hook compilable against historical baseline classes.
+        fixture = '''        if (System.getenv("ARCHIVETUNE_BENCH_NATIVE_FAILURE") == "1") {
+            val failNative: suspend (moe.rukamori.archivetune.innertube.models.YouTubeClient, String, String?, Int?, PlaybackAuthState) -> moe.rukamori.archivetune.innertube.models.response.PlayerResponse =
+                { _, _, _, _, _ -> throw java.io.IOException("Controlled benchmark native failure") }
+            musicServices.backend.javaClass.methods.single { it.name.startsWith("setStreamPlayerRequest") }
+                .invoke(musicServices.backend, failNative)
+            emit("controlled-native-failure", "enabled" to true)
+        }
+'''
+        block = block.replace(anchor, fixture + anchor)
     if auth_policy == "production":
         pattern = r"override fun currentAuthState\(\): PlaybackAuthState \{.*?\n            \}\n\n            override suspend fun refreshIfNeeded"
         replacement = "override fun currentAuthState(): PlaybackAuthState = account.currentAuthState()\n\n            override suspend fun refreshIfNeeded"
@@ -122,7 +137,9 @@ def safe_run(run, mode, round_number, expected, metadata):
             "phases": {name: AUTH._phase_summary(run, name) for name in run["phases"]},
             "cpu": run["cpu"], "inventory": run["process_inventory"], "cleanup": run["cleanup"],
             "sampler_error": run["sampler_error"], "build": metadata,
-            "resolver": run.get("resolver"), "session_clone": run["session_clone"]}
+            "resolver": run.get("resolver"), "session_clone": run["session_clone"],
+            "controlled_native_failure": any(marker.get("type") == "controlled-native-failure" and marker.get("enabled")
+                                             for marker in run.get("markers", []))}
 
 
 def summary(runs):
@@ -170,7 +187,9 @@ def valid_measurement(run):
             and run["sampler_error"] is None and run["cpu"]["tracker_error"] is None
             and proof["browser_teardown_observed"] and proof["cold_successes"] == proof["cold_attempts"] > 0
             and cleanup["no_helpers_in_post_idle"] and cleanup["no_helpers_after_shutdown"] and cleanup["private_home_removed"]
-            and run["phases"]["extraction"]["complete_pss_samples"] > 0)
+            and (run["phases"].get("extraction") or {}).get("complete_pss_samples", 0) > 0
+            and all(not record["success"] or (record["bitrate"] and isinstance(record["has_audio_config"], bool))
+                    for record in run["records"]))
 
 
 def main():
@@ -188,6 +207,9 @@ def main():
     parser.add_argument("--work-root", type=Path, default=Path("/tmp/opencode/archivetune-resolver-matrix"))
     parser.add_argument("--output", type=Path, default=Path("build/resolver-validation/resolver-matrix.json"))
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--build-only", action="store_true", help="Prepare identical instrumented builds without starting timed applications.")
+    parser.add_argument("--native-failure-fixture", action="store_true",
+                        help="Separate controlled-fallback benchmark, never mixed with natural hit-rate results.")
     parser.add_argument("--ytdlp", type=Path, default=Path(".tools/resolver/yt-dlp"))
     parser.add_argument("--bun", type=Path, default=Path(".tools/resolver/bun"))
     args = parser.parse_args()
@@ -198,6 +220,7 @@ def main():
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(root, 0o700)
     candidate = BASE.git_commit_for(repo, args.candidate_ref)
+    harness_commit = BASE.git_head(repo)
     BASE.git_output(repo, "cat-file", "-e", candidate + ":desktop-backend/src/main/kotlin/moe/rukamori/archivetune/innertube/DesktopStreamResolutionPolicy.kt")
     revisions = {"legacy": BASE.git_commit_for(repo, args.baseline_ref),
                  "ytdlp-original": BASE.git_commit_for(repo, args.original_ytdlp_ref),
@@ -213,7 +236,7 @@ def main():
     store = AUTH.SecretServiceSessions(AUTH.SOURCE_SESSION_PATH)
     if not store.source_present:
         raise RuntimeError("Signed-in source session missing; refusing anonymous substitution")
-    AUTH.INSTRUMENTATION_CONFIG["block"] = hook(args.videos, args.repeats, "BaW_jenozKc", args.auth_policy)
+    AUTH.INSTRUMENTATION_CONFIG["block"] = hook(args.videos, args.repeats, "BaW_jenozKc", args.auth_policy, args.native_failure_fixture)
     BASE.inject_instrumentation = AUTH.inject_authenticated_instrumentation
     prepared = {}
     for revision in dict.fromkeys(revisions[mode] for mode in args.modes):
@@ -236,6 +259,9 @@ def main():
             raise RuntimeError("Stale benchmark hook; use a fresh work root")
     if len({item[2]["main_kt_sha256"] for item in prepared.values()}) != 1:
         raise RuntimeError("Instrumentation parity failed")
+    if args.build_only:
+        print("Prepared identical instrumented builds; no application or extraction started", flush=True)
+        return 0
     runs, schedule = [], []
     for round_number in range(args.rounds):
         order = args.modes[round_number % len(args.modes):] + args.modes[:round_number % len(args.modes)]
@@ -244,6 +270,9 @@ def main():
         os.environ["ARCHIVETUNE_BENCH_VIDEOS"] = ",".join(videos)
         schedule.append({"round": round_number, "modes": order, "videos": videos})
         for mode in order:
+            os.environ.pop("ARCHIVETUNE_BENCH_NATIVE_FAILURE", None)
+            if args.native_failure_fixture and mode == "hybrid":
+                os.environ["ARCHIVETUNE_BENCH_NATIVE_FAILURE"] = "1"
             revision = revisions[mode]
             checkout, classpath, metadata = prepared[revision]
             resolver = None if mode == "legacy" else {**tools, "policy": "hybrid" if mode == "hybrid" else "ytdlp"}
@@ -259,7 +288,8 @@ def main():
             runs[-1]["host_context"] = {"started_utc": started_utc,
                                         "loadavg_before": load_before, "loadavg_after": os.getloadavg()}
             document = {"schema": "archivetune.resolver-matrix/1", "seed": args.seed, "schedule": schedule,
-                        "harness_commit": BASE.git_head(repo), "measurement_valid": all(valid_measurement(item) for item in runs),
+                        "harness_commit": harness_commit, "measurement_valid": all(valid_measurement(item) for item in runs),
+                        "native_failure_fixture": args.native_failure_fixture,
                         "tool_sha256": hashes,
                         "auth_policy": args.auth_policy, "source_entry_unchanged": store.source_unchanged(),
                         "core_commits": {rev: BASE.git_output(repo, "ls-tree", rev, "core") for rev in prepared},
@@ -271,6 +301,8 @@ def main():
             print(f"  success {run['resolution']['successes']}/{len(videos) * args.repeats}; playback={run['playback']['all_checks_passed']}", flush=True)
             if not valid_measurement(runs[-1]):
                 raise RuntimeError("Invalid benchmark environment or cleanup; saved evidence, refusing further timed runs")
+            if args.native_failure_fixture and runs[-1]["controlled_native_failure"] != (mode == "hybrid"):
+                raise RuntimeError("Controlled-failure fixture was not applied to the requested arm")
     return 0 if all(run["authentication"]["guard_passed"] and run["session_clone"]["clone_key_cleared"]
                     and run["sampler_error"] is None and run["cpu"]["tracker_error"] is None
                     and run["exit_code"] == 0 and not run["harness_timeout"] and run["missing_attempts"] == 0
@@ -284,7 +316,8 @@ def main():
                     and run["playback"]["all_checks_passed"]
                     and (run["mode"] == "legacy" or run["resolver"]["policy"] == ("hybrid" if run["mode"] == "hybrid" else "ytdlp"))
                     for run in runs) and store.source_unchanged() and all(
-                        value["fastpath_successes"] > 0 for name, value in summary(runs).items() if name == "hybrid") else 1
+                        (value["fallback_successes"] > 0 if args.native_failure_fixture else value["fastpath_successes"] > 0)
+                        for name, value in summary(runs).items() if name == "hybrid") else 1
 
 
 if __name__ == "__main__":
