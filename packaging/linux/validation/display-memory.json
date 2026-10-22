@@ -1,0 +1,173 @@
+{
+  "date": "2026-10-22",
+  "base_root_commit": "b7ae398ae4b757f17e3512b62216a59ebf6ab104",
+  "build": "Isolated release source export with the listed changes overlaid; unrelated tabs/model work excluded.",
+  "configuration": {
+    "gradle_jdk": "OpenJDK 21",
+    "native_toolchain": "GraalVM Community 25.1.3+9.1 (Java 25)",
+    "optimization": "SIZE",
+    "runtime_heap": "128m",
+    "build_heap": "6g",
+    "build_parallelism": 4
+  },
+  "source_sha256": {
+    "desktop-native/src/main/kotlin/moe/rukamori/archivetune/native/NativeMain.kt": "248a387efb4502793469e452ca6be75c856e99dd434c3f738561d0e839043ae7",
+    "desktopApp/build.gradle.kts": "bc736cd764ca9a60cb834f631eb4286db58a9247f4f7cefcd189a3ab0081057e",
+    "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/Main.kt": "0d7d7dd2291d0777e3658156f60f7a5b1eafe84efe18d57eb264bc5698740120",
+    "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/platform/DesktopRuntimeBenchmark.kt": "4d8ecc1eddd18de6bcc8703d4487d69cf96eb7cb70879fbe379c4870054aecb8",
+    "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/platform/DesktopLinuxPlatformSmoke.kt": "2580f7fc64c77e3ed86971dc1b8287f1dffe0420efe02411fcb934af653fa8b0",
+    "desktopApp/src/main/kotlin/moe/rukamori/archivetune/desktop/platform/LinuxDisplayScale.kt": "d448be61e7f578ed84e1b296674e212227811e7a74deb9ded30fd3eef4ddf3df",
+    "desktopApp/src/test/kotlin/moe/rukamori/archivetune/desktop/platform/LinuxDisplayScaleTest.kt": "f06df64f23536719d068e66fdd4ee9867d0320a02fce79d0df3535c3d42fab82",
+    "linux-media-integration/build.gradle.kts": "18dfd313daaf175e44003d127a6098a3c31e38ecc755b56586a7ec8294f038bf",
+    "linux-media-integration/src/main/kotlin/moe/rukamori/archivetune/linuxmedia/LinuxMemoryReclaimer.kt": "9da8ea7e4450aa93f93d47729d4df98ce9bd2c42700ffc9de968ef978a8bfd71",
+    "linux-media-integration/src/test/kotlin/moe/rukamori/archivetune/linuxmedia/LinuxMemoryReclaimerTest.kt": "593dbbf2a17d1807923df7f65fd8a02ba1ff3405131ed6abd0f6117dc038e247"
+  },
+  "unit_tests": {
+    "linux-media-integration": {
+      "tests": 46,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 4
+    },
+    "desktopApp": {
+      "tests": 163,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "scaling_and_playback": [
+    {
+      "arm": "jvm",
+      "xft_dpi": 96,
+      "explicit_override": null,
+      "density": 1,
+      "expected_density": 1.0,
+      "exit_code": 0,
+      "completed": true,
+      "scale_diagnostics": [],
+      "run_id": "scale-jvm-96-9d2fb982",
+      "playback_duration_ms": 3000
+    },
+    {
+      "arm": "jvm",
+      "xft_dpi": 192,
+      "explicit_override": null,
+      "density": 2,
+      "expected_density": 2.0,
+      "exit_code": 0,
+      "completed": true,
+      "scale_diagnostics": [],
+      "run_id": "scale-jvm-192-100c652c",
+      "playback_duration_ms": 3000
+    },
+    {
+      "arm": "native",
+      "xft_dpi": 96,
+      "explicit_override": null,
+      "density": 1,
+      "expected_density": 1.0,
+      "exit_code": 0,
+      "completed": true,
+      "scale_diagnostics": [
+        "[archivetune] LinuxDisplayScale: scale=1 source=XFT_DPI explicit=false"
+      ],
+      "run_id": "scale-native-96-bbb54879",
+      "playback_duration_ms": 3000
+    },
+    {
+      "arm": "native",
+      "xft_dpi": 192,
+      "explicit_override": null,
+      "density": 2,
+      "expected_density": 2.0,
+      "exit_code": 0,
+      "completed": true,
+      "scale_diagnostics": [
+        "[archivetune] LinuxDisplayScale: scale=2 source=XFT_DPI explicit=false"
+      ],
+      "run_id": "scale-native-192-2e00d986",
+      "playback_duration_ms": 3001
+    },
+    {
+      "arm": "native",
+      "xft_dpi": 96,
+      "explicit_override": "2",
+      "density": 2,
+      "expected_density": 2.0,
+      "exit_code": 0,
+      "completed": true,
+      "scale_diagnostics": [
+        "[archivetune] LinuxDisplayScale: scale=2 source=J2D_UISCALE_ENVIRONMENT explicit=true"
+      ],
+      "run_id": "scale-native-96-9552bc82",
+      "playback_duration_ms": 3000
+    },
+    {
+      "arm": "appimage",
+      "xft_dpi": 192,
+      "explicit_override": null,
+      "density": 2,
+      "expected_density": 2.0,
+      "exit_code": 0,
+      "completed": true,
+      "scale_diagnostics": [
+        "[archivetune] LinuxDisplayScale: scale=2 source=XFT_DPI explicit=false"
+      ],
+      "run_id": "scale-appimage-192-123cc8b3",
+      "playback_duration_ms": 60000
+    }
+  ],
+  "platform_smokes": [
+    {
+      "artifact": "native staged executable",
+      "exit_code": 0,
+      "external_mpris": {
+        "org.mpris.MediaPlayer2": true,
+        "org.mpris.MediaPlayer2.Player": true
+      },
+      "markers": [
+        "[archivetune] LinuxDisplayScale: scale=2 source=XFT_DPI explicit=false",
+        "ARCHIVETUNE_PLATFORM_SMOKE mpris=ready bus=org.mpris.MediaPlayer2.ArchiveTune.instance<PID>",
+        "ARCHIVETUNE_PLATFORM_SMOKE allocator_trim=ok released=true",
+        "ARCHIVETUNE_PLATFORM_SMOKE keyring=ok",
+        "ARCHIVETUNE_PLATFORM_SMOKE icon=ok",
+        "ARCHIVETUNE_PLATFORM_SMOKE browser_http_websocket_botguard=ok"
+      ]
+    },
+    {
+      "artifact": "AppImage",
+      "exit_code": 0,
+      "external_mpris": {
+        "org.mpris.MediaPlayer2": true,
+        "org.mpris.MediaPlayer2.Player": true
+      },
+      "markers": [
+        "[archivetune] LinuxDisplayScale: scale=2 source=XFT_DPI explicit=false",
+        "ARCHIVETUNE_PLATFORM_SMOKE mpris=ready bus=org.mpris.MediaPlayer2.ArchiveTune.instance<PID>",
+        "ARCHIVETUNE_PLATFORM_SMOKE allocator_trim=ok released=true",
+        "ARCHIVETUNE_PLATFORM_SMOKE keyring=ok",
+        "ARCHIVETUNE_PLATFORM_SMOKE icon=ok",
+        "ARCHIVETUNE_PLATFORM_SMOKE browser_http_websocket_botguard=ok"
+      ]
+    }
+  ],
+  "allocator_smoke": {
+    "runtime": "JVM unit test, glibc malloc/free through JNA",
+    "rss_before_kib": 270340,
+    "rss_after_kib": 203520,
+    "retained_live_blocks_verified": 2048,
+    "note": "Synthetic freed allocator pages; not an estimate of normal app RAM savings."
+  },
+  "artifact": {
+    "path": "dist/fixed/ArchiveTune-15.10-graal-x86_64.AppImage",
+    "bytes": 142465528,
+    "sha256": "6fe7e8b4a33128fcc2b3a3687a697f4c31b3cc318b27c0fffa0f68eb0e562cd3"
+  },
+  "limitations": [
+    "Initial concurrent scale checks shared one X server and were discarded; all reported scale runs used separate X servers.",
+    "Scale tests use Xvfb/software rendering; the native platform smoke also selected 2x from the real Xwayland display.",
+    "No forced garbage collection, live-page eviction, or periodic cache purge is added.",
+    "Previous CPU/RAM benchmarks were not rerun for this display/memory fix."
+  ]
+}

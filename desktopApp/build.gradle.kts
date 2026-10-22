@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":desktop-lyrics-ui"))
     implementation(project(":windows-media-integration"))
     implementation(project(":linux-media-integration"))
+    implementation(libs.jna.platform)
     implementation(project(":desktop-downloads"))
     implementation(project(":lastfm"))
     implementation(compose.desktop.currentOs)

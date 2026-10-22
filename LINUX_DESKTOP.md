@@ -13,6 +13,30 @@ The GraalVM native image is built with `./gradlew nativeRelease` and staged at
 `desktopApp/build/compose/binaries/main-native/app/ArchiveTune`. Its executable
 is `desktopApp/build/compose/binaries/main-native/app/ArchiveTune/ArchiveTune`.
 
+## Display scaling and memory reclamation
+
+The native Linux entry point reads X11's `Xft.dpi` before initializing Nucleus,
+so its AWT/Compose scale matches the standard JVM build under Xwayland. This
+avoids using a monitor's logical compositor scale in Xwayland's pixel space,
+which can make the native UI too small on mixed-scale desktops. Explicit
+`sun.java2d.uiScale`, `J2D_UISCALE`, and `GDK_SCALE` requests take precedence.
+`ARCHIVETUNE_UI_SCALE_DEBUG=1` prints the chosen scale and its source.
+
+Both Linux runtimes ask glibc's `malloc_trim(0)` to return already-free native
+allocator pages every 60 seconds, after 30 seconds minimized, and two seconds
+after leaving lyrics. Calls run on the I/O dispatcher and share a 30-second
+cooldown. Unsupported allocators simply skip this optional operation. Live
+allocations and playback caches stay intact; this does not force Java/GraalVM
+garbage collection or evict live pages like Windows working-set trimming.
+
+The opt-in allocator regression allocates and frees synthetic blocks, checks
+that RSS falls, and verifies that retained blocks remain readable:
+
+```sh
+ARCHIVETUNE_MEMORY_SMOKE=1 ./gradlew :linux-media-integration:test \
+  --tests '*LinuxMemoryReclaimerTest*'
+```
+
 ## AppImage packaging
 
 `packaging/linux/build-appimage.sh` wraps that jpackage image in an AppImage. It

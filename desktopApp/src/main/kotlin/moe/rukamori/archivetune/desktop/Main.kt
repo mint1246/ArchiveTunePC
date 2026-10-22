@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -36,6 +37,8 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.memory.MemoryCache
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.combine
@@ -70,6 +73,7 @@ import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.desktop.settings.DesktopThemeMode
 import moe.rukamori.archivetune.desktop.settings.DesktopWindowPlacement
 import moe.rukamori.archivetune.windowsmedia.WindowsWorkingSetTrimmer
+import moe.rukamori.archivetune.linuxmedia.LinuxMemoryReclaimer
 import java.awt.Dimension
 import java.awt.GraphicsEnvironment
 import kotlin.math.max
@@ -246,10 +250,11 @@ fun main() {
                 transparent = !linuxWindow,
                 resizable = true,
             ) {
+                val frameDensity = LocalDensity.current
                 LaunchedEffect(runtimeBenchmark) {
                     if (runtimeBenchmark != null) {
                         androidx.compose.runtime.withFrameNanos { }
-                        runtimeBenchmark.onWindowFrame()
+                        runtimeBenchmark.onWindowFrame(frameDensity.density, frameDensity.fontScale)
                     }
                 }
                 var showLyrics by remember { mutableStateOf(false) }
@@ -272,18 +277,18 @@ fun main() {
                     active = !windowState.isMinimized,
                 )
 
-                // Keep the event-driven trims, and also periodically ask Windows to evict cold pages.
+                // Reclaim at the same lifecycle boundaries on both platforms, away from the UI thread.
                 LaunchedEffect(Unit) {
                     while (true) {
                         delay(WORKING_SET_TRIM_INTERVAL_MS)
-                        WindowsWorkingSetTrimmer.trimCurrentProcess()
+                        reclaimIdleMemory()
                     }
                 }
                 LaunchedEffect(windowState.isMinimized) {
                     if (windowState.isMinimized) {
                         delay(MINIMIZED_WORKING_SET_TRIM_DELAY_MS)
                         if (windowState.isMinimized) {
-                            WindowsWorkingSetTrimmer.trimCurrentProcess()
+                            reclaimIdleMemory()
                         }
                     }
                 }
@@ -292,7 +297,7 @@ fun main() {
                         hasEnteredLyrics = true
                     } else if (hasEnteredLyrics) {
                         delay(LEAVING_LYRICS_WORKING_SET_TRIM_DELAY_MS)
-                        WindowsWorkingSetTrimmer.trimCurrentProcess()
+                        reclaimIdleMemory()
                     }
                 }
                 LaunchedEffect(musicServices) {
@@ -531,6 +536,18 @@ private const val DESKTOP_IMAGE_MEMORY_CACHE_BYTES = 32L * 1024L * 1024L
 private const val WORKING_SET_TRIM_INTERVAL_MS = 60_000L
 private const val MINIMIZED_WORKING_SET_TRIM_DELAY_MS = 30_000L
 private const val LEAVING_LYRICS_WORKING_SET_TRIM_DELAY_MS = 2_000L
+
+private val linuxMemoryReclaimer by lazy { LinuxMemoryReclaimer() }
+
+private suspend fun reclaimIdleMemory() = withContext(Dispatchers.IO) {
+    when {
+        System.getProperty("os.name", "").startsWith("Windows", ignoreCase = true) ->
+            WindowsWorkingSetTrimmer.trimCurrentProcess()
+        System.getProperty("os.name", "").startsWith("Linux", ignoreCase = true) ->
+            linuxMemoryReclaimer.trimCurrentProcess()
+        else -> false
+    }
+}
 
 private fun DesktopLastDestination.asDesktopDestination(): DesktopDestination = DesktopDestination.valueOf(name)
 

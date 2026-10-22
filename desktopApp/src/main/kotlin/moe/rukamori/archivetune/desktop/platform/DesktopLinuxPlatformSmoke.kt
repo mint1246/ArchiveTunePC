@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import moe.rukamori.archivetune.linuxmedia.LinuxMediaControls
 import moe.rukamori.archivetune.linuxmedia.LinuxMediaAvailability
+import moe.rukamori.archivetune.linuxmedia.LinuxMemoryReclaimer
 import moe.rukamori.archivetune.desktopauth.ChromiumBotGuardPoTokenProvider
 import moe.rukamori.archivetune.desktopauth.secureSessionStore
 import kotlin.system.exitProcess
@@ -38,6 +39,9 @@ fun runDesktopLinuxPlatformSmoke(arguments: List<String>) {
             // Allows an independent D-Bus client to exercise exported methods and properties.
             Thread.sleep(5_000L)
         }
+        val memoryReclaimer = LinuxMemoryReclaimer()
+        check(memoryReclaimer.isSupported)
+        println("ARCHIVETUNE_PLATFORM_SMOKE allocator_trim=ok released=${memoryReclaimer.trimCurrentProcess()}")
         val store = secureSessionStore(root.resolve("synthetic-keyring-session"))
         try {
             val synthetic = "archivetune-native-synthetic-smoke".toByteArray()

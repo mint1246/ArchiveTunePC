@@ -23,9 +23,9 @@ internal class DesktopRuntimeBenchmark private constructor(
     private val runtime: DesktopRuntime,
     private val services: DesktopMusicServices,
 ) {
-    private val firstFrame = CompletableDeferred<Unit>()
+    private val firstFrame = CompletableDeferred<Pair<Float, Float>>()
 
-    fun onWindowFrame() { firstFrame.complete(Unit) }
+    fun onWindowFrame(density: Float, fontScale: Float) { firstFrame.complete(density to fontScale) }
 
     private fun start() {
         runtime.applicationScope.launch(Dispatchers.IO) {
@@ -37,8 +37,8 @@ internal class DesktopRuntimeBenchmark private constructor(
                 }) { "Benchmark requires isolated application directories" }
                 val audio = Path.of(requireNotNull(System.getenv("ARCHIVETUNE_BENCHMARK_AUDIO"))).toAbsolutePath().normalize()
                 check(Files.isRegularFile(audio)) { "Benchmark audio fixture is missing" }
-                withTimeout(120_000L) { firstFrame.await() }
-                emit("window-ready")
+                val (density, fontScale) = withTimeout(120_000L) { firstFrame.await() }
+                emit("window-ready", "density" to density, "font_scale" to fontScale)
                 // Let initial UI/service work settle before sampling steady-state idle.
                 delay(3_000L)
                 phase("idle", seconds("ARCHIVETUNE_BENCHMARK_IDLE_SECONDS", 10))

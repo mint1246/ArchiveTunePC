@@ -3,6 +3,7 @@ package moe.rukamori.archivetune.native
 import dev.nucleusframework.graalvm.GraalVmInitializer
 import java.nio.file.Path
 import moe.rukamori.archivetune.desktop.main as archiveTuneMain
+import moe.rukamori.archivetune.desktop.platform.LinuxDisplayScale
 import moe.rukamori.archivetune.desktop.platform.runDesktopLinuxPlatformSmoke
 
 /**
@@ -13,6 +14,11 @@ import moe.rukamori.archivetune.desktop.platform.runDesktopLinuxPlatformSmoke
  * afterwards so the native build exercises the same application code as the regular JVM build.
  */
 fun main(args: Array<String>) {
+    // Nucleus' initializer pins sun.java2d.uiScale to the compositor's primary logical monitor
+    // scale, which is wrong under Xwayland's global pixel scale. Preset the same value Skiko's
+    // Linux autodpi uses (Xft.dpi / 96) so Nucleus' guard keeps it; explicit user overrides win.
+    LinuxDisplayScale.apply()
+
     GraalVmInitializer.initialize()
 
     // Native Image has no JVM application image from which ArchiveTune can infer its install root.
