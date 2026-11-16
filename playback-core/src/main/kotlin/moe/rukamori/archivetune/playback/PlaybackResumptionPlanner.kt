@@ -7,7 +7,8 @@
 
 package moe.rukamori.archivetune.playback
 
-internal object PlaybackResumptionPlanner {
+/** Selects existing or persisted queue data; storage and playback are owned by the caller. */
+object PlaybackResumptionPlanner {
     data class PersistedItems<T>(
         val items: List<T>,
         val mediaItemIndex: Int,
@@ -40,7 +41,7 @@ internal object PlaybackResumptionPlanner {
                     )
                 )
 
-        if (usePersistedItems && persisted != null) {
+        if (usePersistedItems) {
             return persisted.items.toResult(
                 currentIndex = persisted.mediaItemIndex,
                 positionMs = persisted.positionMs,

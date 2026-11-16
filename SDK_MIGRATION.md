@@ -100,6 +100,10 @@ The existing download orchestration, retry tracking, resolution queue and manage
 
 Existing lyric entries, prepared models, active-line selection, text/word/grapheme timing, instrumental-gap insertion and prepared-entry adapters moved to the optional `lyrics-timeline` JVM module. Android retains provider fetching, preparation, romanization, translation and rendering. Grapheme segmentation is shared with the existing Android motion renderer, preserving its prior algorithm; nullable word reads were adapted for Kotlin cross-module smart-cast rules without changing the guarded rendering paths. The moved timing tests and full Android `gmsMobileUniversalDebug` unit suite pass; an independently resolved Maven Local example prepared a multilingual timed line. Rendering on a device, provider behavior and other build variants remain unverified. The existing model API exposes Guava and coroutine state; consumers that do not need lyrics need not include the module.
 
+## Milestone: playback resumption selection
+
+The generic queue selection and index/position clamping used by Android's Media3 session resumption now live in `playback-core`. The Android session still loads persisted data and builds Media3 items itself; this does not extract persistence or the session. New tests cover persisted versus current queue selection, matching single-item recovery, browsing and malformed positions. Android compilation and playback-core tests passed; device resumption and storage upgrades have not been verified.
+
 ## Milestone: headless sleep timer
 
 Android's existing sleep timer scheduling and transition policy now use `SleepTimerController` in `playback-core`; the Media3 listener, Compose state and actual service pause remain in the app. The controller takes a caller-owned serialized coroutine scope, a pause callback and an optional clock/state observer; closing it cancels its pending timer. Tests cover deadline, replacement/cancellation, end-of-track and reentrant clear behavior, including the existing state when switching modes. Playback-core tests and Android/desktop compilation pass; Android background and real-device behavior remain unverified.
