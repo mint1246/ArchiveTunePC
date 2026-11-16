@@ -27,6 +27,7 @@ import moe.rukamori.archivetune.downloads.DownloadSnapshot
 import moe.rukamori.archivetune.downloads.DownloadStatus
 import moe.rukamori.archivetune.downloads.PartialCleanupPolicy
 import moe.rukamori.archivetune.desktop.settings.DesktopPartialCleanupPolicy
+import moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore
 import moe.rukamori.archivetune.innertube.AudioStreamProbeHttpException
 import moe.rukamori.archivetune.innertube.ArchiveTuneJvmClient
 import moe.rukamori.archivetune.innertube.ResolvedAudioStream
@@ -92,11 +93,12 @@ private fun SongItem.toRetryableDownloadSpec() = RetryableDownloadSpec(
 
 /** Desktop-only coordinator: resolves fresh URLs just-in-time, never persists them. */
 class DesktopDownloadServices(
-    private val runtime: DesktopRuntime,
+    private val settings: DesktopSettingsStore,
+    private val defaultDownloadDirectory: Path,
     private val backend: ArchiveTuneJvmClient,
 ) : AutoCloseable {
     @Volatile private var directory: Path = configuredDirectory()
-    @Volatile private var manager = newManager(directory, runtime.settings.snapshot())
+    @Volatile private var manager = newManager(directory, settings.snapshot())
     private val retryAttempts = InProcessDownloadAttempts()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutableDownloads = MutableStateFlow(manager.downloads.value)
@@ -318,10 +320,10 @@ class DesktopDownloadServices(
             check(!manager.hasActiveWork()) { "Cancel or finish active downloads before changing the download folder." }
             val normalized = newDirectory.toAbsolutePath().normalize()
             Files.createDirectories(normalized)
-            val desiredSettings = runtime.settings.snapshot().copy(downloadLocation = normalized)
+            val desiredSettings = settings.snapshot().copy(downloadLocation = normalized)
             val replacement = newManager(normalized, desiredSettings)
             try {
-                runtime.settings.update { it.copy(downloadLocation = normalized) }
+                settings.update { it.copy(downloadLocation = normalized) }
                 replaceManager(replacement, normalized)
             } catch (failure: Exception) {
                 replacement.close()
@@ -336,13 +338,13 @@ class DesktopDownloadServices(
             check(!hasPendingResolutions()) { "Wait for queued downloads to finish preparing before changing download behavior." }
             check(inFlightEnqueues == 0) { "Wait for stream resolution to finish before changing download behavior." }
             check(!manager.hasActiveWork()) { "Cancel or finish active downloads before changing download behavior." }
-            val desiredSettings = runtime.settings.snapshot().copy(
+            val desiredSettings = settings.snapshot().copy(
                 downloadConcurrency = maxConcurrentDownloads.coerceIn(1, 8),
                 partialCleanupPolicy = cleanupPolicy,
             )
             val replacement = newManager(directory, desiredSettings)
             try {
-                runtime.settings.update {
+                settings.update {
                     it.copy(
                         downloadConcurrency = desiredSettings.downloadConcurrency,
                         partialCleanupPolicy = cleanupPolicy,
@@ -356,7 +358,7 @@ class DesktopDownloadServices(
         }
     }
 
-    private fun configuredDirectory(): Path = runtime.settings.snapshot().downloadLocation ?: runtime.paths.downloads
+    private fun configuredDirectory(): Path = settings.snapshot().downloadLocation ?: defaultDownloadDirectory
     private fun newManager(path: Path, settings: moe.rukamori.archivetune.desktop.settings.DesktopSettings) =
         DesktopDownloadManager(
             downloadDirectory = path,

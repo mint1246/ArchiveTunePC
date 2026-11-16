@@ -86,7 +86,9 @@ fun main() {
     val runtime = DesktopRuntime.start()
     val musicServices = runtime.own(DesktopMusicServices(runtime))
     val runtimeBenchmark = DesktopRuntimeBenchmark.startIfRequested(runtime, musicServices)
-    val downloadServices = runtime.own(DesktopDownloadServices(runtime, musicServices.backend))
+    val downloadServices = runtime.own(
+        DesktopDownloadServices(runtime.settings, runtime.paths.downloads, musicServices.backend),
+    )
     val updateCoordinator = DesktopUpdateCoordinator(runtime, musicServices.playback)
     val playTogether = runtime.own(PlayTogetherManager(musicServices.playback, runtime.paths.cache, runtime.logger))
     val social = runtime.own(

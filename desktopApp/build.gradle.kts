@@ -49,6 +49,7 @@ dependencies {
     implementation(project(":linux-media-integration"))
     implementation(libs.jna.platform)
     implementation(project(":desktop-downloads"))
+    implementation(project(":desktop-download-orchestration"))
     implementation(project(":lastfm"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
