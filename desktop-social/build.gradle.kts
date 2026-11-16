@@ -7,8 +7,11 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":desktop-auth"))
-    implementation(libs.coroutines.core)
+    api(project(":desktop-auth"))
+    api(project(":desktop-settings"))
+    api(project(":playback-core"))
+    api(libs.coroutines.core)
+    implementation(project(":lastfm"))
     implementation(libs.json)
     testImplementation(kotlin("test"))
 }

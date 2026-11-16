@@ -38,6 +38,7 @@ import moe.rukamori.archivetune.innertube.search.DesktopSearchRepository
 import moe.rukamori.archivetune.spotify.DesktopSpotifyPlaylistImporter
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportProgress
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportResult
+import moe.rukamori.archivetune.playback.api.NextTrackPrefetcher
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
@@ -179,6 +180,8 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         settings = settings,
         credentialStore = secureSessionStore(runtime.paths.data.resolve("lastfm.dpapi")),
         parentScope = runtime.applicationScope,
+        defaultApiKey = DesktopLastFmBuildCredentials.API_KEY,
+        defaultSecret = DesktopLastFmBuildCredentials.SECRET,
     )
     private val lyricsPresenter = lazy {
         DesktopLyricsPresenter(

@@ -46,8 +46,8 @@ class DesktopLastFmService(
     private val openBrowser: (URI) -> Result<Unit> = DesktopSystemBrowserLauncher::open,
     private val scrobbleClient: DesktopLastFmClient = SharedLastFmClient,
     private val clock: DesktopLastFmClock = SystemDesktopLastFmClock,
-    private val defaultApiKey: String = DesktopLastFmBuildCredentials.API_KEY,
-    private val defaultSecret: String = DesktopLastFmBuildCredentials.SECRET,
+    private val defaultApiKey: String = "",
+    private val defaultSecret: String = "",
 ) : AutoCloseable {
     private val serviceJob = SupervisorJob(parentScope.coroutineContext[Job])
     private val scope = CoroutineScope(parentScope.coroutineContext + serviceJob)
