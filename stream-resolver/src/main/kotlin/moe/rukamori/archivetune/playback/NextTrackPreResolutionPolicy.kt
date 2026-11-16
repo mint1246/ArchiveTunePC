@@ -7,7 +7,7 @@
 
 package moe.rukamori.archivetune.playback
 
-internal data class NextTrackPreResolutionCandidate(
+data class NextTrackPreResolutionCandidate(
     val currentIndex: Int,
     val currentMediaId: String,
     val nextIndex: Int,
@@ -15,17 +15,17 @@ internal data class NextTrackPreResolutionCandidate(
     val nextUri: String,
 )
 
-internal data class NextTrackPreResolutionAttempt internal constructor(
+data class NextTrackPreResolutionAttempt internal constructor(
     internal val generation: Long,
     val candidate: NextTrackPreResolutionCandidate,
 )
 
-internal data class NextTrackPreResolutionDecision(
+data class NextTrackPreResolutionDecision(
     val candidateChanged: Boolean,
     val attempt: NextTrackPreResolutionAttempt?,
 )
 
-internal class NextTrackPreResolutionPolicy {
+class NextTrackPreResolutionPolicy {
     private var generation = 0L
     private var activeCandidate: NextTrackPreResolutionCandidate? = null
     private var attempted = false

@@ -222,8 +222,3 @@ class YoutubeiStreamRepository
                 )
         }
     }
-
-internal enum class StreamResolutionPriority {
-    FOREGROUND,
-    BACKGROUND,
-}

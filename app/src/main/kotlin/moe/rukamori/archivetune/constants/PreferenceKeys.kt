@@ -294,13 +294,6 @@ val PlayerStreamClientKey = stringPreferencesKey("playerStreamClient")
 val NetworkMeteredKey = booleanPreferencesKey("networkMetered")
 val LowDataModeKey = NetworkMeteredKey
 
-enum class AudioQuality {
-    AUTO,
-    HIGH,
-    HIGHEST,
-    LOW,
-}
-
 enum class PlayerStreamClient {
     ANDROID_VR,
     WEB_REMIX,

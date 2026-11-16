@@ -7,7 +7,7 @@
 
 package moe.rukamori.archivetune.playback
 
-internal class PlaybackStreamRecoveryTracker(
+class PlaybackStreamRecoveryTracker(
     private val maxRetryAttemptsPerMedia: Int = 4,
 ) {
     private var attemptedMediaId: String? = null

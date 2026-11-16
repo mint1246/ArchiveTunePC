@@ -7,7 +7,7 @@
 
 package moe.rukamori.archivetune.playback
 
-internal fun resolveStreamChunkLength(
+fun resolveStreamChunkLength(
     requestedLength: Long,
     position: Long,
     knownContentLength: Long?,
