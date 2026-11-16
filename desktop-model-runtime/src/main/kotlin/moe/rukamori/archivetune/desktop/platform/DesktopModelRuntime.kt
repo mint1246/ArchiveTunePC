@@ -17,21 +17,20 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
-internal data class DesktopModelAssetSpec(
+data class DesktopModelAssetSpec(
     val key: String,
     val file: String,
     val size: Long,
     val sha256: String,
 )
 
-internal data class DesktopModelSpec(
+data class DesktopModelSpec(
     val id: String,
     val manifestKey: String,
     val version: String,
@@ -44,7 +43,7 @@ internal data class DesktopModelSpec(
     val legacyFileNames: List<String> = emptyList(),
 )
 
-internal data class DesktopModelBundle(
+data class DesktopModelBundle(
     val model: Path,
     val assets: Map<String, Path> = emptyMap(),
 ) {
@@ -52,7 +51,7 @@ internal data class DesktopModelBundle(
         assets[key] ?: error("Model bundle is missing required asset '" + key + "'")
 }
 
-internal object DesktopModels {
+object DesktopModels {
     val STEMS =
         DesktopModelSpec(
             id = "stems",
@@ -104,13 +103,13 @@ internal object DesktopModels {
         )
 }
 
-internal data class DesktopModelManifestAsset(
+data class DesktopModelManifestAsset(
     val file: String,
     val size: Long,
     val sha256: String,
 )
 
-internal data class DesktopModelManifestEntry(
+data class DesktopModelManifestEntry(
     val version: String,
     val file: String,
     val size: Long,
@@ -118,7 +117,7 @@ internal data class DesktopModelManifestEntry(
     val assets: Map<String, DesktopModelManifestAsset>,
 )
 
-internal fun parseDesktopModelManifest(
+fun parseDesktopModelManifest(
     root: JSONObject,
     spec: DesktopModelSpec,
 ): DesktopModelManifestEntry {
@@ -152,7 +151,7 @@ internal fun parseDesktopModelManifest(
     )
 }
 
-internal fun validateDesktopModelManifest(
+fun validateDesktopModelManifest(
     entry: DesktopModelManifestEntry,
     spec: DesktopModelSpec,
 ): DesktopModelManifestEntry {
@@ -185,7 +184,7 @@ internal fun validateDesktopModelManifest(
     return entry
 }
 
-internal object DesktopModelRuntime {
+object DesktopModelRuntime {
     private const val RUNNER_NAME = "archivetune-model-runner.exe"
     private const val LEGACY_RUNNER_NAME = "archivetune-stems.exe"
     private val http =
@@ -193,8 +192,7 @@ internal object DesktopModelRuntime {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .connectTimeout(Duration.ofSeconds(15))
             .build()
-    private val locks = ConcurrentHashMap<String, Mutex>()
-    private val verified = ConcurrentHashMap<String, DesktopModelBundle>()
+    private val locks = Array(32) { Mutex() }
 
     fun findRunner(): Path? {
         val explicit =
@@ -228,18 +226,14 @@ internal object DesktopModelRuntime {
             .firstOrNull(Files::isRegularFile)
     }
 
-    fun findModel(paths: AppPaths, spec: DesktopModelSpec): DesktopModelBundle? {
+    fun findModel(directory: Path, spec: DesktopModelSpec): DesktopModelBundle? {
         explicitBundle(spec)?.let { return it }
-        verified[spec.id]?.takeIf { isBundleUsable(it, spec) }?.let { return it }
-        verified.remove(spec.id)
-        val directory = DesktopStemStorage.modelsDirectory(paths)
         val bundle =
             DesktopModelBundle(
                 model = directory.resolve(spec.file),
                 assets = spec.assets.associate { asset -> asset.key to directory.resolve(asset.file) },
             )
         if (!isBundleUsable(bundle, spec)) return null
-        verified[spec.id] = bundle
         spec.legacyFileNames.forEach { legacy ->
             runCatching { Files.deleteIfExists(directory.resolve(legacy)) }
         }
@@ -247,27 +241,30 @@ internal object DesktopModelRuntime {
     }
 
     suspend fun ensureModel(
-        paths: AppPaths,
+        directory: Path,
         spec: DesktopModelSpec,
+        manifestUrl: String,
         onProgress: (downloaded: Long, total: Long) -> Unit = { _, _ -> },
     ): DesktopModelBundle {
-        findModel(paths, spec)?.let { return it }
-        return locks.computeIfAbsent(spec.id) { Mutex() }.withLock {
-            findModel(paths, spec)?.let { return@withLock it }
-            downloadModel(paths, spec, onProgress)
+        val cacheKey = directory.toAbsolutePath().normalize().toString() + "\u0000" + spec.id
+        findModel(directory, spec)?.let { return it }
+        return locks[(cacheKey.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
+            findModel(directory, spec)?.let { return@withLock it }
+            downloadModel(directory, spec, manifestUrl, onProgress)
         }
     }
 
     private suspend fun downloadModel(
-        paths: AppPaths,
+        directory: Path,
         spec: DesktopModelSpec,
+        defaultManifestUrl: String,
         onProgress: (downloaded: Long, total: Long) -> Unit,
     ): DesktopModelBundle {
         val manifestUrl =
             sequenceOf(
                 System.getenv("ARCHIVETUNE_MODEL_MANIFEST"),
                 if (spec.id == "stems") System.getenv("ARCHIVETUNE_STEM_MODEL_MANIFEST") else null,
-                DesktopBuildInfo.MODEL_MANIFEST_URL,
+                defaultManifestUrl,
             ).firstOrNull { !it.isNullOrBlank() }!!
         val manifestUri = URI.create(manifestUrl)
         val response =
@@ -285,7 +282,6 @@ internal object DesktopModelRuntime {
                 parseDesktopModelManifest(JSONObject(response.body()), spec),
                 spec,
             )
-        val directory = DesktopStemStorage.modelsDirectory(paths)
         Files.createDirectories(directory)
         val total = entry.size + entry.assets.values.sumOf(DesktopModelManifestAsset::size)
         var completed = 0L
@@ -358,7 +354,7 @@ internal object DesktopModelRuntime {
                     put(assetSpec.key, downloadOne(asset.file, asset.size, asset.sha256))
                 }
             }
-        return DesktopModelBundle(model, assets).also { verified[spec.id] = it }
+        return DesktopModelBundle(model, assets)
     }
 
     fun configureRunnerEnvironment(builder: ProcessBuilder, runner: Path) {

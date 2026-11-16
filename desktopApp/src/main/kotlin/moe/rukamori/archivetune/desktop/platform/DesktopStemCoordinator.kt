@@ -524,7 +524,7 @@ class DesktopStemCoordinator(
     }
 
     private suspend fun ensureModel(trackId: String, publishState: Boolean): Path = modelDownloadMutex.withLock {
-        DesktopModelRuntime.findModel(runtime.paths, DesktopModels.STEMS)?.let { return@withLock it.model }
+        DesktopModelRuntime.findModel(DesktopStemStorage.modelsDirectory(runtime.paths), DesktopModels.STEMS)?.let { return@withLock it.model }
         if (publishState) {
             _state.value = DesktopStemState(
                 trackId = trackId,
@@ -533,7 +533,7 @@ class DesktopStemCoordinator(
                 message = "Downloading HTDemucs model…",
             )
         }
-        DesktopModelRuntime.ensureModel(runtime.paths, DesktopModels.STEMS) { downloaded, total ->
+        DesktopModelRuntime.ensureModel(DesktopStemStorage.modelsDirectory(runtime.paths), DesktopModels.STEMS, DesktopBuildInfo.MODEL_MANIFEST_URL) { downloaded, total ->
             if (publishState && _state.value.trackId == trackId) {
                 val progress = if (total > 0L) downloaded.toFloat() / total.toFloat() else 0f
                 _state.value = DesktopStemState(

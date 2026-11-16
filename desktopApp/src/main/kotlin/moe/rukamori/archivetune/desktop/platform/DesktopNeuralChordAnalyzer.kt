@@ -49,7 +49,11 @@ internal class DesktopNeuralChordAnalyzer(
                 val runner =
                     DesktopModelRuntime.findRunner()
                         ?: throw ChordUnavailableException("Local chord model runner is unavailable")
-                val bundle = DesktopModelRuntime.ensureModel(runtime.paths, DesktopModels.CHORDS)
+                val bundle = DesktopModelRuntime.ensureModel(
+                    DesktopStemStorage.modelsDirectory(runtime.paths),
+                    DesktopModels.CHORDS,
+                    DesktopBuildInfo.MODEL_MANIFEST_URL,
+                )
 
                 val directory = chordCacheDirectory()
                 Files.createDirectories(directory)
