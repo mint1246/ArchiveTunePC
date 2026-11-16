@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "ArchiveTune",
+    "slug": "archivetune-ios",
+    "owner": "mint12",
+    "version": "0.1.0",
+    "platforms": [
+      "ios"
+    ],
+    "ios": {
+      "bundleIdentifier": "moe.rukamori.archivetune.ios"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "5c4948a6-fc73-48f4-8d5e-b803e74553e2"
+      }
+    }
+  }
+}

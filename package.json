@@ -1,0 +1,6 @@
+{
+  "name": "archivetune-ios-delivery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Expo/EAS delivery metadata for the native Kotlin Multiplatform ArchiveTune iOS app."
+}

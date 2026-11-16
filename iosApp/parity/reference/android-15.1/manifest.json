@@ -1,0 +1,45 @@
+{
+  "version": "15.1.0",
+  "variant": "gmsMobileX86_64Debug",
+  "apkSha256": "dd0c88d2070f565126ec9bfb8113ae8df2c69ddc019b7c49a1b8cad04d047cfe",
+  "platform": "Android16/API36",
+  "physicalViewport": [
+    1206,
+    2622
+  ],
+  "pixelDensity": 3,
+  "logicalViewport": [
+    402,
+    874
+  ],
+  "systemInsetsLogical": {
+    "top": 52,
+    "bottom": 24
+  },
+  "theme": "default Android16 wallpaper dynamic light",
+  "font": "Poppins (app default)",
+  "account": "signed out, onboarding skipped",
+  "captures": {
+    "friends": {
+      "sha256": "27e8348cc2fa86b31a2c0b35c0296732a9386a72a8111fc59a9d4a665e532059",
+      "state": "observational; matched iOS recapture required"
+    },
+    "home": {
+      "sha256": "d871cda0af7683b09030381e9c08481b1589cda77616e2f7ff15208144b489ac",
+      "state": "observational; matched iOS recapture required"
+    },
+    "library": {
+      "sha256": "07bdf92dd4d85c6d7efabbb433ce9bec80184a6c5031ffad72c13ce689754d2e",
+      "state": "observational; matched iOS recapture required"
+    },
+    "player": {
+      "sha256": "e89bb148a9ad2c38311f047357d32f24323d4c6b1e4104ca9a63ac9a91656f74",
+      "state": "observational; matched iOS recapture required"
+    },
+    "search": {
+      "sha256": "ea0c8ff579aecce0d6c9af09f6361d60f72454745f325504b2d99fe42ebb6eb7",
+      "state": "observational; matched iOS recapture required"
+    }
+  },
+  "iosParityCertified": false
+}

@@ -57,6 +57,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "ArchiveTune"
 include(":app")
+include(":shared")
 include(":desktopApp")
 include(":desktop-backend")
 include(":desktop-auth")
