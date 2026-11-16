@@ -130,7 +130,7 @@ The existing Android audible-time tracker and statistics models now live in `sta
 
 ## Cross-platform suite result
 
-A full `:desktopApp:test` run on Windows executed 127 tests: 126 passed and `AppPathsTest.linux ignores empty or relative XDG paths instead of writing under cwd` failed because its literal Linux path assertions are evaluated with Windows `Path` semantics (`/home/...` becomes `C:\\home\\...`). Neither `AppPaths.kt` nor that test was changed by the SDK migration. This is not a passing full suite; run the Linux-specific test on Linux or address its test portability without weakening its semantics. All focused SDK tests listed above passed.
+A full `:desktopApp:test` run initially failed one Linux-path test on Windows because literal `/home/...` paths were interpreted using Windows `Path` semantics. The test now uses host-native absolute fixture paths while still asserting exact fallback paths for empty/relative XDG values and an exact custom absolute cache path; production path logic was not changed. The full desktop application suite and affected backend, download, lyrics, social, Canvas and library suites subsequently passed on Windows. Linux runtime behavior still requires Linux validation.
 
 ## Remaining blockers and risks
 

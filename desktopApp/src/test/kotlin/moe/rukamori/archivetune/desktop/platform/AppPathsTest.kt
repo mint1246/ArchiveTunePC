@@ -35,20 +35,22 @@ class AppPathsTest {
 
     @Test
     fun `linux ignores empty or relative XDG paths instead of writing under cwd`() {
+        val home = Path.of(System.getProperty("java.io.tmpdir"), "xdg-test-home").toAbsolutePath().normalize()
+        val cacheHome = home.resolve("custom-cache")
         val paths = AppPaths.resolve(
             environment = mapOf(
                 "XDG_CONFIG_HOME" to "",
                 "XDG_DATA_HOME" to "relative/data",
-                "XDG_CACHE_HOME" to "/var/tmp/archivetune-cache",
+                "XDG_CACHE_HOME" to cacheHome.toString(),
                 "XDG_STATE_HOME" to "  ",
             ),
-            properties = mapOf("os.name" to "Linux", "user.home" to "/home/listener"),
+            properties = mapOf("os.name" to "Linux", "user.home" to home.toString()),
         )
 
-        assertEquals("/home/listener/.config/archivetune", paths.config.toString())
-        assertEquals("/home/listener/.local/share/archivetune", paths.data.toString())
-        assertEquals("/var/tmp/archivetune-cache/archivetune", paths.cache.toString())
-        assertEquals("/home/listener/.local/state/archivetune/logs", paths.logs.toString())
+        assertEquals(home.resolve(".config/archivetune"), paths.config)
+        assertEquals(home.resolve(".local/share/archivetune"), paths.data)
+        assertEquals(cacheHome.resolve("archivetune"), paths.cache)
+        assertEquals(home.resolve(".local/state/archivetune/logs"), paths.logs)
     }
 
     @Test

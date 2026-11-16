@@ -29,7 +29,7 @@ Source/build inventory of the baseline desktop tree, updated as SDK extraction p
 - `:stream-resolver` exposes pure-JVM client/format/URL/header/expiry policy. `PlaybackStreamResolverTest` and `DesktopStreamResolutionPolicyTest` source files indicate regression intent, not that they passed in this audit.
 - `:core` holds shared YouTube models/parsing/client behavior. `desktop-backend` is desktop-specific orchestration around that shared logic.
 - Service projects (`:spotifycore`, `:lastfm`, `:canvas`, lyrics providers) are reusable clients with separate APIs, not one desktop SDK. Provider presence does not prove it is wired or feature-complete.
-- Test source sets are present across key modules. Focused tests, a headless VLC run and a quick Native Image compile have since been executed; see `SDK_MIGRATION.md`. The full Windows desktop suite has one Linux-path portability failure. A module boundary or test name is not evidence of end-to-end correctness.
+- Test source sets are present across key modules. Focused tests, a headless VLC run and a quick Native Image compile have since been executed; see `SDK_MIGRATION.md`. The full Windows desktop suite passed after its Linux-path test was made host-path-portable; actual Linux runtime behavior remains unverified. A module boundary or test name is not evidence of end-to-end correctness.
 - Persistent data and secret handling are deliberately host-specific in several places: DPAPI auth, app-data settings/cache/index/statistics, download journal/files, and native helper/runtime paths. Any SDK contract must specify which host owns paths, encryption, lifecycle, cancellation, account isolation and migrations.
 
 ## One safe concrete extraction opportunity
