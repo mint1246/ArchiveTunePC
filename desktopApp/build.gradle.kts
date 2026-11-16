@@ -44,6 +44,7 @@ dependencies {
     implementation(project(":desktop-settings"))
     implementation(project(":desktop-statistics"))
     implementation(project(":desktop-audio-analysis"))
+    implementation(project(":desktop-audio-analysis-runtime"))
     implementation(project(":desktop-lyrics-ui"))
     implementation(project(":windows-media-integration"))
     implementation(project(":linux-media-integration"))

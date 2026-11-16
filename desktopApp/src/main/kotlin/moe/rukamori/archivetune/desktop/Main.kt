@@ -203,7 +203,13 @@ fun main() {
     }
     updateCoordinator.start()
     val restored = runtime.settings.snapshot()
-    val beatAnalysisRepository = DesktopAudioAnalysisRepository(runtime.paths, musicServices.playback, runtime.logger)
+    val beatAnalysisRepository = DesktopAudioAnalysisRepository(
+        cacheRoot = runtime.paths.cache,
+        decodeMono44k = { item, output ->
+            musicServices.playback.decodeAnalysisInput(item, output, sampleRate = 44_100, channels = 1)
+        },
+        logger = runtime.logger,
+    )
     val beatSync = DesktopBeatSyncController(
         enabled = restored.beatSyncedVisualsEnabled,
         intensity = restored.beatSyncedVisualsIntensity,

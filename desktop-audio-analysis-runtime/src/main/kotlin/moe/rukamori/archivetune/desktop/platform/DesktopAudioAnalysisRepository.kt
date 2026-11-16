@@ -4,7 +4,6 @@ import moe.rukamori.archivetune.desktop.analysis.BeatKeyAnalysis
 import moe.rukamori.archivetune.desktop.analysis.DesktopAudioAnalyzer
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackSource
-import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -30,11 +29,11 @@ import java.util.logging.Logger
  * cache and never decode or analyze the song again.
  */
 class DesktopAudioAnalysisRepository(
-    paths: AppPaths,
-    private val playback: VlcjPlaybackController,
+    cacheRoot: Path,
+    private val decodeMono44k: suspend (PlaybackItem, Path) -> Unit,
     private val logger: Logger,
 ) {
-    private val cacheDirectory = paths.cache.resolve("audio-analysis").resolve("v1")
+    private val cacheDirectory = cacheRoot.resolve("audio-analysis").resolve("v1")
     private val memory = ConcurrentHashMap<String, BeatKeyAnalysis>()
     @Volatile private var analyzer: DesktopAudioAnalyzer? = null
 
@@ -51,7 +50,7 @@ class DesktopAudioAnalysisRepository(
         Files.createDirectories(cacheDirectory)
         val input = Files.createTempFile(cacheDirectory, ".analysis-", ".wav")
         try {
-            playback.decodeAnalysisInput(item, input, sampleRate = SAMPLE_RATE, channels = 1)
+            decodeMono44k(item, input)
             val result = analyzePcm16MonoWav(input)
             memory[identity] = result
             writeCache(cacheFile, result)
@@ -195,7 +194,7 @@ class DesktopAudioAnalysisRepository(
         private const val CACHE_VERSION = 1
         private const val MAX_CACHED_BEATS = 1_000_000
 
-        internal fun analysisIdentity(item: PlaybackItem): String = buildString {
+        fun analysisIdentity(item: PlaybackItem): String = buildString {
             append(item.metadata.id)
             append('|')
             append(item.metadata.durationHintMs ?: -1L)
