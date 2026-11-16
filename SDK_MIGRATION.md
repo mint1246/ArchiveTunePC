@@ -4,7 +4,7 @@ Baseline: `874e21d764eef9f9b95a6b64bc3c35afba637702` on `main`; worktree clean b
 
 ## Assessment
 
-Desktop already uses the headless JVM `playback-core` contract and has separate backend, playback, settings, downloads, statistics and integration modules. Many domain coordinators remain in `desktopApp`. Android directly uses `core`, `stream-resolver`, and other shared modules, but its Media3 playback service, database and much feature orchestration remain in `app`; it does not currently consume `playback-core`. Platform backends, storage formats, background services and behavior differ and must not be unified without characterization. Existing JVM modules are not automatically stable SDKs or iOS-compatible.
+Desktop already uses the headless JVM `playback-core` contract and has separate backend, playback, settings, downloads, statistics and integration modules. Many domain coordinators remain in `desktopApp`. Android directly uses `core`, `stream-resolver`, `playback-core` and other shared modules, but its Media3 playback service, database and much feature orchestration remain in `app`. Platform backends, storage formats, background services and behavior differ and must not be unified without characterization. Existing JVM modules are not automatically stable SDKs or iOS-compatible.
 
 ## Migration sequence
 
@@ -18,7 +18,7 @@ Do not remove old paths until their clients, persistence upgrades and runtime be
 
 ## Milestone: publish existing playback contracts (in progress)
 
-`playback-core` now publishes an experimental local Maven artifact, `moe.rukamori.archivetune:playback-core:0.1.0-SNAPSHOT`. It contains existing queue, models and controller interfaces, **not** a player implementation, stream resolver, authentication or an Android adapter. The existing desktop application already consumes the project module; Android has not been migrated. The artifact is not a promise of API stability, nor a complete SDK.
+`playback-core` now publishes an experimental local Maven artifact, `moe.rukamori.archivetune:playback-core:0.1.0-SNAPSHOT`. It contains existing queue, models and controller interfaces, **not** a player implementation, stream resolver, authentication or an Android adapter. Desktop uses the playback contracts; Android consumes selected shared playback policies but has not been adapted to the controller. The artifact is not a promise of API stability, nor a complete SDK.
 
 From the repository root with JDK 21:
 
@@ -99,6 +99,10 @@ The existing download orchestration, retry tracking, resolution queue and manage
 ## Milestone: Android headless lyrics timeline
 
 Existing lyric entries, prepared models, active-line selection, text/word/grapheme timing, instrumental-gap insertion and prepared-entry adapters moved to the optional `lyrics-timeline` JVM module. Android retains provider fetching, preparation, romanization, translation and rendering. Grapheme segmentation is shared with the existing Android motion renderer, preserving its prior algorithm; nullable word reads were adapted for Kotlin cross-module smart-cast rules without changing the guarded rendering paths. The moved timing tests and full Android `gmsMobileUniversalDebug` unit suite pass; an independently resolved Maven Local example prepared a multilingual timed line. Rendering on a device, provider behavior and other build variants remain unverified. The existing model API exposes Guava and coroutine state; consumers that do not need lyrics need not include the module.
+
+## Milestone: headless sleep timer
+
+Android's existing sleep timer scheduling and transition policy now use `SleepTimerController` in `playback-core`; the Media3 listener, Compose state and actual service pause remain in the app. The controller takes a caller-owned serialized coroutine scope, a pause callback and an optional clock/state observer; closing it cancels its pending timer. Tests cover deadline, replacement/cancellation, end-of-track and reentrant clear behavior, including the existing state when switching modes. Playback-core tests and Android/desktop compilation pass; Android background and real-device behavior remain unverified.
 
 ## Milestone: Android lyrics request cache extraction
 

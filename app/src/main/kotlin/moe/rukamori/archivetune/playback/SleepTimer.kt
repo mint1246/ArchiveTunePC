@@ -13,17 +13,13 @@ import androidx.compose.runtime.setValue
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.minutes
+import moe.rukamori.archivetune.playback.api.SleepTimerController
 
 class SleepTimer(
-    private val scope: CoroutineScope,
+    scope: CoroutineScope,
     val player: Player,
-    private val service: MusicService,
+    service: MusicService,
 ) : Player.Listener {
-    private var sleepTimerJob: Job? = null
     var triggerTime by mutableStateOf(-1L)
         private set
     var pauseWhenSongEnd by mutableStateOf(false)
@@ -31,42 +27,24 @@ class SleepTimer(
     val isActive: Boolean
         get() = triggerTime != -1L || pauseWhenSongEnd
 
-    fun start(minute: Int) {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
-        if (minute == -1) {
-            pauseWhenSongEnd = true
-        } else {
-            triggerTime = System.currentTimeMillis() + minute.minutes.inWholeMilliseconds
-            sleepTimerJob =
-                scope.launch {
-                    delay(minute.minutes)
-                    service.pauseFromSleepTimer()
-                }
-        }
+    private val controller = SleepTimerController(
+        scope = scope,
+        pause = service::pauseFromSleepTimer,
+        onStateChanged = { state ->
+            triggerTime = state.triggerTime
+            pauseWhenSongEnd = state.pauseWhenSongEnd
+        },
+    )
+
+    fun start(minute: Int) = controller.start(minute)
+
+    fun clear() = controller.clear()
+
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        controller.onSongTransition()
     }
 
-    fun clear() {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
-        pauseWhenSongEnd = false
-        triggerTime = -1L
-    }
-
-    override fun onMediaItemTransition(
-        mediaItem: MediaItem?,
-        reason: Int,
-    ) {
-        if (pauseWhenSongEnd) {
-            service.pauseFromSleepTimer()
-        }
-    }
-
-    override fun onPlaybackStateChanged(
-        @Player.State playbackState: Int,
-    ) {
-        if (playbackState == Player.STATE_ENDED && pauseWhenSongEnd) {
-            service.pauseFromSleepTimer()
-        }
+    override fun onPlaybackStateChanged(@Player.State playbackState: Int) {
+        if (playbackState == Player.STATE_ENDED) controller.onPlaybackEnded()
     }
 }
