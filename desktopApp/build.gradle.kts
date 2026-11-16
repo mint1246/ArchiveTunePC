@@ -32,6 +32,7 @@ kotlin {
 
 dependencies {
     implementation(project(":desktop-backend"))
+    implementation(project(":desktop-canvas"))
     implementation(project(":canvas"))
     implementation(project(":spotifycore"))
     implementation(project(":desktop-auth"))
