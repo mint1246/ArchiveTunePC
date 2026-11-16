@@ -1107,7 +1107,7 @@ fun Lyrics(
                                         val wordsToRender =
                                             remember(item.words, item.text, item.time, lines.size, index, lineIsRtl, isCjk) {
                                                 if (hasWordTimings && item.words != null) {
-                                                    val baseWords = item.words.filter { it.text.isNotBlank() }
+                                                    val baseWords = item.words.orEmpty().filter { it.text.isNotBlank() }
                                                     baseWords.flatMapIndexed { idx, word ->
                                                         val prevText = baseWords.getOrNull(idx - 1)?.text
                                                         val nextText = baseWords.getOrNull(idx + 1)?.text
@@ -1341,7 +1341,7 @@ fun Lyrics(
                                         } else {
                                             val styledText =
                                                 buildAnnotatedString {
-                                                    item.words.forEachIndexed { wordIndex, word ->
+                                                    item.words.orEmpty().forEachIndexed { wordIndex, word ->
                                                         val wordStartMs = (word.startTime * 1000).toLong()
                                                         val wordEndMs = (word.endTime * 1000).toLong()
                                                         val wordDuration = wordEndMs - wordStartMs
@@ -1433,7 +1433,7 @@ fun Lyrics(
                                         } else {
                                             val styledText =
                                                 buildAnnotatedString {
-                                                    item.words.forEachIndexed { wordIndex, word ->
+                                                    item.words.orEmpty().forEachIndexed { wordIndex, word ->
                                                         val wordStartMs = (word.startTime * 1000).toLong()
                                                         val wordEndMs = (word.endTime * 1000).toLong()
                                                         val wordDuration = wordEndMs - wordStartMs
@@ -1517,7 +1517,7 @@ fun Lyrics(
                                         } else {
                                             val styledText =
                                                 buildAnnotatedString {
-                                                    item.words.forEachIndexed { wordIndex, word ->
+                                                    item.words.orEmpty().forEachIndexed { wordIndex, word ->
                                                         val wordStartMs = (word.startTime * 1000).toLong()
                                                         val wordEndMs = (word.endTime * 1000).toLong()
                                                         val wordDuration = wordEndMs - wordStartMs
@@ -1639,14 +1639,14 @@ fun Lyrics(
                                     ) {
                                         val firstWordStartMs =
                                             (
-                                                item.words
+                                                item.words.orEmpty()
                                                     .firstOrNull()
                                                     ?.startTime
                                                     ?.times(1000)
                                             )?.toLong() ?: 0L
                                         val lastWordEndMs =
                                             (
-                                                item.words
+                                                item.words.orEmpty()
                                                     .lastOrNull()
                                                     ?.endTime
                                                     ?.times(1000)
@@ -1722,7 +1722,7 @@ fun Lyrics(
                                     ) {
                                         val styledText =
                                             buildAnnotatedString {
-                                                item.words.forEachIndexed { wordIndex, word ->
+                                                item.words.orEmpty().forEachIndexed { wordIndex, word ->
                                                     val wordStartMs = (word.startTime * 1000).toLong()
                                                     val wordEndMs = (word.endTime * 1000).toLong()
                                                     val wordDuration = (wordEndMs - wordStartMs).coerceAtLeast(1L)
@@ -1825,7 +1825,7 @@ fun Lyrics(
                                     ) {
                                         val styledText =
                                             buildAnnotatedString {
-                                                item.words.forEachIndexed { wordIndex, word ->
+                                                item.words.orEmpty().forEachIndexed { wordIndex, word ->
                                                     val wordStartMs = (word.startTime * 1000).toLong()
                                                     val wordEndMs = (word.endTime * 1000).toLong()
                                                     val wordDuration = wordEndMs - wordStartMs
@@ -2053,7 +2053,7 @@ fun Lyrics(
                                         val styledText =
                                             if (item.words != null) {
                                                 buildAnnotatedString {
-                                                    item.words.forEachIndexed { idx, word ->
+                                                    item.words.orEmpty().forEachIndexed { idx, word ->
                                                         if (word.isBackground) {
                                                             withStyle(SpanStyle(fontSize = lyricsTextSize.sp * 0.7f)) {
                                                                 append(word.text)
@@ -2100,7 +2100,7 @@ fun Lyrics(
                                         val styledText =
                                             if (item.words != null) {
                                                 buildAnnotatedString {
-                                                    item.words.forEachIndexed { idx, word ->
+                                                    item.words.orEmpty().forEachIndexed { idx, word ->
                                                         if (word.isBackground) {
                                                             withStyle(SpanStyle(fontSize = lyricsTextSize.sp * 0.7f)) {
                                                                 append(word.text)
@@ -2142,7 +2142,7 @@ fun Lyrics(
                                                 !reduceMotionDuringScroll
                                             ) {
                                                 val romanizedWords = romanized.split(" ")
-                                                val mainWords = item.words
+                                                val mainWords = item.words.orEmpty()
 
                                                 val romanizedStyledText =
                                                     buildAnnotatedString {

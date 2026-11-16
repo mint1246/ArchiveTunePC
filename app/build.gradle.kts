@@ -439,6 +439,7 @@ dependencies {
     implementation(project(":audio-analysis-sdk"))
     implementation(project(":statistics-sdk"))
     implementation(project(":lyrics-sdk"))
+    implementation(project(":lyrics-timeline"))
     implementation(project(":sponsorblock-core"))
     implementation(project(":together-sdk"))
     implementation(project(":together-transport"))

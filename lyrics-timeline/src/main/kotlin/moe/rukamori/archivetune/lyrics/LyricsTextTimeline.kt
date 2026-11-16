@@ -154,8 +154,7 @@ object LyricsTextTimelineBuilder {
 
     private fun MappedWord.toLyricsTextWord(displayText: String): LyricsTextWord {
         val ranges =
-            LyricsMotionPhysics
-                .graphemeRanges(displayText.substring(startUtf16, endUtf16))
+            lyricsGraphemeRanges(displayText.substring(startUtf16, endUtf16))
                 .map { range -> (startUtf16 + range.first)..(startUtf16 + range.last) }
         val clusterCount = ranges.size.coerceAtLeast(1)
         val durationMs = (endMs - startMs).coerceAtLeast(1L)
