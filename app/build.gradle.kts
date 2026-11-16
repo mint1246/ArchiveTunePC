@@ -440,6 +440,7 @@ dependencies {
     implementation(project(":statistics-sdk"))
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))
+    implementation(project(":playlist-import-sdk"))
     implementation(project(":sponsorblock-core"))
     implementation(project(":together-sdk"))
     implementation(project(":together-transport"))
