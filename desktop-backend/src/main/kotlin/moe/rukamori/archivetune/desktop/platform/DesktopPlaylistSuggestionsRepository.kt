@@ -29,7 +29,7 @@ import moe.rukamori.archivetune.innertube.pages.SearchResult
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class DesktopPlaylistSuggestionsState(
+data class DesktopPlaylistSuggestionsState(
     val playlistId: String? = null,
     val query: String = "",
     val currentQueryIndex: Int = 0,
@@ -44,14 +44,14 @@ internal data class DesktopPlaylistSuggestionsState(
     val error: String? = null,
 )
 
-internal interface DesktopPlaylistSuggestionsBackend {
+interface DesktopPlaylistSuggestionsBackend {
     suspend fun search(query: String): Result<SearchResult>
     suspend fun continuation(token: String): Result<SearchResult>
     suspend fun addSongs(playlistId: String, videoIds: List<String>): Result<Unit>
 }
 
 /** Account-scoped, persistent YouTube song suggestions for editable playlists. */
-internal class DesktopPlaylistSuggestionsRepository(
+class DesktopPlaylistSuggestionsRepository(
     private val backend: DesktopPlaylistSuggestionsBackend,
     private val coordinator: DesktopResourceCoordinator,
     private val accountScopeProvider: () -> String,

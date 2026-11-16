@@ -31,19 +31,19 @@ import moe.rukamori.archivetune.innertube.pages.PodcastPage
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class DesktopPodcastLibraryState(
+data class DesktopPodcastLibraryState(
     val podcasts: List<PodcastItem> = emptyList(),
     val episodes: List<EpisodeItem> = emptyList(),
     val remotelySavedPodcastIds: Set<String> = emptySet(),
     val locallySavedPodcastIds: Set<String> = emptySet(),
 )
 
-internal data class DesktopRemotePodcastLibrary(
+data class DesktopRemotePodcastLibrary(
     val podcasts: List<PodcastItem>?,
     val episodes: List<EpisodeItem>?,
 )
 
-internal interface DesktopPodcastBackend {
+interface DesktopPodcastBackend {
     suspend fun podcast(browseId: String): Result<PodcastPage>
     suspend fun continuation(token: String): Result<PodcastPage.Continuation>
     suspend fun search(query: String): Result<List<YTItem>>
@@ -53,7 +53,7 @@ internal interface DesktopPodcastBackend {
 }
 
 /** Cached podcast browse/search operations and a compact account-scoped saved podcast library. */
-internal class DesktopPodcastRepository(
+class DesktopPodcastRepository(
     private val backend: DesktopPodcastBackend,
     private val coordinator: DesktopResourceCoordinator,
     private val scope: CoroutineScope,

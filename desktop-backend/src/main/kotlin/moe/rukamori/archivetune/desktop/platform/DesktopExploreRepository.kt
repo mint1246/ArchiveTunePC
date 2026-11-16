@@ -33,14 +33,36 @@ data class DesktopExploreState(
     val hasContent: Boolean get() = explorePage != null || chartsPage != null
 }
 
+interface DesktopExploreBackend {
+    suspend fun explore(): Result<ExplorePage>
+    suspend fun charts(): Result<ChartsPage>
+}
+
 /** Application-scoped Explore state; independent resources refresh concurrently behind cached UI. */
-internal class DesktopExploreRepository(
-    private val backend: ArchiveTuneJvmClient,
+class DesktopExploreRepository(
+    private val backend: DesktopExploreBackend,
     private val coordinator: DesktopResourceCoordinator,
     private val scope: CoroutineScope,
     private val accountScopeProvider: () -> String,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
+    constructor(
+        backend: ArchiveTuneJvmClient,
+        coordinator: DesktopResourceCoordinator,
+        scope: CoroutineScope,
+        accountScopeProvider: () -> String,
+        now: () -> Long = System::currentTimeMillis,
+    ) : this(
+        object : DesktopExploreBackend {
+            override suspend fun explore() = backend.explore()
+            override suspend fun charts() = backend.charts()
+        },
+        coordinator,
+        scope,
+        accountScopeProvider,
+        now,
+    )
+
     private val generation = AtomicLong()
     private val _state = MutableStateFlow(DesktopExploreState())
     val state: StateFlow<DesktopExploreState> = _state.asStateFlow()

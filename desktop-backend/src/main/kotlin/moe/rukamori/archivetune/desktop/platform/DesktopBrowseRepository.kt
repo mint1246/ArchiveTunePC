@@ -18,7 +18,7 @@ import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.innertube.pages.PodcastPage
 
-internal sealed interface DesktopBrowseRoute {
+sealed interface DesktopBrowseRoute {
     val cacheId: String
 
     data class Album(val browseId: String) : DesktopBrowseRoute {
@@ -109,7 +109,7 @@ internal class DesktopBrowsePageCache(
  * [maxPages], so returning to a recent detail is instant without allowing a long browsing session
  * to retain every album/artist/playlist ever opened.
  */
-internal class DesktopBrowseRepository(
+class DesktopBrowseRepository(
     private val backend: ArchiveTuneJvmClient,
     private val coordinator: DesktopResourceCoordinator,
     private val accountScopeProvider: () -> String,
