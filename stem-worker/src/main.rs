@@ -5,10 +5,10 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use ort::{inputs, session::Session, value::Tensor};
-use realfft::{num_complex::Complex32, RealFftPlanner};
+use realfft::{RealFftPlanner, num_complex::Complex32};
 use serde_json::json;
 
 mod chords;
@@ -104,7 +104,9 @@ impl Args {
                 "--input" => input = args.next().map(PathBuf::from),
                 "--output" => output = args.next().map(PathBuf::from),
                 "--help" | "-h" => {
-                    println!("archivetune-model-runner stems --model <htdemucs.onnx> --input <44.1k-stereo.wav> --output <dir>");
+                    println!(
+                        "archivetune-model-runner stems --model <htdemucs.onnx> --input <44.1k-stereo.wav> --output <dir>"
+                    );
                     std::process::exit(0);
                 }
                 other => bail!("unknown argument {other}"),

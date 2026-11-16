@@ -127,7 +127,9 @@ class DesktopLyricsPresenter(
                     loadGeneration.incrementAndGet()
                     searchJob?.cancel()
                     chordJob?.cancel()
+                    chordGeneration.incrementAndGet()
                     cancelTranslation()
+                    if (_chordState.value is DesktopChordState.Loading) _chordState.value = DesktopChordState.Idle
                     return@collectLatest
                 }
                 if (item == null) {
