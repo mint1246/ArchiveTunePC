@@ -13,7 +13,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
-import java.util.logging.Level
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,7 +25,6 @@ import moe.rukamori.archivetune.chords.ChordTrack
 import moe.rukamori.archivetune.chords.ChordTrackSource
 import moe.rukamori.archivetune.chords.ChordUnavailableException
 import moe.rukamori.archivetune.playback.api.PlaybackItem
-import moe.rukamori.archivetune.playback.desktop.VlcjPlaybackController
 import org.json.JSONObject
 
 /**
@@ -35,9 +33,12 @@ import org.json.JSONObject
  * The heavy model is not bundled with the application. It is hash-pinned in the shared model
  * manifest and downloaded only when Songsterr has no authored chord annotations.
  */
-internal class DesktopNeuralChordAnalyzer(
-    private val runtime: DesktopRuntime,
-    private val playback: VlcjPlaybackController,
+class DesktopNeuralChordAnalyzer(
+    private val cacheDirectory: Path,
+    private val modelDirectory: Path,
+    private val manifestUrl: String,
+    private val decodeInput: suspend (PlaybackItem, Path, Int, Int) -> Unit,
+    private val onFailure: (PlaybackItem, Throwable) -> Unit = { _, _ -> },
 ) {
     suspend fun analyze(
         item: PlaybackItem,
@@ -50,9 +51,9 @@ internal class DesktopNeuralChordAnalyzer(
                     DesktopModelRuntime.findRunner()
                         ?: throw ChordUnavailableException("Local chord model runner is unavailable")
                 val bundle = DesktopModelRuntime.ensureModel(
-                    DesktopStemStorage.modelsDirectory(runtime.paths),
+                    modelDirectory,
                     DesktopModels.CHORDS,
-                    DesktopBuildInfo.MODEL_MANIFEST_URL,
+                    manifestUrl,
                 )
 
                 val directory = chordCacheDirectory()
@@ -63,12 +64,7 @@ internal class DesktopNeuralChordAnalyzer(
                 try {
                     Files.deleteIfExists(input)
                     Files.deleteIfExists(output)
-                    playback.decodeAnalysisInput(
-                        item = item,
-                        output = input,
-                        sampleRate = 22_050,
-                        channels = 2,
-                    )
+                    decodeInput(item, input, 22_050, 2)
                     currentCoroutineContext().ensureActive()
                     runModel(
                         runner = runner,
@@ -89,7 +85,7 @@ internal class DesktopNeuralChordAnalyzer(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                runtime.logger.log(Level.FINE, "Local neural chord analysis unavailable for " + item.metadata.id, error)
+                onFailure(item, error)
                 Result.failure(error)
             }
         }
@@ -237,7 +233,7 @@ internal class DesktopNeuralChordAnalyzer(
         }
     }
 
-    private fun chordCacheDirectory(): Path = runtime.paths.cache.resolve("chords")
+    private fun chordCacheDirectory(): Path = cacheDirectory.resolve("chords")
 
     private fun cacheFile(item: PlaybackItem): Path =
         chordCacheDirectory().resolve(cacheKey(item) + ".json")

@@ -167,7 +167,17 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     }
     private val queueStore = PlaybackQueueStore(runtime.paths.data.resolve("persistent-queue.json"))
     private val lyricsScope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    private val neuralChordAnalyzer = DesktopNeuralChordAnalyzer(runtime, playback)
+    private val neuralChordAnalyzer = DesktopNeuralChordAnalyzer(
+        cacheDirectory = runtime.paths.cache,
+        modelDirectory = DesktopStemStorage.modelsDirectory(runtime.paths),
+        manifestUrl = DesktopBuildInfo.MODEL_MANIFEST_URL,
+        decodeInput = { item, output, sampleRate, channels ->
+            playback.decodeAnalysisInput(item, output, sampleRate, channels)
+        },
+        onFailure = { item, error ->
+            runtime.logger.log(java.util.logging.Level.FINE, "Local neural chord analysis unavailable for " + item.metadata.id, error)
+        },
+    )
     val paxsenixCredentialService = DesktopPaxsenixCredentialService(
         secureSessionStore(runtime.paths.data.resolve("paxsenix-lyrics.dpapi")),
     )
