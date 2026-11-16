@@ -78,14 +78,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Set up MSYS2 UCRT64 native toolchain
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          location: C:\
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-binutils
+
+      - name: Add MSYS2 tools to PATH
+        shell: pwsh
+        run: |
+          Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'ucrt64\bin' >> $env:GITHUB_PATH
 
       - name: Cache Rust stem worker
         uses: Swatinem/rust-cache@v2
