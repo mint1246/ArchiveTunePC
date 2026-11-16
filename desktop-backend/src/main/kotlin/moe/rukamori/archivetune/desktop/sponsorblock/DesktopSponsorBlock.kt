@@ -7,6 +7,8 @@
 package moe.rukamori.archivetune.desktop.sponsorblock
 
 import kotlinx.coroutines.suspendCancellableCoroutine
+import moe.rukamori.archivetune.sponsorblock.core.RawSponsorBlockSegment
+import moe.rukamori.archivetune.sponsorblock.core.normalizeSponsorBlockSegments
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -20,8 +22,6 @@ import java.util.LinkedHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.math.max
-import kotlin.math.roundToLong
 
 const val DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL = "https://sponsor.ajay.app"
 
@@ -123,29 +123,20 @@ class DesktopSponsorBlockRepository(
         val segments = buildList {
             for (index in 0 until (rawSegments?.length() ?: 0)) {
                 val raw = rawSegments?.optJSONObject(index) ?: continue
-                if (raw.optString("actionType") != "skip" || raw.optString("category") !in selectedCategories) continue
                 val range = raw.optJSONArray("segment") ?: continue
                 if (range.length() < 2) continue
-                val startSeconds = range.optDouble(0, Double.NaN)
-                val endSeconds = range.optDouble(1, Double.NaN)
-                if (!startSeconds.isFinite() || !endSeconds.isFinite() || startSeconds < 0.0 || endSeconds <= startSeconds) continue
-                if (endSeconds > MAX_SUPPORTED_SECONDS) continue
-                val startMs = (startSeconds * MILLIS_PER_SECOND).roundToLong().coerceAtLeast(0L)
-                val endMs = (endSeconds * MILLIS_PER_SECOND).roundToLong()
-                if (endMs - startMs >= MIN_SEGMENT_MS) add(DesktopSponsorBlockSegment(startMs, endMs))
-            }
-        }.sortedWith(compareBy(DesktopSponsorBlockSegment::startMs, DesktopSponsorBlockSegment::endMs))
-        if (segments.isEmpty()) return emptyList()
-        val merged = ArrayList<DesktopSponsorBlockSegment>(segments.size)
-        segments.forEach { segment ->
-            val previous = merged.lastOrNull()
-            if (previous != null && segment.startMs <= previous.endMs) {
-                merged[merged.lastIndex] = previous.copy(endMs = max(previous.endMs, segment.endMs))
-            } else {
-                merged += segment
+                add(
+                    RawSponsorBlockSegment(
+                        startSeconds = range.optDouble(0, Double.NaN),
+                        endSeconds = range.optDouble(1, Double.NaN),
+                        category = raw.optString("category"),
+                        actionType = raw.optString("actionType"),
+                    ),
+                )
             }
         }
-        return merged
+        return normalizeSponsorBlockSegments(segments, selectedCategories)
+            .map { DesktopSponsorBlockSegment(it.startMs, it.endMs) }
     }
 
     private data class RequestKey(val apiUrl: String, val videoId: String, val categories: List<String>)
@@ -156,9 +147,6 @@ class DesktopSponsorBlockRepository(
         const val HASH_PREFIX_LENGTH = 4
         const val SKIP_ACTION_TYPES = "[\"skip\"]"
         const val USER_AGENT = "ArchiveTune Desktop"
-        const val MIN_SEGMENT_MS = 100L
-        const val MILLIS_PER_SECOND = 1_000.0
-        const val MAX_SUPPORTED_SECONDS = Long.MAX_VALUE / MILLIS_PER_SECOND
         const val HEX_DIGITS = "0123456789abcdef"
     }
 }

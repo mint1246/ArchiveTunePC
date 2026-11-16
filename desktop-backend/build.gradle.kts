@@ -8,6 +8,7 @@ kotlin {
 
 dependencies {
     api(project(":core"))
+    implementation(project(":sponsorblock-core"))
     implementation(project(":spotifycore"))
     implementation(project(":stream-resolver"))
     implementation(project(":morideobfuscator:jvm"))
@@ -24,6 +25,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.json)
     testImplementation(libs.junit)
+    testImplementation(kotlin("test"))
 }
 
 // Developer-only classpath export for measuring resolver JVMs without Gradle startup/daemon RSS.
