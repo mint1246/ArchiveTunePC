@@ -10,6 +10,7 @@ kotlin {
 
 dependencies {
     api(project(":playback-core"))
+    api(project(":desktop-lyrics-engine"))
     implementation(project(":desktop-backend"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)

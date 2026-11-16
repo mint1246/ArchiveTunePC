@@ -1363,9 +1363,9 @@ private fun LyricLineContent(
                 textAlign = TextAlign.Center,
             )
         }
-        if (line.translation != null) {
+        line.translation?.let { translation ->
             Text(
-                text = line.translation,
+                text = translation,
                 style = translationStyle,
                 softWrap = true,
                 textAlign = TextAlign.Center,

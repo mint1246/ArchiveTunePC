@@ -63,16 +63,6 @@ sealed interface DesktopLyricsTranslationState {
     data class Error(val itemId: String, val message: String) : DesktopLyricsTranslationState
 }
 
-/** Implemented by the desktop composition root, which supplies current settings and secure credentials. */
-fun interface DesktopLyricsTranslator {
-    suspend fun translate(
-        itemId: String,
-        document: LyricsDocument,
-        sourceLines: List<String>,
-        targetLanguage: String,
-    ): List<String>
-}
-
 /**
  * Bridges the real playback StateFlow to JvmLyricsClient. collectLatest cancels a pending provider
  * request immediately when the track changes. Cache entries are documents from real providers only.
