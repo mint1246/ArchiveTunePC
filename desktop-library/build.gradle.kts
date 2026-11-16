@@ -5,6 +5,8 @@ plugins {
 kotlin { jvmToolchain(21) }
 
 dependencies {
+    api(project(":playback-core"))
+    implementation(libs.json)
     implementation(libs.coroutines.core)
     implementation("net.jthink:jaudiotagger:3.0.1")
     testImplementation(kotlin("test"))
