@@ -100,13 +100,17 @@ The existing download orchestration, retry tracking, resolution queue and manage
 
 Existing lyric entries, prepared models, active-line selection, text/word/grapheme timing, instrumental-gap insertion and prepared-entry adapters moved to the optional `lyrics-timeline` JVM module. Android retains provider fetching, preparation, romanization, translation and rendering. Grapheme segmentation is shared with the existing Android motion renderer, preserving its prior algorithm; nullable word reads were adapted for Kotlin cross-module smart-cast rules without changing the guarded rendering paths. The moved timing tests and full Android `gmsMobileUniversalDebug` unit suite pass; an independently resolved Maven Local example prepared a multilingual timed line. Rendering on a device, provider behavior and other build variants remain unverified. The existing model API exposes Guava and coroutine state; consumers that do not need lyrics need not include the module.
 
+## Milestone: shared Songsterr chord client
+
+The Android and desktop Songsterr clients were identical apart from their User-Agent. They now consume one `chords-sdk` implementation, retaining each platform's original User-Agent and the Android platform JSON implementation. Shared parser tests replace the identical duplicated test files. The neural analyzer now depends on the shared chord types instead of the entire desktop backend, and its artifact plus `chords-sdk` are published experimentally to Maven Local; an independent example resolved the full dependency graph and constructed the analyzer. Android unit tests and debug APK assembly, desktop backend/lyrics/neural tests, desktop compile and quick Graal compile pass. Live Songsterr, Android device behavior and actual packaged inference remain unverified.
+
 ## Milestone: neural worker cancellation
 
 The extracted chord runner now has a child cancellation monitor that terminates its process even when the parent is blocked reading output; the previous completion callback could wait for that read to finish. Cancellation is rethrown rather than reported as an ordinary failure if terminating the process breaks its stream. A regression test starts a real long-running subprocess, blocks reading its output and verifies cancellation terminates it promptly. The test and quick Graal native compile pass; real GPU inference cancellation remains unverified.
 
 ## Milestone: desktop neural chord analysis boundary
 
-The existing local neural chord analyzer moved into `desktop-neural-chords`, with injected cache/model paths, manifest URL, audio decoding and diagnostics. Desktop supplies its existing VLC decoder and logger; Songsterr priority stays in the lyrics presenter. The cached-result test, desktop compilation and quick Graal native compile pass. This module still depends on backend-owned chord types and is not yet independently published. Real runner inference, cancellation and installed-package operation remain unverified.
+The existing local neural chord analyzer moved into `desktop-neural-chords`, with injected cache/model paths, manifest URL, audio decoding and diagnostics. Desktop supplies its existing VLC decoder and logger; Songsterr priority stays in the lyrics presenter. The cached-result test, desktop compilation and quick Graal native compile pass. Chord types have subsequently moved to `chords-sdk`, and the module is now experimentally published to Maven Local. Real runner inference, cancellation and installed-package operation remain unverified.
 
 ## Milestone: optional desktop model runtime
 

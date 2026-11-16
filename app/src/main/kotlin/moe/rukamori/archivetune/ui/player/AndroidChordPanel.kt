@@ -184,9 +184,10 @@ internal fun AndroidChordPanel(
             ) {
                 itemsIndexed(track.events, key = { index, event -> "${event.startMs}:$index" }) { index, event ->
                     val previousSection = track.events.getOrNull(index - 1)?.section
-                    if (!event.section.isNullOrBlank() && event.section != previousSection) {
+                    val section = event.section
+                    if (!section.isNullOrBlank() && section != previousSection) {
                         Text(
-                            event.section.uppercase(),
+                            section.uppercase(),
                             modifier = Modifier.padding(start = 10.dp, top = if (index == 0) 0.dp else 10.dp, bottom = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             letterSpacing = 1.sp,

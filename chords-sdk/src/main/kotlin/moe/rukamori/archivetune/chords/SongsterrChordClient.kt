@@ -87,6 +87,7 @@ class SongsterrChordClient(
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(20, TimeUnit.SECONDS)
             .build(),
+    private val userAgent: String = "ArchiveTune/desktop chord-provider",
 ) {
     suspend fun getChords(
         request: ChordRequest,
@@ -245,7 +246,7 @@ class SongsterrChordClient(
             Request.Builder()
                 .url(url)
                 .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", userAgent)
                 .get()
                 .build()
         http.newCall(request).execute().use { response ->
@@ -275,7 +276,6 @@ class SongsterrChordClient(
         private const val MAX_JSON_CHARS = 4 * 1024 * 1024
         private const val MIN_MATCH_SCORE = 0.68
         private const val MIN_DERIVED_EVENTS = 4
-        private const val USER_AGENT = "ArchiveTune/desktop chord-provider"
         private val YOUTUBE_VIDEO_ID = Regex("^[A-Za-z0-9_-]{11}$")
 
         internal fun parseTrackJsonForTest(json: String, allowDerived: Boolean = true): ParsedTrack =

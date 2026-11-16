@@ -431,7 +431,7 @@ fun LyricsScreen(
                 if (chordLocalOnlyRetry || artist.isBlank()) {
                     neuralChordAnalyzer.analyze(mediaItem, request, forceRecompute = chordLocalOnlyRetry)
                 } else {
-                    val songsterr = SongsterrChordClient()
+                    val songsterr = SongsterrChordClient(userAgent = "ArchiveTune/android chord-provider")
                     resolveAndroidChordPriority(
                         authored = { songsterr.getChords(request, allowDerived = false) },
                         localNeural = { neuralChordAnalyzer.analyze(mediaItem, request) },
