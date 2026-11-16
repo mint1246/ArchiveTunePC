@@ -100,6 +100,10 @@ The existing download orchestration, retry tracking, resolution queue and manage
 
 Existing lyric entries, prepared models, active-line selection, text/word/grapheme timing, instrumental-gap insertion and prepared-entry adapters moved to the optional `lyrics-timeline` JVM module. Android retains provider fetching, preparation, romanization, translation and rendering. Grapheme segmentation is shared with the existing Android motion renderer, preserving its prior algorithm; nullable word reads were adapted for Kotlin cross-module smart-cast rules without changing the guarded rendering paths. The moved timing tests and full Android `gmsMobileUniversalDebug` unit suite pass; an independently resolved Maven Local example prepared a multilingual timed line. Rendering on a device, provider behavior and other build variants remain unverified. The existing model API exposes Guava and coroutine state; consumers that do not need lyrics need not include the module.
 
+## Milestone: neural worker cancellation
+
+The extracted chord runner now has a child cancellation monitor that terminates its process even when the parent is blocked reading output; the previous completion callback could wait for that read to finish. Cancellation is rethrown rather than reported as an ordinary failure if terminating the process breaks its stream. A regression test starts a real long-running subprocess, blocks reading its output and verifies cancellation terminates it promptly. The test and quick Graal native compile pass; real GPU inference cancellation remains unverified.
+
 ## Milestone: desktop neural chord analysis boundary
 
 The existing local neural chord analyzer moved into `desktop-neural-chords`, with injected cache/model paths, manifest URL, audio decoding and diagnostics. Desktop supplies its existing VLC decoder and logger; Songsterr priority stays in the lyrics presenter. The cached-result test, desktop compilation and quick Graal native compile pass. This module still depends on backend-owned chord types and is not yet independently published. Real runner inference, cancellation and installed-package operation remain unverified.

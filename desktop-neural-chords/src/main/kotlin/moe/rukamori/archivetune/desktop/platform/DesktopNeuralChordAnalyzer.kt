@@ -14,10 +14,14 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.chords.ChordEvent
 import moe.rukamori.archivetune.chords.ChordRequest
@@ -85,6 +89,7 @@ class DesktopNeuralChordAnalyzer(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
+                currentCoroutineContext().ensureActive()
                 onFailure(item, error)
                 Result.failure(error)
             }
@@ -112,13 +117,7 @@ class DesktopNeuralChordAnalyzer(
                 .redirectErrorStream(true)
         DesktopModelRuntime.configureRunnerEnvironment(builder, runner)
         val process = builder.start()
-        val cancellationHandle =
-            currentCoroutineContext().job.invokeOnCompletion { cause ->
-                if (cause is CancellationException && process.isAlive) {
-                    runCatching { process.destroy() }
-                    runCatching { if (process.isAlive) process.destroyForcibly() }
-                }
-            }
+        val cancellationMonitor = CoroutineScope(currentCoroutineContext()).stopProcessOnCancellation(process)
         var workerError: String? = null
         try {
             BufferedReader(InputStreamReader(process.inputStream, StandardCharsets.UTF_8)).useLines { lines ->
@@ -134,11 +133,8 @@ class DesktopNeuralChordAnalyzer(
                 throw IllegalStateException(workerError ?: "Chord model runner exited with code " + exit)
             }
         } finally {
-            cancellationHandle.dispose()
-            if (process.isAlive) {
-                runCatching { process.destroy() }
-                runCatching { if (process.isAlive) process.destroyForcibly() }
-            }
+            cancellationMonitor.cancel()
+            stopProcess(process)
         }
     }
 
@@ -245,5 +241,21 @@ class DesktopNeuralChordAnalyzer(
                 (item.metadata.durationHintMs ?: -1L)
         val digest = MessageDigest.getInstance("SHA-256").digest(identity.toByteArray(StandardCharsets.UTF_8))
         return digest.take(16).joinToString("") { "%02x".format(it) }
+    }
+}
+
+internal fun CoroutineScope.stopProcessOnCancellation(process: Process): Job =
+    launch(start = CoroutineStart.UNDISPATCHED) {
+        try {
+            awaitCancellation()
+        } finally {
+            stopProcess(process)
+        }
+    }
+
+private fun stopProcess(process: Process) {
+    if (process.isAlive) {
+        runCatching { process.destroy() }
+        runCatching { if (process.isAlive) process.destroyForcibly() }
     }
 }
