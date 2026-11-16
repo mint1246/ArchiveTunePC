@@ -1,6 +1,6 @@
 # Lyrics timeline module
 
-This JVM module contains the existing Android lyric entries, prepared-line models, synchronized active-line policy, provider-word-to-line mapping, UTF-16 grapheme segmentation, and conversion from prepared lyrics to entries. It does not initialize Android, a UI, network providers, or a playback service. Android still owns lyric provider selection, preparation, translation/romanization, persistence, and rendering.
+This JVM module contains the existing Android lyric entries, prepared-line models, synchronized active-line policy, provider-word-to-line mapping, UTF-16 grapheme segmentation, instrumental-gap insertion, and conversion from prepared lyrics to entries. It does not initialize Android, a UI, network providers, or a playback service. Android still owns lyric provider selection, preparation, translation/romanization, persistence, and rendering.
 
 `lyricsGraphemeRanges` preserves the existing motion renderer's handling of combining marks, emoji modifiers, regional indicators and ZWJ sequences. It is not a claim of complete Unicode grapheme conformance. Android's animated renderer uses the same function.
 
