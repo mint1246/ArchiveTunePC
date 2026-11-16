@@ -435,6 +435,13 @@ dependencies {
     ksp(libs.hilt.compiler)
     ksp(libs.kotlin.metadata.jvm)
 
+    implementation(project(":playback-core"))
+    implementation(project(":audio-analysis-sdk"))
+    implementation(project(":statistics-sdk"))
+    implementation(project(":lyrics-sdk"))
+    implementation(project(":sponsorblock-core"))
+    implementation(project(":together-sdk"))
+    implementation(project(":together-transport"))
     implementation(project(":core"))
     implementation(project(":moriextractor"))
     implementation(project(":stream-resolver"))

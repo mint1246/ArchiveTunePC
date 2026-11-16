@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import moe.rukamori.archivetune.sdk.audio.BeatTracker
 
 internal data class AndroidBeatAnalysisInput(
     val uri: Uri,
@@ -99,7 +100,7 @@ internal class AndroidBeatAudioDecoder(private val context: Context) {
                                     }.slice()
                                     .order(ByteOrder.nativeOrder())
                             val activeResampler =
-                                resampler ?: BeatLinearResampler(sampleRate, AndroidBeatTracker.SAMPLE_RATE).also { resampler = it }
+                                resampler ?: BeatLinearResampler(sampleRate, BeatTracker.SAMPLE_RATE).also { resampler = it }
                             sourceFrames +=
                                 decodePcmToMono(buffer, pcmEncoding, channelCount) { mono ->
                                     activeResampler.push(mono, output::add)

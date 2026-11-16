@@ -16,84 +16,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.delay
 import moe.rukamori.archivetune.LocalPlayerConnection
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey
 import moe.rukamori.archivetune.constants.BeatSyncedVisualsIntensityKey
 import moe.rukamori.archivetune.playback.PlayerConnection
+import moe.rukamori.archivetune.sdk.audio.BeatEnergyDetector
+import moe.rukamori.archivetune.sdk.audio.sampleBeatTimeline
 import moe.rukamori.archivetune.utils.rememberPreference
-import kotlin.math.sqrt
-
-/**
- * Small adaptive onset detector used by the Android player visuals.
- *
- * It intentionally looks only at bass/kick energy.  This gives the UI a real audio-derived beat
- * signal without requiring the Windows-only Essentia runtime used by desktop.
- */
-internal class BeatEnergyDetector(
-    private val triggerRatio: Float = 1.72f,
-    private val baselineAlpha: Float = 0.055f,
-    private val minimumEnergy: Float = 3.5f,
-    private val refractoryMs: Long = 210L,
-) {
-    private var baseline = 0f
-    private var initialized = false
-    private var lastBeatMs = Long.MIN_VALUE / 2
-
-    fun acceptEnergy(energy: Float, nowMs: Long): Boolean {
-        if (!energy.isFinite() || energy < 0f) return false
-        if (!initialized) {
-            baseline = energy.coerceAtLeast(0.001f)
-            initialized = true
-            return false
-        }
-
-        val reference = baseline.coerceAtLeast(0.001f)
-        val isBeat =
-            energy >= minimumEnergy &&
-                energy >= reference * triggerRatio &&
-                nowMs - lastBeatMs >= refractoryMs
-
-        // Follow normal program level quickly enough to avoid permanently over-triggering, but do
-        // not let a single transient drag the threshold all the way up to itself.
-        val cappedForBaseline = energy.coerceAtMost(reference * 2.2f)
-        baseline += (cappedForBaseline - baseline) * baselineAlpha
-
-        if (isBeat) lastBeatMs = nowMs
-        return isBeat
-    }
-
-    fun acceptFft(
-        fft: ByteArray,
-        samplingRateMilliHz: Int,
-        nowMs: Long,
-    ): Boolean {
-        if (fft.size < 8 || samplingRateMilliHz <= 0) return false
-        val sampleRateHz = samplingRateMilliHz / 1_000f
-        val fftSize = fft.size
-        val firstBin = ((45f * fftSize) / sampleRateHz).toInt().coerceAtLeast(1)
-        val lastBin = ((180f * fftSize) / sampleRateHz).toInt().coerceAtMost((fft.size / 2) - 1)
-        if (firstBin > lastBin) return false
-
-        var sum = 0.0
-        var count = 0
-        for (bin in firstBin..lastBin) {
-            val offset = bin * 2
-            if (offset + 1 >= fft.size) break
-            val real = fft[offset].toInt().toDouble()
-            val imaginary = fft[offset + 1].toInt().toDouble()
-            sum += real * real + imaginary * imaginary
-            count++
-        }
-        if (count == 0) return false
-        return acceptEnergy(sqrt(sum / count).toFloat(), nowMs)
-    }
-}
 
 internal class AndroidBeatSyncController private constructor(
     private val visualizer: Visualizer,
@@ -209,7 +144,7 @@ fun rememberPlayerBeatPulse(
                     if (analysis == null) {
                         0f
                     } else {
-                        sampleAndroidBeatTimeline(
+                        sampleBeatTimeline(
                             beatsSeconds = analysis.beatsSeconds,
                             positionMs = playerConnection.player.currentPosition.toDouble(),
                         ).pulse * intensity.coerceIn(0f, 1f)

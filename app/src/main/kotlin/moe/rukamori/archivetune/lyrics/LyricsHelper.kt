@@ -392,10 +392,3 @@ data class LyricsProviderSearchUpdate(
     val status: LyricsProviderSearchStatus,
     val results: List<LyricsResult> = emptyList(),
 )
-
-data class LyricsResult(
-    val providerName: String,
-    val lyrics: String,
-)
-
-internal fun selectProviderOrderedLyrics(results: List<String?>): String? = results.firstOrNull { it != null }

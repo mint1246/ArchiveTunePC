@@ -261,6 +261,7 @@ import moe.rukamori.archivetune.stems.AndroidStemCache
 import moe.rukamori.archivetune.stems.AndroidStemInput
 import moe.rukamori.archivetune.stems.AndroidStemMixStore
 import moe.rukamori.archivetune.stems.AndroidStemPlaybackCoordinator
+import moe.rukamori.archivetune.playback.api.equalPowerGains
 import moe.rukamori.archivetune.statistics.AndroidStatisticsAlbum
 import moe.rukamori.archivetune.statistics.AndroidStatisticsArtist
 import moe.rukamori.archivetune.statistics.AndroidStatisticsPlaybackSnapshot
@@ -268,6 +269,7 @@ import moe.rukamori.archivetune.statistics.AndroidStatisticsSink
 import moe.rukamori.archivetune.statistics.AndroidStatisticsSong
 import moe.rukamori.archivetune.statistics.AndroidStatisticsStore
 import moe.rukamori.archivetune.statistics.AndroidStatisticsTracker
+import moe.rukamori.archivetune.statistics.SystemAndroidStatisticsClock
 import moe.rukamori.archivetune.together.TogetherPlaybackSync
 import moe.rukamori.archivetune.together.allows
 import moe.rukamori.archivetune.together.permissionsFor
@@ -1339,6 +1341,7 @@ class MusicService :
                             }
                         }
                     },
+                clock = SystemAndroidStatisticsClock,
             )
         castPlaybackRepository.screenState.collect(scope) { castState ->
             stemPlayback.onCastConnectionChanged(
@@ -4910,6 +4913,7 @@ if (
                     hostDisplayName = displayName.trim().ifBlank { getString(R.string.app_name) },
                     initialSettings = compatibleSettings,
                     hostParticipantId = togetherHostId,
+                    elapsedRealtimeMs = android.os.SystemClock::elapsedRealtime,
                 )
 
             server.onEvent = { event ->
@@ -5026,6 +5030,7 @@ if (
                     initialSettings = compatibleSettings,
                     hostParticipantId = togetherHostId,
                     allowDesktopProtocol = true,
+                    elapsedRealtimeMs = android.os.SystemClock::elapsedRealtime,
                 )
             server.onEvent = { event ->
                 ioScope.launch(SilentHandler) {
@@ -5158,6 +5163,7 @@ if (
                 moe.rukamori.archivetune.together.TogetherClient(
                     ioScope,
                     clientId = getOrCreateTogetherClientId(),
+                    elapsedRealtimeMs = android.os.SystemClock::elapsedRealtime,
                 )
             togetherClient = client
             togetherClock =
@@ -5372,6 +5378,7 @@ if (
                 moe.rukamori.archivetune.together.TogetherClient(
                     ioScope,
                     clientId = getOrCreateTogetherClientId(),
+                    elapsedRealtimeMs = android.os.SystemClock::elapsedRealtime,
                 )
             togetherClient = client
             togetherClock =
@@ -6316,13 +6323,13 @@ if (
         togetherPendingGuestControl = null
 
         try {
-            togetherClient?.disconnect()
+            togetherClient?.close()
         } catch (_: Exception) {
         }
         togetherClient = null
 
         try {
-            togetherOnlineHost?.disconnect()
+            togetherOnlineHost?.close()
         } catch (_: Exception) {
         }
         togetherOnlineHost = null

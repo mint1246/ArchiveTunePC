@@ -26,6 +26,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import moe.rukamori.archivetune.sdk.audio.BeatAnalysis
+import moe.rukamori.archivetune.sdk.audio.BeatTracker
 import timber.log.Timber
 
 internal data class AndroidBeatTrack(
@@ -37,7 +39,7 @@ internal data class AndroidBeatTrack(
 
 internal data class AndroidBeatGrid(
     val identity: String,
-    val analysis: AndroidBeatAnalysis,
+    val analysis: BeatAnalysis,
 )
 
 internal class AndroidBeatAnalysisRepository(
@@ -49,12 +51,12 @@ internal class AndroidBeatAnalysisRepository(
     private val expensiveAnalysisMutex = Mutex()
     private val memoryLock = Any()
     private val memory =
-        object : LinkedHashMap<String, AndroidBeatAnalysis>(MEMORY_ENTRIES + 1, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AndroidBeatAnalysis>?): Boolean =
+        object : LinkedHashMap<String, BeatAnalysis>(MEMORY_ENTRIES + 1, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BeatAnalysis>?): Boolean =
                 size > MEMORY_ENTRIES
         }
 
-    suspend fun analyze(track: AndroidBeatTrack): AndroidBeatAnalysis? {
+    suspend fun analyze(track: AndroidBeatTrack): BeatAnalysis? {
         synchronized(memoryLock) { memory[track.identity] }?.let { return it }
         withContext(Dispatchers.IO) { cache.read(track.identity, track.durationMs) }?.let { cached ->
             synchronized(memoryLock) { memory[track.identity] = cached }
@@ -74,7 +76,7 @@ internal class AndroidBeatAnalysisRepository(
                 currentCoroutineContext().ensureActive()
                 val pcm = withContext(Dispatchers.IO) { decoder.decode(input) }
                 currentCoroutineContext().ensureActive()
-                val analysis = withContext(Dispatchers.Default) { AndroidBeatTracker.analyze(pcm) } ?: return@withLock null
+                val analysis = withContext(Dispatchers.Default) { BeatTracker.analyze(pcm) } ?: return@withLock null
                 currentCoroutineContext().ensureActive()
                 synchronized(memoryLock) { memory[track.identity] = analysis }
                 withContext(Dispatchers.IO) { cache.write(track.identity, track.durationMs, analysis) }
@@ -96,7 +98,7 @@ internal class AndroidBeatAnalysisRepository(
 }
 
 internal class AndroidBeatAnalysisCache(private val directory: File) {
-    fun read(identity: String, expectedDurationMs: Long?): AndroidBeatAnalysis? =
+    fun read(identity: String, expectedDurationMs: Long?): BeatAnalysis? =
         runCatching {
             val file = fileFor(identity)
             if (!file.isFile) return null
@@ -117,11 +119,11 @@ internal class AndroidBeatAnalysisCache(private val directory: File) {
                     beats[index] = beat
                     previous = beat
                 }
-                AndroidBeatAnalysis(beats, bpm, analysisDuration)
+                BeatAnalysis(beats, bpm, analysisDuration)
             }
         }.getOrNull()
 
-    fun write(identity: String, expectedDurationMs: Long?, analysis: AndroidBeatAnalysis) {
+    fun write(identity: String, expectedDurationMs: Long?, analysis: BeatAnalysis) {
         if (analysis.beatsSeconds.size < 2) return
         directory.mkdirs()
         val target = fileFor(identity)

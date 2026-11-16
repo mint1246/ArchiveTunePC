@@ -15,6 +15,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.sdk.audio.BeatAnalysis
+
 
 /** Owns cancellation/generation fencing for current-track analysis and one-track-ahead prefetch. */
 internal class AndroidBeatAnalysisCoordinator(

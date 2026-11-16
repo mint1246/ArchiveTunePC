@@ -7,6 +7,8 @@
 
 package moe.rukamori.archivetune.playback
 
+import moe.rukamori.archivetune.playback.api.equalPowerGains
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
