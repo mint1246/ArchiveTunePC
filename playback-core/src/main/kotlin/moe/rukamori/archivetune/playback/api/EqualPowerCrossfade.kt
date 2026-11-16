@@ -5,18 +5,18 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback.desktop
+package moe.rukamori.archivetune.playback.api
 
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-internal data class EqualPowerGains(
+data class EqualPowerGains(
     val outgoing: Float,
     val incoming: Float,
 )
 
-internal fun equalPowerGains(progress: Float): EqualPowerGains {
+fun equalPowerGains(progress: Float): EqualPowerGains {
     val clampedProgress = progress.coerceIn(0f, 1f)
     val radians = clampedProgress.toDouble() * (PI / 2.0)
     return EqualPowerGains(

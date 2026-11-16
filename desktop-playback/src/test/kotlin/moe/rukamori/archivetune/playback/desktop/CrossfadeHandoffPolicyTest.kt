@@ -7,6 +7,8 @@
 
 package moe.rukamori.archivetune.playback.desktop
 
+import moe.rukamori.archivetune.playback.api.equalPowerGains
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

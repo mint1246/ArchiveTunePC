@@ -1,6 +1,10 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    `maven-publish`
 }
+
+group = "moe.rukamori.archivetune"
+version = "0.1.0-SNAPSHOT"
 
 kotlin {
     jvmToolchain(21)
@@ -12,7 +16,7 @@ dependencies {
     implementation(libs.json)
     implementation("uk.co.caprica:vlcj:4.11.0")
     implementation("uk.co.caprica:vlcj-natives:4.8.3")
-    implementation(libs.okhttp)
+    api(libs.okhttp)
     runtimeOnly("org.slf4j:slf4j-nop:2.0.16")
 
     testImplementation(kotlin("test"))
@@ -42,6 +46,15 @@ tasks.test {
             systemProperty(propertyName, forwarded)
         }
         inputs.property(environmentName, forwarded.orEmpty())
+    }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("desktopPlayback") {
+            artifactId = "desktop-playback"
+            from(components["java"])
+        }
     }
 }
 
