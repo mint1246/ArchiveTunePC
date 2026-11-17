@@ -95,7 +95,7 @@ class AndroidSocialRealtime(
     }
 }
 
-internal fun socialPresenceUpdateJson(presence: SocialPresence): JSONObject =
+fun socialPresenceUpdateJson(presence: SocialPresence): JSONObject =
     JSONObject()
         .put("type", "presence.update")
         .put(

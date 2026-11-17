@@ -442,6 +442,9 @@ dependencies {
     implementation(project(":social-sdk")) {
         exclude(group = "org.json", module = "json")
     }
+    implementation(project(":social-realtime")) {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(project(":local-media-sdk"))
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))
