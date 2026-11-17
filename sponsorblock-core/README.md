@@ -2,7 +2,7 @@
 
 This UI-independent JVM module validates and merges SponsorBlock skip ranges. Both Android and desktop retain their own request, authentication, lifecycle, and preferences integrations, and pass selected category API values to `normalizeSponsorBlockSegments`. It does not make network requests or start playback.
 
-The API accepts raw start/end values in seconds, category, and action type; it returns sorted, merged millisecond ranges. Invalid, unselected, non-skip and sub-100 ms ranges are discarded. Callers own seeking and cancellation.
+The API accepts raw start/end values in seconds, category, and action type; it returns sorted, merged millisecond ranges. Invalid, unselected, non-skip and sub-100 ms ranges are discarded. `SponsorBlockSkipPlanner` also tracks repeat suppression and computes seek targets for Android playback. Callers own seeking and cancellation.
 
 Build and publish the experimental local artifact with:
 

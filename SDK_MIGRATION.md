@@ -223,6 +223,8 @@ The app adapters for audio-focus/crossfade/persistence coordination, equalizer p
 
 The independently built `examples/headless-equalizer` resolves `equalizer-sdk` from Maven Local and exercises its preferences API with an in-memory adapter. It does not exercise an audio backend.
 
+Android's SponsorBlock monitor now uses the headless skip planner for range activation, repeat suppression and duration-clamped seek targets. SponsorBlock core tests pass; the Media3 integration still requires app compilation and device playback verification.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.

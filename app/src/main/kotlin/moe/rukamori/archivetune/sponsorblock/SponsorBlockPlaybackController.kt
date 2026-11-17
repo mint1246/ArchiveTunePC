@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.sponsorblock.core.SponsorBlockRange
+import moe.rukamori.archivetune.sponsorblock.core.SponsorBlockSkipPlanner
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -115,7 +117,7 @@ class SponsorBlockPlaybackController
             mediaId: String,
             segments: List<SponsorBlockSegment>,
         ) {
-            var lastSkippedEndMs: Long? = null
+            val planner = SponsorBlockSkipPlanner(segments.map { SponsorBlockRange(it.startMs, it.endMs) })
             while (
                 currentCoroutineContext().isActive &&
                 attachedPlayer === player &&
@@ -127,26 +129,8 @@ class SponsorBlockPlaybackController
                 }
 
                 val positionMs = player.currentPosition.coerceAtLeast(0L)
-                val activeSegment =
-                    segments.firstOrNull { segment ->
-                        positionMs >= segment.startMs &&
-                            positionMs < segment.endMs - END_TOLERANCE_MILLIS
-                    }
-                if (activeSegment == null) {
-                    lastSkippedEndMs = null
-                } else if (lastSkippedEndMs != activeSegment.endMs) {
-                    lastSkippedEndMs = activeSegment.endMs
-                    val knownDuration =
-                        player.duration.takeIf { duration ->
-                            duration != C.TIME_UNSET && duration > 0L
-                        }
-                    val targetPositionMs =
-                        knownDuration?.let { duration -> activeSegment.endMs.coerceAtMost(duration) }
-                            ?: activeSegment.endMs
-                    if (targetPositionMs - positionMs >= MIN_SEEK_DISTANCE_MILLIS) {
-                        player.seekTo(targetPositionMs)
-                    }
-                }
+                val knownDuration = player.duration.takeIf { it != C.TIME_UNSET && it > 0L }
+                planner.targetPosition(positionMs, knownDuration)?.let(player::seekTo)
                 delay(ACTIVE_POLL_INTERVAL_MILLIS)
             }
         }
@@ -161,7 +145,5 @@ class SponsorBlockPlaybackController
             const val TAG = "SponsorBlock"
             const val ACTIVE_POLL_INTERVAL_MILLIS = 200L
             const val INACTIVE_POLL_INTERVAL_MILLIS = 750L
-            const val END_TOLERANCE_MILLIS = 50L
-            const val MIN_SEEK_DISTANCE_MILLIS = 100L
         }
     }
