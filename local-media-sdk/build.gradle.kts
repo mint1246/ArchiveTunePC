@@ -9,6 +9,9 @@ version = "0.1.0-SNAPSHOT"
 kotlin { jvmToolchain(21) }
 
 dependencies {
+    // Retain Compose stability metadata on scan summary models without pulling Compose into
+    // headless consumers (same approach as statistics-sdk).
+    compileOnly(libs.compose.runtime)
     testImplementation(kotlin("test"))
 }
 

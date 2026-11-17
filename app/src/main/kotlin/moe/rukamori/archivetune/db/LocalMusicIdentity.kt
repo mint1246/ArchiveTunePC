@@ -7,15 +7,12 @@
 
 package moe.rukamori.archivetune.db
 
-import java.text.Normalizer
-import java.util.Locale
+import moe.rukamori.archivetune.localmedia.LocalMediaIdentity
 
+/**
+ * Android-facing alias for the headless local-media identity policy. Existing callers and the
+ * persisted local ids keep the same behavior; the implementation now lives in `local-media-sdk`.
+ */
 object LocalMusicIdentity {
-    private val whitespace = Regex("\\s+")
-
-    fun normalize(value: String): String =
-        Normalizer.normalize(value, Normalizer.Form.NFKC)
-            .trim()
-            .replace(whitespace, " ")
-            .lowercase(Locale.ROOT)
+    fun normalize(value: String): String = LocalMediaIdentity.normalize(value)
 }

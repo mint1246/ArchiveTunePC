@@ -12,16 +12,13 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import androidx.compose.runtime.Immutable
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Locale
-import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -45,50 +42,6 @@ import moe.rukamori.archivetune.db.entities.SongArtistMap
 import moe.rukamori.archivetune.db.entities.SongEntity
 import moe.rukamori.archivetune.lyrics.LyricsUtils
 import timber.log.Timber
-
-data class LocalSongScanConfig(
-    val minimumDurationSeconds: Int = 0,
-    val includedFolders: Set<String> = emptySet(),
-    val excludedFolders: Set<String> = emptySet(),
-) {
-    val sanitizedMinimumDurationSeconds: Int
-        get() = minimumDurationSeconds.coerceAtLeast(0)
-
-    val sanitizedIncludedFolders: Set<String>
-        get() = deduplicateFolderEntries(includedFolders)
-
-    val sanitizedExcludedFolders: Set<String>
-        get() = deduplicateFolderEntries(excludedFolders)
-
-    companion object {
-        private val DuplicateSlashRegex = Regex("/+")
-
-        fun normalizeFolderEntry(raw: String): String =
-            raw
-                .trim()
-                .replace('\\', '/')
-                .replace(DuplicateSlashRegex, "/")
-                .trim('/')
-
-        fun deduplicateFolderEntries(entries: Iterable<String>): Set<String> {
-            val deduplicated = linkedMapOf<String, String>()
-            entries.forEach { entry ->
-                val normalized = normalizeFolderEntry(entry)
-                if (normalized.isNotEmpty()) {
-                    deduplicated.putIfAbsent(normalized.lowercase(Locale.ROOT), normalized)
-                }
-            }
-            return deduplicated.values.toSet()
-        }
-    }
-}
-
-@Immutable
-data class LocalSongScanSummary(
-    val scannedSongs: Int,
-    val removedSongs: Int,
-    val metadataLookupFailed: Boolean = false,
-)
 
 @Singleton
 class LocalSongScanner @Inject constructor(
@@ -115,12 +68,15 @@ class LocalSongScanner @Inject constructor(
                     val existingFormats = loadFormats(scannedIds)
                     val resolver = CatalogResolver()
                     val artistCredits = enriched.tracks.flatMap { track ->
-                        (track.artists + albumArtistNames(track)).distinct().map { name -> name to track }
+                        (
+                            track.artists +
+                                LocalLibraryScanPolicy.albumArtistNames(track.artists, track.albumArtist)
+                            ).distinct().map { name -> name to track }
                     }.groupBy { LocalMusicIdentity.normalize(it.first) }
                     val artistIds = artistCredits.mapValues { (_, credits) ->
                         currentCoroutineContext().ensureActive()
                         val name = credits.first().first
-                        val matches = credits.map { it.second }.filter { it.matchedArtistName?.let { matched -> sameName(name, matched) } == true }
+                        val matches = credits.map { it.second }.filter { it.matchedArtistName?.let { matched -> LocalLibraryScanPolicy.sameName(name, matched) } == true }
                         resolver.resolveArtist(
                             name,
                             matches.mapNotNull { it.remoteArtistId }.distinct().singleOrNull(),
@@ -129,9 +85,10 @@ class LocalSongScanner @Inject constructor(
                     }
                     val albumIds = mutableMapOf<String, String>()
                     enriched.tracks.filter { it.albumName != null }.groupBy(::albumKey).forEach { (key, tracks) ->
-                        val albumArtistIds = albumArtistNames(tracks.first()).map { name ->
-                            artistIds.getValue(LocalMusicIdentity.normalize(name))
-                        }.distinct()
+                        val albumArtistIds = LocalLibraryScanPolicy.albumArtistNames(
+                            tracks.first().artists,
+                            tracks.first().albumArtist,
+                        ).map { name -> artistIds.getValue(LocalMusicIdentity.normalize(name)) }.distinct()
                         val previousIds = tracks.mapNotNull { existingSongs[it.id]?.song?.albumId }.toSet()
                         albumIds[key] = resolver.resolveAlbum(tracks, albumArtistIds, previousIds)
                     }
@@ -213,7 +170,9 @@ class LocalSongScanner @Inject constructor(
                     remoteAlbumId = previous.album?.takeUnless { it.isLocal }?.id,
                 )
             } else scanned
-            val lookupArtist = track.albumArtist?.let(::splitArtistNames)?.firstOrNull()
+            val lookupArtist = track.albumArtist
+                ?.let { LocalLibraryScanPolicy.splitArtistNames(it) }
+                ?.firstOrNull()
                 ?: track.artists.firstOrNull { it != unknownArtist }
             val hasTrackArtist = track.artists.any { it != unknownArtist }
             val lookupAlbum = track.albumName != null && hasTrackArtist
@@ -241,9 +200,11 @@ class LocalSongScanner @Inject constructor(
             } else null
             if (match != null) {
                 track = track.copy(
-                    artists = if (hasTrackArtist) track.artists else match.artist?.let(::splitArtistNames)?.takeIf { it.isNotEmpty() } ?: track.artists,
-                    albumName = track.albumName ?: cleanTag(match.album),
-                    albumArtist = track.albumArtist ?: cleanTag(match.albumArtist),
+                    artists = if (hasTrackArtist) track.artists else match.artist
+                        ?.let { LocalLibraryScanPolicy.splitArtistNames(it) }
+                        ?.takeIf { it.isNotEmpty() } ?: track.artists,
+                    albumName = track.albumName ?: LocalLibraryScanPolicy.cleanTag(match.album),
+                    albumArtist = track.albumArtist ?: LocalLibraryScanPolicy.cleanTag(match.albumArtist),
                     year = track.year ?: match.year,
                     thumbnailUrl = track.thumbnailUrl ?: match.thumbnailUrl,
                     trackNumber = track.trackNumber ?: match.trackNumber,
@@ -269,10 +230,10 @@ class LocalSongScanner @Inject constructor(
         fun albumArtwork(id: String): String? = albums[id]?.thumbnailUrl
 
         fun resolveArtist(name: String, remoteId: String?, thumbnailUrl: String?): String {
-            val candidates = artists.values.filter { sameName(it.name, name) }
+            val candidates = artists.values.filter { LocalLibraryScanPolicy.sameName(it.name, name) }
             val remote = candidates.filter { !it.isLocal && it.isYouTubeArtist }.singleOrNull()
             val id = remoteId ?: remote?.id ?: candidates.firstOrNull { it.isLocal }?.id
-                ?: "LOCAL_ARTIST_${stableHash(LocalMusicIdentity.normalize(name))}"
+                ?: "LOCAL_ARTIST_${LocalLibraryScanPolicy.stableHash(LocalMusicIdentity.normalize(name))}"
             val existing = artists[id]
             val entity = existing?.copy(thumbnailUrl = existing.thumbnailUrl ?: thumbnailUrl)
                 ?: ArtistEntity(id = id, name = name, thumbnailUrl = thumbnailUrl, isLocal = remoteId == null && remote == null)
@@ -290,15 +251,18 @@ class LocalSongScanner @Inject constructor(
         fun resolveAlbum(tracks: List<LocalTrackRecord>, artistIds: List<String>, previousIds: Set<String>): String {
             val first = tracks.first()
             val title = requireNotNull(first.albumName)
-            val names = albumArtistNames(first).map(LocalMusicIdentity::normalize).toSet()
+            val names = LocalLibraryScanPolicy.albumArtistNames(first.artists, first.albumArtist)
+                .map(LocalMusicIdentity::normalize).toSet()
             val year = tracks.mapNotNull(LocalTrackRecord::year).firstOrNull()
             val candidates = albums.values.filter { album ->
-                sameName(album.title, title) && (year == null || album.year == null || year == album.year) && albumArtists[album.id] == names
+                LocalLibraryScanPolicy.sameName(album.title, title) &&
+                    (year == null || album.year == null || year == album.year) &&
+                    albumArtists[album.id] == names
             }
             val remote = candidates.filter { !it.isLocal }.singleOrNull()
             val remoteId = tracks.mapNotNull(LocalTrackRecord::remoteAlbumId).distinct().singleOrNull()
             val local = candidates.firstOrNull { it.isLocal && it.id in previousIds } ?: candidates.firstOrNull { it.isLocal }
-            val id = remoteId ?: remote?.id ?: local?.id ?: "LOCAL_ALBUM_${stableHash(albumKey(first))}"
+            val id = remoteId ?: remote?.id ?: local?.id ?: "LOCAL_ALBUM_${LocalLibraryScanPolicy.stableHash(albumKey(first))}"
             val existing = database.albumEntity(id)
             val localAlbum = existing?.isLocal ?: (remoteId == null && remote == null)
             val thumbnail = tracks.firstNotNullOfOrNull { it.thumbnailUrl }
@@ -348,8 +312,14 @@ class LocalSongScanner @Inject constructor(
         ids.chunked(SqlBatchSize).flatMap { database.getFormatsByIds(it) }.associateBy { it.id }
 
     private fun isUnchanged(track: LocalTrackRecord, song: SongEntity?, format: FormatEntity?): Boolean =
-        song != null && format != null && track.dateModified != null &&
-            song.dateModified == track.dateModified && format.contentLength == track.sizeBytes
+        song != null &&
+            format != null &&
+            LocalLibraryScanPolicy.isTrackUnchanged(
+                dateModified = track.dateModified,
+                sizeBytes = track.sizeBytes,
+                previousDateModified = song.dateModified,
+                previousSizeBytes = format.contentLength,
+            )
 
     @Suppress("DEPRECATION")
     private suspend fun queryTracks(scanConfig: LocalSongScanConfig): List<LocalTrackRecord> {
@@ -409,8 +379,14 @@ class LocalSongScanner @Inject constructor(
             val dataIndex = it.getColumnIndex(MediaStore.MediaColumns.DATA)
             while (it.moveToNext()) {
                 currentCoroutineContext().ensureActive()
-                val folder = resolveNormalizedFolderPath(it.getStringOrNull(relativeIndex), it.getStringOrNull(dataIndex))
-                if (!shouldIncludeFolder(folder, included) || shouldExcludeFolder(folder, excluded)) continue
+                val folder = LocalLibraryScanPolicy.resolveNormalizedFolderPath(
+                    it.getStringOrNull(relativeIndex),
+                    it.getStringOrNull(dataIndex),
+                )
+                if (
+                    !LocalLibraryScanPolicy.shouldIncludeFolder(folder, included) ||
+                    LocalLibraryScanPolicy.shouldExcludeFolder(folder, excluded)
+                ) continue
                 val displayName = it.getStringOrNull(displayNameIndex)
                 val mime = it.getStringOrNull(mimeIndex)?.takeIf(String::isNotBlank) ?: "audio/*"
                 if (!SupportedLocalAudio.isSupported(displayName, mime)) continue
@@ -421,17 +397,19 @@ class LocalSongScanner @Inject constructor(
                 val duration = metadata.durationSeconds ?: (it.getLong(durationIndex).coerceAtLeast(0L) / 1000L)
                     .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                 if (duration < scanConfig.sanitizedMinimumDurationSeconds) continue
-                val artist = metadata.artist ?: cleanTag(it.getStringOrNull(artistIndex))
-                val album = metadata.album ?: cleanTag(it.getStringOrNull(albumIndex))
+                val artist = metadata.artist ?: LocalLibraryScanPolicy.cleanTag(it.getStringOrNull(artistIndex))
+                val album = metadata.album ?: LocalLibraryScanPolicy.cleanTag(it.getStringOrNull(albumIndex))
                 val encodedTrack = it.getIntOrNull(trackIndex)?.takeIf { value -> value > 0 }
                 val albumId = it.getLongOrNull(albumIdIndex)?.takeIf { value -> value > 0L }
                 tracks += LocalTrackRecord(
                     id = uri.toString(),
-                    title = metadata.title ?: cleanTag(it.getStringOrNull(titleIndex))
+                    title = metadata.title ?: LocalLibraryScanPolicy.cleanTag(it.getStringOrNull(titleIndex))
                         ?: displayName?.substringBeforeLast('.')?.takeIf(String::isNotBlank) ?: unknownTitle,
-                    artists = artist?.let(::splitArtistNames).orEmpty().ifEmpty { listOf(unknownArtist) },
+                    artists = artist
+                        ?.let { LocalLibraryScanPolicy.splitArtistNames(it) }
+                        .orEmpty().ifEmpty { listOf(unknownArtist) },
                     albumName = album,
-                    albumArtist = metadata.albumArtist ?: cleanTag(it.getStringOrNull(albumArtistIndex)),
+                    albumArtist = metadata.albumArtist ?: LocalLibraryScanPolicy.cleanTag(it.getStringOrNull(albumArtistIndex)),
                     trackNumber = metadata.trackNumber ?: encodedTrack?.rem(1000)?.takeIf { value -> value > 0 },
                     discNumber = metadata.discNumber ?: encodedTrack?.div(1000)?.takeIf { value -> value > 0 },
                     durationSeconds = duration,
@@ -456,24 +434,8 @@ class LocalSongScanner @Inject constructor(
         return tracks
     }
 
-    private fun cleanTag(value: String?): String? = value?.trim()?.takeIf {
-        it.isNotEmpty() && it.lowercase(Locale.ROOT) !in UnknownTags
-    }
-
-    private fun splitArtistNames(value: String): List<String> =
-        value.split(';', '\u0000').mapNotNull(::cleanTag).distinctBy(LocalMusicIdentity::normalize)
-
-    private fun albumArtistNames(track: LocalTrackRecord): List<String> =
-        track.albumArtist?.let(::splitArtistNames)?.takeIf { it.isNotEmpty() } ?: track.artists
-
     private fun albumKey(track: LocalTrackRecord): String =
-        "${LocalMusicIdentity.normalize(track.albumName.orEmpty())}|${albumArtistNames(track).map(LocalMusicIdentity::normalize).sorted().joinToString("\u0000")}"
-
-    private fun sameName(first: String, second: String): Boolean =
-        LocalMusicIdentity.normalize(first) == LocalMusicIdentity.normalize(second)
-
-    private fun stableHash(source: String): String =
-        UUID.nameUUIDFromBytes(source.toByteArray(StandardCharsets.UTF_8)).toString().replace("-", "")
+        LocalLibraryScanPolicy.albumKey(track.albumName, track.artists, track.albumArtist)
 
     private fun pruneUnusedArtworkFiles(retainedArtworkFileNames: Set<String>) {
         val directory = File(context.filesDir, LocalArtworkDirectoryName)
@@ -502,53 +464,6 @@ class LocalSongScanner @Inject constructor(
 
         if (existingLyrics?.source == LyricsEntity.Source.EMBEDDED.value) {
             database.delete(existingLyrics)
-        }
-    }
-
-    private fun resolveNormalizedFolderPath(
-        relativePath: String?,
-        absolutePath: String?,
-    ): String? {
-        val relativeFolder = LocalSongScanConfig.normalizeFolderEntry(relativePath.orEmpty())
-        if (relativeFolder.isNotEmpty()) {
-            return relativeFolder.lowercase(Locale.ROOT)
-        }
-
-        val absoluteFolder =
-            absolutePath
-                ?.replace('\\', '/')
-                ?.substringBeforeLast('/', missingDelimiterValue = "")
-                .orEmpty()
-        val normalizedAbsoluteFolder = LocalSongScanConfig.normalizeFolderEntry(absoluteFolder)
-        return normalizedAbsoluteFolder.takeIf(String::isNotEmpty)?.lowercase(Locale.ROOT)
-    }
-
-    private fun shouldIncludeFolder(
-        folderPath: String?,
-        includedFolders: Set<String>,
-    ): Boolean {
-        if (includedFolders.isEmpty()) return true
-        return matchesFolderEntry(folderPath, includedFolders)
-    }
-
-    private fun shouldExcludeFolder(
-        folderPath: String?,
-        excludedFolders: Set<String>,
-    ): Boolean {
-        if (excludedFolders.isEmpty()) return false
-        return matchesFolderEntry(folderPath, excludedFolders)
-    }
-
-    private fun matchesFolderEntry(
-        folderPath: String?,
-        folders: Set<String>,
-    ): Boolean {
-        if (folderPath.isNullOrEmpty()) return false
-        return folders.any { folder ->
-            folderPath == folder ||
-                folderPath.startsWith("$folder/") ||
-                folderPath.endsWith("/$folder") ||
-                folderPath.contains("/$folder/")
         }
     }
 
@@ -587,7 +502,6 @@ class LocalSongScanner @Inject constructor(
 
     private companion object {
         val AlbumArtUri: Uri = Uri.parse("content://media/external/audio/albumart")
-        val UnknownTags = setOf("<unknown>", "unknown", "unknown artist", "unknown album", "unknown title")
         const val LocalArtworkDirectoryName = "local_music_artwork"
         const val LogTag = "LocalSongScanner"
         const val SqlBatchSize = 900
