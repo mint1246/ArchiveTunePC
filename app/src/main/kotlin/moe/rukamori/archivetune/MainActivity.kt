@@ -267,6 +267,7 @@ import moe.rukamori.archivetune.playback.queues.Queue
 import moe.rukamori.archivetune.playback.queues.YouTubeAlbumRadio
 import moe.rukamori.archivetune.playback.queues.YouTubeQueue
 import moe.rukamori.archivetune.social.AndroidSocialManager
+import moe.rukamori.archivetune.social.createAndroidSocialManager
 import moe.rukamori.archivetune.social.socialPresenceForPlayback
 import moe.rukamori.archivetune.social.socialSnapshot
 import moe.rukamori.archivetune.statistics.AndroidStatisticsStore
@@ -590,7 +591,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        socialManager = AndroidSocialManager.create(this, lifecycleScope)
+        socialManager = createAndroidSocialManager(this, lifecycleScope)
         val socialNotifications = moe.rukamori.archivetune.social.AndroidSocialNotificationManager(this)
         lifecycleScope.launch {
             socialManager.events.collect { event ->

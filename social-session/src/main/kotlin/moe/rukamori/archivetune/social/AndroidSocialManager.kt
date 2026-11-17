@@ -7,7 +7,6 @@
 
 package moe.rukamori.archivetune.social
 
-import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -31,7 +30,7 @@ class AndroidSocialManager(
     private val scope: CoroutineScope,
     private val api: SocialApi,
     private val sessionStore: SocialSessionStore,
-    private val login: AndroidSocialLogin,
+    private val login: suspend () -> StoredSocialSession,
     private val realtime: SocialRealtimeTransport,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val deviceId: String = UUID.randomUUID().toString(),
@@ -65,7 +64,7 @@ class AndroidSocialManager(
 
     suspend fun signIn(): Result<Unit> = runCatching {
         _state.update { it.copy(account = SocialAccountState.SigningIn, error = null) }
-        val stored = login.signIn()
+        val stored = login()
         sessionStore.write(stored)
         activate(stored)
     }.onFailure { error ->
@@ -361,22 +360,6 @@ class AndroidSocialManager(
     private fun <T> signedOutFailure(): Result<T> =
         Result.failure(IllegalStateException("Sign in with Discord first"))
 
-    companion object {
-        fun create(
-            context: Context,
-            scope: CoroutineScope,
-            baseUrl: String = AndroidSocialApi.DEFAULT_BASE_URL,
-        ): AndroidSocialManager {
-            val api = AndroidSocialApi(baseUrl)
-            return AndroidSocialManager(
-                scope = scope,
-                api = api,
-                sessionStore = AndroidSocialSessionStore(context),
-                login = AndroidSocialLogin(context, api),
-                realtime = AndroidSocialRealtime(api),
-            )
-        }
-    }
 }
 
 internal fun normalizeMessages(messages: List<SocialChatMessage>): List<SocialChatMessage> =

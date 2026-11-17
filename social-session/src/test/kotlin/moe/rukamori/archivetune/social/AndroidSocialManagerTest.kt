@@ -91,7 +91,7 @@ class AndroidSocialManagerTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         api = api,
         sessionStore = store,
-        login = AndroidSocialLogin(api, openBrowser = {}),
+        login = { error("Login is not used by this test") },
         realtime = realtime,
         nowMillis = { 1_000L },
         deviceId = "test-device",

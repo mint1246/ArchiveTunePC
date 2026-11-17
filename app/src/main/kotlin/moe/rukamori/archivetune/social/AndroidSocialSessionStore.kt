@@ -14,12 +14,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.first
 import moe.rukamori.archivetune.utils.dataStore
 
-interface SocialSessionStore {
-    suspend fun read(): StoredSocialSession?
-    suspend fun write(session: StoredSocialSession)
-    suspend fun clear()
-}
-
 class AndroidSocialSessionStore(
     context: Context,
 ) : SocialSessionStore {
