@@ -3,29 +3,10 @@ package moe.rukamori.archivetune.social
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AndroidSocialContractTest {
-    @Test
-    fun loginCallbackRequiresMatchingNonceAndDecodesCode() {
-        val callback = parseSocialLoginCallbackTarget(
-            "/archivetune-auth?nonce=abc123&code=hello%2Bworld%2Fok",
-            "abc123",
-        )
-
-        assertEquals("hello+world/ok", callback.code)
-        assertNull(callback.error)
-        assertThrows(IllegalArgumentException::class.java) {
-            parseSocialLoginCallbackTarget(
-                "/archivetune-auth?nonce=wrong&code=hello",
-                "abc123",
-            )
-        }
-    }
-
     @Test
     fun chatMessageParserMatchesCloudPayloadShapes() {
         val message = parseSocialChatMessage(

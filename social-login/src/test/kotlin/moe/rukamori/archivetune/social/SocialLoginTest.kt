@@ -12,8 +12,22 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 
 class SocialLoginTest {
+    @Test
+    fun callbackRequiresMatchingNonceAndDecodesCode() {
+        val callback = parseSocialLoginCallbackTarget(
+            "/archivetune-auth?nonce=abc123&code=hello%2Bworld%2Fok", "abc123",
+        )
+        assertEquals("hello+world/ok", callback.code)
+        assertNull(callback.error)
+        assertFailsWith<IllegalArgumentException> {
+            parseSocialLoginCallbackTarget("/archivetune-auth?nonce=wrong&code=hello", "abc123")
+        }
+    }
+
     @Test
     fun exchangesNonceCheckedLoopbackCallback() = runBlocking {
         val service = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)

@@ -20,7 +20,7 @@ import java.security.SecureRandom
 import java.util.Base64
 import kotlin.coroutines.coroutineContext
 
-data class SocialLoginCallback(
+internal data class SocialLoginCallback(
     val code: String?,
     val error: String?,
 )
@@ -106,7 +106,7 @@ class AndroidSocialLogin(
     }
 }
 
-fun parseSocialLoginCallbackTarget(
+internal fun parseSocialLoginCallbackTarget(
     target: String,
     expectedNonce: String,
 ): SocialLoginCallback {
