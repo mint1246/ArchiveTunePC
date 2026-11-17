@@ -202,3 +202,7 @@ The SponsorBlock HTTP client, segment cache and playback coordinator now live to
 ## Milestone: saved accounts and social client
 
 Android's saved-account JSON model and codec moved unchanged to `account-sdk`. Its JVM compatibility tests and independently resolved Maven Local example pass. Account login, session management and DataStore remain Android-owned; the serialized account contains credentials and requires protected storage. The Android social HTTP client and wire models moved to `social-sdk`; Android retains sign-in, session storage, realtime and UI integration. A local HTTP test exercises authenticated retrieval. Android debug compilation and the full debug unit suite pass; live account and social workflows remain unverified.
+
+## Milestone: optional lifecycle helper
+
+`sdk-lifecycle` provides a caller-owned scope and synchronous `AutoCloseable` cleanup registry with deterministic order, parent cancellation and aggregated failures. Tests cover shutdown, failures and concurrency; an independently resolved download example used it to download a local fixture with matching SHA-256. Applications do not yet use this helper, and suspending shutdown remains feature-owned; it is not a complete SDK session.

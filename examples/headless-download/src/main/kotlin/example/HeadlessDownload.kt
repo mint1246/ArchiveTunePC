@@ -7,11 +7,13 @@ import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.downloads.DesktopDownloadManager
 import moe.rukamori.archivetune.downloads.DownloadRequest
 import moe.rukamori.archivetune.downloads.DownloadStatus
+import moe.rukamori.archivetune.sdk.lifecycle.SdkLifecycle
 
 fun main(args: Array<String>) = runBlocking {
     require(args.size == 3) { "Pass a direct media URL, output directory, and file extension" }
     val directory = Path.of(args[1]).toAbsolutePath().normalize()
-    DesktopDownloadManager(directory).use { downloads ->
+    SdkLifecycle(coroutineContext).use { lifecycle ->
+        val downloads = lifecycle.register(DesktopDownloadManager(directory))
         val id = downloads.enqueue(
             DownloadRequest(url = args[0], headers = emptyMap(), title = "Example", extension = args[2]),
         )

@@ -10,6 +10,7 @@ repositories {
 
 dependencies {
     implementation("moe.rukamori.archivetune:desktop-downloads:0.1.0-SNAPSHOT")
+    implementation("moe.rukamori.archivetune:sdk-lifecycle:0.1.0-SNAPSHOT")
 }
 
 kotlin {
