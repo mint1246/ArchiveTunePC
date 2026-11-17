@@ -25,6 +25,9 @@ import moe.rukamori.archivetune.modelruntime.AndroidOnnxDiagnostics
 import moe.rukamori.archivetune.modelruntime.AndroidOnnxModelContract
 import moe.rukamori.archivetune.modelruntime.AndroidOnnxRuntime
 import moe.rukamori.archivetune.modelruntime.AndroidOnnxSession
+import moe.rukamori.archivetune.sdk.stems.CanonicalPcm16WavReader
+import moe.rukamori.archivetune.sdk.stems.RollingStemPcm16WavWriter
+import moe.rukamori.archivetune.sdk.stems.formatStemBytes
 import timber.log.Timber
 
 enum class AndroidStemSeparationStage {
@@ -303,15 +306,4 @@ private fun emit(
 private fun elapsedMs(startedNanos: Long): Long =
     (System.nanoTime() - startedNanos).coerceAtLeast(0L) / 1_000_000L
 
-internal fun formatModelBytes(bytes: Long): String {
-    val safe = bytes.coerceAtLeast(0L).toDouble()
-    val kib = 1024.0
-    val mib = kib * 1024.0
-    val gib = mib * 1024.0
-    return when {
-        safe >= gib -> "%.2f GB".format(safe / gib)
-        safe >= mib -> "%.1f MB".format(safe / mib)
-        safe >= kib -> "%.1f KB".format(safe / kib)
-        else -> "${bytes.coerceAtLeast(0L)} B"
-    }
-}
+internal fun formatModelBytes(bytes: Long): String = formatStemBytes(bytes)

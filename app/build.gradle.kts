@@ -470,6 +470,9 @@ dependencies {
         exclude(group = "org.json", module = "json")
     }
     implementation(project(":sponsorblock-core"))
+    implementation(project(":stems-sdk")) {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(project(":together-sdk"))
     implementation(project(":together-transport"))
     implementation(project(":core"))

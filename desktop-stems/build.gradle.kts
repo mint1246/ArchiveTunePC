@@ -10,6 +10,7 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     api(project(":playback-core"))
+    api(project(":stems-sdk"))
     implementation(project(":desktop-model-runtime"))
     implementation(libs.json)
     api(libs.coroutines.core)

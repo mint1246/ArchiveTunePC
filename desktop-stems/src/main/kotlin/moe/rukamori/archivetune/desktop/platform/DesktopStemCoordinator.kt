@@ -950,7 +950,7 @@ class DesktopStemCoordinator(
     }
 }
 
-private fun Float.sanitizeStemGain(): Float = takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: 1f
+private fun Float.sanitizeStemGain(): Float = moe.rukamori.archivetune.sdk.stems.sanitizeStemGain(this)
 
 private fun DesktopStemMix.isNeutral(): Boolean = workerGains().all { gain -> abs(gain - 1f) <= 0.001f }
 
