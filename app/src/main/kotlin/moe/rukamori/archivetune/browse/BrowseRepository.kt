@@ -13,6 +13,9 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.PODCAST_LIBRARY_BROWSE_ID
 import moe.rukamori.archivetune.innertube.models.YTItem
+import moe.rukamori.archivetune.sdk.discovery.DiscoveryContentCache
+import moe.rukamori.archivetune.sdk.discovery.DiscoveryKeys
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,28 +29,50 @@ data class BrowsePage(
 class BrowseRepository
     @Inject
     constructor() {
-        suspend fun load(browseId: String): Result<BrowsePage> =
+        private val pageCache =
+            DiscoveryContentCache<BrowsePage>(
+                accountScopeProvider = {
+                    val accountScope = YouTube.cookie?.takeIf(String::isNotBlank)?.let(::sha256Hex) ?: "signed-out"
+                    "$accountScope|${YouTube.locale}"
+                },
+            )
+
+        suspend fun load(
+            browseId: String,
+            forceRefresh: Boolean = false,
+        ): Result<BrowsePage> =
             withContext(Dispatchers.IO) {
-                val result =
-                    if (browseId == PODCAST_LIBRARY_BROWSE_ID) {
-                        YouTube.library(browseId).map { page ->
-                            BrowsePage(
-                                title = page.title,
-                                items = page.items,
-                                continuation = page.continuation,
-                            )
-                        }
-                    } else {
-                        YouTube.browse(browseId, params = null).map { page ->
-                            BrowsePage(
-                                title = page.title,
-                                items = page.items.flatMap { section -> section.items },
-                                continuation = null,
-                            )
-                        }
-                    }
-                result.rethrowCancellation()
-                result
+                val key = DiscoveryKeys.browse(browseId)
+                if (forceRefresh) {
+                    pageCache.invalidate(key)
+                }
+                try {
+                    Result.success(
+                        pageCache.getOrLoad(key) {
+                            if (browseId == PODCAST_LIBRARY_BROWSE_ID) {
+                                YouTube.library(browseId).map { page ->
+                                    BrowsePage(
+                                        title = page.title,
+                                        items = page.items,
+                                        continuation = page.continuation,
+                                    )
+                                }
+                            } else {
+                                YouTube.browse(browseId, params = null).map { page ->
+                                    BrowsePage(
+                                        title = page.title,
+                                        items = page.items.flatMap { section -> section.items },
+                                        continuation = null,
+                                    )
+                                }
+                            }.getOrThrow()
+                        },
+                    )
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (throwable: Throwable) {
+                    Result.failure(throwable)
+                }
             }
 
         suspend fun loadContinuation(continuation: String): Result<BrowsePage> =
@@ -69,3 +94,8 @@ private fun Result<*>.rethrowCancellation() {
     val failure = exceptionOrNull()
     if (failure is CancellationException) throw failure
 }
+
+private fun sha256Hex(value: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }

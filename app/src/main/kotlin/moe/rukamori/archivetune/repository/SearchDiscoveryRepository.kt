@@ -14,6 +14,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.sdk.discovery.DiscoveryFanOut
+import moe.rukamori.archivetune.sdk.discovery.DiscoverySuggestionsPolicy
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.Artist
 import moe.rukamori.archivetune.db.entities.Song
@@ -108,14 +109,17 @@ class SearchDiscoveryRepository
                         .take(MaxSuggestionSeedItems)
                 val seedSongIds = seedSongs.mapTo(HashSet()) { song -> song.id }
 
-                fanOut
-                    .flatMapBatched(seedSongs) { song ->
+                val rawSuggestions =
+                    fanOut.flatMapBatched(seedSongs) { song ->
                         loadRelatedSongs(song)
                             .ifEmpty { searchRelatedSongs(song) }
                     }
-                    .filterNot { song -> song.id in seedSongIds }
-                    .distinctBy { song -> song.id }
-                    .take(MaxSuggestedItems)
+                DiscoverySuggestionsPolicy.filterSuggestedSongs(
+                    songs = rawSuggestions,
+                    seedSongIds = seedSongIds,
+                    maxItems = MaxSuggestedItems,
+                    idOf = SongItem::id,
+                )
             }
 
         private suspend fun loadRelatedSongs(song: Song): List<SongItem> =
@@ -135,17 +139,10 @@ class SearchDiscoveryRepository
         private suspend fun searchRelatedSongs(song: Song): List<SongItem> =
             searchItems(
                 query =
-                    buildString {
-                        append(song.title)
-                        song.artists
-                            .firstOrNull()
-                            ?.name
-                            ?.takeIf(String::isNotBlank)
-                            ?.let { artistName ->
-                                append(' ')
-                                append(artistName)
-                            }
-                    },
+                    DiscoverySuggestionsPolicy.buildRelatedSongSearchQuery(
+                        title = song.title,
+                        firstArtistName = song.artists.firstOrNull()?.name,
+                    ),
                 filter = YouTube.SearchFilter.FILTER_SONG,
             )
 
@@ -161,14 +158,17 @@ class SearchDiscoveryRepository
                         .take(MaxSuggestionSeedItems)
                 val seedArtistIds = seedArtists.mapTo(HashSet()) { artist -> artist.id }
 
-                fanOut
-                    .flatMapBatched(seedArtists) { artist ->
+                val rawArtists =
+                    fanOut.flatMapBatched(seedArtists) { artist ->
                         loadRelatedArtists(artist)
                             .ifEmpty { searchRelatedArtists(artist) }
                     }
-                    .filterNot { artist -> artist.id in seedArtistIds }
-                    .distinctBy { artist -> artist.id }
-                    .take(MaxSuggestedItems)
+                DiscoverySuggestionsPolicy.rankAndFilterSuggestedArtists(
+                    artists = rawArtists,
+                    seedArtistIds = seedArtistIds,
+                    maxItems = MaxSuggestedItems,
+                    idOf = ArtistItem::id,
+                )
             }
 
         private suspend fun loadRelatedArtists(artist: Artist): List<ArtistItem> =

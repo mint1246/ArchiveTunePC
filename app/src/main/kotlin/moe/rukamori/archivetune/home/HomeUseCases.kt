@@ -26,6 +26,8 @@ import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
 import moe.rukamori.archivetune.innertube.pages.HomePage
+import moe.rukamori.archivetune.sdk.discovery.DiscoverySuggestionsPolicy
+import moe.rukamori.archivetune.sdk.discovery.QuickPickSeedPolicy
 import java.util.Locale
 import javax.inject.Inject
 
@@ -201,10 +203,10 @@ data class QuickPickSeed(
     val artistIds: ImmutableList<String>,
 ) {
     val primaryArtistKey: String
-        get() = artistIds.firstOrNull() ?: artistNames.firstOrNull()?.lowercase(Locale.ROOT) ?: id
+        get() = QuickPickSeedPolicy.primaryArtistKey(id, artistIds, artistNames)
 
     val searchQuery: String
-        get() = listOf(title, artistNames.firstOrNull()).filterNotNull().filter(String::isNotBlank).joinToString(" ")
+        get() = DiscoverySuggestionsPolicy.buildRelatedSongSearchQuery(title, artistNames.firstOrNull())
 }
 
 class LoadPersonalizedQuickPicksUseCase

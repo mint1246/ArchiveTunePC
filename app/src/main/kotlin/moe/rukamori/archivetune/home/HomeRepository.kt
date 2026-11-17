@@ -29,9 +29,10 @@ import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.Artist
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.WatchEndpoint
+import moe.rukamori.archivetune.sdk.discovery.QuickPickSeedPolicy
+import moe.rukamori.archivetune.sdk.discovery.RelatedSongsResolver
 import moe.rukamori.archivetune.utils.dataStore
 import timber.log.Timber
-import java.util.Locale
 import javax.inject.Inject
 
 class HomeRepository
@@ -75,56 +76,55 @@ class HomeRepository
                         .filter { song -> song.isYouTubeRecommendationSeed() }
                 }
             val localSeeds =
-                localCandidates
-                    .map { song -> song.toQuickPickSeed() }
-                    .distinctBy(QuickPickSeed::primaryArtistKey)
-                    .take(limit)
+                QuickPickSeedPolicy.selectLocalSeeds(
+                    candidates = localCandidates.map { song -> song.toQuickPickSeed() },
+                    limit = limit,
+                    primaryArtistKeyOf = QuickPickSeed::primaryArtistKey,
+                )
             if (localSeeds.size >= limit) return localSeeds
 
             val remoteSeeds = loadRemoteQuickPickSeeds(limit * REMOTE_HISTORY_LOOKUP_MULTIPLIER)
-            return (localSeeds + remoteSeeds)
-                .distinctBy(QuickPickSeed::id)
-                .distinctBy(QuickPickSeed::primaryArtistKey)
-                .take(limit)
-        }
-
-        suspend fun loadRelatedSongs(seed: QuickPickSeed): Result<List<SongItem>> {
-            val nextResult = YouTube.next(WatchEndpoint(videoId = seed.id))
-            nextResult.exceptionOrNull()?.let { throwable ->
-                if (throwable is CancellationException) throw throwable
-            }
-            val nextPage = nextResult.getOrNull()
-            val relatedSongs =
-                nextPage
-                    ?.relatedEndpoint
-                    ?.let { endpoint -> YouTube.related(endpoint).getOrNullPreservingCancellation()?.songs }
-                    .orEmpty()
-            val radioSongs =
-                (relatedSongs + nextPage?.items.orEmpty())
-                    .validRecommendationsFor(seed.id)
-            if (radioSongs.isNotEmpty()) return Result.success(radioSongs)
-
-            val searchedSongs =
-                YouTube
-                    .search(
-                        query = seed.searchQuery,
-                        filter = YouTube.SearchFilter.FILTER_SONG,
-                        useAccountContext = true,
-                    ).getOrNullPreservingCancellation()
-                    ?.items
-                    .orEmpty()
-                    .filterIsInstance<SongItem>()
-                    .validRecommendationsFor(seed.id)
-            if (searchedSongs.isNotEmpty()) return Result.success(searchedSongs)
-
-            val cachedSongs = loadCachedRelatedSongs(seed.id)
-            if (cachedSongs.isNotEmpty()) return Result.success(cachedSongs)
-
-            return nextResult.fold(
-                onSuccess = { Result.success(emptyList()) },
-                onFailure = { throwable -> Result.failure(throwable) },
+            return QuickPickSeedPolicy.mergeSeeds(
+                localSeeds = localSeeds,
+                remoteSeeds = remoteSeeds,
+                limit = limit,
+                idOf = QuickPickSeed::id,
+                primaryArtistKeyOf = QuickPickSeed::primaryArtistKey,
             )
         }
+
+        suspend fun loadRelatedSongs(seed: QuickPickSeed): Result<List<SongItem>> =
+            RelatedSongsResolver.resolve(
+                seedSongId = seed.id,
+                idOf = SongItem::id,
+                titleOf = SongItem::title,
+                hasArtists = { song -> song.artists.isNotEmpty() },
+                loadPrimary = {
+                    val nextResult = YouTube.next(WatchEndpoint(videoId = seed.id))
+                    nextResult.exceptionOrNull()?.let { throwable ->
+                        if (throwable is CancellationException) throw throwable
+                    }
+                    val nextPage = nextResult.getOrNull()
+                    val relatedSongs =
+                        nextPage
+                            ?.relatedEndpoint
+                            ?.let { endpoint -> YouTube.related(endpoint).getOrNullPreservingCancellation()?.songs }
+                            .orEmpty()
+                    RelatedSongsResolver.PrimaryOutcome(
+                        songs = relatedSongs + nextPage?.items.orEmpty(),
+                        error = nextResult.exceptionOrNull(),
+                    )
+                },
+                loadSearchFallback = {
+                    YouTube
+                        .search(
+                            query = seed.searchQuery,
+                            filter = YouTube.SearchFilter.FILTER_SONG,
+                            useAccountContext = true,
+                        ).map { page -> page.items.filterIsInstance<SongItem>() }
+                },
+                loadLocalFallback = { loadCachedRelatedSongs(seed.id) },
+            )
 
         suspend fun loadLibrarySongIds(): Set<String> = database.librarySongIds().toSet()
 
@@ -148,37 +148,32 @@ class HomeRepository
                     ?.sections
                     .orEmpty()
                     .flatMap { section -> section.songs }
-                    .filter { song -> song.id.length == YOUTUBE_VIDEO_ID_LENGTH }
-            val artistFrequency =
-                songs
-                    .flatMap { song -> song.artists.map { artist -> artist.recommendationKey } }
-                    .groupingBy { artistKey -> artistKey }
-                    .eachCount()
-            return songs
-                .distinctBy(SongItem::id)
-                .sortedByDescending { song ->
-                    song.artists.maxOfOrNull { artist -> artistFrequency[artist.recommendationKey].orZero() }.orZero()
-                }.map { song -> song.toQuickPickSeed() }
-                .take(limit)
+            return QuickPickSeedPolicy
+                .rankRemoteSeeds(
+                    songs = songs,
+                    limit = limit,
+                    idOf = SongItem::id,
+                    artistKeysOf = { song ->
+                        song.artists.map { artist ->
+                            QuickPickSeedPolicy.artistRecommendationKey(artist.id, artist.name)
+                        }
+                    },
+                ).map { song -> song.toQuickPickSeed() }
         }
 
         private suspend fun loadCachedRelatedSongs(seedSongId: String): List<SongItem> =
-            database
-                .getRelatedSongs(seedSongId)
-                .first()
-                .filter { song -> song.isYouTubeRecommendationSeed() }
-                .map { song -> song.toSongItem() }
-                .validRecommendationsFor(seedSongId)
-
-        private fun List<SongItem>.validRecommendationsFor(seedSongId: String): List<SongItem> =
-            asSequence()
-                .filter { song ->
-                    song.id != seedSongId &&
-                        song.id.length == YOUTUBE_VIDEO_ID_LENGTH &&
-                        song.title.isNotBlank() &&
-                        song.artists.isNotEmpty()
-                }.distinctBy(SongItem::id)
-                .toList()
+            QuickPickSeedPolicy.filterValidRecommendations(
+                songs =
+                    database
+                        .getRelatedSongs(seedSongId)
+                        .first()
+                        .filter { song -> song.isYouTubeRecommendationSeed() }
+                        .map { song -> song.toSongItem() },
+                seedSongId = seedSongId,
+                idOf = SongItem::id,
+                titleOf = SongItem::title,
+                hasArtists = { song -> song.artists.isNotEmpty() },
+            )
 
         private fun Song.toQuickPickSeed(): QuickPickSeed =
             QuickPickSeed(
@@ -209,12 +204,7 @@ class HomeRepository
             )
 
         private fun Song.isYouTubeRecommendationSeed(): Boolean =
-            !song.isLocal && !song.isPodcast && id.length == YOUTUBE_VIDEO_ID_LENGTH
-
-        private val Artist.recommendationKey: String
-            get() = id?.takeIf(String::isNotBlank) ?: name.lowercase(Locale.ROOT)
-
-        private fun Int?.orZero(): Int = this ?: 0
+            !song.isLocal && !song.isPodcast && QuickPickSeedPolicy.isValidVideoId(id)
 
         private fun <T> Result<T>.getOrNullPreservingCancellation(): T? {
             exceptionOrNull()?.let { throwable ->
@@ -224,7 +214,6 @@ class HomeRepository
         }
 
         private companion object {
-            const val YOUTUBE_VIDEO_ID_LENGTH = 11
             const val REMOTE_HISTORY_LOOKUP_MULTIPLIER = 6
         }
     }
