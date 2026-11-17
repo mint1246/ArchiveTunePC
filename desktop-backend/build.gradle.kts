@@ -7,6 +7,7 @@ kotlin {
 }
 
 dependencies {
+    api(project(":desktop-resource-core"))
     api(project(":core"))
     api(project(":chords-sdk"))
     implementation(project(":spotifycore"))
