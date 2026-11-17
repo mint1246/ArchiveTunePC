@@ -183,6 +183,11 @@ class DesktopSessionManager(
     private val _state = MutableStateFlow<DesktopAccountState>(DesktopAccountState.SignedOut)
     val state: StateFlow<DesktopAccountState> = _state.asStateFlow()
 
+    /** Changes synchronously on session replacement or sign-out, including account round trips. */
+    @Volatile
+    var accountRevision: Long = 0L
+        private set
+
     /** A redacted profile suitable for diagnostics. */
     val diagnostic: DesktopSessionDiagnostic
         get() = active?.toDiagnostic(clock.millis()) ?: DesktopSessionDiagnostic.signedOut()
@@ -237,18 +242,22 @@ class DesktopSessionManager(
             try {
                 secureStore.read()?.let(StoredDesktopSessionCodec::decode)
             } catch (_: SecureStoreUnavailableException) {
-                _state.value = DesktopAccountState.Unavailable(DesktopAuthIssue.SECURE_STORAGE_UNAVAILABLE)
-                return _state.value
+                return publishRestoreFailure(DesktopAuthIssue.SECURE_STORAGE_UNAVAILABLE)
             } catch (_: Exception) {
-                _state.value = DesktopAccountState.Unavailable(DesktopAuthIssue.CORRUPT_SESSION)
-                return _state.value
+                return publishRestoreFailure(DesktopAuthIssue.CORRUPT_SESSION)
             }
         synchronized(stateLock) {
+            accountRevision++
             active = stored
             lastCookieRefreshAtEpochMillis = stored?.let { clock.millis() }
             _state.value = stateFor(stored, restored = true)
         }
         return _state.value
+    }
+
+    private fun publishRestoreFailure(issue: DesktopAuthIssue): DesktopAccountState = synchronized(stateLock) {
+        accountRevision++
+        DesktopAccountState.Unavailable(issue).also { _state.value = it }
     }
 
     /**
@@ -366,6 +375,7 @@ class DesktopSessionManager(
                 // never leave a half-imported session behind.
                 return SessionImportResult.Rejected(SessionImportFailure.SECURE_STORAGE_UNAVAILABLE)
             }
+            accountRevision++
             active = stored
             lastCookieRefreshAtEpochMillis = clock.millis()
             _state.value = DesktopAccountState.SignedIn(stored.account, restoredFromSecureStore = false)
@@ -378,6 +388,7 @@ class DesktopSessionManager(
             try {
                 synchronized(stateLock) {
                     secureStore.delete()
+                    accountRevision++
                     active = null
                     lastCookieRefreshAtEpochMillis = null
                     _state.value = DesktopAccountState.SignedOut
@@ -565,6 +576,9 @@ class DesktopSessionManager(
             synchronized(stateLock) {
                 if (active?.authState?.fingerprint != previous.authState.fingerprint) return false
                 secureStore.write(StoredDesktopSessionCodec.encode(refreshed))
+                if (previous.account.copy(avatarUrl = null) != refreshed.account.copy(avatarUrl = null)) {
+                    accountRevision++
+                }
                 active = refreshed
                 _state.value = DesktopAccountState.SignedIn(refreshed.account, restoredFromSecureStore = false)
             }

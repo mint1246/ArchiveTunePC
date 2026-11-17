@@ -106,6 +106,7 @@ import moe.rukamori.archivetune.desktop.platform.AppPaths
 import moe.rukamori.archivetune.desktop.platform.DesktopAlbumIndex
 import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopBrowseRoute
+import moe.rukamori.archivetune.desktop.platform.DesktopPlaylistBrowseEffects
 import moe.rukamori.archivetune.desktop.platform.DesktopPodcastRepository
 import moe.rukamori.archivetune.desktop.platform.DesktopStemQueueState
 import moe.rukamori.archivetune.desktop.platform.DesktopPlaylistSuggestionsRepository
@@ -352,6 +353,17 @@ internal class DesktopBrowseController(
 @Composable
 internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMusicServices, downloadServices: DesktopDownloadServices, paths: AppPaths, logger: Logger, browse: DesktopBrowseController, playTogether: PlayTogetherManager, social: DesktopSocialManager, onOpenChat: (moe.rukamori.archivetune.desktop.social.SocialUser) -> Unit = {}, onBeatVisualPreferencesChanged: (Boolean, Float) -> Unit = { _, _ -> }, modifier: Modifier = Modifier) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val playlistMutations = remember(services, browse, scope) {
+        services.playlistMutations(object : DesktopPlaylistBrowseEffects {
+            override fun invalidatePlaylist(playlistId: String) = browse.invalidatePlaylist(playlistId)
+
+            override fun refreshPlaylist(playlistId: String) = browse.refreshPlaylist(playlistId, scope)
+
+            override fun clearCurrentStack() = browse.clearCurrentStack()
+
+            override fun currentlyOpenPlaylistId(): String? = (browse.detail as? Detail.Playlist)?.page?.playlist?.id
+        })
+    }
     val partyState by playTogether.state.collectAsState()
     val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
     val accountState by services.account.state.collectAsState()
@@ -794,34 +806,23 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             onRemoveFromPlaylist = { song ->
                 browse.failure = null
                 scope.launch {
-                    services.backend.removeSongFromPlaylist(page.page.playlist.id, song)
-                        .onSuccess { browse.refreshPlaylist(page.page.playlist.id, scope) }
+                    playlistMutations.removeSongFromPlaylist(page.page.playlist.id, song)
                         .onFailure { browse.failure = it.message ?: "Could not remove song from playlist" }
                 }
             },
             onRenamePlaylist = { name ->
                 val original = page.page.playlist
                 browse.failure = null
-                services.libraryRepository.renameCached(original.id, name)
                 scope.launch {
-                    services.backend.renamePlaylist(original.id, name)
-                        .onSuccess { browse.refreshPlaylist(original.id, scope) }
-                        .onFailure {
-                            services.libraryRepository.upsertCached(original)
-                            browse.failure = it.message ?: "Could not rename playlist"
-                        }
+                    playlistMutations.renamePlaylist(original, name)
+                        .onFailure { browse.failure = it.message ?: "Could not rename playlist" }
                 }
             },
             onDeletePlaylist = {
                 val original = page.page.playlist
                 browse.failure = null
                 scope.launch {
-                    services.backend.deletePlaylist(original.id)
-                        .onSuccess {
-                            browse.invalidatePlaylist(original.id)
-                            services.libraryRepository.removeCached(original.id)
-                            browse.clearCurrentStack()
-                        }
+                    playlistMutations.deletePlaylist(original.id)
                         .onFailure { browse.failure = it.message ?: "Could not delete playlist" }
                 }
             },
@@ -943,17 +944,14 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 browse.failure = null
                 playlistPickerSession = session.beginAdd()
                 scope.launch {
-                    val result = services.backend.addSongsToPlaylist(playlist.id, session.songs.map(SongItem::id))
+                    val result = playlistMutations.addSongsToPlaylist(playlist.id, session.songs) {
+                        val current = playlistPickerSession
+                        current != null && current.adding && current.song.id == session.song.id
+                    }
                     val current = playlistPickerSession
                     if (current?.song?.id != session.song.id || !current.adding) return@launch
                     if (result.isSuccess) {
                         playlistPickerSession = null
-                        result.onSuccess {
-                            browse.invalidatePlaylist(playlist.id)
-                            if ((browse.detail as? Detail.Playlist)?.page?.playlist?.id == playlist.id) {
-                                browse.openPlaylist(playlist.id, scope, forceRefresh = true)
-                            }
-                        }
                     } else {
                         playlistPickerSession = current.finishAdd(result)
                         result.onFailure { browse.failure = it.message ?: "Could not add songs to playlist" }
@@ -972,8 +970,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 showCreatePlaylist = false
                 createPlaylistSongs = emptyList()
                 scope.launch {
-                    services.backend.createPlaylist(name, songs.map(SongItem::id))
-                        .onSuccess { playlistId -> services.libraryRepository.addCached(playlistId, name) }
+                    playlistMutations.createPlaylist(name, songs)
                         .onFailure { browse.failure = it.message ?: "Could not create playlist" }
                 }
             },

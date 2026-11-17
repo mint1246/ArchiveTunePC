@@ -111,40 +111,54 @@ class DesktopLibraryRepository private constructor(
         return result
     }
 
-    fun renameCached(playlistId: String, name: String) {
-        _state.value = _state.value.copy(
-            playlists = _state.value.playlists.map { if (it.id == playlistId) it.copy(title = name) else it },
-        )
-        persistCurrentSoon()
+    fun renameCached(playlistId: String, name: String) = renameCached(playlistId, name, expectedScope = null)
+
+    internal fun renameCached(playlistId: String, name: String, expectedScope: String?) = mutatePlaylists(expectedScope) {
+        it.map { playlist -> if (playlist.id == playlistId) playlist.copy(title = name) else playlist }
     }
 
-    fun removeCached(playlistId: String) {
-        _state.value = _state.value.copy(playlists = _state.value.playlists.filterNot { it.id == playlistId })
-        persistCurrentSoon()
+    fun removeCached(playlistId: String) = removeCached(playlistId, expectedScope = null)
+
+    internal fun removeCached(playlistId: String, expectedScope: String?) = mutatePlaylists(expectedScope) {
+        it.filterNot { playlist -> playlist.id == playlistId }
     }
 
-    fun addCached(playlistId: String, name: String) {
-        if (_state.value.playlists.any { it.id == playlistId }) return
-        upsertCached(
-            PlaylistItem(
-                id = playlistId,
-                title = name,
-                author = null,
-                songCountText = null,
-                thumbnail = null,
-                playEndpoint = null,
-                shuffleEndpoint = null,
-                radioEndpoint = null,
-                isEditable = true,
-            ),
+    fun addCached(playlistId: String, name: String) = addCached(playlistId, name, expectedScope = null)
+
+    internal fun addCached(playlistId: String, name: String, expectedScope: String?) = mutatePlaylists(expectedScope) { playlists ->
+        if (playlists.any { it.id == playlistId }) return@mutatePlaylists playlists
+        val created = PlaylistItem(
+            id = playlistId,
+            title = name,
+            author = null,
+            songCountText = null,
+            thumbnail = null,
+            playEndpoint = null,
+            shuffleEndpoint = null,
+            radioEndpoint = null,
+            isEditable = true,
         )
+        listOf(created) + playlists
     }
 
-    fun upsertCached(playlist: PlaylistItem) {
-        _state.value = _state.value.copy(
-            playlists = listOf(playlist) + _state.value.playlists.filterNot { it.id == playlist.id },
-        )
-        persistCurrentSoon()
+    fun upsertCached(playlist: PlaylistItem) = upsertCached(playlist, expectedScope = null)
+
+    internal fun upsertCached(playlist: PlaylistItem, expectedScope: String?) = mutatePlaylists(expectedScope) {
+        listOf(playlist) + it.filterNot { cached -> cached.id == playlist.id }
+    }
+
+    private fun mutatePlaylists(expectedScope: String?, transform: (List<PlaylistItem>) -> List<PlaylistItem>) {
+        while (true) {
+            val current = _state.value
+            if (expectedScope != null && current.accountScope.isNotEmpty() && current.accountScope != expectedScope) return
+            val playlists = transform(current.playlists)
+            if (playlists === current.playlists) return
+            val next = current.copy(playlists = playlists)
+            if (_state.compareAndSet(current, next)) {
+                persistSoon(next)
+                return
+            }
+        }
     }
 
     fun invalidateFreshness() {
@@ -172,8 +186,7 @@ class DesktopLibraryRepository private constructor(
         )
     }
 
-    private fun persistCurrentSoon() {
-        val snapshot = _state.value
+    private fun persistSoon(snapshot: DesktopRemoteLibraryState) {
         if (snapshot.accountScope.isBlank()) return
         coordinator.putMemory(cacheKey(snapshot.accountScope), snapshot.playlists, snapshot.updatedAtEpochMillis ?: now())
         scope.launch(Dispatchers.IO) {

@@ -239,6 +239,8 @@ Desktop queue checkpoint timing now comes from `playback-core`. Its existing tes
 
 The Android app now uses `android-playback` for its Media3 queue traversal, transport helpers and observable player state. The app supplies its existing player and remains responsible for its background service, stream resolution wiring and guest controls. All 16 adapter tests pass and the release AAR publishes locally. The integrated Android build and physical playback remain to be verified.
 
+Desktop playlist creation, rename, delete and track mutations now use the headless coordinator in `desktop-backend`. Rename rollback retains the full original playlist record and the coordinator checks the active session revision before applying cache effects. Desktop auth, backend and app suites pass. Live YouTube mutations still require verification, and the underlying YouTube client continues to use shared session configuration.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.

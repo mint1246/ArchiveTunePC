@@ -762,6 +762,15 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
 
     internal fun currentBrowseAccountScope(): String = accountCacheScope()
 
+    internal fun playlistMutations(browseEffects: DesktopPlaylistBrowseEffects): DesktopPlaylistMutationRepository =
+        DesktopPlaylistMutationRepository(
+            backend = backend,
+            libraryRepository = libraryRepository,
+            browseEffects = browseEffects,
+            accountScopeProvider = ::accountCacheScope,
+            accountEpochProvider = { account.accountRevision },
+        )
+
     private fun startPlayHistoryRecorder() {
         runtime.applicationScope.launch {
             playback.events.collect { event ->

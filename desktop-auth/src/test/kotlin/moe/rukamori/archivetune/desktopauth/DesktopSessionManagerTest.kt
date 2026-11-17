@@ -135,12 +135,20 @@ class DesktopSessionManagerTest {
     fun `logout deletes encrypted payload and clears session provider`() = runBlocking {
         val store = MemoryStore()
         val manager = manager(store = store)
+        val initialRevision = manager.accountRevision
         manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
+        val signedInRevision = manager.accountRevision
+        assertTrue(signedInRevision > initialRevision)
 
         assertTrue(manager.logout().isSuccess)
+        val signedOutRevision = manager.accountRevision
+        assertTrue(signedOutRevision > signedInRevision)
         assertNull(store.value)
         assertEquals(DesktopAccountState.SignedOut, manager.state.value)
         assertEquals(PlaybackAuthState.EMPTY, manager.currentAuthState())
+
+        manager.importAndValidate(YouTubeSessionImport(cookieHeader = "SAPISID=secret"))
+        assertTrue(manager.accountRevision > signedOutRevision)
     }
 
     @Test
