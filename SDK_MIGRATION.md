@@ -176,9 +176,9 @@ A full `:desktopApp:test` run initially failed one Linux-path test on Windows be
 
 ## Remaining blockers and risks
 
-- Android requires an adapter/extraction with real Media3 service, lifecycle, persistence and device tests; no Android playback migration is claimed.
+- Android uses the shared playback policies and Media3 adapter AAR. The background service, complete session initialization, persistence and device tests still require work.
 - Desktop orchestration and many other feature implementations still reside in application modules. Desktop and Android semantic differences need characterization before consolidation.
-- No published Android AAR, Unity bridge, independently configured full desktop session, account/discovery SDK, or release artifact exists yet. Authentication, streaming policies and dependency licensing must be reviewed before distribution.
+- The Android adapter AAR publishes to Maven Local. A complete Android or desktop SDK session, Unity bridge and distributed release remain outstanding. Account and discovery modules expose individual features, with authenticated service orchestration still partly owned by the apps.
 - Physical-device, actual audio, account-dependent network, storage-upgrade, packaged Graal and performance validation remain outstanding. No Quest 2 memory baseline has been recorded.
 
 ## Milestone: Android neural chord core extraction
@@ -240,6 +240,8 @@ Desktop queue checkpoint timing now comes from `playback-core`. Its existing tes
 The Android app now uses `android-playback` for its Media3 queue traversal, transport helpers and observable player state. The app supplies its existing player and remains responsible for its background service, stream resolution wiring and guest controls. All 16 adapter tests pass and the release AAR publishes locally. The integrated Android build and physical playback remain to be verified.
 
 Desktop playlist creation, rename, delete and track mutations now use the headless coordinator in `desktop-backend`. Rename rollback retains the full original playlist record and the coordinator checks the active session revision before applying cache effects. Desktop auth, backend and app suites pass. Live YouTube mutations still require verification, and the underlying YouTube client continues to use shared session configuration.
+
+The separate Android consumer assembled against the published Media3 AAR from Maven Local, with Kotlin 2.4.10 matching the SDK metadata. The independent desktop settings consumer wrote and verified its settings file using the published `desktop-settings` artifact.
 
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 

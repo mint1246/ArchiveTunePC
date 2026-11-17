@@ -2,7 +2,7 @@
 
 `android-playback` exposes the queue traversal, transport helpers, and state observer used by the Android app. It accepts a caller-supplied Media3 `Player`, including an existing `ExoPlayer`. Construct and close `Media3PlayerStateObserver` on the player's application thread. The observer removes its listener on close. The caller owns the player, media item resolution, and any background media session.
 
-Build using JDK 21 and Android SDK 37.2. Publish the AAR and the JVM playback contracts to Maven Local for use in a separate Android project:
+Build using JDK 21, Android SDK 37.2 and Kotlin 2.4.10. Publish the AAR and the JVM playback contracts to Maven Local for use in a separate Android project:
 
 ```powershell
 .\gradlew.bat :playback-core:publishToMavenLocal :android-playback:publishToMavenLocal

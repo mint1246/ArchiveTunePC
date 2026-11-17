@@ -1,4 +1,4 @@
-# ArchiveTune SDK: experimental JVM components
+# ArchiveTune SDK: experimental components
 
 The migration is in progress. These artifacts are not a stable, complete ArchiveTune SDK:
 Android playback/session, authenticated discovery and other application-owned features still
@@ -8,7 +8,7 @@ verification gaps.
 
 ## Using individual modules
 
-Use JDK 21. Publish a module and its project dependencies to Maven Local from the repository,
+Use JDK 21 and Kotlin 2.4.10 for Kotlin consumers. Publish a module and its project dependencies to Maven Local from the repository,
 then resolve `moe.rukamori.archivetune:<artifact>:0.1.0-SNAPSHOT` from `mavenLocal()` in a
 separate Gradle project. These snapshots are local development artifacts, not a public release.
 Choose only the modules required by the client; publishing or resolving a library does not
@@ -17,10 +17,13 @@ start a playback session or background feature.
 | Artifact | Current boundary | Independent example |
 | --- | --- | --- |
 | `playback-core` | Queue, controller contracts and shared playback policies; no player implementation | `examples/headless-playback` |
+| `android-playback` | Media3 AAR with state observation, queue traversal and transport helpers for a caller-supplied Android player | `examples/android-playback-consumer` |
 | `desktop-playback` | VLC desktop player; caller supplies source resolution and a compatible VLC runtime | `examples/headless-desktop` |
 | `desktop-downloads` | Desktop download engine; caller supplies a resolved URL and destination, then closes the manager | `examples/headless-download` |
+| `desktop-settings` | Desktop settings policy and session with in-memory or file storage | `examples/headless-desktop-settings` |
+| `equalizer-sdk` | Android-compatible equalizer preference policy; caller supplies settings storage and the audio backend | `examples/headless-equalizer` |
 | `desktop-resource-core` | Desktop bounded content cache and single-flight coordination; caller owns account-scoped keys and safe cache contents | `examples/headless-resource-cache` |
-| `account-sdk` | Saved-account JSON and cookie-export parsing; caller owns credential validation and protected storage | `examples/headless-accounts` |
+| `account-sdk` | Saved-account JSON, cookie-export parsing and Android YouTube login orchestration; caller supplies backend and protected storage | `examples/headless-accounts` |
 | `social-sdk` | Social HTTP client and wire models; caller supplies a token | `examples/headless-social` |
 | `social-session` | Social session orchestration with caller-provided login, session storage, scope and realtime transport | `examples/headless-social-session` |
 | `social-realtime` | Optional WebSocket implementation; caller owns connection and `close()` | Local WebSocket test in the module |
@@ -31,6 +34,10 @@ Other experimental modules include lyrics, chords, analysis, party transport, pl
 export, statistics, local-media parsing, discovery policies, desktop STEM and SponsorBlock. Their
 Gradle files and tests describe their present dependencies; inclusion does not imply that every
 application path or feature is available as an independent service.
+
+The Android AAR needs Android SDK 37.2 at build time and supports API 26 or later at runtime.
+The consumer example builds as a separate Gradle project and resolves the published AAR and
+`playback-core` from Maven Local.
 
 For example, to publish the playback contracts and desktop backend and run the queue example:
 
