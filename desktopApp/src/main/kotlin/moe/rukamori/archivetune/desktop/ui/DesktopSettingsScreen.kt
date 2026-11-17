@@ -98,6 +98,9 @@ import moe.rukamori.archivetune.playback.desktop.DesktopCrossfadeConfiguration
 import moe.rukamori.archivetune.playback.desktop.DesktopCrossfadeControl
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerCapabilities
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
+import moe.rukamori.archivetune.sdk.settings.DesktopSettingsPolicy
+import moe.rukamori.archivetune.sdk.settings.DesktopSettingsSession
+import moe.rukamori.archivetune.sdk.settings.LyricsProviderToggleResult
 import java.nio.file.Path
 import java.awt.event.KeyEvent
 import java.util.logging.Logger
@@ -158,7 +161,8 @@ fun DesktopSettingsPanel(
     var linuxCaptureSession by remember { mutableStateOf(0L) }
     val isLinuxDesktop = remember { isLinuxDesktop() }
     val observedKeybindKeys = if (isLinuxDesktop) linuxRecording.bestChord else serviceKeybindKeys
-    var settings by remember(settingsStore) { mutableStateOf(settingsStore.snapshot()) }
+    val settingsSession = remember(settingsStore) { DesktopSettingsSession.forStore(settingsStore) }
+    var settings by remember(settingsStore) { mutableStateOf(settingsSession.snapshot()) }
     val emptyLastFmState = remember { MutableStateFlow(DesktopLastFmState()) }
     val lastFm by (lastFmStateFlow ?: emptyLastFmState).collectAsState()
     // Keep this mirror in sync when the host reloads/migrates its folder list while this
@@ -212,19 +216,11 @@ fun DesktopSettingsPanel(
     }
 
     fun update(transform: (DesktopSettings) -> DesktopSettings) {
-        settings = settingsStore.update(transform)
+        settings = settingsSession.update(transform)
     }
 
     fun updateKeybind(binding: DesktopKeybind) {
-        settings = settingsStore.update { current ->
-            val action = binding.action
-            val chord = binding.virtualKeys.toSet()
-            current.copy(
-                keybinds = current.keybinds
-                    .filterNot { it.action == action || it.virtualKeys.toSet() == chord }
-                    .plus(binding),
-            )
-        }
+        settings = settingsSession.assignKeybind(binding)
         onKeybindsChanged()
     }
 
@@ -245,12 +241,12 @@ fun DesktopSettingsPanel(
     }
 
     fun clearKeybind(action: DesktopKeybindAction) {
-        settings = settingsStore.update { current -> current.copy(keybinds = current.keybinds.filterNot { it.action == action }) }
+        settings = settingsSession.clearKeybind(action)
         onKeybindsChanged()
     }
 
     fun applyEqualizer(next: DesktopEqualizerSettings) {
-        settings = settingsStore.update { it.copy(equalizer = next) }
+        settings = settingsSession.setEqualizer(next)
         val profile = settings.equalizer.toPlaybackProfile()
         scope.launch {
             runCatching { audioEffects?.applyEqualizer(profile) }
@@ -259,7 +255,7 @@ fun DesktopSettingsPanel(
     }
 
     fun updateCrossfade(transform: (DesktopSettings) -> DesktopSettings) {
-        settings = settingsStore.update(transform)
+        settings = settingsSession.update(transform)
         val configuration = settings.toCrossfadeConfiguration()
         scope.launch {
             runCatching { (playback as? DesktopCrossfadeControl)?.setCrossfadeConfiguration(configuration) }
@@ -394,7 +390,7 @@ fun DesktopSettingsPanel(
                     Slider(
                         value = duration,
                         onValueChange = { value ->
-                            val snapped = (value * 2f).roundToInt() / 2f
+                            val snapped = DesktopSettingsPolicy.snapCrossfadeDurationSeconds(value)
                             updateCrossfade { it.copy(crossfadeDurationSeconds = snapped) }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -551,8 +547,7 @@ fun DesktopSettingsPanel(
                 DesktopSponsorBlockCategory.entries.forEach { category ->
                     val selected = category.apiValue in settings.sponsorBlockCategories
                     Row(Modifier.fillMaxWidth().clickable {
-                        val next = if (selected) settings.sponsorBlockCategories - category.apiValue else settings.sponsorBlockCategories + category.apiValue
-                        update { it.copy(sponsorBlockCategories = next) }
+                        settings = settingsSession.toggleSponsorBlockCategory(category.apiValue)
                     }, verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(selected, null)
                         Text(category.displayName)
@@ -586,7 +581,7 @@ fun DesktopSettingsPanel(
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ToggleRow("Enable equalizer", settings.equalizer.enabled, Icons.Rounded.GraphicEq) { enabled ->
-                    applyEqualizer(settings.equalizer.copy(enabled = enabled))
+                    applyEqualizer(DesktopSettingsPolicy.setEqualizerEnabled(settings.equalizer, enabled))
                 }
                 when {
                     equalizerUnavailable -> Text(
@@ -611,13 +606,11 @@ fun DesktopSettingsPanel(
                                         scope.launch {
                                             val effects = audioEffects ?: return@launch
                                             val profile = runCatching { effects.presetEqualizer(preset) }.getOrNull() ?: return@launch
-                                            val next = DesktopEqualizerSettings(
-                                                enabled = true,
+                                            settings = settingsSession.applyEqualizerPreset(
                                                 presetName = preset,
                                                 preampDb = profile.preampDb,
                                                 bandGainsDb = profile.bandGainsDb,
                                             )
-                                            settings = settingsStore.update { it.copy(equalizer = next) }
                                             runCatching { effects.applyEqualizer(settings.equalizer.toPlaybackProfile()) }
                                                 .onFailure { error = it.message ?: "Could not apply equalizer preset." }
                                         }
@@ -633,7 +626,7 @@ fun DesktopSettingsPanel(
                             value = settings.equalizer.preampDb,
                             enabled = settings.equalizer.enabled,
                         ) { value ->
-                            applyEqualizer(settings.equalizer.copy(preampDb = value, presetName = null))
+                            applyEqualizer(DesktopSettingsPolicy.updateEqualizerPreamp(settings.equalizer, value))
                         }
                         capabilities.bandFrequenciesHz.forEachIndexed { index, frequencyHz ->
                             val gain = settings.equalizer.bandGainsDb.getOrElse(index) { 0f }
@@ -642,11 +635,14 @@ fun DesktopSettingsPanel(
                                 value = gain,
                                 enabled = settings.equalizer.enabled,
                             ) { value ->
-                                val gains = List(capabilities.bandFrequenciesHz.size) { bandIndex ->
-                                    settings.equalizer.bandGainsDb.getOrElse(bandIndex) { 0f }
-                                }.toMutableList()
-                                gains[index] = value
-                                applyEqualizer(settings.equalizer.copy(bandGainsDb = gains, presetName = null))
+                                applyEqualizer(
+                                    DesktopSettingsPolicy.updateEqualizerBand(
+                                        equalizer = settings.equalizer,
+                                        bandIndex = index,
+                                        bandCount = capabilities.bandFrequenciesHz.size,
+                                        gainDb = value,
+                                    ),
+                                )
                             }
                         }
                     }
@@ -755,15 +751,17 @@ fun DesktopSettingsPanel(
                     }
                 }
                 BuiltInLyricsProviders.defaults.forEach { provider ->
-                    val enabled = settings.lyricsProviderIds.isEmpty() || provider.id in settings.lyricsProviderIds
+                    val enabled = DesktopSettingsPolicy.isLyricsProviderEnabled(settings.lyricsProviderIds, provider.id)
                     Row(Modifier.fillMaxWidth().clickable {
-                        val current = if (settings.lyricsProviderIds.isEmpty()) BuiltInLyricsProviders.defaults.map { it.id } else settings.lyricsProviderIds
-                        val next = if (enabled) current - provider.id else current + provider.id
-                        if (next.isEmpty()) {
-                            error = "Keep at least one lyrics provider enabled."
-                        } else {
-                            error = null
-                            update { it.copy(lyricsProviderIds = if (next.size == BuiltInLyricsProviders.defaults.size) emptyList() else next) }
+                        val defaultIds = BuiltInLyricsProviders.defaults.map { it.id }
+                        when (val result = settingsSession.toggleLyricsProvider(provider.id, defaultIds)) {
+                            LyricsProviderToggleResult.EmptySelectionNotAllowed -> {
+                                error = "Keep at least one lyrics provider enabled."
+                            }
+                            is LyricsProviderToggleResult.Updated -> {
+                                error = null
+                                settings = result.settings
+                            }
                         }
                     }, verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(enabled, null)
@@ -1448,7 +1446,7 @@ private fun DesktopEqualizerSettings.toPlaybackProfile(): DesktopEqualizerProfil
 private fun DesktopSettings.toCrossfadeConfiguration(): DesktopCrossfadeConfiguration =
     DesktopCrossfadeConfiguration(
         enabled = crossfadeEnabled,
-        durationMs = (crossfadeDurationSeconds * 1_000f).toLong(),
+        durationMs = DesktopSettingsPolicy.crossfadeDurationMillis(this),
         preserveGaplessAlbumTransitions = crossfadeGaplessAlbumTransitions,
     )
 

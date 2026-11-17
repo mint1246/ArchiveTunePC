@@ -6,7 +6,7 @@
 
 package moe.rukamori.archivetune.desktop.settings
 
-import java.net.URI
+import moe.rukamori.archivetune.sdk.settings.DesktopSettingsPolicy
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -247,7 +247,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
                     enabled = values.getProperty("playback.equalizer.enabled")?.toBooleanStrictOrNull() ?: false,
                     presetName = values.getProperty("playback.equalizer.preset"),
                     preampDb = values.getProperty("playback.equalizer.preampDb")?.toFloatOrNull() ?: 0f,
-                    bandGainsDb = readFloats(values, "playback.equalizer.band", MAX_EQUALIZER_BANDS),
+                    bandGainsDb = readFloats(values, "playback.equalizer.band", DesktopSettingsPolicy.MAX_EQUALIZER_BANDS),
                 ),
                 audioOutputDeviceId = values.getProperty("playback.audioOutputDevice"),
                 lastDestination = values.enumValue("navigation.lastDestination", DesktopLastDestination.HOME),
@@ -365,66 +365,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
         }
     }
 
-    private fun DesktopSettings.sanitized(): DesktopSettings = copy(
-        accentSeedArgb = accentSeedArgb?.takeIf { it in 0..ARGB_MAX },
-        beatSyncedVisualsIntensity = beatSyncedVisualsIntensity.finiteOr(0.75f).coerceIn(0f, 1f),
-        volume = volume.finiteOr(1f).coerceIn(0f, 1f),
-        speed = speed.finiteOr(1f).coerceIn(0.25f, 4f),
-        pitchSemitones = pitchSemitones.finiteOr(0f).coerceIn(-12f, 12f),
-        crossfadeDurationSeconds = crossfadeDurationSeconds.finiteOr(5f).coerceIn(0f, 10f),
-        equalizer = equalizer.sanitized(),
-        audioOutputDeviceId = audioOutputDeviceId?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH),
-        downloadConcurrency = downloadConcurrency.coerceIn(1, 8),
-        windowPlacement = windowPlacement.sanitized(),
-        libraryFolders = libraryFolders.map(Path::absolute).map(Path::normalize).distinct().take(MAX_LIBRARY_FOLDERS),
-        downloadLocation = downloadLocation?.absolute()?.normalize(),
-        lyricsProviderIds = lyricsProviderIds.map(String::trim)
-            .filter(String::isNotEmpty)
-            .filterNot(LEGACY_REMOVED_LYRICS_PROVIDER_IDS::contains)
-            .distinct()
-            .take(MAX_LYRICS_PROVIDERS),
-        lyricsTranslationTargetLanguage = lyricsTranslationTargetLanguage.trim().takeIf(String::isNotEmpty)?.take(MAX_TRANSLATION_LANGUAGE_LENGTH) ?: "en",
-        lyricsTranslationEndpoint = normalizeSettingsHttpsUrl(lyricsTranslationEndpoint) ?: DEFAULT_TRANSLATION_ENDPOINT,
-        lyricsTranslationModel = lyricsTranslationModel.trim().takeIf(String::isNotEmpty)?.take(MAX_TRANSLATION_MODEL_LENGTH) ?: "gpt-4o-mini",
-        lyricsTranslationCustomPrompt = lyricsTranslationCustomPrompt.take(MAX_TRANSLATION_PROMPT_LENGTH),
-        sponsorBlockCategories = sponsorBlockCategories.filterTo(linkedSetOf(), DEFAULT_DESKTOP_SPONSOR_BLOCK_CATEGORIES::contains),
-        sponsorBlockApiUrl = normalizeSettingsHttpsUrl(sponsorBlockApiUrl) ?: DEFAULT_DESKTOP_SPONSOR_BLOCK_API_URL,
-        desktopCanvasCacheLimitMb = sanitizeDesktopCanvasCacheLimit(desktopCanvasCacheLimitMb),
-        lastFmMinTrackDurationSeconds = lastFmMinTrackDurationSeconds.coerceIn(0, 600),
-        lastFmScrobbleDelayPercent = lastFmScrobbleDelayPercent.finiteOr(0.5f).coerceIn(0.1f, 1f),
-        lastFmScrobbleDelaySeconds = lastFmScrobbleDelaySeconds.coerceIn(1, 600),
-        lastFmEndpoint = normalizeSettingsHttpsUrl(lastFmEndpoint)?.let { endpoint ->
-            if (lastFmEndpoint.trim().endsWith("/")) "$endpoint/" else endpoint
-        } ?: "https://ws.audioscrobbler.com/2.0/",
-        keybinds = keybinds
-            .mapNotNull { it.sanitizedOrNull() }
-            .distinctBy { it.action },
-    )
-
-    private fun DesktopKeybind.sanitizedOrNull(): DesktopKeybind? {
-        val keys = virtualKeys.filter { it in MIN_WINDOWS_VIRTUAL_KEY..MAX_WINDOWS_VIRTUAL_KEY }.distinct()
-        return takeIf { keys.isNotEmpty() }?.copy(
-            virtualKeys = keys,
-            repeatWhileHeld = repeatWhileHeld && action.supportsHoldRepeat,
-        )
-    }
-
-    private fun DesktopWindowPlacement.sanitized(): DesktopWindowPlacement = copy(
-        widthDp = widthDp.finiteOr(1_280f).coerceIn(640f, 5_120f),
-        heightDp = heightDp.finiteOr(800f).coerceIn(480f, 2_880f),
-        xDp = xDp?.takeIf(Float::isFinite),
-        yDp = yDp?.takeIf(Float::isFinite),
-    )
-
-    private fun DesktopEqualizerSettings.sanitized(): DesktopEqualizerSettings = copy(
-        presetName = presetName?.trim()?.takeIf(String::isNotEmpty)?.take(MAX_EQUALIZER_PRESET_LENGTH),
-        preampDb = preampDb.finiteOr(0f).coerceIn(MIN_EQUALIZER_GAIN_DB, MAX_EQUALIZER_GAIN_DB),
-        bandGainsDb = bandGainsDb.take(MAX_EQUALIZER_BANDS).map {
-            it.finiteOr(0f).coerceIn(MIN_EQUALIZER_GAIN_DB, MAX_EQUALIZER_GAIN_DB)
-        },
-    )
-
-    private fun Float.finiteOr(default: Float): Float = takeIf(Float::isFinite) ?: default
+    private fun DesktopSettings.sanitized(): DesktopSettings = DesktopSettingsPolicy.sanitize(this)
 
     private fun <T : Enum<T>> Properties.enumValue(key: String, default: T): T {
         val persistedName = getProperty(key) ?: return default
@@ -438,11 +379,11 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
     }
 
     private fun readPaths(values: Properties, prefix: String): List<Path> =
-        (0 until MAX_LIBRARY_FOLDERS)
+        (0 until DesktopSettingsPolicy.MAX_LIBRARY_FOLDERS)
             .mapNotNull { values.getProperty("$prefix.$it")?.toPathOrNull() }
 
     private fun readStrings(values: Properties, prefix: String): List<String> =
-        (0 until MAX_LYRICS_PROVIDERS)
+        (0 until DesktopSettingsPolicy.MAX_LYRICS_PROVIDERS)
             .mapNotNull { values.getProperty("$prefix.$it")?.trim()?.takeIf(String::isNotEmpty) }
 
     private fun readFloats(values: Properties, prefix: String, limit: Int): List<Float> =
@@ -465,37 +406,7 @@ class DesktopSettingsStore(file: Path) : AutoCloseable {
 
     private fun String.toPathOrNull(): Path? = runCatching { Path.of(this).absolute().normalize() }.getOrNull()
 
-    private fun normalizeSettingsHttpsUrl(value: String): String? {
-        val candidate = value.trim()
-        val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
-        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
-        if (uri.userInfo != null || uri.query != null || uri.fragment != null) return null
-        if (candidate.length > MAX_SETTINGS_URL_LENGTH) return null
-        return candidate.trimEnd('/')
-    }
-
-    private fun sanitizeDesktopCanvasCacheLimit(value: Int): Int = when {
-        value == 0 -> 0
-        else -> value.coerceIn(64, 8_192)
-    }
-
     private companion object {
-        const val ARGB_MAX = 0xFFFF_FFFFL
-        const val MAX_LIBRARY_FOLDERS = 64
-        const val MAX_LYRICS_PROVIDERS = 32
-        val LEGACY_REMOVED_LYRICS_PROVIDER_IDS = setOf("paxsenix", "paxsenix-netease", "paxsenix-youtube")
-        const val MAX_TRANSLATION_LANGUAGE_LENGTH = 64
-        const val MAX_TRANSLATION_MODEL_LENGTH = 128
-        const val MAX_TRANSLATION_PROMPT_LENGTH = 4_000
-        const val MAX_SETTINGS_URL_LENGTH = 2_048
-        const val DEFAULT_TRANSLATION_ENDPOINT = "https://api.openai.com/v1/chat/completions"
-        const val MAX_EQUALIZER_BANDS = 32
-        const val MAX_EQUALIZER_PRESET_LENGTH = 80
-        const val MIN_EQUALIZER_GAIN_DB = -20f
-        const val MAX_EQUALIZER_GAIN_DB = 20f
-        const val MAX_AUDIO_OUTPUT_DEVICE_ID_LENGTH = 1_024
-        const val MIN_WINDOWS_VIRTUAL_KEY = 1
-        const val MAX_WINDOWS_VIRTUAL_KEY = 0xFF
         const val WRITE_DEBOUNCE_MILLIS = 250L
         val states = ConcurrentHashMap<Path, SharedState>()
         val flusher = Executors.newSingleThreadScheduledExecutor { runnable ->

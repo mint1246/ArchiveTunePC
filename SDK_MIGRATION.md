@@ -231,6 +231,8 @@ Android queue drag reorder planning now lives in `playback-core`, using window i
 
 Desktop playlist CSV export, picker state, ordering and local filtering now use `playlist-sdk` through app adapters. SDK tests and desktop application and test-source compilation pass; actual desktop UI and exported files remain to be exercised.
 
+Desktop settings normalization and mutations now use a headless policy and session in `desktop-settings`. The desktop app supplies its shared store, which still owns the existing Properties format and coalesced writes. Module and desktop app suites passed after integration. Live audio, keybinds, packaged behavior and upgrades remain to be exercised.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.

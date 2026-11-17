@@ -19,6 +19,7 @@ import moe.rukamori.archivetune.desktop.library.DesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktop.library.PropertiesDesktopLibraryFolderStore
 import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
+import moe.rukamori.archivetune.sdk.settings.DesktopSettingsPolicy
 import moe.rukamori.archivetune.desktop.statistics.DesktopListenTracker
 import moe.rukamori.archivetune.desktop.statistics.DesktopStatisticsStore
 import moe.rukamori.archivetune.innertube.models.Album
@@ -398,7 +399,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             playback.setCrossfadeConfiguration(
                 DesktopCrossfadeConfiguration(
                     enabled = restored.crossfadeEnabled,
-                    durationMs = (restored.crossfadeDurationSeconds * 1_000f).toLong(),
+                    durationMs = DesktopSettingsPolicy.crossfadeDurationMillis(restored),
                     preserveGaplessAlbumTransitions = restored.crossfadeGaplessAlbumTransitions,
                 ),
             )
