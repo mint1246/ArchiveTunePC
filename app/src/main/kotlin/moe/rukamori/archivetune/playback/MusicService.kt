@@ -65,16 +65,10 @@ import androidx.media3.common.Player.STATE_IDLE
 import androidx.media3.common.Timeline
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.datasource.ResolvingDataSource
-import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.Cache
-import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -238,6 +232,11 @@ import moe.rukamori.archivetune.models.toMediaMetadata
 import moe.rukamori.archivetune.morideobfuscator.youtubei.YoutubeiException
 import moe.rukamori.archivetune.morideobfuscator.youtubei.YoutubeiFailureKind
 import moe.rukamori.archivetune.playback.preload.NextStreamPreloader
+import moe.rukamori.archivetune.playback.android.bypassesDeferredPlaybackResolution
+import moe.rukamori.archivetune.playback.android.bypassesPlaybackCache
+import moe.rukamori.archivetune.playback.android.cachedPlaybackDataSourceFactory
+import moe.rukamori.archivetune.playback.android.isFullyCached
+import moe.rukamori.archivetune.playback.android.resolvingPlaybackUpstream
 import moe.rukamori.archivetune.playback.preload.ObservePlaybackPreloadConfigurationUseCase
 import moe.rukamori.archivetune.playback.preload.PlaybackPreloadConfiguration
 import moe.rukamori.archivetune.playback.stream.AudioStreamRequest
@@ -3447,7 +3446,7 @@ if ((::stemPlayback.isInitialized && stemPlayback.rendererActive) || player.curr
         if (player.currentMediaItem
                 ?.localConfiguration
                 ?.uri
-                ?.shouldBypassPlayerCache() == true
+                ?.bypassesPlaybackCache() == true
         ) {
             return true
         }
@@ -3473,7 +3472,7 @@ if ((::stemPlayback.isInitialized && stemPlayback.rendererActive) || player.curr
         if (targetPlayer.currentMediaItem
                 ?.localConfiguration
                 ?.uri
-                ?.shouldBypassPlayerCache() == true
+                ?.bypassesPlaybackCache() == true
         ) {
             return true
         }
@@ -7175,7 +7174,7 @@ if (
             player.currentMediaItem
                 ?.localConfiguration
                 ?.uri
-                ?.shouldBypassPlayerCache() == true
+                ?.bypassesPlaybackCache() == true
 
     override fun onPlaybackStateChanged(
         @Player.State playbackState: Int,
@@ -7321,7 +7320,7 @@ if (
             nextMediaId == currentMediaId ||
             nextMediaId.isLocalMediaId() ||
             nextUri == null ||
-            nextUri.shouldBypassYouTubeResolver()
+            nextUri.bypassesDeferredPlaybackResolution()
         ) {
             nextStreamPreloader.cancel()
             return
@@ -7699,7 +7698,7 @@ if (
     ) {
         val currentMediaId = recoverySnapshot.mediaId
         val isLocalMedia = currentMediaId.isLocalMediaId() ||
-            player.currentMediaItem?.localConfiguration?.uri?.shouldBypassPlayerCache() == true
+            player.currentMediaItem?.localConfiguration?.uri?.bypassesPlaybackCache() == true
         val (isFullyDownloadedMedia, hasAnyCachedData) = withContext(Dispatchers.IO) {
             if (isLocalMedia || currentMediaId in cacheBypassMediaIds) {
                 false to false
@@ -7910,7 +7909,7 @@ if (
         val currentItem = player.getMediaItemAt(currentIndex)
         val nextItem = player.getMediaItemAt(nextIndex)
         val nextUri = nextItem.localConfiguration?.uri ?: return null
-        if (nextUri.shouldBypassYouTubeResolver()) return null
+        if (nextUri.bypassesDeferredPlaybackResolution()) return null
         return NextTrackPreResolutionCandidate(
             currentIndex = currentIndex,
             currentMediaId = currentItem.mediaId,
@@ -7920,69 +7919,24 @@ if (
         )
     }
 
-    private fun createPlayerCacheDataSourceFactory(cacheWriteEnabled: Boolean): CacheDataSource.Factory =
-        CacheDataSource
-            .Factory()
-            .setCache(playerCache)
-            .setUpstreamDataSourceFactory(createResolvedUpstreamDataSourceFactory())
-            .apply {
-                if (!cacheWriteEnabled) {
-                    setCacheWriteDataSinkFactory(null)
+    private fun createDataSourceFactory() =
+        cachedPlaybackDataSourceFactory(
+            upstream = resolvingPlaybackUpstream(this, OkHttpDataSource.Factory(mediaOkHttpClient), CHUNK_LENGTH) { request, mediaId ->
+                resolveDeferredPlaybackDataSpec(request, mediaId, allowCacheShortCircuit = true)
+            },
+            playerCache = playerCache,
+            downloadCache = downloadCache,
+            bypassCache = { it in cacheBypassMediaIds },
+            cacheWritesEnabled = { !isLowDataModeActive() },
+            onCacheableRequest = { mediaId ->
+                database.getFormatByIdBlocking(mediaId)?.let { format ->
+                    format.toCastMimeType()?.let { castMimeTypeCache.put(mediaId, it) }
+                    audioNormalizationFactorCache[mediaId] =
+                        calculateAudioNormalizationFactor(format, normalizeAudio = true)
                 }
-            }.setFlags(FLAG_IGNORE_CACHE_ON_ERROR)
-
-    private fun createDataSourceFactory(): DataSource.Factory {
-        val downloadedFactory =
-            CacheDataSource.Factory()
-                .setCache(downloadCache)
-                .setCacheWriteDataSinkFactory(null)
-        val streamingFactory = DataSource.Factory {
-            createPlayerCacheDataSourceFactory(
-                cacheWriteEnabled = !isLowDataModeActive(),
-            ).createDataSource()
-        }
-        val directFactory = createResolvedUpstreamDataSourceFactory()
-
-        return DataSource.Factory {
-            SchemeRoutingDataSource { dataSpec ->
-                val mediaId = dataSpec.key
-                when {
-                    dataSpec.uri.shouldBypassPlayerCache() || (mediaId != null && mediaId in cacheBypassMediaIds) -> directFactory
-                    else -> {
-                        if (mediaId != null) {
-                            database.getFormatByIdBlocking(mediaId)?.let { format ->
-                                format.toCastMimeType()?.let { castMimeTypeCache.put(mediaId, it) }
-                                audioNormalizationFactorCache[mediaId] =
-                                    calculateAudioNormalizationFactor(format, normalizeAudio = true)
-                            }
-                            scope.launch(Dispatchers.IO) { recoverSong(mediaId) }
-                        }
-                        if (mediaId != null && downloadCache.isFullyCached(mediaId)) {
-                            downloadedFactory
-                        } else {
-                            streamingFactory
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun Cache.isFullyCached(mediaId: String): Boolean {
-        val contentLength = ContentMetadata.getContentLength(getContentMetadata(mediaId))
-        return contentLength > 0L && isCached(mediaId, 0L, contentLength)
-    }
-
-    private fun createResolvedUpstreamDataSourceFactory(): DataSource.Factory {
-        val httpFactory = OkHttpDataSource.Factory(mediaOkHttpClient)
-        val chunkedFactory = DataSource.Factory {
-            ChunkedDataSource(httpFactory.createDataSource(), CHUNK_LENGTH)
-        }
-        val mediaFactory = DefaultDataSource.Factory(this, chunkedFactory)
-        return ResolvingDataSource.Factory(mediaFactory) { dataSpec ->
-            resolvePlaybackDataSpec(dataSpec, allowCacheShortCircuit = true)
-        }
-    }
+                scope.launch(Dispatchers.IO) { recoverSong(mediaId) }
+            },
+        )
 
     private fun String?.toCastMimeType(): String? {
         val normalized = this?.trim()?.takeIf(String::isNotEmpty) ?: return null
@@ -8005,7 +7959,7 @@ if (
     private fun resolveMediaItemForCast(mediaItem: MediaItem): MediaItem {
         val localConfiguration = mediaItem.localConfiguration ?: return mediaItem
         val uri = localConfiguration.uri
-        if (uri.shouldBypassYouTubeResolver()) return mediaItem
+        if (uri.bypassesDeferredPlaybackResolution()) return mediaItem
         val mediaId = localConfiguration.customCacheKey ?: mediaItem.mediaId
         val lowDataModeActive = isLowDataModeActive()
         val resolved =
@@ -8038,10 +7992,20 @@ if (
         cacheAllowed: () -> Boolean = { true },
         speculative: Boolean = false,
     ): DataSpec {
-        if (dataSpec.uri.shouldBypassYouTubeResolver()) {
+        if (dataSpec.uri.bypassesDeferredPlaybackResolution()) {
             return dataSpec
         }
         val mediaId = dataSpec.key ?: return dataSpec
+        return resolveDeferredPlaybackDataSpec(dataSpec, mediaId, allowCacheShortCircuit, cacheAllowed, speculative)
+    }
+
+    private fun resolveDeferredPlaybackDataSpec(
+        dataSpec: DataSpec,
+        mediaId: String,
+        allowCacheShortCircuit: Boolean,
+        cacheAllowed: () -> Boolean = { true },
+        speculative: Boolean = false,
+    ): DataSpec {
         val storedFormat = database.getFormatByIdBlocking(mediaId)
         storedFormat?.let { format ->
             format.toCastMimeType()?.let { castMimeTypeCache.put(mediaId, it) }
@@ -8274,22 +8238,6 @@ if (
         return length?.let { resolvedDataSpec.subrange(0L, it) } ?: resolvedDataSpec
     }
 
-    private fun Uri.shouldBypassYouTubeResolver(): Boolean {
-        val normalizedScheme = scheme?.lowercase(Locale.US)
-        return normalizedScheme == "content" ||
-            normalizedScheme == "file" ||
-            normalizedScheme == "android.resource" ||
-            normalizedScheme == "http" ||
-            normalizedScheme == "https"
-    }
-
-    private fun Uri.shouldBypassPlayerCache(): Boolean {
-        val normalizedScheme = scheme?.lowercase(Locale.US)
-        return normalizedScheme == "content" ||
-            normalizedScheme == "file" ||
-            normalizedScheme == "android.resource"
-    }
-
     private fun deviceSupportsMimeType(mimeType: String): Boolean =
         runCatching {
             val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
@@ -8303,42 +8251,6 @@ if (
             createDataSourceFactory(),
             DefaultExtractorsFactory(),
         )
-
-    private class SchemeRoutingDataSource(
-        private val selectFactory: (DataSpec) -> DataSource.Factory,
-    ) : DataSource {
-        private val transferListeners = mutableListOf<TransferListener>()
-        private var delegate: DataSource? = null
-
-        override fun addTransferListener(transferListener: TransferListener) {
-            transferListeners += transferListener
-            delegate?.addTransferListener(transferListener)
-        }
-
-        override fun open(dataSpec: DataSpec): Long {
-            val selectedFactory = selectFactory(dataSpec)
-            val selectedDataSource = selectedFactory.createDataSource()
-            transferListeners.forEach(selectedDataSource::addTransferListener)
-            delegate = selectedDataSource
-            return selectedDataSource.open(dataSpec)
-        }
-
-        override fun read(
-            buffer: ByteArray,
-            offset: Int,
-            length: Int,
-        ): Int = checkNotNull(delegate).read(buffer, offset, length)
-
-        override fun getUri(): Uri? = delegate?.uri
-
-        override fun getResponseHeaders(): Map<String, List<String>> = delegate?.responseHeaders ?: emptyMap()
-
-        override fun close() {
-            val selected = delegate
-            delegate = null
-            selected?.close()
-        }
-    }
 
     private fun updateAudioOffload(enabled: Boolean) {
         val effectiveEnabled =

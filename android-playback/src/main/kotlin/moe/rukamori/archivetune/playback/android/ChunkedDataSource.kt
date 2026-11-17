@@ -5,15 +5,17 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.android
 
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import java.io.EOFException
 
+@UnstableApi
 internal class ChunkedDataSource(
     private val upstream: DataSource,
     private val chunkLength: Long,
@@ -77,18 +79,11 @@ internal class ChunkedDataSource(
     }
 
     private fun openNextChunk(dataSpec: DataSpec): Long {
-        val length =
-            if (dataSpec.length == C.LENGTH_UNSET.toLong()) {
-                null
-            } else {
-                resolveStreamChunkLength(
-                    requestedLength = dataSpec.length,
-                    position = dataSpec.position,
-                    knownContentLength = null,
-                    chunkLength = chunkLength,
-                )
-            }
-        val chunkSpec = length?.let { dataSpec.subrange(0L, it) } ?: dataSpec
+        val chunkSpec = if (dataSpec.length > 0L && chunkLength > 0L && dataSpec.position >= 0L) {
+            dataSpec.subrange(0L, minOf(dataSpec.length, chunkLength))
+        } else {
+            dataSpec
+        }
         chunkBytesRemaining = chunkSpec.length
         upstreamOpen = true
         return upstream.open(chunkSpec)

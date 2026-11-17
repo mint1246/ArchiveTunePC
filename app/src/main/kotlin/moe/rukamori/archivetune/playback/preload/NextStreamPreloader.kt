@@ -8,10 +8,10 @@
 package moe.rukamori.archivetune.playback.preload
 
 import androidx.media3.datasource.cache.Cache
-import androidx.media3.datasource.cache.ContentMetadata
 import moe.rukamori.archivetune.di.DownloadCache
 import moe.rukamori.archivetune.di.PlayerCache
 import moe.rukamori.archivetune.playback.stream.AudioStreamRequest
+import moe.rukamori.archivetune.playback.android.isFullyCached
 import moe.rukamori.archivetune.playback.stream.NextStreamPreloadCoordinator
 import moe.rukamori.archivetune.playback.stream.PreloadCacheProbe
 import moe.rukamori.archivetune.playback.stream.PreloadDiagnostics
@@ -42,11 +42,6 @@ class NextStreamPreloader
         fun updateTarget(request: AudioStreamRequest) = coordinator.updateTarget(request)
 
         fun cancel() = coordinator.cancel()
-
-        private fun Cache.isFullyCached(key: String): Boolean {
-            val contentLength = getContentMetadata(key).get(ContentMetadata.KEY_CONTENT_LENGTH, -1L)
-            return contentLength > 0L && isCached(key, 0L, contentLength)
-        }
 
         private companion object {
             const val LOG_TAG = "AudioStreamResolver"

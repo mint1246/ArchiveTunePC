@@ -17,7 +17,7 @@ start a playback session or background feature.
 | Artifact | Current boundary | Independent example |
 | --- | --- | --- |
 | `playback-core` | Queue, controller contracts and shared playback policies; no player implementation | `examples/headless-playback` |
-| `android-playback` | Media3 AAR with state observation, queue traversal and transport helpers for a caller-supplied Android player | `examples/android-playback-consumer` |
+| `android-playback` | Media3 AAR with state observation, queue traversal, transport and load-time deferred source resolution | `examples/android-playback-consumer` |
 | `desktop-playback` | VLC desktop player; caller supplies source resolution and a compatible VLC runtime | `examples/headless-desktop` |
 | `desktop-downloads` | Desktop download engine; caller supplies a resolved URL and destination, then closes the manager | `examples/headless-download` |
 | `desktop-settings` | Desktop settings policy and session with in-memory or file storage | `examples/headless-desktop-settings` |

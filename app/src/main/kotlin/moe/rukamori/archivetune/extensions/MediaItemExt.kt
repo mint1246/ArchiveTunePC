@@ -19,6 +19,7 @@ import moe.rukamori.archivetune.innertube.models.WatchEndpoint.WatchEndpointMusi
 import moe.rukamori.archivetune.innertube.models.WatchEndpoint.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig.Companion.MUSIC_VIDEO_TYPE_UGC
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.models.toMediaMetadata
+import moe.rukamori.archivetune.playback.android.setPlaybackAddress
 import moe.rukamori.archivetune.ui.utils.YTThumbQuality
 import moe.rukamori.archivetune.ui.utils.YtimgResizePolicy
 import moe.rukamori.archivetune.ui.utils.buildYTThumbnailUrl
@@ -40,19 +41,13 @@ private fun String?.toNotificationArtworkUri() =
             ytimgResizePolicy = YtimgResizePolicy.PreserveOriginal,
         )?.toUri()
 
-private fun MediaItem.Builder.setCacheKeyIfRemote(mediaId: String): MediaItem.Builder {
-    if (!mediaId.isLocalMediaId()) {
-        setCustomCacheKey(mediaId)
-    }
-    return this
-}
+private fun MediaItem.Builder.setArchiveTuneAddress(mediaId: String): MediaItem.Builder =
+    setPlaybackAddress(mediaId, cacheKey = mediaId.takeUnless { it.isLocalMediaId() })
 
 fun Song.toMediaItem() =
     MediaItem
         .Builder()
-        .setMediaId(song.id)
-        .setUri(song.id)
-        .setCacheKeyIfRemote(song.id)
+        .setArchiveTuneAddress(song.id)
         .setTag(toMediaMetadata())
         .setMediaMetadata(
             androidx.media3.common.MediaMetadata
@@ -86,9 +81,7 @@ fun Song.toMediaItem() =
 fun SongItem.toMediaItem() =
     MediaItem
         .Builder()
-        .setMediaId(id)
-        .setUri(id)
-        .setCacheKeyIfRemote(id)
+        .setArchiveTuneAddress(id)
         .setTag(toMediaMetadata())
         .setMediaMetadata(
             androidx.media3.common.MediaMetadata
@@ -119,9 +112,7 @@ fun EpisodeItem.toMediaItem() = toMediaMetadata().toMediaItem()
 fun MediaMetadata.toMediaItem() =
     MediaItem
         .Builder()
-        .setMediaId(id)
-        .setUri(id)
-        .setCacheKeyIfRemote(id)
+        .setArchiveTuneAddress(id)
         .setTag(this)
         .setMediaMetadata(
             androidx.media3.common.MediaMetadata

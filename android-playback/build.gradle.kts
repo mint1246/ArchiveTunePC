@@ -38,6 +38,7 @@ kotlin {
 dependencies {
     api(project(":playback-core"))
     api("androidx.media3:media3-common:${libs.versions.media3.get()}")
+    api("androidx.media3:media3-datasource:${libs.versions.media3.get()}")
     api(libs.coroutines.core)
 
     testImplementation(libs.junit)
