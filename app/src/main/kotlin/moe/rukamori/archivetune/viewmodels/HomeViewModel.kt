@@ -30,6 +30,7 @@ import moe.rukamori.archivetune.aicontentfilter.FilterAiContentUseCase
 import moe.rukamori.archivetune.aicontentfilter.LoadAiContentFilterPolicyUseCase
 import moe.rukamori.archivetune.aicontentfilter.ObserveAiContentFilterUseCase
 import moe.rukamori.archivetune.auth.SwitchSavedYouTubeAccountUseCase
+import moe.rukamori.archivetune.auth.hasLoginCookie
 import moe.rukamori.archivetune.constants.AccountChannelHandleKey
 import moe.rukamori.archivetune.constants.AccountEmailKey
 import moe.rukamori.archivetune.constants.AccountNameKey

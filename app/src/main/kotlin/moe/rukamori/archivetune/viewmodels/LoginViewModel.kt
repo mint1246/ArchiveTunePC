@@ -16,8 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.account.login.MissingYouTubeDataSyncIdException
 import moe.rukamori.archivetune.auth.CompleteYouTubeLoginUseCase
-import moe.rukamori.archivetune.auth.MissingYouTubeDataSyncIdException
 import moe.rukamori.archivetune.auth.UpdateYouTubeLoginContextUseCase
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import timber.log.Timber
@@ -111,15 +111,15 @@ class LoginViewModel
                         dataSyncId = latestDataSyncId,
                     ).onSuccess { session ->
                         completedCookie = normalizedCookie
-                        latestVisitorData = session.authState.visitorData
-                        latestDataSyncId = session.authState.dataSyncId
+                        latestVisitorData = session.visitorData
+                        latestDataSyncId = session.dataSyncId
                         _screenState.value =
                             LoginScreenState.Success(
                                 LoginAccountUiModel(
-                                    name = session.accountName,
-                                    email = session.accountEmail,
-                                    channelHandle = session.accountChannelHandle,
-                                    dataSyncId = session.authState.dataSyncId.orEmpty(),
+                                    name = session.accountInfo.name,
+                                    email = session.accountInfo.email,
+                                    channelHandle = session.accountInfo.channelHandle,
+                                    dataSyncId = session.dataSyncId,
                                 ),
                             )
                     }.onFailure { throwable ->

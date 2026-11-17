@@ -11,6 +11,7 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     compileOnly(libs.compose.runtime)
+    api(libs.coroutines.core)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation(libs.json)
     testImplementation(kotlin("test-junit5"))

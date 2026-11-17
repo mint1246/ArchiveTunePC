@@ -7,53 +7,25 @@
 
 package moe.rukamori.archivetune.auth
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import moe.rukamori.archivetune.constants.AccountChannelHandleKey
-import moe.rukamori.archivetune.constants.AccountEmailKey
-import moe.rukamori.archivetune.constants.AccountNameKey
-import moe.rukamori.archivetune.constants.DataSyncIdKey
-import moe.rukamori.archivetune.constants.InnerTubeCookieKey
-import moe.rukamori.archivetune.constants.PoTokenGvsKey
-import moe.rukamori.archivetune.constants.PoTokenKey
-import moe.rukamori.archivetune.constants.PoTokenPlayerKey
-import moe.rukamori.archivetune.constants.SavedAccountsKey
-import moe.rukamori.archivetune.constants.SelectedYtmPlaylistsKey
-import moe.rukamori.archivetune.constants.VisitorDataKey
-import moe.rukamori.archivetune.constants.WebClientPoTokenEnabledKey
-import moe.rukamori.archivetune.constants.YtmSyncKey
-import moe.rukamori.archivetune.innertube.PlaybackAuthState
-import moe.rukamori.archivetune.innertube.YouTube
-import moe.rukamori.archivetune.innertube.models.AccountInfo
-import moe.rukamori.archivetune.innertube.utils.hasYouTubeLoginCookie
-import moe.rukamori.archivetune.innertube.utils.hasCompleteYouTubeLoginCookies
+import moe.rukamori.archivetune.account.login.YouTubeAccountCoordinator
+import moe.rukamori.archivetune.account.login.YouTubeAccountSnapshot
+import moe.rukamori.archivetune.account.login.YouTubeLoginSession
 import moe.rukamori.archivetune.utils.SavedAccount
-import moe.rukamori.archivetune.utils.dataStore
-import moe.rukamori.archivetune.utils.decodeSavedAccounts
-import moe.rukamori.archivetune.utils.encodeSavedAccounts
-import moe.rukamori.archivetune.utils.toPlaybackAuthState
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class YouTubeLoginSession(
-    val authState: PlaybackAuthState,
-    val accountName: String,
-    val accountEmail: String,
-    val accountChannelHandle: String,
-)
-
-class MissingYouTubeDataSyncIdException : IllegalStateException("YouTube DataSyncId is missing")
-
+/**
+ * App-facing facade over the headless SDK coordinator. It only selects the IO dispatcher and keeps
+ * the existing use-case signatures; all verification, resolution, persistence and account-switch
+ * orchestration lives in [YouTubeAccountCoordinator].
+ */
 @Singleton
 class YouTubeLoginRepository
     @Inject
     constructor(
-        @ApplicationContext private val context: Context,
+        private val coordinator: YouTubeAccountCoordinator,
     ) {
         suspend fun completeLogin(
             cookie: String,
@@ -61,95 +33,16 @@ class YouTubeLoginRepository
             dataSyncId: String?,
         ): Result<YouTubeLoginSession> =
             withContext(Dispatchers.IO) {
-                runCatchingPreservingCancellation {
-                    val normalizedCookie = cookie.trim()
-                    check(hasYouTubeLoginCookie(normalizedCookie)) { "YouTube login cookie is missing" }
-                    check(hasCompleteYouTubeLoginCookies(normalizedCookie)) { "YouTube login cookies are incomplete" }
-
-                    val initialAuthState =
-                        PlaybackAuthState(
-                            cookie = normalizedCookie,
-                            visitorData = visitorData,
-                            dataSyncId = dataSyncId,
-                        ).normalized()
-                    val verificationAuthState = initialAuthState.copy(dataSyncId = null)
-                    YouTube.authState = verificationAuthState
-
-                    val accountInfo = YouTube.accountInfo().getOrThrow()
-
-                    val resolvedDataSyncId = resolveRequiredDataSyncId(initialAuthState.dataSyncId)
-                    val resolvedAuthState = initialAuthState.copy(dataSyncId = resolvedDataSyncId).normalized()
-                    YouTube.authState = resolvedAuthState
-
-                    persistLoginSession(
-                        authState = resolvedAuthState,
-                        accountInfo = accountInfo,
-                    )
-
-                    YouTubeLoginSession(
-                        authState = resolvedAuthState,
-                        accountName = accountInfo.name,
-                        accountEmail = accountInfo.email.orEmpty(),
-                        accountChannelHandle = accountInfo.channelHandle.orEmpty(),
-                    )
-                }
+                coordinator.completeLogin(
+                    cookie = cookie,
+                    visitorData = visitorData,
+                    dataSyncId = dataSyncId,
+                )
             }
 
-        suspend fun switchSavedAccount(account: SavedAccount): Result<PlaybackAuthState> =
+        suspend fun switchSavedAccount(account: SavedAccount): Result<YouTubeAccountSnapshot> =
             withContext(Dispatchers.IO) {
-                runCatchingPreservingCancellation {
-                    check(hasYouTubeLoginCookie(account.innerTubeCookie)) { "Saved account login cookie is missing" }
-                    check(hasCompleteYouTubeLoginCookies(account.innerTubeCookie)) {
-                        "Saved account login cookies are incomplete"
-                    }
-
-                    val initialAuthState =
-                        PlaybackAuthState(
-                            cookie = account.innerTubeCookie,
-                            visitorData = account.visitorData,
-                            dataSyncId = account.dataSyncId,
-                        ).normalized()
-                    YouTube.authState = initialAuthState
-
-                    val resolvedDataSyncId = resolveRequiredDataSyncId(initialAuthState.dataSyncId)
-                    val resolvedAuthState = initialAuthState.copy(dataSyncId = resolvedDataSyncId).normalized()
-                    YouTube.authState = resolvedAuthState
-
-                    context.dataStore.edit { preferences ->
-                        preferences[InnerTubeCookieKey] = account.innerTubeCookie
-                        account.visitorData
-                            .normalizeAuthValue()
-                            ?.let { preferences[VisitorDataKey] = it }
-                            ?: preferences.remove(VisitorDataKey)
-                        preferences[DataSyncIdKey] = resolvedDataSyncId
-                        preferences[AccountNameKey] = account.name
-                        preferences[AccountEmailKey] = account.email
-                        preferences[AccountChannelHandleKey] = account.channelHandle
-                        preferences.remove(PoTokenKey)
-                        preferences.remove(PoTokenGvsKey)
-                        preferences.remove(PoTokenPlayerKey)
-                        preferences[WebClientPoTokenEnabledKey] = false
-                        preferences[YtmSyncKey] = account.ytmSync
-                        preferences[SelectedYtmPlaylistsKey] = account.selectedYtmPlaylists
-
-                        val savedAccounts = decodeSavedAccounts(preferences[SavedAccountsKey].orEmpty())
-                        val repairedAccounts =
-                            savedAccounts.map { savedAccount ->
-                                if (savedAccount.id == account.id && savedAccount.dataSyncId != resolvedDataSyncId) {
-                                    savedAccount.copy(dataSyncId = resolvedDataSyncId)
-                                } else {
-                                    savedAccount
-                                }
-                            }
-                        if (repairedAccounts != savedAccounts) {
-                            preferences[SavedAccountsKey] = encodeSavedAccounts(repairedAccounts)
-                        }
-                    }
-
-                    context.dataStore.data
-                        .first()
-                        .toPlaybackAuthState()
-                }
+                coordinator.switchSavedAccount(account)
             }
 
         suspend fun saveLoginContext(
@@ -157,52 +50,11 @@ class YouTubeLoginRepository
             dataSyncId: String? = null,
         ) {
             withContext(Dispatchers.IO) {
-                val normalizedVisitorData = visitorData.normalizeAuthValue()
-                val normalizedDataSyncId = dataSyncId.normalizeDataSyncId()
-                if (normalizedVisitorData == null && normalizedDataSyncId == null) return@withContext
-
-                context.dataStore.edit { preferences ->
-                    normalizedVisitorData?.let { preferences[VisitorDataKey] = it }
-                    normalizedDataSyncId?.let { preferences[DataSyncIdKey] = it }
-                }
-
-                normalizedVisitorData?.let { YouTube.visitorData = it }
-                normalizedDataSyncId?.let { YouTube.dataSyncId = it }
+                coordinator.saveLoginContext(
+                    visitorData = visitorData,
+                    dataSyncId = dataSyncId,
+                )
             }
-        }
-
-        private suspend fun persistLoginSession(
-            authState: PlaybackAuthState,
-            accountInfo: AccountInfo,
-        ) {
-            val dataSyncId = authState.dataSyncId ?: throw MissingYouTubeDataSyncIdException()
-            context.dataStore.edit { preferences ->
-                preferences[InnerTubeCookieKey] = authState.cookie.orEmpty()
-                authState.visitorData
-                    ?.let { preferences[VisitorDataKey] = it }
-                    ?: preferences.remove(VisitorDataKey)
-                preferences[DataSyncIdKey] = dataSyncId
-                preferences[AccountNameKey] = accountInfo.name
-                preferences[AccountEmailKey] = accountInfo.email.orEmpty()
-                preferences[AccountChannelHandleKey] = accountInfo.channelHandle.orEmpty()
-                preferences.remove(PoTokenKey)
-                preferences.remove(PoTokenGvsKey)
-                preferences.remove(PoTokenPlayerKey)
-                preferences[WebClientPoTokenEnabledKey] = false
-            }
-        }
-
-        private suspend fun resolveRequiredDataSyncId(candidate: String?): String {
-            val networkDataSyncId =
-                YouTube
-                    .accountDataSyncId()
-                    .onFailure { if (it is CancellationException) throw it }
-                    .getOrNull()
-                    .normalizeDataSyncId()
-
-            return networkDataSyncId
-                ?: candidate.normalizeDataSyncId()
-                ?: throw MissingYouTubeDataSyncIdException()
         }
     }
 
@@ -228,7 +80,8 @@ class SwitchSavedYouTubeAccountUseCase
     constructor(
         private val repository: YouTubeLoginRepository,
     ) {
-        suspend operator fun invoke(account: SavedAccount): Result<PlaybackAuthState> = repository.switchSavedAccount(account)
+        suspend operator fun invoke(account: SavedAccount): Result<YouTubeAccountSnapshot> =
+            repository.switchSavedAccount(account)
     }
 
 class UpdateYouTubeLoginContextUseCase
@@ -246,18 +99,3 @@ class UpdateYouTubeLoginContextUseCase
             )
         }
     }
-
-private suspend inline fun <T> runCatchingPreservingCancellation(crossinline block: suspend () -> T): Result<T> =
-    try {
-        Result.success(block())
-    } catch (throwable: Throwable) {
-        if (throwable is CancellationException) throw throwable
-        Result.failure(throwable)
-    }
-
-private fun String?.normalizeAuthValue(): String? {
-    val trimmed = this?.trim()
-    return trimmed?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-}
-
-private fun String?.normalizeDataSyncId(): String? = PlaybackAuthState(dataSyncId = this).normalized().dataSyncId
