@@ -7,9 +7,6 @@
 
 package moe.rukamori.archivetune.social
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -23,7 +20,7 @@ import java.security.SecureRandom
 import java.util.Base64
 import kotlin.coroutines.coroutineContext
 
-internal data class SocialLoginCallback(
+data class SocialLoginCallback(
     val code: String?,
     val error: String?,
 )
@@ -33,20 +30,6 @@ class AndroidSocialLogin(
     private val openBrowser: suspend (String) -> Unit,
     private val timeoutMillis: Long = 3 * 60_000L,
 ) {
-    constructor(
-        context: Context,
-        api: SocialApi,
-    ) : this(
-        api = api,
-        openBrowser = { url ->
-            withContext(Dispatchers.Main.immediate) {
-                context.applicationContext.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
-            }
-        },
-    )
-
     suspend fun signIn(): StoredSocialSession {
         val nonce = randomNonce()
         return withContext(Dispatchers.IO) {
@@ -123,7 +106,7 @@ class AndroidSocialLogin(
     }
 }
 
-internal fun parseSocialLoginCallbackTarget(
+fun parseSocialLoginCallbackTarget(
     target: String,
     expectedNonce: String,
 ): SocialLoginCallback {
