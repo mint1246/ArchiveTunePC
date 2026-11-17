@@ -454,6 +454,7 @@ dependencies {
         exclude(group = "org.json", module = "json")
     }
     implementation(project(":discovery-sdk"))
+    implementation(project(":equalizer-sdk"))
     implementation(project(":local-media-sdk"))
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))

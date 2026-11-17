@@ -223,7 +223,8 @@ class EqualizerViewModel
 
                     is EqualizerConfigurationResult.Data -> {
                         val config = result.configuration
-                        if (config.capabilities == null || config.capabilities.bandCount <= 0) {
+                        val capabilities = config.capabilities
+                        if (capabilities == null || capabilities.bandCount <= 0) {
                             EqualizerScreenState.Empty
                         } else {
                             EqualizerScreenState.Success(

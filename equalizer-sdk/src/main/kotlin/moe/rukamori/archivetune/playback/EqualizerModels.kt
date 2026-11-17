@@ -11,6 +11,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/**
+ * A saved equalizer profile. The serialized field names and defaults are part of the persisted
+ * format and must not change: custom profiles are stored as JSON in user preferences and exported
+ * to / imported from files.
+ */
 @Serializable
 data class EqProfile(
     val id: String,
@@ -40,6 +45,7 @@ data class EqCapabilities(
     val systemPresets: List<String>,
 )
 
+/** Effective equalizer settings after persisted-value defaults and coercion have been applied. */
 data class EqSettings(
     val enabled: Boolean,
     val bandLevelsMb: List<Int>,
@@ -52,7 +58,11 @@ data class EqSettings(
     val autoHeadroomEnabled: Boolean,
 )
 
-internal object EqualizerJson {
+/**
+ * Single JSON configuration for the persisted equalizer format. Kept here so every consumer uses
+ * the same tolerant parsing and writes every default explicitly.
+ */
+object EqualizerJson {
     val json: Json =
         Json {
             ignoreUnknownKeys = true

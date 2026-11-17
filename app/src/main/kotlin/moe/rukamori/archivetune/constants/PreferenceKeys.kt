@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
+import moe.rukamori.archivetune.equalizer.EqualizerPreferenceKeys
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
@@ -335,18 +336,20 @@ val PlaylistTagOrderKey = stringPreferencesKey("playlistTagOrder")
 val ShowHomeCategoryChipsKey = booleanPreferencesKey("showHomeCategoryChips")
 val ShowTagsInLibraryKey = booleanPreferencesKey("showTagsInLibrary")
 
-val EqualizerEnabledKey = booleanPreferencesKey("equalizerEnabled")
-val EqualizerControlModeKey = stringPreferencesKey("equalizerControlMode")
-val EqualizerBandLevelsMbKey = stringPreferencesKey("equalizerBandLevelsMb")
-val EqualizerAutoHeadroomEnabledKey = booleanPreferencesKey("equalizerAutoHeadroomEnabled")
-val EqualizerOutputGainEnabledKey = booleanPreferencesKey("equalizerOutputGainEnabled")
-val EqualizerOutputGainMbKey = intPreferencesKey("equalizerOutputGainMb")
-val EqualizerBassBoostEnabledKey = booleanPreferencesKey("equalizerBassBoostEnabled")
-val EqualizerBassBoostStrengthKey = intPreferencesKey("equalizerBassBoostStrength")
-val EqualizerVirtualizerEnabledKey = booleanPreferencesKey("equalizerVirtualizerEnabled")
-val EqualizerVirtualizerStrengthKey = intPreferencesKey("equalizerVirtualizerStrength")
-val EqualizerSelectedProfileIdKey = stringPreferencesKey("equalizerSelectedProfileId")
-val EqualizerCustomProfilesJsonKey = stringPreferencesKey("equalizerCustomProfilesJson")
+// Serialized names are owned by the headless equalizer SDK so the DataStore keys and the SDK
+// preference reader/writer can never drift apart. Values are unchanged from the original keys.
+val EqualizerEnabledKey = booleanPreferencesKey(EqualizerPreferenceKeys.ENABLED)
+val EqualizerControlModeKey = stringPreferencesKey(EqualizerPreferenceKeys.CONTROL_MODE)
+val EqualizerBandLevelsMbKey = stringPreferencesKey(EqualizerPreferenceKeys.BAND_LEVELS_MB)
+val EqualizerAutoHeadroomEnabledKey = booleanPreferencesKey(EqualizerPreferenceKeys.AUTO_HEADROOM_ENABLED)
+val EqualizerOutputGainEnabledKey = booleanPreferencesKey(EqualizerPreferenceKeys.OUTPUT_GAIN_ENABLED)
+val EqualizerOutputGainMbKey = intPreferencesKey(EqualizerPreferenceKeys.OUTPUT_GAIN_MB)
+val EqualizerBassBoostEnabledKey = booleanPreferencesKey(EqualizerPreferenceKeys.BASS_BOOST_ENABLED)
+val EqualizerBassBoostStrengthKey = intPreferencesKey(EqualizerPreferenceKeys.BASS_BOOST_STRENGTH)
+val EqualizerVirtualizerEnabledKey = booleanPreferencesKey(EqualizerPreferenceKeys.VIRTUALIZER_ENABLED)
+val EqualizerVirtualizerStrengthKey = intPreferencesKey(EqualizerPreferenceKeys.VIRTUALIZER_STRENGTH)
+val EqualizerSelectedProfileIdKey = stringPreferencesKey(EqualizerPreferenceKeys.SELECTED_PROFILE_ID)
+val EqualizerCustomProfilesJsonKey = stringPreferencesKey(EqualizerPreferenceKeys.CUSTOM_PROFILES_JSON)
 
 val MaxImageCacheSizeKey = intPreferencesKey("maxImageCacheSize")
 val SmartTrimmerKey = booleanPreferencesKey("smartTrimmer")
