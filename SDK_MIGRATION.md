@@ -221,6 +221,8 @@ Android lyrics provider ordering, concurrency, timeouts and result updates now u
 
 The app adapters for audio-focus/crossfade/persistence coordination, equalizer preferences, download-library aggregation, local scan policies and YouTube login now delegate to SDK modules. Platform Media3 calls, DataStore, network and audio effects remain Android-owned. The download adapter maps Media3 constants to SDK states explicitly; it does not assume matching numeric values. Focused SDK tests and `:app:testGmsMobileUniversalDebugUnitTest` pass with these integrations. Device audio, background playback, account, download and storage-upgrade testing remain outstanding.
 
+The independently built `examples/headless-equalizer` resolves `equalizer-sdk` from Maven Local and exercises its preferences API with an in-memory adapter. It does not exercise an audio backend.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.
