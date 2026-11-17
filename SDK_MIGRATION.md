@@ -216,3 +216,11 @@ Android discovery's batching and list selection now use `discovery-sdk`; the exi
 ## Milestone: lyrics and desktop resource orchestration
 
 Android lyrics provider ordering, concurrency, timeouts and result updates now use `lyrics-sdk`; Android still owns preferences, connectivity, provider implementations and rendering. Headless provider tests pass. The existing desktop resource coordinator and its tests moved unchanged to `desktop-resource-core`, which the desktop backend consumes through its public dependency. Resource and backend tests and desktop compilation pass; callers remain responsible for account-scoped keys and safe cache contents. The Android debug APK was assembled after the preceding account, discovery, playlist and social changes; it does not validate subsequent lyrics changes or real device behavior.
+
+## Android integration milestone
+
+The app adapters for audio-focus/crossfade/persistence coordination, equalizer preferences, download-library aggregation, local scan policies and YouTube login now delegate to SDK modules. Platform Media3 calls, DataStore, network and audio effects remain Android-owned. The download adapter maps Media3 constants to SDK states explicitly; it does not assume matching numeric values. Focused SDK tests and `:app:testGmsMobileUniversalDebugUnitTest` pass with these integrations. Device audio, background playback, account, download and storage-upgrade testing remain outstanding.
+
+A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
+
+A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.
