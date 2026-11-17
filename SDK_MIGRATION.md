@@ -180,3 +180,7 @@ A full `:desktopApp:test` run initially failed one Linux-path test on Windows be
 ## Milestone: Android neural chord core extraction
 
 The Android chord model asset verification, DSP and streaming resampler now live in the headless `chord-neural-core` JVM module. Android retains MediaCodec decoding and ONNX execution and consumes the same implementation; model files and cache formats are unchanged. Existing DSP and model-store tests and the Android debug unit suite passed, as did the debug APK assembly. The published Maven Local artifact is exercised by the independent headless chord example. Real device inference and audio decoding remain unverified.
+
+## Milestone: desktop SponsorBlock feature extraction
+
+The SponsorBlock HTTP client, segment cache and playback coordinator now live together in `desktop-sponsorblock`; the desktop application still supplies settings and party seek authority. Existing client and coordinator tests pass in the feature module, and desktop application compilation passes. Live service and packaged-app behavior remain unverified.

@@ -32,6 +32,7 @@ kotlin {
 
 dependencies {
     implementation(project(":desktop-backend"))
+    implementation(project(":desktop-sponsorblock"))
     implementation(project(":desktop-spotify-import"))
     implementation(project(":desktop-model-runtime"))
     implementation(project(":desktop-neural-chords"))

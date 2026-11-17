@@ -9,7 +9,6 @@ kotlin {
 dependencies {
     api(project(":core"))
     api(project(":chords-sdk"))
-    implementation(project(":sponsorblock-core"))
     implementation(project(":spotifycore"))
     implementation(project(":stream-resolver"))
     implementation(project(":morideobfuscator:jvm"))
