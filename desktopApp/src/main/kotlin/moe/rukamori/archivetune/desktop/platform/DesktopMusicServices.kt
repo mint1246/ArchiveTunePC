@@ -160,7 +160,14 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         initialAudioOutputDeviceId = settings.snapshot().audioOutputDeviceId,
         initialPitchSemitones = settings.snapshot().pitchSemitones,
     )
-    val stems = DesktopStemCoordinator(runtime, playback)
+    val stems = DesktopStemCoordinator(
+        playback = VlcjStemPlaybackBridge(playback),
+        applicationScope = runtime.applicationScope,
+        modelsDirectory = DesktopStemStorage.modelsDirectory(runtime.paths),
+        stemsDirectory = DesktopStemStorage.stemsDirectory(runtime.paths),
+        modelManifestUrl = DesktopBuildInfo.MODEL_MANIFEST_URL,
+        diagnostics = { level, message, error -> runtime.logger.log(level, message, error) },
+    )
     val canvas = DesktopCanvasRepository(settings, runtime.paths.cache.resolve("canvas"), runtime.applicationScope)
     private val nextTrackPrefetcher = NextTrackPrefetcher(runtime.applicationScope) { item, cacheAllowed ->
         resolve(item, cacheResolvedRemote = cacheAllowed, reportFailure = false)
