@@ -14,6 +14,7 @@ import moe.rukamori.archivetune.innertube.models.ArtistItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.pages.MoodAndGenres
 import moe.rukamori.archivetune.repository.SearchDiscoveryRepository
+import moe.rukamori.archivetune.sdk.discovery.DiscoveryLists
 import javax.inject.Inject
 
 class LoadSearchDiscoveryUseCase
@@ -29,25 +30,20 @@ class LoadSearchDiscoveryUseCase
                     moodAndGenres = ImmutableList.copyOf(data.moodAndGenres),
                     suggestedSongs =
                         ImmutableList.copyOf(
-                            data
-                                .suggestedSongs
-                                .distinctBy { item -> item.id }
-                                .take(MaxDiscoveryItems),
+                            DiscoveryLists.takeDistinct(data.suggestedSongs, MaxDiscoveryItems) { it.id },
                         ),
                     trendingAlbums =
                         ImmutableList.copyOf(
-                            (
+                            DiscoveryLists.takeDistinct(
                                 chartItems.filterIsInstance<AlbumItem>() +
                                     data.newReleaseAlbums +
-                                    data.searchedAlbums
-                            ).distinctBy { item -> item.id }.take(MaxDiscoveryItems),
+                                    data.searchedAlbums,
+                                MaxDiscoveryItems,
+                            ) { it.id },
                         ),
                     suggestedArtists =
                         ImmutableList.copyOf(
-                            data
-                                .suggestedArtists
-                                .distinctBy { item -> item.id }
-                                .take(MaxDiscoveryItems),
+                            DiscoveryLists.takeDistinct(data.suggestedArtists, MaxDiscoveryItems) { it.id },
                         ),
                 )
             }

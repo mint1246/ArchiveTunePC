@@ -450,6 +450,7 @@ dependencies {
     implementation(project(":social-session")) {
         exclude(group = "org.json", module = "json")
     }
+    implementation(project(":discovery-sdk"))
     implementation(project(":local-media-sdk"))
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))

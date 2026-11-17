@@ -10,11 +10,10 @@ package moe.rukamori.archivetune.repository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
+import moe.rukamori.archivetune.sdk.discovery.DiscoveryFanOut
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.Artist
 import moe.rukamori.archivetune.db.entities.Song
@@ -109,17 +108,11 @@ class SearchDiscoveryRepository
                         .take(MaxSuggestionSeedItems)
                 val seedSongIds = seedSongs.mapTo(HashSet()) { song -> song.id }
 
-                seedSongs
-                    .chunked(ConcurrentRequestBatchSize)
-                    .flatMap { batch ->
-                        batch.map { song ->
-                            async {
-                                loadRelatedSongs(song)
-                                    .ifEmpty { searchRelatedSongs(song) }
-                            }
-                        }.awaitAll().also { yield() }
+                fanOut
+                    .flatMapBatched(seedSongs) { song ->
+                        loadRelatedSongs(song)
+                            .ifEmpty { searchRelatedSongs(song) }
                     }
-                    .flatten()
                     .filterNot { song -> song.id in seedSongIds }
                     .distinctBy { song -> song.id }
                     .take(MaxSuggestedItems)
@@ -168,17 +161,11 @@ class SearchDiscoveryRepository
                         .take(MaxSuggestionSeedItems)
                 val seedArtistIds = seedArtists.mapTo(HashSet()) { artist -> artist.id }
 
-                seedArtists
-                    .chunked(ConcurrentRequestBatchSize)
-                    .flatMap { batch ->
-                        batch.map { artist ->
-                            async {
-                                loadRelatedArtists(artist)
-                                    .ifEmpty { searchRelatedArtists(artist) }
-                            }
-                        }.awaitAll().also { yield() }
+                fanOut
+                    .flatMapBatched(seedArtists) { artist ->
+                        loadRelatedArtists(artist)
+                            .ifEmpty { searchRelatedArtists(artist) }
                     }
-                    .flatten()
                     .filterNot { artist -> artist.id in seedArtistIds }
                     .distinctBy { artist -> artist.id }
                     .take(MaxSuggestedItems)
@@ -210,5 +197,6 @@ class SearchDiscoveryRepository
             const val MaxSuggestedItems = 12
             const val TopAlbumsQuery = "top albums"
             const val ConcurrentRequestBatchSize = 3
+            val fanOut = DiscoveryFanOut(batchSize = ConcurrentRequestBatchSize)
         }
     }
