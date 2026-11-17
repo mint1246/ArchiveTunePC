@@ -5,17 +5,17 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.sdk.download
 
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DownloadCachePolicyTest {
     @Test
     fun completePlaybackCache_canBeReusedWhenNoDownloadBytesExist() {
         assertTrue(
-            shouldReuseCompletePlaybackCache(
+            DownloadCachePolicy.shouldReuseCompletePlaybackCache(
                 hasPartialDownload = false,
                 playbackContentLength = 1_000L,
                 fullyCached = true,
@@ -26,7 +26,7 @@ class DownloadCachePolicyTest {
     @Test
     fun partialPlaybackCache_neverBypassesFreshResolution() {
         assertFalse(
-            shouldReuseCompletePlaybackCache(
+            DownloadCachePolicy.shouldReuseCompletePlaybackCache(
                 hasPartialDownload = false,
                 playbackContentLength = 1_000L,
                 fullyCached = false,
@@ -37,7 +37,7 @@ class DownloadCachePolicyTest {
     @Test
     fun unknownPlaybackLength_neverBypassesFreshResolution() {
         assertFalse(
-            shouldReuseCompletePlaybackCache(
+            DownloadCachePolicy.shouldReuseCompletePlaybackCache(
                 hasPartialDownload = false,
                 playbackContentLength = null,
                 fullyCached = true,
@@ -48,7 +48,7 @@ class DownloadCachePolicyTest {
     @Test
     fun existingPartialDownload_neverMixesPlaybackCacheRepresentation() {
         assertFalse(
-            shouldReuseCompletePlaybackCache(
+            DownloadCachePolicy.shouldReuseCompletePlaybackCache(
                 hasPartialDownload = true,
                 playbackContentLength = 1_000L,
                 fullyCached = true,
@@ -59,7 +59,7 @@ class DownloadCachePolicyTest {
     @Test
     fun partialResume_prefersPersistedDownloadMetadataItag() {
         assertTrue(
-            resolvePinnedDownloadFormatId(
+            DownloadCachePolicy.resolvePinnedDownloadFormatId(
                 hasPartialDownload = true,
                 metadataFormatId = 251,
                 databaseFormatId = 140,
@@ -70,7 +70,7 @@ class DownloadCachePolicyTest {
     @Test
     fun partialResume_fallsBackToDatabaseItagAfterPlaybackCacheCopyRestart() {
         assertTrue(
-            resolvePinnedDownloadFormatId(
+            DownloadCachePolicy.resolvePinnedDownloadFormatId(
                 hasPartialDownload = true,
                 metadataFormatId = null,
                 databaseFormatId = 251,
@@ -81,7 +81,7 @@ class DownloadCachePolicyTest {
     @Test
     fun freshDownload_doesNotPinStaleDatabaseFormat() {
         assertFalse(
-            resolvePinnedDownloadFormatId(
+            DownloadCachePolicy.resolvePinnedDownloadFormatId(
                 hasPartialDownload = false,
                 metadataFormatId = null,
                 databaseFormatId = 251,

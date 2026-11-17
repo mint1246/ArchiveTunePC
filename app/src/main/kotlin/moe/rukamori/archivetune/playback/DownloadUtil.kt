@@ -60,6 +60,8 @@ import moe.rukamori.archivetune.playback.stream.AudioStreamRequest
 import moe.rukamori.archivetune.playback.stream.ResolveAudioStreamUseCase
 import moe.rukamori.archivetune.playback.stream.ResolvedAudioStream
 import moe.rukamori.archivetune.playback.stream.StreamPurpose
+import moe.rukamori.archivetune.sdk.download.DownloadCachePolicy.resolvePinnedDownloadFormatId
+import moe.rukamori.archivetune.sdk.download.DownloadCachePolicy.shouldReuseCompletePlaybackCache
 import moe.rukamori.archivetune.utils.StreamClientUtils
 import moe.rukamori.archivetune.utils.YTPlayerUtils
 import moe.rukamori.archivetune.utils.enumPreference
@@ -768,21 +770,4 @@ class DownloadUtil
             private const val MAX_LOGGED_CAUSE_DEPTH = 6
             private val STREAM_REFRESH_RESPONSE_CODES = setOf(403, 404, 410, 416)
         }
-    }
-
-internal fun shouldReuseCompletePlaybackCache(
-    hasPartialDownload: Boolean,
-    playbackContentLength: Long?,
-    fullyCached: Boolean,
-): Boolean = !hasPartialDownload && playbackContentLength != null && playbackContentLength > 0L && fullyCached
-
-internal fun resolvePinnedDownloadFormatId(
-    hasPartialDownload: Boolean,
-    metadataFormatId: Int?,
-    databaseFormatId: Int?,
-): Int? =
-    if (hasPartialDownload) {
-        metadataFormatId ?: databaseFormatId
-    } else {
-        null
     }
