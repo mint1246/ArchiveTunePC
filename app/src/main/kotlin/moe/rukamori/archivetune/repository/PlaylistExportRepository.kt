@@ -17,8 +17,8 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.Playlist
 import moe.rukamori.archivetune.db.entities.PlaylistSong
+import moe.rukamori.archivetune.playlist.export.PlaylistCsvFormat
 import java.io.IOException
-import java.io.Writer
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,38 +49,6 @@ class PlaylistExportRepository
                     ?.bufferedWriter(Charsets.UTF_8)
                     ?: throw IOException("Unable to open CSV destination")
 
-            writer.use { output ->
-                output.append('\uFEFF')
-                records.forEach { record ->
-                    record.forEachIndexed { index, value ->
-                        if (index > 0) output.append(',')
-                        output.writeCsvField(value)
-                    }
-                    output.append("\r\n")
-                }
-            }
-        }
-
-        private fun Writer.writeCsvField(value: String) {
-            val safeValue = value.escapeSpreadsheetFormula()
-            append('"')
-            safeValue.forEach { character ->
-                if (character == '"') append('"')
-                append(character)
-            }
-            append('"')
-        }
-
-        private fun String.escapeSpreadsheetFormula(): String {
-            val firstMeaningfulCharacter = firstOrNull { character -> !character.isWhitespace() }
-            return if (firstMeaningfulCharacter != null && firstMeaningfulCharacter in CSV_FORMULA_PREFIXES) {
-                "'$this"
-            } else {
-                this
-            }
-        }
-
-        private companion object {
-            val CSV_FORMULA_PREFIXES = setOf('=', '+', '-', '@')
+            writer.use { output -> PlaylistCsvFormat.write(output, records) }
         }
     }
