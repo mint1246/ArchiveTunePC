@@ -235,6 +235,8 @@ Desktop settings normalization and mutations now use a headless policy and sessi
 
 Android manual and scheduled backups now use `backup-sdk` for archive handling, settings XML, validation and scheduling. The app supplies Android storage, database and restart adapters, with restore and restart in the same cancellation-protected section. Headless backup, restore, Unicode and scheduling tests pass. Android integration and restoration of existing backups on a device remain to be verified.
 
+Desktop queue checkpoint timing now comes from `playback-core`. Its existing tests moved with it and cover periodic checkpoints, queue changes, pause and seek, and forced shutdown saves. Desktop continues using its existing queue store and file format.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.

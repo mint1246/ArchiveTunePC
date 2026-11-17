@@ -43,11 +43,11 @@ import moe.rukamori.archivetune.playback.api.NextTrackPrefetcher
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackEvent
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
-import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.PlaybackSource
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
+import moe.rukamori.archivetune.playback.session.QueuePersistencePolicy
 import moe.rukamori.archivetune.playback.desktop.DesktopConcretePlaybackSourceResolver
 import moe.rukamori.archivetune.playback.desktop.DesktopCrossfadeConfiguration
 import moe.rukamori.archivetune.playback.desktop.DesktopEqualizerProfile
@@ -1107,53 +1107,6 @@ private data class PlaybackPreferences(
     val repeatMode: RepeatMode,
     val shuffleEnabled: Boolean,
 )
-
-internal data class QueuePersistenceKey(
-    val title: String?,
-    val queue: List<PlaybackItem>,
-    val currentIndex: Int,
-)
-
-internal class QueuePersistencePolicy(
-    private val checkpointMs: Long = 25_000L,
-    private val seekJumpMs: Long = 5_000L,
-) {
-    private data class Observation(
-        val key: QueuePersistenceKey,
-        val playWhenReady: Boolean,
-        val stopped: Boolean,
-        val positionMs: Long,
-        val positionBucket: Long,
-    )
-
-    private var previous: Observation? = null
-
-    init {
-        require(checkpointMs > 0L) { "Queue checkpoint interval must be positive" }
-        require(seekJumpMs > 0L) { "Queue seek threshold must be positive" }
-    }
-
-    fun shouldPersist(snapshot: PlaybackSnapshot, force: Boolean = false): Boolean {
-        val position = snapshot.positionMs.coerceAtLeast(0L)
-        val current = Observation(
-            key = QueuePersistenceKey(snapshot.queueTitle, snapshot.queue, snapshot.currentIndex),
-            playWhenReady = snapshot.playWhenReady,
-            stopped = snapshot.status == PlaybackStatus.IDLE || snapshot.status == PlaybackStatus.ENDED,
-            positionMs = position,
-            positionBucket = position / checkpointMs,
-        )
-        val last = previous
-        previous = current
-        if (force) return true
-        if (last == null) return false
-        if (current.key != last.key) return true
-        if (current.playWhenReady != last.playWhenReady) return true
-        if (!last.stopped && current.stopped) return true
-        if (current.key.queue.isEmpty() || current.key.currentIndex !in current.key.queue.indices) return false
-        if (kotlin.math.abs(current.positionMs - last.positionMs) >= seekJumpMs) return true
-        return current.positionBucket != last.positionBucket
-    }
-}
 
 private data class CachedResolvedSource(
     val source: ResolvedPlaybackSource,
