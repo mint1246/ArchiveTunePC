@@ -4,11 +4,16 @@ import java.nio.file.Path
 import moe.rukamori.archivetune.chords.ChordEvent
 import moe.rukamori.archivetune.chords.ChordTrack
 import moe.rukamori.archivetune.chords.ChordTrackSource
+import moe.rukamori.archivetune.chords.AndroidChordLinearResampler
 import moe.rukamori.archivetune.desktop.platform.DesktopNeuralChordAnalyzer
 
 fun main() {
     val track = ChordTrack(0, "Example", "Artist", null, ChordTrackSource.LOCAL_NEURAL, listOf(ChordEvent(0, 1000, "C")), 1000)
     check(track.alignedTo(1100).events.single().endMs == 1100L)
+    val samples = mutableListOf<Float>()
+    val resampler = AndroidChordLinearResampler(44_100, 22_050)
+    listOf(0f, 1f, 2f).forEach { resampler.push(it, samples::add) }
+    check(samples == listOf(0f, 2f))
     DesktopNeuralChordAnalyzer(Path.of("cache"), Path.of("models"), "https://example.invalid/manifest.json", { _, _, _, _ ->
         error("Provide a real audio decoder before running analysis")
     })

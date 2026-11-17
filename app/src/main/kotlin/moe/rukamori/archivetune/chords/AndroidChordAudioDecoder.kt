@@ -156,40 +156,6 @@ private inline fun decodePcmToMono(
     return frames.toLong()
 }
 
-internal fun androidChordStereoMean(left: Float, right: Float): Float = (left + right) * 0.5f
-
-internal class AndroidChordLinearResampler(
-    sourceRate: Int,
-    targetRate: Int,
-) {
-    private val step = sourceRate.toDouble() / targetRate.toDouble()
-    private var previous = 0f
-    private var sourceIndex = -1L
-    private var nextOutputPosition = 0.0
-
-    init {
-        require(sourceRate > 0 && targetRate > 0)
-    }
-
-    fun push(sample: Float, sink: (Float) -> Unit) {
-        sourceIndex++
-        if (sourceIndex == 0L) {
-            previous = sample
-            sink(sample)
-            nextOutputPosition = step
-            return
-        }
-        val currentIndex = sourceIndex.toDouble()
-        val previousIndex = currentIndex - 1.0
-        while (nextOutputPosition <= currentIndex + 1e-12) {
-            val fraction = (nextOutputPosition - previousIndex).coerceIn(0.0, 1.0).toFloat()
-            sink(previous + (sample - previous) * fraction)
-            nextOutputPosition += step
-        }
-        previous = sample
-    }
-}
-
 private class FloatAccumulator(private val chunkSize: Int = 65_536) {
     private val chunks = mutableListOf<FloatArray>()
     private var current = FloatArray(chunkSize)

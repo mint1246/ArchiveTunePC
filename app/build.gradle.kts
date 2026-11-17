@@ -444,6 +444,9 @@ dependencies {
     implementation(project(":chords-sdk")) {
         exclude(group = "org.json", module = "json")
     }
+    implementation(project(":chord-neural-core")) {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(project(":sponsorblock-core"))
     implementation(project(":together-sdk"))
     implementation(project(":together-transport"))

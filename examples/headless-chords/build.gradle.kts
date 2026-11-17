@@ -8,6 +8,7 @@ repositories {
 }
 dependencies {
     implementation("moe.rukamori.archivetune:desktop-neural-chords:0.1.0-SNAPSHOT")
+    implementation("moe.rukamori.archivetune:chord-neural-core:0.1.0-SNAPSHOT")
 }
 kotlin { jvmToolchain(21) }
 application { mainClass.set("example.HeadlessChordsKt") }

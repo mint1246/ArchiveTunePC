@@ -21,14 +21,14 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-internal data class AndroidChordAssetSpec(
+data class AndroidChordAssetSpec(
     val key: String,
     val file: String,
     val size: Long,
     val sha256: String,
 )
 
-internal object AndroidChordModelSpec {
+object AndroidChordModelSpec {
     // Android uses a statically-shaped single-window graph. The upstream/directml export leaves
     // the batch dimension symbolic, which expands into Shape/Range/Scatter machinery that none of
     // our accelerated Android EPs can own completely while generic CPU fallback is disabled.
@@ -73,7 +73,7 @@ internal data class AndroidChordManifest(
     val assets: Map<String, AndroidChordAssetSpec>,
 )
 
-internal data class AndroidChordModelBundle(
+data class AndroidChordModelBundle(
     val model: File,
     val config: File,
     val cqtPlan: File,
@@ -81,7 +81,7 @@ internal data class AndroidChordModelBundle(
 )
 
 /** Chord-local downloader until the shared Android model store exposes generic bundles. */
-internal class AndroidChordModelStore(
+class AndroidChordModelStore(
     private val root: File,
     private val manifestUrl: String = AndroidChordModelSpec.MANIFEST_URL,
 ) {

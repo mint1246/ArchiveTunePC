@@ -176,3 +176,7 @@ A full `:desktopApp:test` run initially failed one Linux-path test on Windows be
 - Desktop orchestration and many other feature implementations still reside in application modules. Desktop and Android semantic differences need characterization before consolidation.
 - No published Android AAR, Unity bridge, independently configured full desktop session, account/discovery SDK, or release artifact exists yet. Authentication, streaming policies and dependency licensing must be reviewed before distribution.
 - Physical-device, actual audio, account-dependent network, storage-upgrade, packaged Graal and performance validation remain outstanding. No Quest 2 memory baseline has been recorded.
+
+## Milestone: Android neural chord core extraction
+
+The Android chord model asset verification, DSP and streaming resampler now live in the headless `chord-neural-core` JVM module. Android retains MediaCodec decoding and ONNX execution and consumes the same implementation; model files and cache formats are unchanged. Existing DSP and model-store tests and the Android debug unit suite passed, as did the debug APK assembly. The published Maven Local artifact is exercised by the independent headless chord example. Real device inference and audio decoding remain unverified.

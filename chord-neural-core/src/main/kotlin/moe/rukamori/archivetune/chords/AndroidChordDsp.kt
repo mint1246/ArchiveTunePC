@@ -18,7 +18,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import org.json.JSONObject
 
-internal data class AndroidChordConfig(val chordVocab: List<String>) {
+data class AndroidChordConfig(val chordVocab: List<String>) {
     companion object {
         fun parseAndValidate(json: String): AndroidChordConfig {
             val root = JSONObject(json)
@@ -48,7 +48,7 @@ internal object AndroidChordContract {
     const val CQT_MAGIC = 0x5451434d
 }
 
-internal data class AndroidChordOctavePlan(
+data class AndroidChordOctavePlan(
     val index: Int,
     val hopLength: Int,
     val fftSize: Int,
@@ -56,7 +56,7 @@ internal data class AndroidChordOctavePlan(
     val binCount: Int,
 )
 
-internal data class AndroidChordCqtPlan(
+data class AndroidChordCqtPlan(
     val sampleRate: Double,
     val hopLength: Int,
     val nBins: Int,
@@ -153,7 +153,7 @@ internal data class AndroidChordCqtPlan(
     }
 }
 
-internal fun computeAndroidChordCqt(
+fun computeAndroidChordCqt(
     audio: FloatArray,
     plan: AndroidChordCqtPlan,
     cancellationCheck: () -> Unit = {},
@@ -232,7 +232,7 @@ internal fun downsampleAndroidChord(input: FloatArray, plan: AndroidChordCqtPlan
     }
 }
 
-internal fun smoothAndroidChordArgmax(
+fun smoothAndroidChordArgmax(
     logits: FloatArray,
     frameCount: Int,
     windowCount: Int,
@@ -261,7 +261,7 @@ internal fun smoothAndroidChordArgmax(
     }
 }
 
-internal fun androidChordPredictionsToEvents(
+fun androidChordPredictionsToEvents(
     predictions: IntArray,
     logits: FloatArray,
     frameCount: Int,
