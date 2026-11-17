@@ -223,9 +223,9 @@ The app adapters for audio-focus/crossfade/persistence coordination, equalizer p
 
 The independently built `examples/headless-equalizer` resolves `equalizer-sdk` from Maven Local and exercises its preferences API with an in-memory adapter. It does not exercise an audio backend.
 
-Android's SponsorBlock monitor now uses the headless skip planner for range activation, repeat suppression and duration-clamped seek targets. SponsorBlock core tests pass; the Media3 integration still requires app compilation and device playback verification.
+Android's SponsorBlock monitor now uses the headless skip planner for range activation, repeat suppression and duration-clamped seek targets. SponsorBlock core and Android debug unit tests pass. Device playback testing remains outstanding.
 
-Android statistics overview queries, time bucketing and trend construction now use a headless query service; the existing Room store supplies its query interface and continues to own persistence. The statistics SDK tests pass. Combined Android compilation and actual database/device verification remain outstanding for this milestone.
+Android statistics overview queries, time bucketing and trend construction now use a headless query service. The existing Room store supplies its query interface and owns persistence. The statistics SDK and Android debug unit tests pass. Database and device verification remain outstanding.
 
 Android queue drag reorder planning now lives in `playback-core`, using window identity to distinguish duplicate tracks and preserving the existing shuffled traversal ordering. Focused planner tests pass; Media3 UI and device verification remain outstanding.
 
@@ -233,11 +233,11 @@ Desktop playlist CSV export, picker state, ordering and local filtering now use 
 
 Desktop settings normalization and mutations now use a headless policy and session in `desktop-settings`. The desktop app supplies its shared store, which still owns the existing Properties format and coalesced writes. Module and desktop app suites passed after integration. Live audio, keybinds, packaged behavior and upgrades remain to be exercised.
 
-Android manual and scheduled backups now use `backup-sdk` for archive handling, settings XML, validation and scheduling. The app supplies Android storage, database and restart adapters, with restore and restart in the same cancellation-protected section. Headless backup, restore, Unicode and scheduling tests pass. Android integration and restoration of existing backups on a device remain to be verified.
+Android manual and scheduled backups now use `backup-sdk` for archive handling, settings XML, validation and scheduling. The app supplies Android storage, database and restart adapters, with restore and restart in the same cancellation-protected section. Headless backup, restore, Unicode and scheduling tests and the Android debug unit suite pass. Restoration of existing backups on a device remains to be verified.
 
 Desktop queue checkpoint timing now comes from `playback-core`. Its existing tests moved with it and cover periodic checkpoints, queue changes, pause and seek, and forced shutdown saves. Desktop continues using its existing queue store and file format.
 
-The Android app now uses `android-playback` for its Media3 queue traversal, transport helpers and observable player state. The app supplies its existing player and remains responsible for its background service, stream resolution wiring and guest controls. All 16 adapter tests pass and the release AAR publishes locally. The integrated Android build and physical playback remain to be verified.
+The Android app now uses `android-playback` for its Media3 queue traversal, transport helpers and observable player state. The app supplies its existing player and owns its background service, stream resolution wiring and guest controls. All 16 adapter tests and the Android debug unit suite pass. The release AAR publishes locally. Playback on a device remains to be verified.
 
 Desktop playlist creation, rename, delete and track mutations now use the headless coordinator in `desktop-backend`. Rename rollback retains the full original playlist record and the coordinator checks the active session revision before applying cache effects. Desktop auth, backend and app suites pass. Live YouTube mutations still require verification, and the underlying YouTube client continues to use shared session configuration.
 
@@ -245,7 +245,11 @@ The separate Android consumer assembled against the published Media3 AAR from Ma
 
 Desktop stream selection, completed-download fallback, signed-source memory caching and HTTP recovery now live in `desktop-stream-playback`. The desktop app supplies the same authenticated backend and logger. The module and desktop app tests pass, including checks for cache scope, expiry and retry decisions. Live streaming and packaged playback remain to be verified. Separate Maven publication depends on publishing the desktop backend and its transitive modules.
 
-The Android next-stream preloader now uses `stream-resolver` for target deduplication, cancellation and retry decisions. The app supplies the existing Media3 cache probes and stream resolver. Module tests cover superseded targets, cached sources and retry after failure. Android symbol processing passes, with app compilation and unit tests running separately to constrain memory use.
+The Android next-stream preloader now uses `stream-resolver` for target deduplication, cancellation and retry decisions. The app supplies the existing Media3 cache probes and stream resolver. Module tests cover superseded targets, cached sources and retry after failure. All 137 Android debug unit tests and 110 desktop app tests passed with the recent migrations. Running Android symbol processing and Kotlin compilation in separate Gradle invocations kept memory use within the Windows build host's available commit limit.
+
+The untracked `android-playback/drafts/media3-controller/` holds a proposed shared `PlaybackController` adapter outside Gradle's source sets. Its queued deferred items can reach Media3 with an unresolved URI when playback advances automatically. Before adopting a shared controller, connect deferred sources to the real Media3 data-source path and verify automatic advancement, duplicate occurrences and cancellation of obsolete resolution.
+
+The integrated Android GMS mobile universal debug APK assembled at `app/build/outputs/apk/gmsMobileUniversal/debug/app-gms-mobile-universal-debug.apk`. Assembly excluded the root `spotlessApply` task to avoid applying changes to unrelated source files. The Android debug unit suite, the Media3 adapter tests and the independent consumer build all passed. A fresh native desktop build and physical Android behavior checks remain outstanding.
 
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
