@@ -206,3 +206,9 @@ Android's saved-account JSON model and codec moved unchanged to `account-sdk`. I
 ## Milestone: optional lifecycle helper
 
 `sdk-lifecycle` provides a caller-owned scope and synchronous `AutoCloseable` cleanup registry with deterministic order, parent cancellation and aggregated failures. Tests cover shutdown, failures and concurrency; an independently resolved download example used it to download a local fixture with matching SHA-256. Applications do not yet use this helper, and suspending shutdown remains feature-owned; it is not a complete SDK session.
+
+## Milestone: social and discovery boundaries
+
+Social session orchestration and realtime transport now use headless JVM modules; Android supplies browser login, DataStore session storage and lifecycle scope. The WebSocket and session tests, Android debug compilation and Android debug unit suite pass. The session depends only on the transport interface, so alternate transports do not require Ktor. Live authentication and realtime service behavior remain unverified.
+
+Android discovery's batching and list selection now use `discovery-sdk`; the existing search view-model cache behavior remains in place. The module also contains an experimental bounded cache with single-flight and invalidation tests, but the app does not yet use it. Playlist CSV export uses a headless coordinator and retains order, duplicate entries, CSV escaping and Android storage. Module tests and the Android debug unit suite pass; actual ContentResolver export and live discovery remain unverified.

@@ -9,7 +9,7 @@ version = "0.1.0-SNAPSHOT"
 kotlin { jvmToolchain(21) }
 
 dependencies {
-    api(project(":social-realtime"))
+    api(project(":social-sdk"))
     api(libs.coroutines.core)
     implementation(project(":together-sdk"))
     testImplementation(libs.junit)

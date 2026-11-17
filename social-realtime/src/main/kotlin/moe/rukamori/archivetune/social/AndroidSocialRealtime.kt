@@ -23,18 +23,6 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-interface SocialRealtimeTransport : AutoCloseable {
-    suspend fun connect(
-        token: String,
-        deviceId: String,
-        onConnected: suspend () -> Unit,
-        onMessage: (String) -> Unit,
-    )
-
-    suspend fun publishPresence(presence: SocialPresence)
-    fun disconnect()
-}
-
 class AndroidSocialRealtime(
     private val api: SocialApi,
 ) : SocialRealtimeTransport {
