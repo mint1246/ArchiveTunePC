@@ -9,38 +9,23 @@ package moe.rukamori.archivetune.playback
 
 import androidx.media3.common.Player
 import moe.rukamori.archivetune.db.entities.Song
+import moe.rukamori.archivetune.social.presence.PresenceDecision
+import moe.rukamori.archivetune.social.presence.PresencePlaybackStage
+import moe.rukamori.archivetune.social.presence.PresencePolicyInputs
+import moe.rukamori.archivetune.social.presence.deriveFinalPresenceDecision
+import moe.rukamori.archivetune.social.presence.derivePlaybackSemanticState as deriveSocialPlaybackSemanticState
+import moe.rukamori.archivetune.social.presence.derivePresenceDecision
+import moe.rukamori.archivetune.social.presence.deriveRawPresenceDecision
+import moe.rukamori.archivetune.social.presence.resolvePresenceDecision
 
-enum class PausedPresenceGate {
-    FollowPreference,
-    HiddenByNotificationDismiss,
-}
-
-enum class PresenceMode {
-    Playing,
-    Paused,
-}
-
-enum class PlaybackSemanticState {
-    PlayingReady,
-    PausedByUser,
-    BufferingWhilePlayRequested,
-    Inactive,
-}
-
-enum class HiddenReason {
-    Disabled,
-    NoToken,
-    NoSong,
-    PausedByPreference,
-    PausedByNotificationDismiss,
-    ServiceStopping,
-    NoStablePlaybackYet,
-    PlaybackStalled,
-}
-
-enum class HoldReason {
-    BufferingWhilePlayRequested,
-}
+typealias PausedPresenceGate = moe.rukamori.archivetune.social.presence.PausedPresenceGate
+typealias PresenceMode = moe.rukamori.archivetune.social.presence.PresenceMode
+typealias PlaybackSemanticState = moe.rukamori.archivetune.social.presence.PlaybackSemanticState
+typealias HiddenReason = moe.rukamori.archivetune.social.presence.PresenceHiddenReason
+typealias HoldReason = moe.rukamori.archivetune.social.presence.PresenceHoldReason
+typealias ActiveHoldState = moe.rukamori.archivetune.social.presence.PresenceActiveHoldState
+typealias LastAppliedVisiblePresence = moe.rukamori.archivetune.social.presence.LastAppliedPresence
+typealias DiscordHoldContext = moe.rukamori.archivetune.social.presence.PresenceHoldContext
 
 sealed interface DiscordPresenceDecision {
     data class Visible(
@@ -61,34 +46,15 @@ sealed interface DiscordPresenceDecision {
     ) : DiscordPresenceDecision
 }
 
+data class DiscordPresenceResolution(
+    val decision: DiscordPresenceDecision,
+    val nextHoldState: ActiveHoldState?,
+)
+
 data class DiscordPresenceSnapshot(
     val song: Song,
     val positionMs: Long,
     val isPaused: Boolean,
-)
-
-data class ActiveHoldState(
-    val reason: HoldReason,
-    val songId: String?,
-    val startedAtMs: Long,
-)
-
-data class LastAppliedVisiblePresence(
-    val songId: String,
-    val mode: PresenceMode,
-    val appliedAtMs: Long,
-)
-
-data class DiscordHoldContext(
-    val nowMs: Long,
-    val activeHoldState: ActiveHoldState?,
-    val lastAppliedVisiblePresence: LastAppliedVisiblePresence?,
-    val holdTimeoutMs: Long,
-)
-
-data class DiscordPresenceResolution(
-    val decision: DiscordPresenceDecision,
-    val nextHoldState: ActiveHoldState?,
 )
 
 data class DiscordPresenceInputs(
@@ -103,172 +69,63 @@ data class DiscordPresenceInputs(
     val playbackState: Int = if (isPlaying) Player.STATE_READY else Player.STATE_IDLE,
 )
 
-fun derivePlaybackSemanticState(input: DiscordPresenceInputs): PlaybackSemanticState {
-    if (input.song == null) {
-        return PlaybackSemanticState.Inactive
+private fun DiscordPresenceInputs.toPresencePolicyInputs(): PresencePolicyInputs =
+    PresencePolicyInputs(
+        enabled = enabled,
+        hasToken = hasToken,
+        songId = song?.song?.id,
+        isPlaying = isPlaying,
+        showWhenPaused = showWhenPaused,
+        pausedPresenceGate = pausedPresenceGate,
+        serviceStopping = serviceStopping,
+        playWhenReady = playWhenReady,
+        playbackStage =
+            when (playbackState) {
+                Player.STATE_READY -> PresencePlaybackStage.READY
+                Player.STATE_BUFFERING -> PresencePlaybackStage.BUFFERING
+                Player.STATE_ENDED -> PresencePlaybackStage.ENDED
+                else -> PresencePlaybackStage.IDLE
+            },
+    )
+
+private fun PresenceDecision.toDiscordDecision(): DiscordPresenceDecision =
+    when (this) {
+        is PresenceDecision.Visible -> DiscordPresenceDecision.Visible(songId = songId, mode = mode)
+        is PresenceDecision.Hidden -> DiscordPresenceDecision.Hidden(reason = reason)
+        is PresenceDecision.Hold -> DiscordPresenceDecision.Hold(reason = reason, songId = songId)
     }
-    if (!input.playWhenReady) {
-        return PlaybackSemanticState.PausedByUser
+
+private fun DiscordPresenceDecision.toSocialDecision(): PresenceDecision =
+    when (this) {
+        is DiscordPresenceDecision.Visible -> PresenceDecision.Visible(songId = songId, mode = mode)
+        is DiscordPresenceDecision.Hidden -> PresenceDecision.Hidden(reason = reason)
+        is DiscordPresenceDecision.Hold -> PresenceDecision.Hold(reason = reason, songId = songId)
     }
 
-    return when (input.playbackState) {
-        Player.STATE_READY -> {
-            if (input.isPlaying) {
-                PlaybackSemanticState.PlayingReady
-            } else {
-                PlaybackSemanticState.BufferingWhilePlayRequested
-            }
-        }
-
-        Player.STATE_BUFFERING -> {
-            PlaybackSemanticState.BufferingWhilePlayRequested
-        }
-
-        Player.STATE_IDLE,
-        Player.STATE_ENDED,
-        -> {
-            PlaybackSemanticState.Inactive
-        }
-
-        else -> {
-            PlaybackSemanticState.Inactive
-        }
-    }
-}
+fun derivePlaybackSemanticState(input: DiscordPresenceInputs): PlaybackSemanticState =
+    deriveSocialPlaybackSemanticState(input.toPresencePolicyInputs())
 
 fun deriveRawDiscordPresenceDecision(
     input: DiscordPresenceInputs,
     semanticState: PlaybackSemanticState,
-): DiscordPresenceDecision {
-    if (input.serviceStopping) {
-        return DiscordPresenceDecision.Hidden(HiddenReason.ServiceStopping)
-    }
-    if (!input.enabled) {
-        return DiscordPresenceDecision.Hidden(HiddenReason.Disabled)
-    }
-    if (!input.hasToken) {
-        return DiscordPresenceDecision.Hidden(HiddenReason.NoToken)
-    }
-
-    val song = input.song ?: return DiscordPresenceDecision.Hidden(HiddenReason.NoSong)
-
-    return when (semanticState) {
-        PlaybackSemanticState.PlayingReady -> {
-            DiscordPresenceDecision.Visible(
-                songId = song.song.id,
-                mode = PresenceMode.Playing,
-            )
-        }
-
-        PlaybackSemanticState.PausedByUser -> {
-            when {
-                !input.showWhenPaused -> {
-                    DiscordPresenceDecision.Hidden(HiddenReason.PausedByPreference)
-                }
-
-                input.pausedPresenceGate == PausedPresenceGate.HiddenByNotificationDismiss -> {
-                    DiscordPresenceDecision.Hidden(HiddenReason.PausedByNotificationDismiss)
-                }
-
-                else -> {
-                    DiscordPresenceDecision.Visible(
-                        songId = song.song.id,
-                        mode = PresenceMode.Paused,
-                    )
-                }
-            }
-        }
-
-        PlaybackSemanticState.BufferingWhilePlayRequested -> {
-            DiscordPresenceDecision.Hold(
-                reason = HoldReason.BufferingWhilePlayRequested,
-                songId = song.song.id,
-            )
-        }
-
-        PlaybackSemanticState.Inactive -> {
-            DiscordPresenceDecision.Hidden(HiddenReason.PlaybackStalled)
-        }
-    }
-}
+): DiscordPresenceDecision =
+    deriveRawPresenceDecision(input.toPresencePolicyInputs(), semanticState).toDiscordDecision()
 
 fun resolveDiscordPresenceDecision(
     rawDecision: DiscordPresenceDecision,
     holdContext: DiscordHoldContext,
 ): DiscordPresenceResolution =
-    when (rawDecision) {
-        is DiscordPresenceDecision.Visible -> {
-            DiscordPresenceResolution(
-                decision = rawDecision,
-                nextHoldState = null,
-            )
-        }
-
-        is DiscordPresenceDecision.Hidden -> {
-            DiscordPresenceResolution(
-                decision = rawDecision,
-                nextHoldState = null,
-            )
-        }
-
-        is DiscordPresenceDecision.Hold -> {
-            val lastAppliedVisible =
-                holdContext.lastAppliedVisiblePresence
-                    ?: return DiscordPresenceResolution(
-                        decision = DiscordPresenceDecision.Hidden(HiddenReason.NoStablePlaybackYet),
-                        nextHoldState = null,
-                    )
-
-            val activeHold = holdContext.activeHoldState
-            val isSameHold =
-                activeHold != null &&
-                    activeHold.reason == rawDecision.reason &&
-                    activeHold.songId == rawDecision.songId
-
-            if (isSameHold) {
-                val elapsedMs = holdContext.nowMs - activeHold.startedAtMs
-                if (elapsedMs >= holdContext.holdTimeoutMs) {
-                    return DiscordPresenceResolution(
-                        decision = DiscordPresenceDecision.Hidden(HiddenReason.PlaybackStalled),
-                        nextHoldState = null,
-                    )
-                }
-
-                return DiscordPresenceResolution(
-                    decision = rawDecision,
-                    nextHoldState = activeHold,
-                )
-            }
-
-            DiscordPresenceResolution(
-                decision = rawDecision,
-                nextHoldState =
-                    ActiveHoldState(
-                        reason = rawDecision.reason,
-                        songId = rawDecision.songId ?: lastAppliedVisible.songId,
-                        startedAtMs = holdContext.nowMs,
-                    ),
-            )
-        }
+    resolvePresenceDecision(rawDecision.toSocialDecision(), holdContext).let {
+        DiscordPresenceResolution(decision = it.decision.toDiscordDecision(), nextHoldState = it.nextHoldState)
     }
 
 fun deriveDiscordPresenceDecision(input: DiscordPresenceInputs): DiscordPresenceDecision =
-    deriveFinalDiscordPresenceDecision(
-        input = input,
-        holdContext =
-            DiscordHoldContext(
-                nowMs = 0L,
-                activeHoldState = null,
-                lastAppliedVisiblePresence = null,
-                holdTimeoutMs = 0L,
-            ),
-    ).decision
+    derivePresenceDecision(input.toPresencePolicyInputs()).toDiscordDecision()
 
 fun deriveFinalDiscordPresenceDecision(
     input: DiscordPresenceInputs,
     holdContext: DiscordHoldContext,
-): DiscordPresenceResolution {
-    val semanticState = derivePlaybackSemanticState(input)
-    val rawDecision = deriveRawDiscordPresenceDecision(input, semanticState)
-    return resolveDiscordPresenceDecision(rawDecision, holdContext)
-}
+): DiscordPresenceResolution =
+    deriveFinalPresenceDecision(input.toPresencePolicyInputs(), holdContext).let {
+        DiscordPresenceResolution(decision = it.decision.toDiscordDecision(), nextHoldState = it.nextHoldState)
+    }
