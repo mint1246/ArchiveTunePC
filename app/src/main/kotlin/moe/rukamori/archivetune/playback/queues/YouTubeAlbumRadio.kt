@@ -14,6 +14,7 @@ import moe.rukamori.archivetune.extensions.toMediaItem
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.WatchEndpoint
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.sdk.discovery.RadioContinuationPolicy
 
 class YouTubeAlbumRadio(
     internal val playlistId: String,
@@ -58,17 +59,23 @@ class YouTubeAlbumRadio(
             )
         }
 
-    override fun hasNextPage(): Boolean = !firstTimeLoaded || continuation != null
+    override fun hasNextPage(): Boolean =
+        RadioContinuationPolicy.hasRadioNextPage(
+            firstTimeLoaded = firstTimeLoaded,
+            continuation = continuation,
+        )
 
     override suspend fun nextPage(): List<MediaItem> =
         withContext(IO) {
             val nextResult = YouTube.next(endpoint, continuation).getOrThrow()
             continuation = nextResult.continuation
-            if (!firstTimeLoaded) {
-                firstTimeLoaded = true
-                nextResult.items.subList(albumSongCount, nextResult.items.size).map { it.toMediaItem() }
-            } else {
-                nextResult.items.map { it.toMediaItem() }
-            }
+            val wasFirstTimeLoaded = firstTimeLoaded
+            firstTimeLoaded = true
+            RadioContinuationPolicy
+                .sliceAlbumRadioContinuation(
+                    items = nextResult.items,
+                    albumSongCount = albumSongCount,
+                    firstTimeLoaded = wasFirstTimeLoaded,
+                ).map { it.toMediaItem() }
         }
 }

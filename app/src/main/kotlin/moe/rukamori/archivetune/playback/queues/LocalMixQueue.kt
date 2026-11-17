@@ -16,6 +16,7 @@ import moe.rukamori.archivetune.extensions.toMediaItem
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.WatchEndpoint
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.sdk.discovery.RadioContinuationPolicy
 
 class LocalMixQueue(
     private val database: MusicDatabase,
@@ -32,16 +33,14 @@ class LocalMixQueue(
                     .filterNot { it.song.song.isPodcast }
                     .map { it.map.songId }
 
-            val relatedSongs =
-                playlistSongIds.flatMap { songId ->
-                    database.relatedSongs(songId)
-                }
-            val uniqueRelated =
-                relatedSongs
-                    .filterNot { it.song.isPodcast }
-                    .filter { song -> song.id !in playlistSongIds }
-                    .distinctBy { it.id }
-            val finalMix = uniqueRelated.take(maxMixSize)
+            val finalMix =
+                RadioContinuationPolicy.selectLocalMixItems(
+                    playlistSongIds = playlistSongIds,
+                    relatedSongsForSeed = { songId -> database.relatedSongs(songId) },
+                    idOf = { it.id },
+                    isPodcast = { it.song.isPodcast },
+                    maxMixSize = maxMixSize,
+                )
 
             if (finalMix.isNotEmpty()) {
                 return@withContext Queue.Status(
@@ -60,7 +59,6 @@ class LocalMixQueue(
                 nextResult
                     ?.items
                     ?.map { it.toMediaItem() }
-                    ?.filter { it.mediaId !in playlistSongIds }
                     .orEmpty()
 
             val fromRelated =
@@ -72,13 +70,16 @@ class LocalMixQueue(
                             .getOrNull()
                             ?.songs
                             ?.map { it.toMediaItem() }
-                            ?.filter { it.mediaId !in playlistSongIds }
                     }.orEmpty()
 
             val onlineMix =
-                (fromNext + fromRelated)
-                    .distinctBy { it.mediaId }
-                    .take(maxMixSize)
+                RadioContinuationPolicy.mergeOnlineMixItems(
+                    playlistSongIds = playlistSongIds.toSet(),
+                    nextItems = fromNext,
+                    relatedItems = fromRelated,
+                    idOf = { it.mediaId },
+                    maxMixSize = maxMixSize,
+                )
 
             Queue.Status(
                 title = "Mix from Playlist",

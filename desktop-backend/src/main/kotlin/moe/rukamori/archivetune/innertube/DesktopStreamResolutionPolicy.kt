@@ -6,24 +6,16 @@
  */
 package moe.rukamori.archivetune.innertube
 
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import java.util.Locale
+import moe.rukamori.archivetune.stream.StreamAudioQuality
 
 /** Developer/benchmark selection; playback and download interfaces remain the same. */
-enum class DesktopStreamResolutionMode { LEGACY, YT_DLP, HYBRID }
+typealias DesktopStreamResolutionMode = moe.rukamori.archivetune.stream.DesktopStreamResolutionMode
 
 internal fun configuredDesktopStreamResolutionMode(
     value: String? = System.getProperty("archivetune.streamResolver") ?: System.getenv("ARCHIVETUNE_STREAM_RESOLVER"),
 ): DesktopStreamResolutionMode =
-    when (value?.trim()?.lowercase(Locale.ROOT)) {
-        null, "", "hybrid" -> DesktopStreamResolutionMode.HYBRID
-        "ytdlp" -> DesktopStreamResolutionMode.YT_DLP
-        "legacy" -> DesktopStreamResolutionMode.LEGACY
-        else -> throw IllegalArgumentException("Unknown desktop stream resolver mode")
-    }
+    moe.rukamori.archivetune.stream.configuredDesktopStreamResolutionMode(value)
 
 /**
  * The upstream extractor owns compatibility recovery. The optional fast path uses the
@@ -36,38 +28,25 @@ internal suspend fun <T> resolveDesktopStream(
     nativeTimeoutMillis: Long = 2_000,
     native: suspend () -> T,
     upstream: suspend () -> T,
-): T = when (mode) {
-    DesktopStreamResolutionMode.LEGACY -> native()
-    DesktopStreamResolutionMode.YT_DLP -> upstream()
-    DesktopStreamResolutionMode.HYBRID -> {
-        require(nativeTimeoutMillis > 0)
-        val fast = try {
-            withTimeoutOrNull(nativeTimeoutMillis) { CompletedNativeStream(native()) }
-        } catch (cancellation: CancellationException) {
-            // User/preload cancellation and the enclosing deadline never trigger new work.
-            throw cancellation
-        } catch (_: Exception) {
-            null
-        }
-        // Structured cancellation has finished native cleanup before fallback starts.
-        // Surface the upstream error if both fail; retaining native URL-bearing errors
-        // as suppressed exceptions would break the subprocess's redaction contract.
-        if (fast != null) fast.value else upstream()
-    }
-}
-
-private data class CompletedNativeStream<T>(val value: T)
+): T =
+    moe.rukamori.archivetune.stream.resolveDesktopStream(
+        mode = mode,
+        nativeTimeoutMillis = nativeTimeoutMillis,
+        native = native,
+        upstream = upstream,
+    )
 
 /** The non-cookie fast client must not hide premium formats requested by a signed-in user. */
 internal fun allowsDirectAudioFastPath(quality: JvmAudioQuality, auth: PlaybackAuthState): Boolean =
-    quality != JvmAudioQuality.HIGHEST || !auth.hasLoginCookie
+    moe.rukamori.archivetune.stream.allowsDirectAudioFastPath(quality.toStreamAudioQuality(), auth)
 
 /** No URL transformation, JS, player-script download or proof-token minting in the fast path. */
-internal fun directAudioFastPathUrl(format: PlayerResponse.StreamingData.Format): String? {
-    if (!format.isAudio || !format.mimeType.startsWith("audio/") ||
-        format.signatureCipher != null || format.cipher != null) return null
-    val raw = format.url ?: return null
-    val url = raw.toHttpUrlOrNull() ?: return null
-    if (url.username.isNotEmpty() || url.password.isNotEmpty() || "n" in url.queryParameterNames) return null
-    return raw
-}
+internal fun directAudioFastPathUrl(format: PlayerResponse.StreamingData.Format): String? =
+    moe.rukamori.archivetune.stream.directAudioFastPathUrl(format)
+
+private fun JvmAudioQuality.toStreamAudioQuality(): StreamAudioQuality =
+    when (this) {
+        JvmAudioQuality.LOW -> StreamAudioQuality.LOW
+        JvmAudioQuality.HIGH -> StreamAudioQuality.HIGH
+        JvmAudioQuality.HIGHEST -> StreamAudioQuality.HIGHEST
+    }

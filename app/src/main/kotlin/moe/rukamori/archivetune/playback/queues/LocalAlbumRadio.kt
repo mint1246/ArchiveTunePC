@@ -15,6 +15,7 @@ import moe.rukamori.archivetune.extensions.toMediaItem
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.models.WatchEndpoint
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.sdk.discovery.RadioContinuationPolicy
 
 class LocalAlbumRadio(
     internal val albumWithSongs: AlbumWithSongs,
@@ -44,26 +45,33 @@ class LocalAlbumRadio(
             )
         }
 
-    override fun hasNextPage(): Boolean = !localOnly && (!firstTimeLoaded || continuation != null)
+    override fun hasNextPage(): Boolean =
+        RadioContinuationPolicy.hasRadioNextPage(
+            localOnly = localOnly,
+            firstTimeLoaded = firstTimeLoaded,
+            continuation = continuation,
+        )
 
     override suspend fun nextPage(): List<MediaItem> =
         withContext(IO) {
             if (localOnly) return@withContext emptyList()
-            if (!firstTimeLoaded) {
+            val wasFirstTimeLoaded = firstTimeLoaded
+            if (!wasFirstTimeLoaded) {
                 playlistId =
                     YouTube
                         .album(albumWithSongs.album.id)
                         .getOrThrow()
                         .album.playlistId
-                val nextResult = YouTube.next(endpoint, continuation).getOrThrow()
-                continuation = nextResult.continuation
-                firstTimeLoaded = true
-                return@withContext nextResult.items
-                    .filterNot { it.id in initialSongIds }
-                    .map { it.toMediaItem() }
             }
             val nextResult = YouTube.next(endpoint, continuation).getOrThrow()
             continuation = nextResult.continuation
-            nextResult.items.map { it.toMediaItem() }
+            firstTimeLoaded = true
+            RadioContinuationPolicy
+                .filterLocalAlbumRadioItems(
+                    items = nextResult.items,
+                    initialSongIds = initialSongIds,
+                    firstTimeLoaded = wasFirstTimeLoaded,
+                    idOf = { it.id },
+                ).map { it.toMediaItem() }
         }
 }

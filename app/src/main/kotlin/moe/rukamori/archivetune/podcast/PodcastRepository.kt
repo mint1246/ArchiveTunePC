@@ -18,6 +18,7 @@ import moe.rukamori.archivetune.db.entities.PodcastEntity
 import moe.rukamori.archivetune.innertube.YouTube
 import moe.rukamori.archivetune.innertube.pages.PodcastPage
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.sdk.discovery.PodcastLibraryPolicy
 import moe.rukamori.archivetune.utils.SyncUtils
 import java.time.LocalDateTime
 import javax.inject.Inject
@@ -68,11 +69,11 @@ class PodcastRepository
                     isPodcastSaved = podcast?.isSaved == true,
                     episodeIds =
                         ImmutableSet.copyOf(
-                            episodes
-                                .asSequence()
-                                .filter { song -> song.song.inLibrary != null }
-                                .map { song -> song.id }
-                                .toList(),
+                            PodcastLibraryPolicy.savedEpisodeIds(
+                                episodes = episodes,
+                                isInLibrary = { song -> song.song.inLibrary != null },
+                                idOf = { song -> song.id },
+                            ),
                         ),
                 )
             }
@@ -94,8 +95,12 @@ class PodcastRepository
                             ),
                         )
                     }
-                    if (!save && current.remoteSavedAt == null) return@withContext Result.success(Unit)
-                    val playlistId = current.playlistId?.takeIf(String::isNotBlank) ?: return@withContext Result.success(Unit)
+                    val playlistId =
+                        PodcastLibraryPolicy.shouldSyncPodcastSaveRemotely(
+                            save = save,
+                            hasRemoteSavedTimestamp = current.remoteSavedAt != null,
+                            playlistId = current.playlistId,
+                        ) ?: return@withContext Result.success(Unit)
                     syncUtils.requireLibrarySyncEnabled()
                     YouTube.likePlaylist(playlistId, save).getOrThrow()
                     database.withTransaction {
@@ -156,7 +161,12 @@ class PodcastRepository
                         authorId = item.author?.id,
                         thumbnailUrl = item.thumbnail,
                         localSavedAt = existing?.localSavedAt,
-                        remoteSavedAt = if (page.isSaved) existing?.remoteSavedAt ?: now else null,
+                        remoteSavedAt =
+                            PodcastLibraryPolicy.reconcileRemoteSavedFlag(
+                                isRemotelySaved = page.isSaved,
+                                existingRemoteSavedAt = existing?.remoteSavedAt,
+                                now = now,
+                            ),
                         lastUpdateTime = now,
                     ),
                 )
