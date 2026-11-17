@@ -9,15 +9,10 @@ package moe.rukamori.archivetune.statistics
 
 import androidx.sqlite.db.SupportSQLiteDatabase
 import moe.rukamori.archivetune.db.MusicDatabase
-import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlin.math.min
 
 /**
  * Authoritative Android statistics persisted in the existing song.db without changing Room's schema.
@@ -29,10 +24,12 @@ import kotlin.math.min
  */
 class AndroidStatisticsStore(
     private val database: MusicDatabase,
-    val zoneId: ZoneId = ZoneId.systemDefault(),
-) : AndroidStatisticsSink {
+    override val zoneId: ZoneId = ZoneId.systemDefault(),
+) : AndroidStatisticsSink,
+    AndroidStatisticsQuerySource {
     @Volatile
     private var schemaReady = false
+    private val queryService = AndroidStatisticsQueryService(this)
 
     override fun recordAudible(
         song: AndroidStatisticsSong,
@@ -47,7 +44,7 @@ class AndroidStatisticsStore(
         db.beginTransaction()
         try {
             upsertMetadata(db, song)
-            splitAcrossHours(startEpochMs, durationMs) { hourStart, sliceMs ->
+            splitAcrossHours(startEpochMs, durationMs, zoneId) { hourStart, sliceMs ->
                 db.execSQL(
                     "INSERT OR IGNORE INTO $TABLE_HOUR(songId, hourStartEpochMs, listeningTimeMs, playCount) VALUES (?, ?, 0, 0)",
                     arrayOf<Any?>(song.id, hourStart),
@@ -58,7 +55,7 @@ class AndroidStatisticsStore(
                 )
             }
             if (playAtEpochMs != null) {
-                val hourStart = hourStartEpochMs(playAtEpochMs)
+                val hourStart = hourStartEpochMs(playAtEpochMs, zoneId)
                 db.execSQL(
                     "INSERT OR IGNORE INTO $TABLE_HOUR(songId, hourStartEpochMs, listeningTimeMs, playCount) VALUES (?, ?, 0, 0)",
                     arrayOf<Any?>(song.id, hourStart),
@@ -91,129 +88,70 @@ class AndroidStatisticsStore(
 
     fun overview(
         range: AndroidStatisticsEpochRange,
-        songLimit: Int = 20,
-        artistLimit: Int = 12,
-        albumLimit: Int = 12,
-    ): AndroidStatisticsOverview {
-        require(songLimit >= 0 && artistLimit >= 0 && albumLimit >= 0) { "Statistics limits must be non-negative" }
+        songLimit: Int = AndroidStatisticsQueryService.DEFAULT_SONG_LIMIT,
+        artistLimit: Int = AndroidStatisticsQueryService.DEFAULT_ARTIST_LIMIT,
+        albumLimit: Int = AndroidStatisticsQueryService.DEFAULT_ALBUM_LIMIT,
+    ): AndroidStatisticsOverview = queryService.overview(range, songLimit, artistLimit, albumLimit)
+
+    override fun querySummary(range: AndroidStatisticsEpochRange): AndroidStatisticsSummary {
         val db = writableDb()
         val where = rangeWhere(range, alias = "h")
         val args = rangeArgs(range)
 
-        val summary =
-            AndroidStatisticsSummary(
-                totalListeningMs = scalarLong(db, "SELECT COALESCE(SUM(h.listeningTimeMs), 0) FROM $TABLE_HOUR h$where", args),
-                totalPlays = scalarLong(db, "SELECT COALESCE(SUM(h.playCount), 0) FROM $TABLE_HOUR h$where", args),
-                uniqueSongs = scalarLong(db, "SELECT COUNT(DISTINCT h.songId) FROM $TABLE_HOUR h$where", args).toSafeInt(),
-                uniqueArtists =
-                    scalarLong(
-                        db,
-                        """
-                        SELECT COUNT(DISTINCT a.artistKey)
-                        FROM $TABLE_ARTIST a
-                        JOIN $TABLE_HOUR h ON h.songId = a.songId
-                        $where
-                        """.trimIndent(),
-                        args,
-                    ).toSafeInt(),
-                uniqueAlbums =
-                    scalarLong(
-                        db,
-                        """
-                        SELECT COUNT(DISTINCT CASE
-                            WHEN s.albumId IS NOT NULL AND s.albumId != '' THEN 'id:' || s.albumId
-                            WHEN s.albumTitle IS NOT NULL AND s.albumTitle != '' THEN 'title:' || lower(trim(s.albumTitle))
-                            ELSE NULL
-                        END)
-                        FROM $TABLE_SONG s
-                        JOIN $TABLE_HOUR h ON h.songId = s.songId
-                        $where
-                        """.trimIndent(),
-                        args,
-                    ).toSafeInt(),
-            )
-
-        val hourSlices = hourSlices(db, range)
-        return AndroidStatisticsOverview(
-            summary = summary,
-            dailyListening = dailyTrend(hourSlices, range),
-            listeningByDayOfWeek = dayOfWeekTrend(hourSlices),
-            listeningByHour = hourOfDayTrend(hourSlices),
-            topSongs = topSongs(db, range, songLimit),
-            topArtists = topArtists(db, range, artistLimit),
-            topAlbums = topAlbums(db, range, albumLimit),
+        return AndroidStatisticsSummary(
+            totalListeningMs = scalarLong(db, "SELECT COALESCE(SUM(h.listeningTimeMs), 0) FROM $TABLE_HOUR h$where", args),
+            totalPlays = scalarLong(db, "SELECT COALESCE(SUM(h.playCount), 0) FROM $TABLE_HOUR h$where", args),
+            uniqueSongs = scalarLong(db, "SELECT COUNT(DISTINCT h.songId) FROM $TABLE_HOUR h$where", args).toSafeInt(),
+            uniqueArtists =
+                scalarLong(
+                    db,
+                    """
+                    SELECT COUNT(DISTINCT a.artistKey)
+                    FROM $TABLE_ARTIST a
+                    JOIN $TABLE_HOUR h ON h.songId = a.songId
+                    $where
+                    """.trimIndent(),
+                    args,
+                ).toSafeInt(),
+            uniqueAlbums =
+                scalarLong(
+                    db,
+                    """
+                    SELECT COUNT(DISTINCT CASE
+                        WHEN s.albumId IS NOT NULL AND s.albumId != '' THEN 'id:' || s.albumId
+                        WHEN s.albumTitle IS NOT NULL AND s.albumTitle != '' THEN 'title:' || lower(trim(s.albumTitle))
+                        ELSE NULL
+                    END)
+                    FROM $TABLE_SONG s
+                    JOIN $TABLE_HOUR h ON h.songId = s.songId
+                    $where
+                    """.trimIndent(),
+                    args,
+                ).toSafeInt(),
         )
     }
 
-    private fun hourSlices(
-        db: SupportSQLiteDatabase,
-        range: AndroidStatisticsEpochRange,
-    ): List<Pair<Long, Long>> {
+    override fun queryHourSlices(range: AndroidStatisticsEpochRange): List<AndroidStatisticsHourSlice> {
+        val db = writableDb()
         val where = rangeWhere(range, "h")
-        val result = ArrayList<Pair<Long, Long>>()
+        val result = ArrayList<AndroidStatisticsHourSlice>()
         db.query(
             "SELECT h.hourStartEpochMs, COALESCE(SUM(h.listeningTimeMs), 0) FROM $TABLE_HOUR h$where GROUP BY h.hourStartEpochMs ORDER BY h.hourStartEpochMs",
             rangeArgs(range).toTypedArray(),
         ).use { cursor ->
-            while (cursor.moveToNext()) result += cursor.getLong(0) to cursor.getLong(1)
+            while (cursor.moveToNext()) {
+                result += AndroidStatisticsHourSlice(cursor.getLong(0), cursor.getLong(1))
+            }
         }
         return result
     }
 
-    private fun dailyTrend(
-        slices: List<Pair<Long, Long>>,
-        range: AndroidStatisticsEpochRange,
-    ): List<AndroidStatisticsBucket> {
-        if (slices.isEmpty()) return emptyList()
-        val values = LinkedHashMap<LocalDate, Long>()
-        slices.forEach { (epochMs, listeningMs) ->
-            val date = Instant.ofEpochMilli(epochMs).atZone(zoneId).toLocalDate()
-            values[date] = (values[date] ?: 0L) + listeningMs
-        }
-        val first = range.fromEpochMs
-            ?.let { Instant.ofEpochMilli(it).atZone(zoneId).toLocalDate() }
-            ?: values.keys.first()
-        val lastFromRange = range.toEpochMs
-            ?.let { end -> Instant.ofEpochMilli((end - 1L).coerceAtLeast(0L)).atZone(zoneId).toLocalDate() }
-        val last = lastFromRange ?: values.keys.last()
-        if (first > last) return emptyList()
-        val formatter = DateTimeFormatter.ofPattern("d MMM")
-        return generateSequence(first) { date -> date.plusDays(1).takeIf { it <= last } }
-            .map { date -> AndroidStatisticsBucket(date.format(formatter), values[date] ?: 0L) }
-            .toList()
-    }
-
-    private fun dayOfWeekTrend(slices: List<Pair<Long, Long>>): List<AndroidStatisticsBucket> {
-        if (slices.isEmpty()) return emptyList()
-        val totals = LongArray(7)
-        slices.forEach { (epochMs, listeningMs) ->
-            val day = Instant.ofEpochMilli(epochMs).atZone(zoneId).dayOfWeek
-            totals[day.value % 7] += listeningMs // Sunday first, matching desktop.
-        }
-        val labels = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-        return totals.indices
-            .filter { totals[it] > 0L }
-            .map { index -> AndroidStatisticsBucket(labels[index], totals[index]) }
-    }
-
-    private fun hourOfDayTrend(slices: List<Pair<Long, Long>>): List<AndroidStatisticsBucket> {
-        if (slices.isEmpty()) return emptyList()
-        val totals = LongArray(24)
-        slices.forEach { (epochMs, listeningMs) ->
-            val hour = Instant.ofEpochMilli(epochMs).atZone(zoneId).hour
-            totals[hour] += listeningMs
-        }
-        return totals.indices
-            .filter { totals[it] > 0L }
-            .map { hour -> AndroidStatisticsBucket("%02d:00".format(hour), totals[hour]) }
-    }
-
-    private fun topSongs(
-        db: SupportSQLiteDatabase,
+    override fun queryTopSongs(
         range: AndroidStatisticsEpochRange,
         limit: Int,
     ): List<AndroidStatisticsMedia> {
         if (limit == 0) return emptyList()
+        val db = writableDb()
         val where = rangeWhere(range, "h")
         val args = rangeArgs(range) + limit
         val sql =
@@ -249,12 +187,12 @@ class AndroidStatisticsStore(
         return result
     }
 
-    private fun topArtists(
-        db: SupportSQLiteDatabase,
+    override fun queryTopArtists(
         range: AndroidStatisticsEpochRange,
         limit: Int,
     ): List<AndroidStatisticsMedia> {
         if (limit == 0) return emptyList()
+        val db = writableDb()
         val where = rangeWhere(range, "h")
         val args = rangeArgs(range) + limit
         val sql =
@@ -292,12 +230,12 @@ class AndroidStatisticsStore(
         return result
     }
 
-    private fun topAlbums(
-        db: SupportSQLiteDatabase,
+    override fun queryTopAlbums(
         range: AndroidStatisticsEpochRange,
         limit: Int,
     ): List<AndroidStatisticsMedia> {
         if (limit == 0) return emptyList()
+        val db = writableDb()
         val rangeAnd = rangeAnd(range, "h")
         val args = rangeArgs(range) + limit
         val albumKey =
@@ -508,28 +446,6 @@ class AndroidStatisticsStore(
         schemaReady = true
     }
 
-    private fun splitAcrossHours(
-        startEpochMs: Long,
-        durationMs: Long,
-        block: (Long, Long) -> Unit,
-    ) {
-        var cursor = startEpochMs
-        var remaining = durationMs
-        while (remaining > 0L) {
-            val zoned = Instant.ofEpochMilli(cursor).atZone(zoneId)
-            val hourStart = zoned.truncatedTo(ChronoUnit.HOURS)
-            val nextHour = hourStart.plusHours(1).toInstant().toEpochMilli()
-            val untilBoundary = (nextHour - cursor).takeIf { it > 0L } ?: remaining
-            val slice = min(remaining, untilBoundary)
-            block(hourStart.toInstant().toEpochMilli(), slice)
-            cursor = safeAdd(cursor, slice)
-            remaining -= slice
-        }
-    }
-
-    private fun hourStartEpochMs(epochMs: Long): Long =
-        Instant.ofEpochMilli(epochMs).atZone(zoneId).truncatedTo(ChronoUnit.HOURS).toInstant().toEpochMilli()
-
     private fun rangeWhere(
         range: AndroidStatisticsEpochRange,
         alias: String,
@@ -573,14 +489,7 @@ class AndroidStatisticsStore(
     private fun android.database.Cursor.getStringOrNull(index: Int): String? =
         if (isNull(index)) null else getString(index)
 
-    private fun artistKey(artist: AndroidStatisticsArtist): String =
-        artist.id?.takeIf(String::isNotBlank)?.let { "id:$it" }
-            ?: "name:${artist.name.trim().lowercase()}"
-
     private fun Long.toSafeInt(): Int = coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-
-    private fun safeAdd(left: Long, right: Long): Long =
-        if (right > 0L && left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
 
     companion object {
         private const val TABLE_SONG = "archivetune_statistics_song"

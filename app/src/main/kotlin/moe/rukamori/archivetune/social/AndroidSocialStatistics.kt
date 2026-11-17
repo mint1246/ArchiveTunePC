@@ -9,19 +9,21 @@ package moe.rukamori.archivetune.social
 
 import moe.rukamori.archivetune.statistics.AndroidStatisticsMedia
 import moe.rukamori.archivetune.statistics.AndroidStatisticsOverview
+import moe.rukamori.archivetune.statistics.AndroidStatisticsQueryService
 import moe.rukamori.archivetune.statistics.AndroidStatisticsRange
 import moe.rukamori.archivetune.statistics.AndroidStatisticsStore
 import moe.rukamori.archivetune.statistics.AndroidStatisticsTarget
-import moe.rukamori.archivetune.statistics.toEpochRange
 
 /** Builds the same complete social statistics payload desktop publishes. */
 fun AndroidStatisticsStore.socialSnapshot(nowEpochMs: Long = System.currentTimeMillis()): SocialStatisticsSnapshot =
     SocialStatisticsSnapshot(
         ranges =
-            AndroidStatisticsRange.entries.associate { range ->
-                val overview = overview(range.toEpochRange(nowEpochMs, zoneId))
-                range.name to overview.toSocialRange(range)
-            },
+            AndroidStatisticsQueryService(this)
+                .allRangeOverviews(nowEpochMs = nowEpochMs)
+                .entries
+                .associate { (range, overview) ->
+                    range.name to overview.toSocialRange(range)
+                },
         updatedAt = nowEpochMs,
     )
 

@@ -46,6 +46,7 @@ class AndroidStatisticsViewModel
         database: MusicDatabase,
     ) : ViewModel() {
         private val store = AndroidStatisticsStore(database)
+        private val queryService = AndroidStatisticsQueryService(store)
         private val selectedRange = MutableStateFlow(AndroidStatisticsRange.DAYS_7)
         private val refreshNonce = MutableStateFlow(0L)
 
@@ -54,9 +55,7 @@ class AndroidStatisticsViewModel
                 .flatMapLatest { range ->
                     flow<AndroidStatisticsUiState> {
                         emit(AndroidStatisticsUiState.Loading)
-                        val now = System.currentTimeMillis()
-                        val epochRange = range.toEpochRange(now, store.zoneId)
-                        val overview = store.overview(epochRange)
+                        val overview = queryService.overviewForRange(range)
                         emit(AndroidStatisticsUiState.Content(range, overview))
                     }.flowOn(Dispatchers.IO)
                         .catch { throwable ->
