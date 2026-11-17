@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.Playlist
 import moe.rukamori.archivetune.db.entities.TagEntity
+import moe.rukamori.archivetune.sdk.playlist.PlaylistTagPolicy
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -81,10 +82,11 @@ class PlaylistTagsRepository
             playlistId: String,
             tagIds: List<String>,
         ) = withContext(Dispatchers.IO) {
+            val assignment = PlaylistTagPolicy.planReplacePlaylistTags(playlistId, tagIds) ?: return@withContext
             database.withTransaction {
-                removeAllPlaylistTags(playlistId)
-                tagIds.forEach { tagId ->
-                    addTagToPlaylist(playlistId, tagId)
+                removeAllPlaylistTags(assignment.playlistId)
+                assignment.tagIds.forEach { tagId ->
+                    addTagToPlaylist(assignment.playlistId, tagId)
                 }
             }
         }
@@ -93,10 +95,11 @@ class PlaylistTagsRepository
             playlistIds: List<String>,
             tagIds: List<String>,
         ) = withContext(Dispatchers.IO) {
+            val assignment = PlaylistTagPolicy.planBulkTagAssignment(playlistIds, tagIds) ?: return@withContext
             database.withTransaction {
                 addTagsToPlaylists(
-                    playlistIds = playlistIds,
-                    tagIds = tagIds,
+                    playlistIds = assignment.playlistIds,
+                    tagIds = assignment.tagIds,
                 )
             }
         }

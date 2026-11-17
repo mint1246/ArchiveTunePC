@@ -17,6 +17,7 @@ import moe.rukamori.archivetune.innertube.models.PlaylistItem
 import moe.rukamori.archivetune.innertube.models.PodcastItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.models.YTItem
+import moe.rukamori.archivetune.sdk.playlist.AiContentFilterMatcher
 import javax.inject.Inject
 
 class ObserveAiContentFilterUseCase
@@ -62,11 +63,11 @@ class LoadAiContentFilterPolicyUseCase
             repository.refreshIfStale()
             val lists = repository.loadLists()
             val blockedKeys =
-                if (settings.includeModerateConfidence) {
-                    lists.blocklist + lists.warnlist
-                } else {
-                    lists.blocklist
-                }
+                AiContentFilterMatcher.effectiveBlockedKeys(
+                    blocklist = lists.blocklist,
+                    warnlist = lists.warnlist,
+                    includeModerateConfidence = settings.includeModerateConfidence,
+                )
             return AiContentFilterPolicy(
                 enabled = true,
                 blockedChannelKeys = blockedKeys,
@@ -80,40 +81,36 @@ class FilterAiContentUseCase
         operator fun <T : YTItem> invoke(
             items: List<T>,
             policy: AiContentFilterPolicy,
-        ): List<T> {
-            if (!policy.enabled || policy.blockedChannelKeys.isEmpty()) return items
-            return items.filterNot { item -> item.matches(policy.blockedChannelKeys) }
-        }
+        ): List<T> =
+            AiContentFilterMatcher.filterItems(
+                items = items,
+                enabled = policy.enabled,
+                blockedChannelKeys = policy.blockedChannelKeys,
+                creatorCandidates = { item -> item.creatorCandidates() },
+            )
 
-        private fun YTItem.matches(blockedChannelKeys: Set<String>): Boolean = creatorKeys().any(blockedChannelKeys::contains)
-
-        private fun YTItem.creatorKeys(): Sequence<String> =
+        private fun YTItem.creatorCandidates(): Sequence<String?> =
             when (this) {
                 is SongItem -> {
-                    artists.asSequence().flatMap { artist -> artist.keys() }
+                    artists.asSequence().flatMap { artist -> artist.candidates() }
                 }
 
                 is AlbumItem -> {
-                    artists.orEmpty().asSequence().flatMap { artist -> artist.keys() }
+                    artists.orEmpty().asSequence().flatMap { artist -> artist.candidates() }
                 }
 
                 is PlaylistItem -> {
-                    author?.keys().orEmpty()
+                    author?.candidates().orEmpty()
                 }
 
                 is ArtistItem -> {
                     sequenceOf(title, id, channelId)
-                        .filterNotNull()
-                        .mapNotNull(::normalizeChannelKey)
                 }
 
-                is PodcastItem -> author?.keys().orEmpty()
+                is PodcastItem -> author?.candidates().orEmpty()
 
-                is EpisodeItem -> podcast?.keys().orEmpty()
+                is EpisodeItem -> podcast?.candidates().orEmpty()
             }
 
-        private fun Artist.keys(): Sequence<String> =
-            sequenceOf(name, id)
-                .filterNotNull()
-                .mapNotNull(::normalizeChannelKey)
+        private fun Artist.candidates(): Sequence<String?> = sequenceOf(name, id)
     }

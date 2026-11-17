@@ -27,6 +27,7 @@ import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.constants.AiContentFilterEnabledKey
 import moe.rukamori.archivetune.constants.AiContentFilterIncludeModerateKey
 import moe.rukamori.archivetune.constants.AiContentFilterLastUpdatedKey
+import moe.rukamori.archivetune.sdk.playlist.AiContentFilterMatcher
 import moe.rukamori.archivetune.utils.dataStore
 import okhttp3.Call
 import okhttp3.Callback
@@ -287,12 +288,7 @@ class AiContentFilterRepository
         }
 
         private fun parseChannelList(raw: String): Set<String> =
-            raw
-                .lineSequence()
-                .map(String::trim)
-                .filter { line -> line.isNotEmpty() && !line.startsWith('!') }
-                .mapNotNull(::normalizeChannelKey)
-                .toSet()
+            AiContentFilterMatcher.parseChannelList(raw)
 
         private fun AiChannelLists.toStatus(lastUpdatedEpochMillis: Long) =
             AiContentFilterStatus(
@@ -319,11 +315,4 @@ class AiContentFilterRepository
     }
 
 internal fun normalizeChannelKey(value: String): String? =
-    value
-        .trim()
-        .removePrefix("@")
-        .asSequence()
-        .filter(Char::isLetterOrDigit)
-        .joinToString(separator = "")
-        .lowercase()
-        .takeIf { it.isNotBlank() }
+    AiContentFilterMatcher.normalizeChannelKey(value)

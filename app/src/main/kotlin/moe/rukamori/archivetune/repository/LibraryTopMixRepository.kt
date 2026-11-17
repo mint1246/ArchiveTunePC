@@ -24,18 +24,18 @@ import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.LibraryTopMixEntity
 import moe.rukamori.archivetune.db.entities.LibraryTopMixSongMap
 import moe.rukamori.archivetune.db.entities.Song
-import moe.rukamori.archivetune.extensions.filterExplicit
 import moe.rukamori.archivetune.library.GeneratedLibraryTopMix
 import moe.rukamori.archivetune.library.LibraryTopMix
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.models.toMediaMetadata
+import moe.rukamori.archivetune.sdk.playlist.LibraryTopMixPolicy
 import moe.rukamori.archivetune.utils.dataStore
 import java.time.LocalDateTime
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val LibraryTopMixCandidateLimit = 300
-private const val LibraryTopMixDisplayLimit = 5
+private const val LibraryTopMixCandidateLimit = LibraryTopMixPolicy.CANDIDATE_LIMIT
+private const val LibraryTopMixDisplayLimit = LibraryTopMixPolicy.DISPLAY_LIMIT
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
@@ -51,24 +51,21 @@ class LibraryTopMixRepository
                     database
                         .libraryTopMixes(LibraryTopMixDisplayLimit)
                         .map { mixes ->
-                            mixes.mapNotNull { mix ->
-                                val tracks =
-                                    database
-                                        .libraryTopMixSongs(mix.id)
-                                        .filterNot { song -> song.song.isPodcast }
-                                        .filterExplicit(hideExplicit)
-                                        .map { it.toMediaMetadata() }
-                                if (tracks.isEmpty()) {
-                                    null
-                                } else {
+                            LibraryTopMixPolicy.buildVisibleMixes(
+                                mixes = mixes,
+                                tracksForMix = { mix -> database.libraryTopMixSongs(mix.id) },
+                                hideExplicit = hideExplicit,
+                                isPodcast = { song -> song.song.isPodcast },
+                                isExplicit = { song -> song.song.explicit },
+                                mapMix = { mix, eligibleTracks ->
                                     LibraryTopMix(
                                         id = mix.id,
                                         title = mix.title,
                                         description = mix.description,
-                                        tracks = ImmutableList.copyOf(tracks),
+                                        tracks = ImmutableList.copyOf(eligibleTracks.map { it.toMediaMetadata() }),
                                     )
-                                }
-                            }
+                                },
+                            )
                         }
                 }.flowOn(Dispatchers.IO)
 
@@ -78,17 +75,20 @@ class LibraryTopMixRepository
                     database
                         .recentSongs(limit)
                         .map { songs ->
-                            songs
-                                .filterNot { it.song.isPodcast }
-                                .filterExplicit(hideExplicit)
+                            LibraryTopMixPolicy.filterEligibleTracks(
+                                tracks = songs,
+                                hideExplicit = hideExplicit,
+                                isPodcast = { it.song.isPodcast },
+                                isExplicit = { it.song.explicit },
+                            )
                         }
                 }.first()
 
         suspend fun replaceTopMixes(mixes: List<GeneratedLibraryTopMix>) {
             database.withTransaction {
                 deleteLibraryTopMixes()
-                mixes
-                    .take(LibraryTopMixDisplayLimit)
+                LibraryTopMixPolicy
+                    .limitTopMixes(mixes, LibraryTopMixDisplayLimit)
                     .forEachIndexed { mixIndex, mix ->
                         insert(
                             LibraryTopMixEntity(
@@ -119,10 +119,13 @@ class LibraryTopMixRepository
                     database
                         .recentSongs(LibraryTopMixCandidateLimit)
                         .map { songs ->
-                            songs
-                                .filterNot { it.song.isPodcast }
-                                .filterExplicit(hideExplicit)
-                                .map { it.toMediaMetadata() }
+                            LibraryTopMixPolicy
+                                .filterEligibleTracks(
+                                    tracks = songs,
+                                    hideExplicit = hideExplicit,
+                                    isPodcast = { it.song.isPodcast },
+                                    isExplicit = { it.song.explicit },
+                                ).map { it.toMediaMetadata() }
                         }
                 }.flowOn(Dispatchers.IO)
 
@@ -132,11 +135,13 @@ class LibraryTopMixRepository
                     database
                         .likedSongsByCreateDateAsc()
                         .map { songs ->
-                            songs
-                                .filterNot { it.song.isPodcast }
-                                .filterExplicit(hideExplicit)
-                                .asReversed()
-                                .map { it.toMediaMetadata() }
+                            LibraryTopMixPolicy
+                                .reverseLikedTracks(
+                                    tracks = songs,
+                                    hideExplicit = hideExplicit,
+                                    isPodcast = { it.song.isPodcast },
+                                    isExplicit = { it.song.explicit },
+                                ).map { it.toMediaMetadata() }
                         }
                 }.flowOn(Dispatchers.IO)
 
@@ -146,11 +151,14 @@ class LibraryTopMixRepository
                     database
                         .songs(SongSortType.PLAY_TIME, descending = true, filterVideo = true)
                         .map { songs ->
-                            songs
-                                .filterNot { it.song.isPodcast }
-                                .filterExplicit(hideExplicit)
-                                .filter { it.song.totalPlayTime > 0L }
-                                .map { it.toMediaMetadata() }
+                            LibraryTopMixPolicy
+                                .filterListenedTracks(
+                                    tracks = songs,
+                                    hideExplicit = hideExplicit,
+                                    isPodcast = { it.song.isPodcast },
+                                    isExplicit = { it.song.explicit },
+                                    totalPlayTimeMs = { it.song.totalPlayTime },
+                                ).map { it.toMediaMetadata() }
                         }
                 }.flowOn(Dispatchers.IO)
 
@@ -160,10 +168,13 @@ class LibraryTopMixRepository
                     database
                         .songs(SongSortType.CREATE_DATE, descending = true, filterVideo = true)
                         .map { songs ->
-                            songs
-                                .filterNot { it.song.isPodcast }
-                                .filterExplicit(hideExplicit)
-                                .map { it.toMediaMetadata() }
+                            LibraryTopMixPolicy
+                                .filterEligibleTracks(
+                                    tracks = songs,
+                                    hideExplicit = hideExplicit,
+                                    isPodcast = { it.song.isPodcast },
+                                    isExplicit = { it.song.explicit },
+                                ).map { it.toMediaMetadata() }
                         }
                 }.flowOn(Dispatchers.IO)
 
