@@ -17,7 +17,12 @@ fun main() = runBlocking {
         override suspend fun clear() = Unit
     }
     val transport = object : SocialRealtimeTransport {
-        override suspend fun connect(token: String, deviceId: String, onConnected: suspend () -> Unit, onMessage: (String) -> Unit) = Unit
+        override suspend fun connect(
+            token: String,
+            deviceId: String,
+            onConnected: suspend () -> Unit,
+            onMessage: (String) -> Unit,
+        ) = Unit
         override suspend fun publishPresence(presence: SocialPresence) = Unit
         override fun disconnect() = Unit
         override fun close() = Unit
