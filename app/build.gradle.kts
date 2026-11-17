@@ -438,6 +438,7 @@ dependencies {
     implementation(project(":playback-core"))
     implementation(project(":audio-analysis-sdk"))
     implementation(project(":statistics-sdk"))
+    implementation(project(":account-sdk"))
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))
     implementation(project(":playlist-import-sdk"))

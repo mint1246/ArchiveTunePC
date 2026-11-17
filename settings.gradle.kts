@@ -59,6 +59,7 @@ rootProject.name = "ArchiveTune"
 include(":app")
 include(":audio-analysis-sdk")
 include(":statistics-sdk")
+include(":account-sdk")
 include(":lyrics-sdk")
 include(":lyrics-timeline")
 include(":playlist-import-sdk")
