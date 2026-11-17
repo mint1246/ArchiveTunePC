@@ -42,6 +42,7 @@ dependencies {
     implementation(project(":canvas"))
     implementation(project(":spotifycore"))
     implementation(project(":desktop-auth"))
+    implementation(project(":account-sdk"))
     implementation(project(":desktop-social"))
     implementation(project(":desktop-playback"))
     implementation(project(":desktop-play-together"))

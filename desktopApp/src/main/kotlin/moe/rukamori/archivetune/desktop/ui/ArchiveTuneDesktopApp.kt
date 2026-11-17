@@ -118,8 +118,8 @@ import moe.rukamori.archivetune.desktopauth.DesktopAccountState
 import moe.rukamori.archivetune.desktopauth.DesktopSessionManager
 import moe.rukamori.archivetune.desktopauth.SessionImportFailure
 import moe.rukamori.archivetune.desktopauth.SessionImportResult
-import moe.rukamori.archivetune.desktopauth.YouTubeCookieJsonFailure
-import moe.rukamori.archivetune.desktopauth.YouTubeCookieJsonInspection
+import moe.rukamori.archivetune.account.discovery.YouTubeCookieJsonFailure
+import moe.rukamori.archivetune.account.discovery.YouTubeCookieJsonInspection
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

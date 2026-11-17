@@ -6,6 +6,10 @@
 
 package moe.rukamori.archivetune.desktopauth
 
+import moe.rukamori.archivetune.account.discovery.YouTubeCookieJsonFailure
+import moe.rukamori.archivetune.account.discovery.YouTubeCookieJsonImportResult
+import moe.rukamori.archivetune.account.discovery.YouTubeCookieJsonImporter
+import moe.rukamori.archivetune.account.discovery.YouTubeCookieJsonInspection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +24,7 @@ import moe.rukamori.archivetune.innertube.classifyAccountValidationFailure
 import moe.rukamori.archivetune.innertube.DesktopSessionProvider
 import moe.rukamori.archivetune.innertube.PlaybackAuthState
 import moe.rukamori.archivetune.innertube.models.AccountInfo
+import moe.rukamori.archivetune.innertube.utils.hasYouTubeLoginCookie
 import java.awt.Desktop
 import java.net.URI
 import java.time.Clock
@@ -168,6 +173,7 @@ class DesktopSessionManager(
     private val refreshLeadMillis: Long = DEFAULT_REFRESH_LEAD_MILLIS,
     private val cookieRefreshIntervalMillis: Long = DEFAULT_COOKIE_REFRESH_INTERVAL_MILLIS,
 ) : DesktopSessionProvider {
+    private val cookieImporter = YouTubeCookieJsonImporter(::hasYouTubeLoginCookie)
     private val refreshMutex = Mutex()
     private val stateLock = Any()
     @Volatile
@@ -205,7 +211,7 @@ class DesktopSessionManager(
 
     /** Parses a browser cookie export without retaining its raw JSON or exposing cookie values. */
     fun inspectCookieJson(rawJson: String): YouTubeCookieJsonInspection =
-        YouTubeCookieJsonImporter.inspect(rawJson, clock.millis())
+        cookieImporter.inspect(rawJson, clock.millis())
 
     /**
      * Converts a supported browser export directly into a validated session. Visitor/DataSync/PO
@@ -213,7 +219,7 @@ class DesktopSessionManager(
      */
     suspend fun importCookieJson(rawJson: String): CookieJsonSessionImportResult {
         val parsed =
-            when (val result = YouTubeCookieJsonImporter.parse(rawJson, clock.millis())) {
+            when (val result = cookieImporter.parse(rawJson, clock.millis())) {
                 is YouTubeCookieJsonImportResult.Ready -> result.parsed
                 is YouTubeCookieJsonImportResult.Rejected -> return CookieJsonSessionImportResult.Rejected(result.reason)
             }

@@ -1,17 +1,19 @@
-package moe.rukamori.archivetune.desktopauth
+package moe.rukamori.archivetune.account.discovery
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import moe.rukamori.archivetune.innertube.utils.hasYouTubeLoginCookie
 
 class YouTubeCookieJsonImporterTest {
+    private val importer = YouTubeCookieJsonImporter(::hasYouTubeLoginCookie)
     private val now = 1_800_000_000_000L
 
     @Test
     fun `array export filters domains and deterministically keeps most specific live cookie`() {
         val result =
-            YouTubeCookieJsonImporter.parse(
+            importer.parse(
                 """[
                   {"name":"SAPISID","value":"google-value","domain":".google.com","path":"/"},
                   {"name":"SAPISID","value":"youtube-value","domain":".youtube.com","path":"/","expirationDate":1900000000},
@@ -31,11 +33,11 @@ class YouTubeCookieJsonImporterTest {
     @Test
     fun `wrapper and simple name value exports are both supported`() {
         val wrapped =
-            YouTubeCookieJsonImporter.inspect(
+            importer.inspect(
                 """{"cookies":[{"name":"SAPISID","value":"value","domain":"youtube.com","path":"/"}]}""",
                 now,
             )
-        val simple = YouTubeCookieJsonImporter.inspect("""{"SAPISID":"value","PREF":"x"}""", now)
+        val simple = importer.inspect("""{"SAPISID":"value","PREF":"x"}""", now)
 
         assertTrue(wrapped is YouTubeCookieJsonInspection.Ready)
         assertTrue(simple is YouTubeCookieJsonInspection.Ready)
@@ -45,7 +47,7 @@ class YouTubeCookieJsonImporterTest {
     @Test
     fun `google domain login cookies are not sent to YouTube`() {
         val result =
-            YouTubeCookieJsonImporter.parse(
+            importer.parse(
                 """[{"name":"SAPISID","value":"google-only","domain":".google.com","path":"/","expirationDate":1900000000}]""",
                 now,
             )
@@ -55,7 +57,7 @@ class YouTubeCookieJsonImporterTest {
 
     @Test
     fun `unrelated YouTube hosts and paths cannot replace Music login cookies`() {
-        val result = YouTubeCookieJsonImporter.parse(
+        val result = importer.parse(
             """[
               {"name":"SAPISID","value":"music-session","domain":"music.youtube.com","hostOnly":true,"path":"/"},
               {"name":"SAPISID","value":"parent-domain-session","domain":".youtube.com","path":"/"},
@@ -74,7 +76,7 @@ class YouTubeCookieJsonImporterTest {
 
     @Test
     fun `host-only root domain cookies cannot authenticate Music`() {
-        val result = YouTubeCookieJsonImporter.parse(
+        val result = importer.parse(
             """[{"name":"SAPISID","value":"root-host-only","domain":"youtube.com","hostOnly":true,"path":"/"}]""",
             now,
         )
@@ -84,7 +86,7 @@ class YouTubeCookieJsonImporterTest {
 
     @Test
     fun `partitioned cookies cannot replace the top-level session`() {
-        val result = YouTubeCookieJsonImporter.parse(
+        val result = importer.parse(
             """[
               {"name":"SAPISID","value":"top-level","domain":".youtube.com","path":"/"},
               {"name":"SAPISID","value":"partitioned","domain":"music.youtube.com","path":"/","partitionKey":{"topLevelSite":"https://example.com"}}
@@ -98,7 +100,7 @@ class YouTubeCookieJsonImporterTest {
     @Test
     fun `expired and unrelated cookies cannot create a session`() {
         val result =
-            YouTubeCookieJsonImporter.parse(
+            importer.parse(
                 """[
                   {"name":"SAPISID","value":"expired","domain":"youtube.com","expirationDate":1000},
                   {"name":"SAPISID","value":"other","domain":"evil.example"}
@@ -111,9 +113,9 @@ class YouTubeCookieJsonImporterTest {
 
     @Test
     fun `header injection and malformed or oversized JSON are rejected`() {
-        val injected = YouTubeCookieJsonImporter.parse("""[{"name":"SAPISID","value":"good\r\nInjected: yes","domain":"youtube.com"}]""", now)
-        val malformed = YouTubeCookieJsonImporter.parse("{" , now)
-        val oversized = YouTubeCookieJsonImporter.parse(" ".repeat(1_000_001), now)
+        val injected = importer.parse("""[{"name":"SAPISID","value":"good\r\nInjected: yes","domain":"youtube.com"}]""", now)
+        val malformed = importer.parse("{" , now)
+        val oversized = importer.parse(" ".repeat(1_000_001), now)
 
         assertEquals(YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.UNSAFE_COOKIE_VALUE), injected)
         assertEquals(YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.MALFORMED_JSON), malformed)
@@ -122,7 +124,7 @@ class YouTubeCookieJsonImporterTest {
 
     @Test
     fun `safe inspection and parsed representation never disclose cookie values`() {
-        val result = YouTubeCookieJsonImporter.parse("""[{"name":"SAPISID","value":"very-secret-value","domain":"youtube.com"}]""", now)
+        val result = importer.parse("""[{"name":"SAPISID","value":"very-secret-value","domain":"youtube.com"}]""", now)
         val parsed = (result as YouTubeCookieJsonImportResult.Ready).parsed
 
         assertFalse(parsed.toString().contains("very-secret-value"))

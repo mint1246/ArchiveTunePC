@@ -4,9 +4,8 @@
  * GPL-3.0 License | Contributors: see git history
  */
 
-package moe.rukamori.archivetune.desktopauth
+package moe.rukamori.archivetune.account.discovery
 
-import moe.rukamori.archivetune.innertube.utils.hasYouTubeLoginCookie
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -27,7 +26,7 @@ sealed interface YouTubeCookieJsonInspection {
 }
 
 sealed interface YouTubeCookieJsonImportResult {
-    class Ready internal constructor(internal val parsed: ParsedYouTubeCookieJson) : YouTubeCookieJsonImportResult
+    class Ready internal constructor(val parsed: ParsedYouTubeCookieJson) : YouTubeCookieJsonImportResult
     data class Rejected(val reason: YouTubeCookieJsonFailure) : YouTubeCookieJsonImportResult
 }
 
@@ -45,9 +44,9 @@ enum class YouTubeCookieJsonFailure {
  * Parsed cookie material. Its `toString` deliberately contains no secrets; callers should use
  * [summary] for UI and diagnostics, then consume [cookieHeader] only for immediate validation.
  */
-internal class ParsedYouTubeCookieJson(
-    internal val cookieHeader: String,
-    internal val expiresAtEpochMillis: Long?,
+class ParsedYouTubeCookieJson internal constructor(
+    val cookieHeader: String,
+    val expiresAtEpochMillis: Long?,
     val summary: YouTubeCookieJsonSummary,
 ) {
     override fun toString(): String = "ParsedYouTubeCookieJson(summary=$summary)"
@@ -58,7 +57,7 @@ internal class ParsedYouTubeCookieJson(
  * header text, arbitrary domains, or unsafe header characters. The only output secret is a
  * short-lived Cookie header passed directly to session validation.
  */
-object YouTubeCookieJsonImporter {
+class YouTubeCookieJsonImporter(private val hasLoginCookie: (String?) -> Boolean) {
     fun inspect(rawJson: String, nowEpochMillis: Long = System.currentTimeMillis()): YouTubeCookieJsonInspection =
         when (val result = parse(rawJson, nowEpochMillis)) {
             is YouTubeCookieJsonImportResult.Ready -> YouTubeCookieJsonInspection.Ready(result.parsed.summary)
@@ -112,7 +111,7 @@ object YouTubeCookieJsonImporter {
                 .sortedBy(ImportedCookie::name)
         val header = selected.joinToString("; ") { "${it.name}=${it.value}" }
         if (header.length > MAX_COOKIE_HEADER_CHARACTERS) return YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.HEADER_TOO_LARGE)
-        if (!hasYouTubeLoginCookie(header)) return YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.MISSING_LOGIN_COOKIE)
+        if (!hasLoginCookie(header)) return YouTubeCookieJsonImportResult.Rejected(YouTubeCookieJsonFailure.MISSING_LOGIN_COOKIE)
 
         return YouTubeCookieJsonImportResult.Ready(
             ParsedYouTubeCookieJson(
@@ -232,10 +231,12 @@ object YouTubeCookieJsonImporter {
             .thenBy { it.expiresAtEpochMillis ?: Long.MAX_VALUE }
             .thenByDescending { it.sourceIndex }
 
-    private const val DEFAULT_IMPLIED_DOMAIN = "music.youtube.com"
-    private const val MAX_JSON_CHARACTERS = 1_000_000
-    private const val MAX_EXPORTED_COOKIES = 5_000
-    private const val MAX_COOKIE_HEADER_CHARACTERS = 24_000
-    private val COOKIE_NAME = Regex("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
-    private val LOGIN_COOKIE_NAMES = setOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID", "APISID")
+    private companion object {
+        const val DEFAULT_IMPLIED_DOMAIN = "music.youtube.com"
+        const val MAX_JSON_CHARACTERS = 1_000_000
+        const val MAX_EXPORTED_COOKIES = 5_000
+        const val MAX_COOKIE_HEADER_CHARACTERS = 24_000
+        val COOKIE_NAME = Regex("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+        val LOGIN_COOKIE_NAMES = setOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID", "APISID")
+    }
 }

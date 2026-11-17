@@ -438,7 +438,9 @@ dependencies {
     implementation(project(":playback-core"))
     implementation(project(":audio-analysis-sdk"))
     implementation(project(":statistics-sdk"))
-    implementation(project(":account-sdk"))
+    implementation(project(":account-sdk")) {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(project(":social-sdk")) {
         exclude(group = "org.json", module = "json")
     }

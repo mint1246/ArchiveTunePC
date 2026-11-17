@@ -12,7 +12,9 @@ kotlin { jvmToolchain(21) }
 dependencies {
     compileOnly(libs.compose.runtime)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation(libs.json)
     testImplementation(kotlin("test-junit5"))
+    testImplementation(project(":core"))
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.4")
 }
 
