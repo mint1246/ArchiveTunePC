@@ -5,14 +5,13 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.api
 
-import moe.rukamori.archivetune.playback.api.equalPowerGains
-
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.math.abs
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class CrossfadeHandoffPolicyTest {
     @Test
@@ -59,14 +58,25 @@ class CrossfadeHandoffPolicyTest {
         val midpoint = equalPowerGains(0.5f)
         val end = equalPowerGains(1f)
 
-        assertEquals(1f, start.outgoing, 0.0001f)
-        assertEquals(0f, start.incoming, 0.0001f)
-        assertEquals(1f, end.incoming, 0.0001f)
-        assertEquals(0f, end.outgoing, 0.0001f)
-        assertEquals(
+        assertFloatEquals(1f, start.outgoing, 0.0001f)
+        assertFloatEquals(0f, start.incoming, 0.0001f)
+        assertFloatEquals(1f, end.incoming, 0.0001f)
+        assertFloatEquals(0f, end.outgoing, 0.0001f)
+        assertFloatEquals(
             1f,
             midpoint.outgoing * midpoint.outgoing + midpoint.incoming * midpoint.incoming,
             0.0001f,
+        )
+    }
+
+    private fun assertFloatEquals(
+        expected: Float,
+        actual: Float,
+        tolerance: Float,
+    ) {
+        assertTrue(
+            abs(expected - actual) <= tolerance,
+            "Expected $expected but was $actual (tolerance $tolerance)",
         )
     }
 }

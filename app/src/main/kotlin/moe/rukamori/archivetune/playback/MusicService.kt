@@ -262,6 +262,12 @@ import moe.rukamori.archivetune.stems.AndroidStemInput
 import moe.rukamori.archivetune.stems.AndroidStemMixStore
 import moe.rukamori.archivetune.stems.AndroidStemPlaybackCoordinator
 import moe.rukamori.archivetune.playback.api.equalPowerGains
+import moe.rukamori.archivetune.playback.api.hasPlaybackPositionAdvanced
+import moe.rukamori.archivetune.playback.api.needsCorrectiveCrossfadeSeek
+import moe.rukamori.archivetune.playback.api.playbackLoudnessNormalizationFactor
+import moe.rukamori.archivetune.playback.api.PlaybackParameterPersistence
+import moe.rukamori.archivetune.playback.api.PersistedPlaybackParameters
+import moe.rukamori.archivetune.playback.api.sharedCrossfadeAudioSessionId
 import moe.rukamori.archivetune.statistics.AndroidStatisticsAlbum
 import moe.rukamori.archivetune.statistics.AndroidStatisticsArtist
 import moe.rukamori.archivetune.statistics.AndroidStatisticsPlaybackSnapshot

@@ -5,10 +5,12 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.api
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import kotlin.math.abs
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class PlaybackParameterPersistenceTest {
     @Test
@@ -37,12 +39,23 @@ class PlaybackParameterPersistenceTest {
 
     @Test
     fun `pitch multiplier conversion matches semitone model`() {
-        assertEquals(-12f, PlaybackParameterPersistence.pitchMultiplierToSemitones(0.5f), 0.0001f)
-        assertEquals(0f, PlaybackParameterPersistence.pitchMultiplierToSemitones(1f), 0.0001f)
-        assertEquals(12f, PlaybackParameterPersistence.pitchMultiplierToSemitones(2f), 0.0001f)
+        assertFloatEquals(-12f, PlaybackParameterPersistence.pitchMultiplierToSemitones(0.5f), 0.0001f)
+        assertFloatEquals(0f, PlaybackParameterPersistence.pitchMultiplierToSemitones(1f), 0.0001f)
+        assertFloatEquals(12f, PlaybackParameterPersistence.pitchMultiplierToSemitones(2f), 0.0001f)
 
-        assertEquals(0.5f, PlaybackParameterPersistence.semitonesToPitchMultiplier(-12f), 0.0001f)
-        assertEquals(1f, PlaybackParameterPersistence.semitonesToPitchMultiplier(0f), 0.0001f)
-        assertEquals(2f, PlaybackParameterPersistence.semitonesToPitchMultiplier(12f), 0.0001f)
+        assertFloatEquals(0.5f, PlaybackParameterPersistence.semitonesToPitchMultiplier(-12f), 0.0001f)
+        assertFloatEquals(1f, PlaybackParameterPersistence.semitonesToPitchMultiplier(0f), 0.0001f)
+        assertFloatEquals(2f, PlaybackParameterPersistence.semitonesToPitchMultiplier(12f), 0.0001f)
+    }
+
+    private fun assertFloatEquals(
+        expected: Float,
+        actual: Float,
+        tolerance: Float,
+    ) {
+        assertTrue(
+            abs(expected - actual) <= tolerance,
+            "Expected $expected but was $actual (tolerance $tolerance)",
+        )
     }
 }

@@ -5,17 +5,19 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.api
 
 import kotlin.math.log2
 import kotlin.math.pow
 
-internal data class PersistedPlaybackParameters(
+/** Sanitized, persisted playback speed and pitch, shared across platforms. */
+data class PersistedPlaybackParameters(
     val speed: Float,
     val pitchSemitones: Float,
 )
 
-internal object PlaybackParameterPersistence {
+/** Validation and conversion of persisted playback speed/pitch values. */
+object PlaybackParameterPersistence {
     const val DEFAULT_SPEED = 1f
     const val DEFAULT_PITCH_SEMITONES = 0f
     private const val MIN_SPEED = 0.25f

@@ -5,11 +5,12 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.api
 
 import kotlin.math.abs
 
-internal fun needsCorrectiveCrossfadeSeek(
+/** Whether the two crossfade players have drifted far enough to require a corrective seek. */
+fun needsCorrectiveCrossfadeSeek(
     primaryPositionMs: Long,
     secondaryPositionMs: Long,
     maximumDriftMs: Long,
@@ -18,10 +19,12 @@ internal fun needsCorrectiveCrossfadeSeek(
     return abs(primaryPositionMs - secondaryPositionMs) > maximumDriftMs
 }
 
-internal fun hasPlaybackPositionAdvanced(
+/** Whether playback actually moved forward after a seek was issued. */
+fun hasPlaybackPositionAdvanced(
     positionAfterSeekMs: Long,
     currentPositionMs: Long,
 ): Boolean = currentPositionMs > positionAfterSeekMs
 
-internal fun sharedCrossfadeAudioSessionId(primaryAudioSessionId: Int): Int? =
+/** The primary audio session id to reuse for continuous effects, or null when unusable. */
+fun sharedCrossfadeAudioSessionId(primaryAudioSessionId: Int): Int? =
     primaryAudioSessionId.takeIf { it > 0 }

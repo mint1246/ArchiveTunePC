@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import moe.rukamori.archivetune.models.ActiveOutputDevice
 import moe.rukamori.archivetune.models.PlayerOutputDevice
+import moe.rukamori.archivetune.playback.api.AudioOutputIdentity
+import moe.rukamori.archivetune.playback.api.AudioOutputPolicy
 
 @Immutable
 data class AudioOutputDevice(

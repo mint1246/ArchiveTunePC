@@ -5,11 +5,17 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.api
 
 import kotlin.math.pow
 
-internal fun playbackLoudnessNormalizationFactor(
+const val MIN_PLAYBACK_NORMALIZATION_FACTOR = 0.25
+const val MAX_PLAYBACK_NORMALIZATION_FACTOR = 1.414
+private const val MIN_VALID_PLAYBACK_LOUDNESS_DB = -60.0
+private const val MAX_VALID_PLAYBACK_LOUDNESS_DB = 30.0
+
+/** Loudness-normalization gain for a stream, derived from the best valid metadata field. */
+fun playbackLoudnessNormalizationFactor(
     enabled: Boolean,
     perceptualLoudnessDb: Double?,
     loudnessDb: Double?,
@@ -27,8 +33,3 @@ internal fun playbackLoudnessNormalizationFactor(
 
 private fun sanitizePlaybackLoudnessDb(value: Double?): Double? =
     value?.takeIf { it.isFinite() && it in MIN_VALID_PLAYBACK_LOUDNESS_DB..MAX_VALID_PLAYBACK_LOUDNESS_DB }
-
-internal const val MIN_PLAYBACK_NORMALIZATION_FACTOR = 0.25
-internal const val MAX_PLAYBACK_NORMALIZATION_FACTOR = 1.414
-private const val MIN_VALID_PLAYBACK_LOUDNESS_DB = -60.0
-private const val MAX_VALID_PLAYBACK_LOUDNESS_DB = 30.0

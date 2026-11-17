@@ -5,12 +5,16 @@
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
  */
 
-package moe.rukamori.archivetune.playback
+package moe.rukamori.archivetune.playback.api
 
 import java.security.MessageDigest
 import java.util.Locale
 
-internal data class AudioOutputIdentity(
+/**
+ * Platform-neutral description of an output device used to derive a stable selection id.
+ * Android supplies ids from `AudioDeviceInfo`; no Android types are required here.
+ */
+data class AudioOutputIdentity(
     val runtimeId: Int,
     val type: Int,
     val address: String?,
@@ -18,13 +22,18 @@ internal data class AudioOutputIdentity(
     val fallbackName: String,
 )
 
-internal data class AudioOutputPolicyChoice(
+/** A device exposed to the user plus the stable id persisted by the caller. */
+data class AudioOutputPolicyChoice(
     val persistentId: String,
     val runtimeId: Int,
     val displayName: String,
 )
 
-internal object AudioOutputPolicy {
+/**
+ * Normalizes platform output devices into stable, deduplicated choices and resolves a
+ * previously persisted id back to the current runtime device. Storage is owned by the caller.
+ */
+object AudioOutputPolicy {
     private const val ID_PREFIX = "android-audio-v1"
 
     fun normalize(identities: List<AudioOutputIdentity>): List<AudioOutputPolicyChoice> {
