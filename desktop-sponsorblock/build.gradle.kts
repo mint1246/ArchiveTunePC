@@ -6,10 +6,10 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation(project(":sponsorblock-core"))
-    implementation(project(":desktop-settings"))
-    implementation(project(":playback-core"))
+    api(project(":desktop-settings"))
+    api(project(":playback-core"))
     implementation(libs.coroutines.core)
-    implementation(libs.okhttp)
+    api(libs.okhttp)
     implementation(libs.json)
     testImplementation(libs.junit)
     testImplementation(kotlin("test"))
