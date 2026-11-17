@@ -473,6 +473,9 @@ dependencies {
     implementation(project(":stems-sdk")) {
         exclude(group = "org.json", module = "json")
     }
+    implementation(project(":update-sdk")) {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(project(":together-sdk"))
     implementation(project(":together-transport"))
     implementation(project(":core"))

@@ -139,7 +139,8 @@ try {
         --check-c-compiler=gcc
     if ($LASTEXITCODE -ne 0) { throw 'Essentia configure failed.' }
 
-    & $Python waf -j ([Environment]::ProcessorCount) build
+    $WafJobs = if ($env:ARCHIVETUNE_ESSENTIA_JOBS) { [int]$env:ARCHIVETUNE_ESSENTIA_JOBS } else { [Math]::Min([Environment]::ProcessorCount, 4) }
+    & $Python waf -j $WafJobs build
     if ($LASTEXITCODE -ne 0) { throw 'Essentia build failed.' }
 } finally {
     Pop-Location

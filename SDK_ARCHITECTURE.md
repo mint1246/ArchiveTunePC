@@ -71,7 +71,7 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 
 | Module | Artifact / Role | Key Types & Boundaries |
 | --- | --- | --- |
-| `stream-resolver` | JVM | `StreamResolutionCoordinator` (bounded in-memory cache, single-flight coalescing, priority, expiry), `NextStreamPreloadCoordinator`, `PlaybackStreamRecoveryTracker`, `StreamChunkResolver`, `AudioQuality`, `PlaybackStreamResolver`. |
+| `stream-resolver` | JVM | `StreamResolutionCoordinator` (bounded in-memory cache, single-flight coalescing, priority, expiry), `NextStreamPreloadCoordinator`, `PlaybackStreamRecoveryTracker`, `StreamChunkResolver`, `DesktopStreamResolutionMode` / `resolveDesktopStream` / `directAudioFastPathUrl`, `AudioQuality`, `PlaybackStreamResolver`. |
 | `android-playback` | Published Android AAR (`android-playback`) | `Media3PlaybackSession` (`createMedia3PlaybackSession`), `Media3PlaybackController`, `AndroidPlaybackQueueStore`, `resolvingPlaybackSourceUpstream`, `resolvingPlaybackUpstream`, `cachedPlaybackDataSourceFactory`, `setPlaybackAddress`, `ChunkedDataSource`, `Media3PlayerStateObserver`, `Media3PlaybackMappings`. |
 | `desktop-playback` | Published JVM (`desktop-playback`) | `createDesktopPlaybackSession`, `VlcjPlaybackController`, `DesktopCrossfade`, `DesktopAudioEffects` (libVLC live `aout` pitch/speed), `DesktopAudioOutput`, `PlaybackQueueStore`, `VlcRuntime`. Requires caller-supplied `PlaybackSourceResolver` and compatible libVLC runtime. |
 | `desktop-stream-playback` | Desktop JVM | Desktop stream selection, completed-download fallback, signed-source memory caching, and HTTP recovery. |
@@ -82,7 +82,8 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 | `chord-neural-core` | Published JVM (`chord-neural-core`) | Android/headless chord model asset verification, DSP, and streaming resampler. |
 | `desktop-neural-chords` | Desktop JVM | Local neural chord analyzer delegating to the Rust/DirectML runner with cancellation monitoring. |
 | `desktop-model-runtime` | Published JVM (`desktop-model-runtime`) | Verified ONNX/DirectML model manifest handling, SHA-256 download coalescing, and Windows runner lookup (`archivetune-model-runner.exe`). |
-| `desktop-stems` | Desktop JVM | `DesktopStemCoordinator` for 6-stem (`drums, bass, other, vocals, guitar, piano`) orchestration and `StemPlaybackBridge`. |
+| `stems-sdk` | Published JVM (`stems-sdk`) | Portable 6-stem (`drums, bass, other, vocals, guitar, piano`) `StemControls`, `StemMixStore`, 6-file `StemCache`, `StemBatchQueue`, `StemModelStore`, `StemStorage`, and pure-Kotlin `DemucsDsp` + `CanonicalStemWav` pipeline. |
+| `desktop-stems` | Published JVM (`desktop-stems`) | `DesktopStemCoordinator` for 6-stem (`drums, bass, other, vocals, guitar, piano`) orchestration and `StemPlaybackBridge`. |
 | `sponsorblock-core` | JVM | Segment validation, category/action filtering, rounding, ordering, and skip planning shared by Android and Desktop. |
 | `desktop-sponsorblock` | Desktop JVM | SponsorBlock HTTP client, segment cache, and desktop playback coordinator. |
 
@@ -90,7 +91,7 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 
 | Module | Artifact / Role | Key Types & Boundaries |
 | --- | --- | --- |
-| `discovery-sdk` | JVM | `DiscoveryContentCache`, `DiscoveryFanOut`, `DiscoveryKeys`, `DiscoveryLists`, `DiscoverySuggestionsPolicy`, `QuickPickSeedPolicy`, `RelatedSongsResolver`. |
+| `discovery-sdk` | Published JVM (`discovery-sdk`) | `DiscoveryContentCache`, `DiscoveryFanOut`, `DiscoveryKeys`, `DiscoveryLists`, `DiscoverySuggestionsPolicy`, `QuickPickSeedPolicy`, `RelatedSongsResolver`, `RadioContinuationPolicy`, `PodcastLibraryPolicy`. |
 | `playlist-sdk` | Published JVM (`playlist-sdk`) | `PlaylistCsvExporter`, `PlaylistOrdering` (`playlistSongOccurrences`, `sortPlaylistSongOccurrences`, `filterLibraryContent`), `AddToPlaylistPickerSession`, `PlaylistTagPolicy`, `LibraryTopMixPolicy`, `AiContentFilterMatcher`. |
 | `playlist-import-sdk` | JVM | Fuzzy matching and ordered, bounded-concurrency import song resolution (preserves duplicates and order). |
 | `desktop-spotify-import` | Desktop JVM | Real Spotify playlist importer wired to `desktop-backend` and `:spotifycore`. |
@@ -111,7 +112,7 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 | `desktop-canvas` | Desktop JVM | Canvas provider lookup, cancellation, and video caching. |
 | `account-sdk` | Published JVM (`account-sdk`) | `SavedAccount` JSON codec, `YouTubeCookieJsonImporter`, `YouTubeAccountCoordinator` (verify -> lookup -> `DataSyncId` -> persist). |
 | `desktop-auth` | Desktop JVM | `SecureSessionStore` (Windows DPAPI), `DesktopSessionManager`, `ManagedChromiumLogin`, `DesktopBotGuardPoTokenProvider`. |
-| `social-sdk` | Published JVM (`social-sdk`) | Social HTTP client and wire models (caller supplies token). |
+| `social-sdk` | Published JVM (`social-sdk`) | Social HTTP client, wire models, platform-neutral Rich Presence policy (`PresencePolicy`), and `ScrobbleSessionCoordinator` (caller supplies token/sink). |
 | `social-session` | JVM | Social session orchestration with caller-injected login, storage, and transport. |
 | `social-realtime` | JVM | Optional WebSocket client (`close()` owned by caller). |
 | `social-login` | JVM | Optional nonce-checked loopback OAuth callback flow. |
@@ -119,9 +120,10 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 | `together-sdk` | Published JVM (`together-sdk`) | Play Together models, wire messages, permission decisions, `TogetherGuestPlaybackPlanner`, `TogetherPlaybackSync`, `TogetherLink`, `TogetherDesktopPartyProtocol`. |
 | `together-transport` | Published JVM (`together-transport`) | Direct WebSocket client/host server and online HTTP API (`AutoCloseable`). |
 | `desktop-play-together` | Desktop JVM | `PlayTogetherManager` desktop party host/guest orchestration. |
-| `statistics-sdk` | JVM | Audible-time listening tracker and overview/trend query service (monotonic elapsed deltas, `min(30s, 50% duration)` play-count threshold). |
+| `statistics-sdk` | Published JVM (`statistics-sdk`) | Audible-time listening tracker and overview/trend query service (monotonic elapsed deltas, `min(30s, 50% duration)` play-count threshold). |
 | `desktop-statistics` | Desktop JVM | `DesktopStatisticsStore` and `DesktopListenTracker` (compact aggregate persistence). |
 | `backup-sdk` | JVM | Archive handling, settings XML, validation, and backup schedule policy. |
+| `update-sdk` | Published JVM (`update-sdk`) | Shared `SemVer` comparison, R2 Android/Desktop `latest.json` manifest parsing, universal ABI fallback, SHA-256 verification, and GitHub commit parsing. |
 | `desktop-settings` | Published JVM (`desktop-settings`) | Desktop settings normalization, keybinds, and `Properties`-backed session. |
 
 ---
@@ -351,7 +353,11 @@ public sealed class ArchiveTuneBridge : MonoBehaviour
 .\gradlew.bat `
   :playback-core:publishToMavenLocal `
   :sdk-lifecycle:publishToMavenLocal `
+  :discovery-sdk:publishToMavenLocal `
   :playlist-sdk:publishToMavenLocal `
+  :stems-sdk:publishToMavenLocal `
+  :update-sdk:publishToMavenLocal `
+  :social-sdk:publishToMavenLocal `
   :account-sdk:publishToMavenLocal `
   :android-playback:publishToMavenLocal `
   :desktop-playback:publishToMavenLocal `
@@ -362,6 +368,10 @@ public sealed class ArchiveTuneBridge : MonoBehaviour
 
 ```powershell
 .\gradlew.bat -p examples/headless-playlist run --no-daemon
+.\gradlew.bat -p examples/headless-discovery run --no-daemon
+.\gradlew.bat -p examples/headless-stems run --no-daemon
+.\gradlew.bat -p examples/headless-updater run --no-daemon
+.\gradlew.bat -p examples/headless-social run --no-daemon
 .\gradlew.bat -p examples/headless-equalizer run --no-daemon
 .\gradlew.bat -p examples/headless-playback run --no-daemon
 ```

@@ -21,7 +21,17 @@ import moe.rukamori.archivetune.constants.R2UpdateManifestEtagKey
 import moe.rukamori.archivetune.constants.R2UpdateManifestJsonKey
 import moe.rukamori.archivetune.constants.R2UpdateManifestLastCheckedAtKey
 import moe.rukamori.archivetune.constants.UpdateChannel
-import org.json.JSONArray
+import moe.rukamori.archivetune.sdk.update.GitCommitRecord
+import moe.rukamori.archivetune.sdk.update.ReleaseChannelKey
+import moe.rukamori.archivetune.sdk.update.UpdateReleaseRecord
+import moe.rukamori.archivetune.sdk.update.findLatestCanaryRelease as findLatestSdkCanaryRelease
+import moe.rukamori.archivetune.sdk.update.findLatestStableOrNewestRelease
+import moe.rukamori.archivetune.sdk.update.isNewerSemVerOrDifferent
+import moe.rukamori.archivetune.sdk.update.isSameSemVerOrLiteral
+import moe.rukamori.archivetune.sdk.update.parseAndroidUpdateManifest as parseSdkAndroidUpdateManifest
+import moe.rukamori.archivetune.sdk.update.parseGitHubCommitsJson
+import moe.rukamori.archivetune.sdk.update.releaseVersionName
+import moe.rukamori.archivetune.sdk.update.shouldRefreshManifestCache
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 
@@ -75,113 +85,10 @@ object Updater {
     internal fun currentArtifactKey(): String =
         "${BuildConfig.DISTRIBUTION}-${BuildConfig.DEVICE}-${BuildConfig.ARCHITECTURE}"
 
-    private data class SemVer(
-        val major: Int,
-        val minor: Int,
-        val patch: Int,
-        val preRelease: List<PreReleaseIdentifier>,
-    ) : Comparable<SemVer> {
-        override fun compareTo(other: SemVer): Int {
-            val majorCompare = major.compareTo(other.major)
-            if (majorCompare != 0) return majorCompare
-            val minorCompare = minor.compareTo(other.minor)
-            if (minorCompare != 0) return minorCompare
-            val patchCompare = patch.compareTo(other.patch)
-            if (patchCompare != 0) return patchCompare
-
-            val thisIsStable = preRelease.isEmpty()
-            val otherIsStable = other.preRelease.isEmpty()
-            if (thisIsStable && !otherIsStable) return 1
-            if (!thisIsStable && otherIsStable) return -1
-
-            val maxIndex = minOf(preRelease.size, other.preRelease.size)
-            for (i in 0 until maxIndex) {
-                val c = preRelease[i].compareTo(other.preRelease[i])
-                if (c != 0) return c
-            }
-            return preRelease.size.compareTo(other.preRelease.size)
-        }
-
-        fun normalizedName(): String =
-            if (preRelease.isEmpty()) {
-                "$major.$minor.$patch"
-            } else {
-                "$major.$minor.$patch-" + preRelease.joinToString(".") { it.raw }
-            }
-    }
-
-    private sealed interface PreReleaseIdentifier : Comparable<PreReleaseIdentifier> {
-        val raw: String
-    }
-
-    private data class NumericIdentifier(
-        override val raw: String,
-        val value: Long,
-    ) : PreReleaseIdentifier {
-        override fun compareTo(other: PreReleaseIdentifier): Int =
-            when (other) {
-                is NumericIdentifier -> value.compareTo(other.value)
-                is AlphaIdentifier -> -1
-            }
-    }
-
-    private data class AlphaIdentifier(
-        override val raw: String,
-    ) : PreReleaseIdentifier {
-        override fun compareTo(other: PreReleaseIdentifier): Int =
-            when (other) {
-                is NumericIdentifier -> 1
-                is AlphaIdentifier -> raw.compareTo(other.raw)
-            }
-    }
-
-    private val semVerRegex =
-        Regex("""(?i)\bv?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?\b""")
-
-    private fun parseSemVerOrNull(text: String): SemVer? {
-        val match = semVerRegex.find(text) ?: return null
-        val major = match.groupValues.getOrNull(1)?.toIntOrNull() ?: return null
-        val minor = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return null
-        val patch = match.groupValues.getOrNull(3)?.toIntOrNull() ?: return null
-        val preReleaseText = match.groupValues.getOrNull(4)?.takeIf { it.isNotBlank() }
-        val preRelease =
-            preReleaseText
-                ?.split('.')
-                ?.filter { it.isNotBlank() }
-                ?.map { identifier ->
-                    if (identifier.all { it.isDigit() }) {
-                        NumericIdentifier(raw = identifier, value = identifier.toLong())
-                    } else {
-                        AlphaIdentifier(raw = identifier)
-                    }
-                }
-                ?: emptyList()
-        return SemVer(
-            major = major,
-            minor = minor,
-            patch = patch,
-            preRelease = preRelease,
-        )
-    }
-
-    private fun parseReleaseSemVerOrNull(release: ReleaseInfo): SemVer? =
-        parseSemVerOrNull(release.tagName) ?: parseSemVerOrNull(release.name)
-
     internal fun isSameVersion(
         a: String,
         b: String,
-    ): Boolean {
-        val aSemVer = parseSemVerOrNull(a)
-        val bSemVer = parseSemVerOrNull(b)
-        return if (aSemVer != null && bSemVer != null) {
-            aSemVer.major == bSemVer.major &&
-                aSemVer.minor == bSemVer.minor &&
-                aSemVer.patch == bSemVer.patch &&
-                aSemVer.preRelease == bSemVer.preRelease
-        } else {
-            a.trim() == b.trim()
-        }
-    }
+    ): Boolean = isSameSemVerOrLiteral(a, b)
 
     internal fun isUpdateAvailable(
         latestVersion: String,
@@ -192,81 +99,28 @@ object Updater {
                 return latestVersionCode > BuildConfig.VERSION_CODE.toLong()
             }
         }
-        val latestSemVer = parseSemVerOrNull(latestVersion)
-        val currentSemVer = parseSemVerOrNull(currentVersion)
-        return if (latestSemVer != null && currentSemVer != null) {
-            latestSemVer > currentSemVer
-        } else {
-            !isSameVersion(latestVersion, currentVersion)
-        }
+        return isNewerSemVerOrDifferent(latestVersion, currentVersion)
     }
 
-    internal fun findLatestRelease(releases: List<ReleaseInfo>): ReleaseInfo? {
-        if (releases.isEmpty()) return null
-        val parsed =
-            releases.mapNotNull { release ->
-                parseReleaseSemVerOrNull(release)?.let { version -> version to release }
-            }
-
-        if (parsed.isEmpty()) return releases.firstOrNull()
-
-        val stable = parsed.filter { it.first.preRelease.isEmpty() }
-        val candidates = stable.ifEmpty { parsed }
-        return candidates.maxWithOrNull(compareBy({ it.first }, { it.second.publishedAt }))?.second
-    }
+    internal fun findLatestRelease(releases: List<ReleaseInfo>): ReleaseInfo? =
+        findLatestStableOrNewestRelease(releases.map { it.toUpdateReleaseRecord() })?.toReleaseInfo()
 
     internal fun findLatestCanaryRelease(releases: List<ReleaseInfo>): ReleaseInfo? =
-        releases.maxWithOrNull(compareBy<ReleaseInfo>({ it.versionCode ?: Long.MIN_VALUE }, { it.publishedAt }))
-
-    private fun preferredReleaseVersionNameOrNull(release: ReleaseInfo): String? =
-        parseReleaseSemVerOrNull(release)?.normalizedName()
+        findLatestSdkCanaryRelease(releases.map { it.toUpdateReleaseRecord() })?.toReleaseInfo()
 
     internal fun getReleaseVersionName(release: ReleaseInfo): String =
-        preferredReleaseVersionNameOrNull(release) ?: release.name.ifBlank { release.tagName }
+        releaseVersionName(release.toUpdateReleaseRecord())
 
     internal fun parseAndroidUpdateManifest(
         json: String,
         channel: UpdateChannel,
         artifactKey: String = currentArtifactKey(),
-    ): ReleaseInfo? {
-        val root = JSONObject(json)
-        val android = root.optJSONObject("android") ?: return null
-        require(android.optInt("schema", 1) == 1) { "Unsupported Android update manifest schema" }
-        val channelObject = android.optJSONObject(channel.manifestKey) ?: return null
-        val version = channelObject.getString("version").trim()
-        require(version.isNotBlank()) { "Android update manifest has an empty version" }
-        val versionCode = channelObject.optLong("versionCode", -1L)
-        require(versionCode > 0L) { "Android update manifest has an invalid versionCode" }
-
-        val artifacts = channelObject.getJSONObject("artifacts")
-        val artifact =
-            artifacts.optJSONObject(artifactKey)
-                ?: universalFallbackKey(artifactKey)?.let(artifacts::optJSONObject)
-                ?: return null
-        val downloadUrl = artifact.getString("url").trim()
-        require(downloadUrl.startsWith("https://")) { "Android update URL must use HTTPS" }
-        val sha256 = artifact.getString("sha256").trim().lowercase()
-        require(sha256.matches(Sha256Regex)) { "Android update manifest has an invalid SHA-256" }
-
-        return ReleaseInfo(
-            tagName = channelObject.optString("tag", version).ifBlank { version },
-            name = channelObject.optString("name", "ArchiveTune $version").ifBlank { "ArchiveTune $version" },
-            body = channelObject.optString("notes").takeIf(String::isNotBlank),
-            publishedAt = channelObject.optString("publishedAt"),
-            htmlUrl = channelObject.optString("pageUrl").takeIf(String::isNotBlank) ?: downloadUrl,
-            versionCode = versionCode,
-            downloadUrl = downloadUrl,
-            sha256 = sha256,
-            sizeBytes = artifact.optLong("size", -1L).takeIf { it > 0L },
-        )
-    }
-
-    private fun universalFallbackKey(artifactKey: String): String? {
-        if (artifactKey.endsWith("-universal")) return null
-        val architectureSeparator = artifactKey.lastIndexOf('-')
-        if (architectureSeparator <= 0) return null
-        return artifactKey.substring(0, architectureSeparator + 1) + "universal"
-    }
+    ): ReleaseInfo? =
+        parseSdkAndroidUpdateManifest(
+            json = json,
+            channel = channel.toSdkChannelKey(),
+            artifactKey = artifactKey,
+        )?.toReleaseInfo()
 
     private suspend fun fetchManifestNetwork(cachedEtag: String?): ReleasesNetworkResult {
         val response: HttpResponse =
@@ -311,7 +165,13 @@ object Updater {
         val cachedEtag = dataStore.getAsync(R2UpdateManifestEtagKey)
         val lastCheckedAt = dataStore.getAsync(R2UpdateManifestLastCheckedAtKey, 0L)
         val shouldCheckNetwork =
-            forceRefresh || cachedJson == null || (now - lastCheckedAt) >= ReleaseCacheCheckIntervalMs
+            shouldRefreshManifestCache(
+                forceRefresh = forceRefresh,
+                hasCachedJson = cachedJson != null,
+                nowMs = now,
+                lastCheckedAtMs = lastCheckedAt,
+                intervalMs = ReleaseCacheCheckIntervalMs,
+            )
 
         if (!shouldCheckNetwork && cachedJson != null) {
             lastCheckTime = now
@@ -460,36 +320,51 @@ object Updater {
                 client
                     .get("https://api.github.com/repos/$SourceRepository/commits?sha=$branch&per_page=$count")
                     .bodyAsText()
-            val jsonArray = JSONArray(response)
-            buildList {
-                for (i in 0 until jsonArray.length()) {
-                    val commitObj = jsonArray.getJSONObject(i)
-                    val commit = commitObj.getJSONObject("commit")
-                    val authorObj = commit.optJSONObject("author")
-                    val githubAuthorObj = commitObj.optJSONObject("author")
-                    add(
-                        GitCommit(
-                            sha = commitObj.optString("sha", "").take(7),
-                            message = commit.optString("message", "").lines().firstOrNull() ?: "",
-                            author = authorObj?.optString("name", "Unknown") ?: "Unknown",
-                            date = authorObj?.optString("date", "") ?: "",
-                            url = commitObj.optString("html_url", ""),
-                            authorAvatarUrl = githubAuthorObj?.optString("avatar_url")?.takeIf { it.isNotBlank() },
-                        ),
-                    )
-                }
-            }
+            parseGitHubCommitsJson(response).map { it.toGitCommit() }
         }
 
-    private val UpdateChannel.manifestKey: String
-        get() =
-            when (this) {
-                UpdateChannel.STABLE -> "stable"
-                // R2's schema predates the upstream channel rename and continues to call this channel "canary".
-                UpdateChannel.ARTIFACT -> "canary"
-            }
+    private fun UpdateChannel.toSdkChannelKey(): ReleaseChannelKey =
+        when (this) {
+            UpdateChannel.STABLE -> ReleaseChannelKey.STABLE
+            // R2's schema predates the upstream channel rename and continues to call this channel "canary".
+            UpdateChannel.ARTIFACT -> ReleaseChannelKey.CANARY
+        }
 
-    private val Sha256Regex = Regex("^[0-9a-f]{64}$")
+    private fun ReleaseInfo.toUpdateReleaseRecord(): UpdateReleaseRecord =
+        UpdateReleaseRecord(
+            tagName = tagName,
+            name = name,
+            body = body,
+            publishedAt = publishedAt,
+            htmlUrl = htmlUrl,
+            versionCode = versionCode,
+            downloadUrl = downloadUrl,
+            sha256 = sha256,
+            sizeBytes = sizeBytes,
+        )
+
+    private fun UpdateReleaseRecord.toReleaseInfo(): ReleaseInfo =
+        ReleaseInfo(
+            tagName = tagName,
+            name = name,
+            body = body,
+            publishedAt = publishedAt,
+            htmlUrl = htmlUrl,
+            versionCode = versionCode,
+            downloadUrl = downloadUrl,
+            sha256 = sha256,
+            sizeBytes = sizeBytes,
+        )
+
+    private fun GitCommitRecord.toGitCommit(): GitCommit =
+        GitCommit(
+            sha = sha,
+            message = message,
+            author = author,
+            date = date,
+            url = url,
+            authorAvatarUrl = authorAvatarUrl,
+        )
 
     private inline fun <T> runCatchingCancellable(block: () -> T): Result<T> =
         try {

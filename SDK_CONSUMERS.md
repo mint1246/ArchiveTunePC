@@ -1,10 +1,11 @@
-# ArchiveTune SDK: experimental components
+# ArchiveTune SDK: modular headless & platform components
 
-The migration is in progress. These artifacts are not a stable, complete ArchiveTune SDK:
-Android playback/session, authenticated discovery and other application-owned features still
-need extraction. The existing Android and desktop applications remain the behavior reference.
-See [SDK_MIGRATION.md](SDK_MIGRATION.md) and the platform inventories for status and device
-verification gaps.
+These `0.1.0-SNAPSHOT` Maven Local artifacts expose ArchiveTune's headless JVM domain policies,
+coordinators, and platform playback sessions (`android-playback` AAR for Media3 and
+`desktop-playback` for libVLC) consumed by the Android (`app/`) and Desktop (`desktopApp/`)
+applications. See [SDK_ARCHITECTURE.md](SDK_ARCHITECTURE.md) for the full architecture and
+Unity 6.6 / Meta Quest 2 integration guide, and [SDK_MIGRATION.md](SDK_MIGRATION.md) plus the
+platform inventories for executed verification and remaining physical-device checks.
 
 ## Using individual modules
 
@@ -16,18 +17,22 @@ start a playback session or background feature.
 
 | Artifact | Current boundary | Independent example |
 | --- | --- | --- |
-| `playback-core` | Queue, controller contracts and shared playback policies; no player implementation | `examples/headless-playback` |
-| `android-playback` | Media3 AAR with state observation, queue traversal, transport and load-time deferred source resolution | `examples/android-playback-consumer` |
-| `desktop-playback` | VLC desktop player; caller supplies source resolution and a compatible VLC runtime | `examples/headless-desktop` |
+| `playback-core` | Queue, controller contracts, `PlaybackSessionHost`, clicked-item queue policy and shared playback policies; no player implementation | `examples/headless-playback` |
+| `android-playback` | Media3 AAR with `Media3PlaybackController`, `AndroidPlaybackQueueStore`, `createMedia3PlaybackSession`, state observation, queue traversal, transport and load-time deferred source resolution | `examples/android-playback-consumer` |
+| `desktop-playback` | VLC desktop player, `createDesktopPlaybackSession` and `PlaybackQueueStore.asQueuePersistence()`; caller supplies source resolution and a compatible VLC runtime | `examples/headless-desktop` |
 | `desktop-downloads` | Desktop download engine; caller supplies a resolved URL and destination, then closes the manager | `examples/headless-download` |
 | `desktop-settings` | Desktop settings policy and session with in-memory or file storage | `examples/headless-desktop-settings` |
 | `equalizer-sdk` | Android-compatible equalizer preference policy; caller supplies settings storage and the audio backend | `examples/headless-equalizer` |
 | `desktop-resource-core` | Desktop bounded content cache and single-flight coordination; caller owns account-scoped keys and safe cache contents | `examples/headless-resource-cache` |
 | `account-sdk` | Saved-account JSON, cookie-export parsing and Android YouTube login orchestration; caller supplies backend and protected storage | `examples/headless-accounts` |
-| `social-sdk` | Social HTTP client and wire models; caller supplies a token | `examples/headless-social` |
+| `social-sdk` | Social HTTP client, wire models, platform-neutral Rich Presence policy and scrobble session coordinator | `examples/headless-social` |
 | `social-session` | Social session orchestration with caller-provided login, session storage, scope and realtime transport | `examples/headless-social-session` |
 | `social-realtime` | Optional WebSocket implementation; caller owns connection and `close()` | Local WebSocket test in the module |
 | `social-login` | Optional nonce-checked loopback callback flow; caller opens the browser | Local loopback test in the module |
+| `discovery-sdk` | Bounded discovery cache, quick-pick seeding, related-song resolution, suggestions, radio continuation and podcast library policies | `examples/headless-discovery` |
+| `playlist-sdk` | Playlist CSV export, occurrence ordering, local search filtering, picker session, tag normalization, top-mix weighting and AI content-filter matching | `examples/headless-playlist` |
+| `stems-sdk` | Portable 6-stem (`drums, bass, other, vocals, guitar, piano`) controls, mix store, 6-file cache, batch queue, model store and pure-Kotlin HTDemucs DSP/WAV pipeline | `examples/headless-stems` |
+| `update-sdk` | Shared SemVer comparison, R2 Android/Desktop `latest.json` manifest parsing, ABI fallback, SHA-256 verification and GitHub commit parsing | `examples/headless-updater` |
 | `sdk-lifecycle` | Optional synchronous ownership helper for scopes and `AutoCloseable` components | `examples/headless-download` and `examples/headless-social-session` |
 
 Other experimental modules include lyrics, chords, analysis, party transport, playlist import and

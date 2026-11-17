@@ -19,7 +19,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.playback.api.PlaybackController
-import org.json.JSONObject
+import moe.rukamori.archivetune.sdk.update.compareNumericVersionParts
+import moe.rukamori.archivetune.sdk.update.parseDesktopUpdateManifest
+import moe.rukamori.archivetune.sdk.update.shouldStageDesktopUpdate as sdkShouldStageDesktopUpdate
 
 sealed interface DesktopUpdateState {
     data object Disabled : DesktopUpdateState
@@ -119,12 +121,9 @@ class DesktopUpdateCoordinator(
     private suspend fun checkAndStage(baseUrl: String) {
         _state.value = DesktopUpdateState.Checking
         val manifestUri = URI.create("$baseUrl/latest.json")
-        val manifest = fetchJson(manifestUri)
-        val version = manifest.getString("version").trim()
-        val expectedExecutableSha256 = manifest.optString("exeSha256")
-            .trim()
-            .lowercase()
-            .takeIf(String::isNotBlank)
+        val manifest = parseDesktopUpdateManifest(fetchManifestJsonText(manifestUri))
+        val version = manifest.version
+        val expectedExecutableSha256 = manifest.exeSha256
         val currentExecutableSha256 = expectedExecutableSha256?.let {
             runningExecutableSha256 ?: error("Could not hash the running ArchiveTune executable")
         }
@@ -139,11 +138,8 @@ class DesktopUpdateCoordinator(
             return
         }
 
-        val downloadValue = manifest.optString("url").takeIf(String::isNotBlank)
-            ?: manifest.optString("msi").takeIf(String::isNotBlank)
-            ?: error("latest.json is missing url/msi")
-        val downloadUri = manifestUri.resolve(downloadValue)
-        val expectedSha256 = manifest.getString("sha256").trim().lowercase()
+        val downloadUri = manifestUri.resolve(manifest.downloadPathOrUrl)
+        val expectedSha256 = manifest.msiSha256
 
         Files.createDirectories(updateDirectory)
         val destination = updateDirectory.resolve("ArchiveTune-${sanitizeVersion(version)}.msi")
@@ -180,7 +176,7 @@ class DesktopUpdateCoordinator(
         _restartRequests.emit(Unit)
     }
 
-    private fun fetchJson(uri: URI): JSONObject {
+    private fun fetchManifestJsonText(uri: URI): String {
         val request = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofSeconds(20))
             .header("Accept", "application/json")
@@ -188,7 +184,7 @@ class DesktopUpdateCoordinator(
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
         check(response.statusCode() in 200..299) { "Update manifest HTTP ${response.statusCode()}" }
-        return JSONObject(response.body())
+        return response.body()
     }
 
     private fun download(uri: URI, destination: Path) {
@@ -254,35 +250,18 @@ class DesktopUpdateCoordinator(
     }
 }
 
-internal fun compareVersions(left: String, right: String): Int {
-    val leftParts = normalizedVersionParts(left)
-    val rightParts = normalizedVersionParts(right)
-    val size = maxOf(leftParts.size, rightParts.size)
-    for (index in 0 until size) {
-        val a = leftParts.getOrElse(index) { 0 }
-        val b = rightParts.getOrElse(index) { 0 }
-        if (a != b) return a.compareTo(b)
-    }
-    return 0
-}
+internal fun compareVersions(left: String, right: String): Int =
+    compareNumericVersionParts(left, right)
 
 internal fun shouldStageDesktopUpdate(
     manifestVersion: String,
     currentVersion: String,
     expectedExecutableSha256: String?,
     currentExecutableSha256: String?,
-): Boolean {
-    val expected = expectedExecutableSha256?.trim()?.lowercase()?.takeIf(String::isNotBlank)
-    if (expected != null) {
-        require(expected.matches(Regex("[0-9a-f]{64}"))) { "latest.json contains an invalid exeSha256" }
-        val current = currentExecutableSha256?.trim()?.lowercase()
-            ?: error("Current executable SHA-256 is unavailable")
-        require(current.matches(Regex("[0-9a-f]{64}"))) { "Current executable SHA-256 is invalid" }
-        return current != expected
-    }
-    return compareVersions(manifestVersion, currentVersion) > 0
-}
-
-private fun normalizedVersionParts(version: String): List<Int> =
-    version.trim().removePrefix("v").split('.', '-', '+')
-        .map { token -> token.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+): Boolean =
+    sdkShouldStageDesktopUpdate(
+        manifestVersion = manifestVersion,
+        currentVersion = currentVersion,
+        expectedExecutableSha256 = expectedExecutableSha256,
+        currentExecutableSha256 = currentExecutableSha256,
+    )
