@@ -58,6 +58,9 @@ The headless download example uses this lifecycle to own its download manager. E
 applications have not been migrated to it. The helper supports synchronous `AutoCloseable`
 cleanup; services with suspending shutdown still require explicit coordination. It is not a
 complete SDK session or a replacement for feature-specific lifecycle contracts.
+Registered components must tolerate their lifecycle-owned scopes being cancelled before
+`close()`; components that launch restoration or cleanup in those scopes need a different
+shutdown arrangement.
 
 ## Validation performed
 
