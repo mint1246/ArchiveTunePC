@@ -245,6 +245,8 @@ The separate Android consumer assembled against the published Media3 AAR from Ma
 
 Desktop stream selection, completed-download fallback, signed-source memory caching and HTTP recovery now live in `desktop-stream-playback`. The desktop app supplies the same authenticated backend and logger. The module and desktop app tests pass, including checks for cache scope, expiry and retry decisions. Live streaming and packaged playback remain to be verified. Separate Maven publication depends on publishing the desktop backend and its transitive modules.
 
+The Android next-stream preloader now uses `stream-resolver` for target deduplication, cancellation and retry decisions. The app supplies the existing Media3 cache probes and stream resolver. Module tests cover superseded targets, cached sources and retry after failure. Android symbol processing passes, with app compilation and unit tests running separately to constrain memory use.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.
