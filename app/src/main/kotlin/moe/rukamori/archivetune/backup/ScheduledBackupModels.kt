@@ -8,13 +8,10 @@
 package moe.rukamori.archivetune.backup
 
 import android.net.Uri
+import moe.rukamori.archivetune.backup.sdk.ScheduledBackupConfig
+import moe.rukamori.archivetune.backup.sdk.ScheduledBackupFrequency as SdkScheduledBackupFrequency
 
-enum class ScheduledBackupFrequency {
-    DAILY,
-    WEEKLY,
-    MONTHLY,
-    CUSTOM,
-}
+typealias ScheduledBackupFrequency = SdkScheduledBackupFrequency
 
 data class ScheduledBackupSettings(
     val enabled: Boolean = false,
@@ -23,4 +20,14 @@ data class ScheduledBackupSettings(
     val directoryUri: Uri? = null,
     val directoryName: String? = null,
     val overwriteExisting: Boolean = false,
-)
+) {
+    fun toSdkConfig(): ScheduledBackupConfig =
+        ScheduledBackupConfig(
+            enabled = enabled,
+            frequency = frequency,
+            customDateEpochDay = customDateEpochDay,
+            directoryUriString = directoryUri?.toString(),
+            directoryName = directoryName,
+            overwriteExisting = overwriteExisting,
+        )
+}

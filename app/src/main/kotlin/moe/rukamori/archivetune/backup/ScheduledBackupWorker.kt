@@ -18,9 +18,8 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CancellationException
 import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.backup.sdk.ScheduledBackupScheduleCalculator
 import moe.rukamori.archivetune.utils.reportException
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 class ScheduledBackupWorker(
     context: Context,
@@ -57,12 +56,10 @@ class ScheduledBackupWorker(
     private fun createDestination(settings: ScheduledBackupSettings): Uri {
         val treeUri = requireNotNull(settings.directoryUri)
         val fileName =
-            if (settings.overwriteExisting) {
-                "${applicationContext.getString(R.string.app_name)}.backup"
-            } else {
-                val timestamp = LocalDateTime.now().format(FILE_TIMESTAMP_FORMATTER)
-                "${applicationContext.getString(R.string.app_name)}_$timestamp.backup"
-            }
+            ScheduledBackupScheduleCalculator.buildBackupFileName(
+                appName = applicationContext.getString(R.string.app_name),
+                overwriteExisting = settings.overwriteExisting,
+            )
 
         if (settings.overwriteExisting) {
             findChildDocument(treeUri, fileName)?.let { return it }
@@ -114,7 +111,6 @@ class ScheduledBackupWorker(
 
     companion object {
         private const val BACKUP_MIME_TYPE = "application/octet-stream"
-        private val FILE_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     }
 }
 

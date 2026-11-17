@@ -460,6 +460,7 @@ dependencies {
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))
     implementation(project(":playlist-import-sdk"))
+    implementation(project(":backup-sdk"))
     implementation(project(":chords-sdk")) {
         exclude(group = "org.json", module = "json")
     }

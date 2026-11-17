@@ -8,24 +8,39 @@
 package moe.rukamori.archivetune.backup
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
-import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
+import moe.rukamori.archivetune.backup.sdk.BackupArchiveCategory as SdkBackupArchiveCategory
+import moe.rukamori.archivetune.backup.sdk.BackupArchiveConstants
+import moe.rukamori.archivetune.backup.sdk.BackupArchiveService
+import moe.rukamori.archivetune.backup.sdk.BackupArchiveStep as SdkBackupArchiveStep
+import moe.rukamori.archivetune.backup.sdk.BackupDatabaseSource
+import moe.rukamori.archivetune.backup.sdk.BackupPreferenceValue
+import moe.rukamori.archivetune.backup.sdk.BackupRestoreTarget
+import moe.rukamori.archivetune.backup.sdk.BackupSettingsSnapshot
+import moe.rukamori.archivetune.backup.sdk.BackupValidationResult as SdkBackupValidationResult
+import moe.rukamori.archivetune.backup.sdk.RestoreArchiveProgress
+import moe.rukamori.archivetune.constants.RedownloadOnRestoreKey
 import moe.rukamori.archivetune.db.InternalDatabase
 import moe.rukamori.archivetune.db.MusicDatabase
-import moe.rukamori.archivetune.extensions.zipOutputStream
+import moe.rukamori.archivetune.extensions.div
+import moe.rukamori.archivetune.playback.MusicService
+import moe.rukamori.archivetune.playback.MusicService.Companion.PERSISTENT_QUEUE_FILE
 import moe.rukamori.archivetune.utils.dataStore
-import java.io.FileInputStream
-import java.io.OutputStream
-import java.util.zip.ZipEntry
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.roundToInt
 
 enum class BackupArchiveStep {
     EXPORT_SETTINGS,
@@ -48,205 +63,182 @@ class BackupArchiveRepository
         private val database: MusicDatabase,
         private val operationCoordinator: BackupOperationCoordinator,
     ) {
+        private val archiveService = BackupArchiveService(operationCoordinator.sdkCoordinator)
+
         suspend fun createBackup(
             uri: Uri,
             categories: Set<BackupArchiveCategory>,
             onProgress: (BackupArchiveProgress) -> Unit = {},
-        ) = withContext(Dispatchers.IO) {
-            operationCoordinator.withLock {
-                require(categories.isNotEmpty()) { "At least one backup category is required" }
-
-                val includeSettings = BackupArchiveCategory.SETTINGS in categories
-                val includeAccount = BackupArchiveCategory.ACCOUNT in categories
-                val includeLibrary = BackupArchiveCategory.LIBRARY in categories
-                val settingsExcludedKeys = if (includeAccount) emptySet() else ACCOUNT_PREFERENCE_KEYS
-                val dbFile = context.getDatabasePath(InternalDatabase.DB_NAME)
-                val dbFiles =
-                    if (includeLibrary) {
+        ) {
+            val dbFile = context.getDatabasePath(InternalDatabase.DB_NAME)
+            val databaseSource =
+                object : BackupDatabaseSource {
+                    override fun existingDatabaseFiles(): List<File> =
                         listOf(
                             dbFile,
                             dbFile.resolveSibling("${InternalDatabase.DB_NAME}-wal"),
                         ).filter { it.exists() }
-                    } else {
-                        emptyList()
-                    }
 
-                val totalUnits = (if (includeSettings) 1 else 0) + (if (includeLibrary) 1 else 0) + dbFiles.size
-                val unitSpan = 100f / totalUnits.coerceAtLeast(1)
-                var completedUnits = 0
-                var lastProgress: BackupArchiveProgress? = null
-
-                fun emit(
-                    step: BackupArchiveStep,
-                    fileName: String? = null,
-                    unitFraction: Float = 0f,
-                    indeterminate: Boolean = false,
-                ) {
-                    val progress =
-                        BackupArchiveProgress(
-                            step = step,
-                            fileName = fileName,
-                            percent =
-                                ((completedUnits + unitFraction.coerceIn(0f, 1f)) * unitSpan)
-                                    .roundToInt()
-                                    .coerceIn(0, 100),
-                            indeterminate = indeterminate,
-                        )
-                    if (progress != lastProgress) {
-                        lastProgress = progress
-                        onProgress(progress)
-                    }
-                }
-
-                val output =
-                    context.contentResolver.openOutputStream(uri, "wt")
-                        ?: throw IllegalStateException("Failed to open backup destination")
-                output.buffered().zipOutputStream().use { zipStream ->
-                    if (includeSettings) {
-                        emit(BackupArchiveStep.EXPORT_SETTINGS, indeterminate = true)
-                        zipStream.putNextEntry(ZipEntry(SETTINGS_XML_FILENAME))
-                        writeSettingsToXml(zipStream, settingsExcludedKeys)
-                        zipStream.closeEntry()
-                        completedUnits++
-                    }
-
-                    if (includeLibrary) {
-                        emit(BackupArchiveStep.CHECKPOINT_DATABASE, indeterminate = true)
+                    override suspend fun checkpointAndRead(block: suspend (List<File>) -> Unit) {
                         database.awaitIdle()
                         database.checkpoint()
-                        completedUnits++
-
-                        val buffer = ByteArray(BUFFER_SIZE)
                         val connection = database.openHelper.writableDatabase
                         connection.beginTransactionNonExclusive()
                         try {
-                            listOf(dbFile, dbFile.resolveSibling("${InternalDatabase.DB_NAME}-wal"))
-                                .filter { it.exists() }
-                                .forEach { file ->
-                                    val fileSize = file.length().coerceAtLeast(1L)
-                                    var bytesCopied = 0L
-                                    emit(BackupArchiveStep.COPY_DATABASE_FILE, file.name)
-                                    zipStream.putNextEntry(ZipEntry(file.name))
-                                    FileInputStream(file).use { input ->
-                                        while (true) {
-                                            currentCoroutineContext().ensureActive()
-                                            val read = input.read(buffer)
-                                            if (read <= 0) break
-                                            zipStream.write(buffer, 0, read)
-                                            bytesCopied += read
-                                            emit(
-                                                step = BackupArchiveStep.COPY_DATABASE_FILE,
-                                                fileName = file.name,
-                                                unitFraction = bytesCopied.toFloat() / fileSize.toFloat(),
-                                            )
-                                        }
-                                    }
-                                    zipStream.closeEntry()
-                                    completedUnits++
-                                }
+                            block(existingDatabaseFiles())
                         } finally {
                             connection.endTransaction()
                         }
                     }
                 }
-            }
+
+            archiveService.createBackup(
+                categories = categories.mapTo(linkedSetOf()) { it.toSdkCategory() },
+                openOutputStream = {
+                    context.contentResolver.openOutputStream(uri, "wt")
+                        ?: throw IllegalStateException("Failed to open backup destination")
+                },
+                preferencesProvider = { readPreferencesSnapshot() },
+                databaseSource = databaseSource,
+                onProgress = { progress ->
+                    onProgress(
+                        BackupArchiveProgress(
+                            step = progress.step.toAppStep(),
+                            fileName = progress.fileName,
+                            percent = progress.percent,
+                            indeterminate = progress.indeterminate,
+                        ),
+                    )
+                },
+            )
         }
 
-        private suspend fun writeSettingsToXml(
-            outputStream: OutputStream,
-            excludedKeyNames: Set<String>,
-        ) {
-            val preferences =
-                context.dataStore.data
-                    .first()
-                    .asMap()
-            val serializer = android.util.Xml.newSerializer()
-            serializer.setOutput(outputStream, Charsets.UTF_8.name())
-            serializer.startDocument(Charsets.UTF_8.name(), true)
-            serializer.startTag(null, "ArchiveTuneBackup")
-            serializer.startTag(null, "Settings")
+        suspend fun validateBackup(
+            uri: Uri,
+            onError: (Exception) -> Unit = {},
+        ): SdkBackupValidationResult =
+            archiveService.validateBackup(
+                dbName = InternalDatabase.DB_NAME,
+                openInputStream = { context.applicationContext.contentResolver.openInputStream(uri) },
+                onError = onError,
+            )
 
+        suspend fun restoreBackup(
+            uri: Uri,
+            categories: Set<BackupArchiveCategory>,
+            onProgress: (RestoreArchiveProgress) -> Unit = {},
+            onBeforeRestart: suspend () -> Unit = {},
+            restartApplication: () -> Unit = {},
+        ) {
+            val restoreTarget =
+                object : BackupRestoreTarget {
+                    override suspend fun prepareDatabaseRestore() {
+                        context.stopService(Intent(context, MusicService::class.java))
+                        database.awaitIdle()
+                        database.checkpoint()
+                        database.close()
+                        BackupArchiveConstants.databaseSidecarNames(InternalDatabase.DB_NAME).forEach { sidecarName ->
+                            val sidecar = context.getDatabasePath(sidecarName)
+                            check(!sidecar.exists() || sidecar.delete()) { "Failed to clear database sidecar" }
+                        }
+                    }
+
+                    override suspend fun applySettings(snapshot: BackupSettingsSnapshot) {
+                        context.dataStore.edit { prefs ->
+                            snapshot.booleans.forEach { (k, v) -> prefs[booleanPreferencesKey(k)] = v }
+                            snapshot.ints.forEach { (k, v) -> prefs[intPreferencesKey(k)] = v }
+                            snapshot.longs.forEach { (k, v) -> prefs[longPreferencesKey(k)] = v }
+                            snapshot.floats.forEach { (k, v) -> prefs[floatPreferencesKey(k)] = v }
+                            snapshot.strings.forEach { (k, v) -> prefs[stringPreferencesKey(k)] = v }
+                            snapshot.stringSets.forEach { (k, v) -> prefs[stringSetPreferencesKey(k)] = v }
+                        }
+                    }
+
+                    override suspend fun writeLegacyPreferencesPb(inputStream: InputStream) {
+                        val settingsDir = context.filesDir / "datastore"
+                        if (!settingsDir.exists()) settingsDir.mkdirs()
+                        (settingsDir / BackupArchiveConstants.SETTINGS_PB_FILENAME).outputStream().use { out ->
+                            inputStream.copyTo(out)
+                        }
+                    }
+
+                    override suspend fun writeDatabaseFile(
+                        entryName: String,
+                        inputStream: InputStream,
+                    ) {
+                        val dbFile = context.getDatabasePath(entryName)
+                        if (dbFile.exists()) {
+                            dbFile.delete()
+                        }
+                        FileOutputStream(dbFile).use { out ->
+                            inputStream.copyTo(out)
+                        }
+                    }
+
+                    override suspend fun finalizeRestore(includeDownloads: Boolean) {
+                        onBeforeRestart()
+                        try {
+                            context.filesDir.resolve(PERSISTENT_QUEUE_FILE).delete()
+                        } catch (_: Exception) {
+                        }
+                        if (includeDownloads) {
+                            context.dataStore.edit { prefs ->
+                                prefs[RedownloadOnRestoreKey] = true
+                            }
+                        }
+                        restartApplication()
+                    }
+                }
+
+            archiveService.restoreBackup(
+                categories = categories.mapTo(linkedSetOf()) { it.toSdkCategory() },
+                dbName = InternalDatabase.DB_NAME,
+                openInputStream = { context.applicationContext.contentResolver.openInputStream(uri) },
+                restoreTarget = restoreTarget,
+                onProgress = onProgress,
+            )
+        }
+
+        private suspend fun readPreferencesSnapshot(): Map<String, BackupPreferenceValue> {
+            val preferences = context.dataStore.data.first().asMap()
+            val mapped = LinkedHashMap<String, BackupPreferenceValue>(preferences.size)
             preferences.forEach { (key, value) ->
-                if (
-                    key.name !in excludedKeyNames &&
-                    key.name !in ScheduledBackupRepository.NON_PORTABLE_PREFERENCE_KEYS
-                ) {
-                    serializer.writePreference(key, value)
+                val converted =
+                    when (value) {
+                        is Boolean -> BackupPreferenceValue.BooleanValue(value)
+                        is Int -> BackupPreferenceValue.IntValue(value)
+                        is Long -> BackupPreferenceValue.LongValue(value)
+                        is Float -> BackupPreferenceValue.FloatValue(value)
+                        is String -> BackupPreferenceValue.StringValue(value)
+                        is Set<*> -> BackupPreferenceValue.StringSetValue(value.mapTo(linkedSetOf()) { it.toString() })
+                        else -> null
+                    }
+                if (converted != null) {
+                    mapped[key.name] = converted
                 }
             }
-
-            serializer.endTag(null, "Settings")
-            serializer.endTag(null, "ArchiveTuneBackup")
-            serializer.endDocument()
-            serializer.flush()
+            return mapped
         }
 
-        private fun org.xmlpull.v1.XmlSerializer.writePreference(
-            key: Preferences.Key<*>,
-            value: Any,
-        ) {
-            val tagName =
-                when (value) {
-                    is Boolean -> "boolean"
-                    is Int -> "int"
-                    is Long -> "long"
-                    is Float -> "float"
-                    is String -> "string"
-                    is Set<*> -> "string-set"
-                    else -> return
-                }
-            startTag(null, tagName)
-            attribute(null, "name", key.name)
-            if (value is Set<*>) {
-                value.forEach { item ->
-                    startTag(null, "item")
-                    text(item.toString())
-                    endTag(null, "item")
-                }
-            } else {
-                attribute(null, "value", value.toString())
+        private fun BackupArchiveCategory.toSdkCategory(): SdkBackupArchiveCategory =
+            when (this) {
+                BackupArchiveCategory.LIBRARY -> SdkBackupArchiveCategory.LIBRARY
+                BackupArchiveCategory.ACCOUNT -> SdkBackupArchiveCategory.ACCOUNT
+                BackupArchiveCategory.SETTINGS -> SdkBackupArchiveCategory.SETTINGS
+                BackupArchiveCategory.DOWNLOADS -> SdkBackupArchiveCategory.DOWNLOADS
             }
-            endTag(null, tagName)
-        }
+
+        private fun SdkBackupArchiveStep.toAppStep(): BackupArchiveStep =
+            when (this) {
+                SdkBackupArchiveStep.EXPORT_SETTINGS -> BackupArchiveStep.EXPORT_SETTINGS
+                SdkBackupArchiveStep.CHECKPOINT_DATABASE -> BackupArchiveStep.CHECKPOINT_DATABASE
+                SdkBackupArchiveStep.COPY_DATABASE_FILE -> BackupArchiveStep.COPY_DATABASE_FILE
+            }
 
         companion object {
-            const val SETTINGS_XML_FILENAME = "settings.xml"
-            private const val BUFFER_SIZE = 64 * 1024
+            const val SETTINGS_XML_FILENAME = BackupArchiveConstants.SETTINGS_XML_FILENAME
 
-            val ACCOUNT_PREFERENCE_KEYS: Set<String> =
-                setOf(
-                    "innerTubeCookie",
-                    "visitorData",
-                    "dataSyncId",
-                    "poToken",
-                    "poTokenGvs",
-                    "poTokenPlayer",
-                    "poTokenSourceUrl",
-                    "webClientPoTokenEnabled",
-                    "accountName",
-                    "accountEmail",
-                    "accountChannelHandle",
-                    "useLoginForBrowse",
-                    "lastfmSession",
-                    "lastfmUsername",
-                    "lastfmProvider",
-                    "lastfmCustomEndpoint",
-                    "lastfmApiKeyOverride",
-                    "lastfmSecretOverride",
-                    "paxsenixApiKey",
-                    "listenbrainz_token",
-                    "discordToken",
-                    "discordUsername",
-                    "discordName",
-                    "proxyUsername",
-                    "proxyPassword",
-                    "spotify_sp_dc",
-                    "spotify_sp_key",
-                    "spotify_access_token",
-                    "spotify_access_token_expires_at",
-                    "spotify_account_name",
-                    "spotify_account_avatar_url",
-                )
+            val ACCOUNT_PREFERENCE_KEYS: Set<String> = BackupArchiveConstants.ACCOUNT_PREFERENCE_KEYS
         }
     }
 

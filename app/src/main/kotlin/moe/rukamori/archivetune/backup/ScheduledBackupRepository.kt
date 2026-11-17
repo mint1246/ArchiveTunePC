@@ -22,8 +22,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import moe.rukamori.archivetune.backup.sdk.BackupArchiveConstants
+import moe.rukamori.archivetune.backup.sdk.ScheduledBackupScheduleCalculator
 import moe.rukamori.archivetune.utils.dataStore
-import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -74,7 +75,7 @@ class ScheduledBackupRepository
 
         suspend fun updateCustomDate(epochDay: Long): ScheduledBackupSettings =
             updateMutex.withLock {
-                require(epochDay >= LocalDate.now().toEpochDay()) { "Backup date cannot be in the past" }
+                ScheduledBackupScheduleCalculator.validateCustomDate(epochDay)
                 context.dataStore
                     .edit { preferences ->
                         preferences[FREQUENCY_KEY] = ScheduledBackupFrequency.CUSTOM.name
@@ -134,12 +135,7 @@ class ScheduledBackupRepository
             private val DIRECTORY_NAME_KEY = stringPreferencesKey("scheduledBackupDirectoryName")
             private val OVERWRITE_KEY = booleanPreferencesKey("scheduledBackupOverwriteExisting")
 
-            val NON_PORTABLE_PREFERENCE_KEYS: Set<String> =
-                setOf(
-                    ENABLED_KEY.name,
-                    DIRECTORY_URI_KEY.name,
-                    DIRECTORY_NAME_KEY.name,
-                )
+            val NON_PORTABLE_PREFERENCE_KEYS: Set<String> = BackupArchiveConstants.NON_PORTABLE_PREFERENCE_KEYS
 
             private fun androidx.datastore.preferences.core.Preferences.toScheduledBackupSettings(): ScheduledBackupSettings =
                 ScheduledBackupSettings(

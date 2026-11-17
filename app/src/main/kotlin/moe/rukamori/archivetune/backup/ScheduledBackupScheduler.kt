@@ -13,8 +13,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.Duration
-import java.time.LocalDate
+import moe.rukamori.archivetune.backup.sdk.ScheduledBackupScheduleCalculator
 import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -59,38 +58,14 @@ class ScheduledBackupScheduler
                         .setRequiresStorageNotLow(true)
                         .build(),
                 ).setInitialDelay(
-                    Duration.between(ZonedDateTime.now(), runAt).toMillis().coerceAtLeast(MINIMUM_DELAY_MS),
+                    ScheduledBackupScheduleCalculator.initialDelayMillis(runAt),
                     TimeUnit.MILLISECONDS,
                 ).build()
 
-        private fun nextRunAt(settings: ScheduledBackupSettings): ZonedDateTime? {
-            if (!settings.enabled || settings.directoryUri == null) return null
-            val now = ZonedDateTime.now()
-            val nextDate =
-                when (settings.frequency) {
-                    ScheduledBackupFrequency.DAILY -> {
-                        now.toLocalDate().plusDays(1)
-                    }
-
-                    ScheduledBackupFrequency.WEEKLY -> {
-                        now.toLocalDate().plusWeeks(1)
-                    }
-
-                    ScheduledBackupFrequency.MONTHLY -> {
-                        now.toLocalDate().plusMonths(1)
-                    }
-
-                    ScheduledBackupFrequency.CUSTOM -> {
-                        val epochDay = settings.customDateEpochDay ?: return null
-                        LocalDate.ofEpochDay(epochDay).takeUnless { it.isBefore(now.toLocalDate()) } ?: return null
-                    }
-                }
-            return nextDate.atTime(BACKUP_HOUR, 0).atZone(now.zone)
-        }
+        private fun nextRunAt(settings: ScheduledBackupSettings): ZonedDateTime? =
+            ScheduledBackupScheduleCalculator.nextRunAt(settings.toSdkConfig())
 
         companion object {
             private const val WORK_NAME = "scheduled_auto_backup"
-            private const val BACKUP_HOUR = 2
-            private const val MINIMUM_DELAY_MS = 1_000L
         }
     }

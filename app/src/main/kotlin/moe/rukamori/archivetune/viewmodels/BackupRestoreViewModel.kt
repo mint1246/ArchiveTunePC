@@ -13,13 +13,6 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.floatPreferencesKey
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.common.collect.ImmutableList
@@ -27,9 +20,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,41 +31,32 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.MainActivity
 import moe.rukamori.archivetune.R
-import moe.rukamori.archivetune.constants.RedownloadOnRestoreKey
 import moe.rukamori.archivetune.backup.BackupArchiveCategory
 import moe.rukamori.archivetune.backup.BackupArchiveRepository
-import moe.rukamori.archivetune.backup.BackupOperationCoordinator
 import moe.rukamori.archivetune.backup.BackupArchiveStep
 import moe.rukamori.archivetune.backup.CreateBackupUseCase
 import moe.rukamori.archivetune.backup.ObserveScheduledBackupSettingsUseCase
 import moe.rukamori.archivetune.backup.ScheduledBackupFrequency
 import moe.rukamori.archivetune.backup.ScheduledBackupSettings
 import moe.rukamori.archivetune.backup.UpdateScheduledBackupUseCase
-import moe.rukamori.archivetune.db.InternalDatabase
+import moe.rukamori.archivetune.backup.sdk.BackupArchiveConstants
+import moe.rukamori.archivetune.backup.sdk.BackupValidationError
+import moe.rukamori.archivetune.backup.sdk.RestoreArchiveStep
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.db.entities.ArtistEntity
 import moe.rukamori.archivetune.db.entities.Song
 import moe.rukamori.archivetune.db.entities.SongEntity
-import moe.rukamori.archivetune.extensions.div
-import moe.rukamori.archivetune.extensions.zipInputStream
-import moe.rukamori.archivetune.playback.MusicService
-import moe.rukamori.archivetune.playback.MusicService.Companion.PERSISTENT_QUEUE_FILE
 import moe.rukamori.archivetune.playlist.export.ExportablePlaylist
 import moe.rukamori.archivetune.playlistexport.ExportPlaylistAsCsvUseCase
 import moe.rukamori.archivetune.playlistexport.ObserveExportablePlaylistsUseCase
-import moe.rukamori.archivetune.utils.dataStore
 import moe.rukamori.archivetune.utils.reportException
-import org.xmlpull.v1.XmlPullParser
-import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.io.PushbackReader
 import java.io.Reader
-import java.io.StringReader
 import java.time.LocalDate
 import java.time.format.FormatStyle
 import java.util.Locale
 import javax.inject.Inject
-import kotlin.math.roundToInt
 import kotlin.system.exitProcess
 
 data class BackupRestoreProgressUi(
@@ -250,7 +231,7 @@ class BackupRestoreViewModel
     constructor(
         val database: MusicDatabase,
         private val createBackupUseCase: CreateBackupUseCase,
-        private val backupOperationCoordinator: BackupOperationCoordinator,
+        private val backupArchiveRepository: BackupArchiveRepository,
         observeScheduledBackupSettings: ObserveScheduledBackupSettingsUseCase,
         private val updateScheduledBackup: UpdateScheduledBackupUseCase,
         private val observeExportablePlaylists: ObserveExportablePlaylistsUseCase,
@@ -572,148 +553,49 @@ class BackupRestoreViewModel
             categories: Set<BackupCategory>,
         ) {
             if (restoreJob?.isActive == true || manualBackupJob?.isActive == true) return
-            restoreJob = viewModelScope.launch(Dispatchers.IO) {
-                backupOperationCoordinator.withLock {
+            restoreJob =
+                viewModelScope.launch(Dispatchers.IO) {
                     val title = context.getString(R.string.restore_in_progress)
                     try {
-                        val includeSettings = BackupCategory.SETTINGS in categories
-                        val includeAccount = BackupCategory.ACCOUNT in categories
-                        val includeLibrary = BackupCategory.LIBRARY in categories
-                        val includeDownloads = BackupCategory.DOWNLOADS in categories
-                        val settingsExcludedKeys = if (includeAccount) emptySet() else ACCOUNT_PREF_KEYS
-                        emitProgress(
-                            title = title,
-                            step = context.getString(R.string.restore_step_verifying),
-                            percent = 0,
-                            indeterminate = true,
-                        )
-
-                        val entryNames = ArrayList<String>()
-                        var hasDb = false
-                        context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
-                            stream.zipInputStream().use { zip ->
-                                var entry = zip.nextEntry
-                                while (entry != null) {
-                                    entryNames.add(entry.name)
-                                    if (entry.name == InternalDatabase.DB_NAME) hasDb = true
-                                    entry = zip.nextEntry
-                                }
-                            }
-                        }
-                        if (includeLibrary && !hasDb) throw IllegalStateException("Backup missing database")
-
-                        val restoreEntries =
-                            entryNames.filter { name ->
-                                (includeSettings && (name == SETTINGS_XML_FILENAME || name == SETTINGS_FILENAME)) ||
-                                    (
-                                        includeLibrary && (
-                                            name == InternalDatabase.DB_NAME ||
-                                                name == "${InternalDatabase.DB_NAME}-wal" ||
-                                                name == "${InternalDatabase.DB_NAME}-shm" ||
-                                                name == "${InternalDatabase.DB_NAME}-journal"
-                                        )
-                                    )
-                            }
-
-                        val totalUnits = 1 + (if (includeLibrary) 1 else 0) + restoreEntries.size
-                        val unitSpan = 100f / totalUnits.coerceAtLeast(1)
-                        var completedUnits = 0
-
-                        fun emit(
-                            step: String,
-                            indeterminate: Boolean,
-                        ) {
-                            val p = (completedUnits * unitSpan).roundToInt().coerceIn(0, 100)
-                            emitProgress(title = title, step = step, percent = p, indeterminate = indeterminate)
-                        }
-
-                        currentCoroutineContext().ensureActive()
-                        withContext(NonCancellable) {
-                            completedUnits++
-                            if (includeLibrary) {
-                                emit(context.getString(R.string.restore_step_stopping_playback), indeterminate = true)
-                                context.stopService(Intent(context, MusicService::class.java))
-                                database.awaitIdle()
-                                database.checkpoint()
-                                database.close()
-                                listOf("-wal", "-shm", "-journal").forEach { suffix ->
-                                    val sidecar = context.getDatabasePath("${InternalDatabase.DB_NAME}$suffix")
-                                    check(!sidecar.exists() || sidecar.delete()) { "Failed to clear database sidecar" }
-                                }
-                                completedUnits++
-                            }
-
-                            context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
-                                stream.zipInputStream().use { zip ->
-                                    var entry = zip.nextEntry
-                                    while (entry != null) {
-                                        val name = entry.name
-                                        if (name !in restoreEntries) {
-                                            entry = zip.nextEntry
-                                            continue
+                        backupArchiveRepository.restoreBackup(
+                            uri = uri,
+                            categories = categories.mapTo(linkedSetOf()) { BackupArchiveCategory.valueOf(it.name) },
+                            onProgress = { progress ->
+                                val step =
+                                    when (progress.step) {
+                                        RestoreArchiveStep.VERIFYING -> {
+                                            context.getString(R.string.restore_step_verifying)
                                         }
-                                        when (name) {
-                                            SETTINGS_XML_FILENAME -> {
-                                                emit(context.getString(R.string.restore_step_restoring_settings), indeterminate = true)
-                                                restoreSettingsFromXml(context, zip, settingsExcludedKeys)
-                                            }
 
-                                            SETTINGS_FILENAME -> {
-                                                emit(context.getString(R.string.restore_step_restoring_settings), indeterminate = true)
-                                                val settingsDir = context.filesDir / "datastore"
-                                                if (!settingsDir.exists()) settingsDir.mkdirs()
-                                                (settingsDir / SETTINGS_FILENAME).outputStream().use { out ->
-                                                    zip.copyTo(out)
-                                                }
-                                            }
-
-                                            InternalDatabase.DB_NAME,
-                                            "${InternalDatabase.DB_NAME}-wal",
-                                            "${InternalDatabase.DB_NAME}-shm",
-                                            "${InternalDatabase.DB_NAME}-journal",
-                                            -> {
-                                                emit(context.getString(R.string.restore_step_restoring_file, name), indeterminate = true)
-                                                val dbFile = context.getDatabasePath(name)
-                                                if (dbFile.exists()) {
-                                                    dbFile.delete()
-                                                }
-                                                FileOutputStream(dbFile).use { out ->
-                                                    zip.copyTo(out)
-                                                }
-                                            }
+                                        RestoreArchiveStep.STOPPING_PLAYBACK -> {
+                                            context.getString(R.string.restore_step_stopping_playback)
                                         }
-                                        completedUnits++
-                                        entry = zip.nextEntry
+
+                                        RestoreArchiveStep.RESTORING_SETTINGS -> {
+                                            context.getString(R.string.restore_step_restoring_settings)
+                                        }
+
+                                        RestoreArchiveStep.RESTORING_FILE -> {
+                                            context.getString(R.string.restore_step_restoring_file, progress.fileName.orEmpty())
+                                        }
+
+                                        RestoreArchiveStep.RESTARTING -> {
+                                            context.getString(R.string.restore_step_restarting)
+                                        }
                                     }
+                                emitProgress(title = title, step = step, percent = progress.percent, indeterminate = progress.indeterminate)
+                            },
+                            onBeforeRestart = {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, R.string.restore_success, Toast.LENGTH_SHORT).show()
                                 }
-                            }
-
-                            emitProgress(
-                                title = title,
-                                step = context.getString(R.string.restore_step_restarting),
-                                percent = 100,
-                                indeterminate = true,
-                            )
-
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(context, R.string.restore_success, Toast.LENGTH_SHORT).show()
-                            }
-
-                            try {
-                                context.filesDir.resolve(PERSISTENT_QUEUE_FILE).delete()
-                            } catch (_: Exception) {
-                            }
-
-                            if (includeDownloads) {
-                                context.dataStore.edit { prefs ->
-                                    prefs[RedownloadOnRestoreKey] = true
-                                }
-                            }
-
-                            _backupRestoreProgress.value = null
-                            context.startActivity(Intent(context, MainActivity::class.java))
-                            exitProcess(0)
-                        }
+                            },
+                            restartApplication = {
+                                _backupRestoreProgress.value = null
+                                context.startActivity(Intent(context, MainActivity::class.java))
+                                exitProcess(0)
+                            },
+                        )
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (e: Exception) {
@@ -725,112 +607,6 @@ class BackupRestoreViewModel
                         _backupRestoreProgress.value = null
                     }
                 }
-            }
-        }
-
-        private suspend fun restoreSettingsFromXml(
-            context: Context,
-            inputStream: java.io.InputStream,
-            excludedKeyNames: Set<String> = emptySet(),
-        ) {
-            val content = inputStream.readBytes().toString(Charsets.UTF_8)
-            if (content.isBlank()) return
-
-            val parser = android.util.Xml.newPullParser()
-            parser.setInput(StringReader(content))
-
-            var eventType = parser.eventType
-            val booleans = LinkedHashMap<String, Boolean>()
-            val ints = LinkedHashMap<String, Int>()
-            val longs = LinkedHashMap<String, Long>()
-            val floats = LinkedHashMap<String, Float>()
-            val strings = LinkedHashMap<String, String>()
-            val stringSets = LinkedHashMap<String, Set<String>>()
-
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                if (eventType == XmlPullParser.START_TAG) {
-                    val name = parser.name
-                    val keyName = parser.getAttributeValue(null, "name")
-
-                    if (keyName != null && keyName !in excludedKeyNames) {
-                        when (name) {
-                            "boolean" -> {
-                                val value = parser.getAttributeValue(null, "value")?.toBoolean()
-                                if (value != null) {
-                                    booleans[keyName] = value
-                                }
-                            }
-
-                            "int" -> {
-                                val value = parser.getAttributeValue(null, "value")?.toIntOrNull()
-                                if (value != null) {
-                                    ints[keyName] = value
-                                }
-                            }
-
-                            "long" -> {
-                                val value = parser.getAttributeValue(null, "value")?.toLongOrNull()
-                                if (value != null) {
-                                    longs[keyName] = value
-                                }
-                            }
-
-                            "float" -> {
-                                val value = parser.getAttributeValue(null, "value")?.toFloatOrNull()
-                                if (value != null) {
-                                    floats[keyName] = value
-                                }
-                            }
-
-                            "string" -> {
-                                val value = parser.getAttributeValue(null, "value")
-                                if (value != null) {
-                                    strings[keyName] = value
-                                }
-                            }
-
-                            "string-set" -> {
-                                val values = LinkedHashSet<String>()
-                                while (true) {
-                                    val next = parser.next()
-                                    if (next == XmlPullParser.START_TAG && parser.name == "item") {
-                                        values.add(parser.nextText())
-                                        continue
-                                    }
-                                    if (next == XmlPullParser.END_TAG && parser.name == "string-set") {
-                                        break
-                                    }
-                                    if (next == XmlPullParser.END_DOCUMENT) {
-                                        break
-                                    }
-                                }
-                                stringSets[keyName] = values
-                            }
-                        }
-                    }
-                }
-                eventType = parser.next()
-            }
-
-            if (
-                booleans.isEmpty() &&
-                ints.isEmpty() &&
-                longs.isEmpty() &&
-                floats.isEmpty() &&
-                strings.isEmpty() &&
-                stringSets.isEmpty()
-            ) {
-                return
-            }
-
-            context.dataStore.edit { prefs ->
-                booleans.forEach { (k, v) -> prefs[booleanPreferencesKey(k)] = v }
-                ints.forEach { (k, v) -> prefs[intPreferencesKey(k)] = v }
-                longs.forEach { (k, v) -> prefs[longPreferencesKey(k)] = v }
-                floats.forEach { (k, v) -> prefs[floatPreferencesKey(k)] = v }
-                strings.forEach { (k, v) -> prefs[stringPreferencesKey(k)] = v }
-                stringSets.forEach { (k, v) -> prefs[stringSetPreferencesKey(k)] = v }
-            }
         }
 
         private fun normalizeCsvHeaderCell(value: String): String =
@@ -975,71 +751,28 @@ class BackupRestoreViewModel
         suspend fun validateBackup(
             context: Context,
             uri: Uri,
-        ): BackupValidationResult =
-            withContext(Dispatchers.IO) {
-                try {
-                    val stream =
-                        context.applicationContext.contentResolver.openInputStream(uri)
-                    if (stream == null) {
-                        return@withContext BackupValidationResult(
-                            isValid = false,
-                            availableCategories = emptySet(),
-                            errorMessage = context.getString(R.string.restore_file_not_found),
-                        )
-                    }
-                    stream.use { inputStream ->
-                        val zipStream = inputStream.zipInputStream()
-                        val entryNames = mutableSetOf<String>()
-                        zipStream.use { zip ->
-                            var entry = zip.nextEntry
-                            while (entry != null) {
-                                entryNames.add(entry.name)
-                                entry = zip.nextEntry
-                            }
-                        }
-                        if (entryNames.isEmpty()) {
-                            return@withContext BackupValidationResult(
-                                isValid = false,
-                                availableCategories = emptySet(),
-                                errorMessage = context.getString(R.string.restore_invalid_file),
-                            )
-                        }
-                        val categories = mutableSetOf<BackupCategory>()
-                        val hasSettings = SETTINGS_XML_FILENAME in entryNames || SETTINGS_FILENAME in entryNames
-                        val hasDb = entryNames.any { it.startsWith(InternalDatabase.DB_NAME) }
-                        if (hasSettings) {
-                            categories.add(BackupCategory.SETTINGS)
-                            categories.add(BackupCategory.ACCOUNT)
-                        }
-                        if (hasDb) {
-                            categories.add(BackupCategory.LIBRARY)
-                            categories.add(BackupCategory.DOWNLOADS)
-                        }
-                        if (categories.isEmpty()) {
-                            return@withContext BackupValidationResult(
-                                isValid = false,
-                                availableCategories = emptySet(),
-                                errorMessage = context.getString(R.string.restore_missing_content),
-                            )
-                        }
-                        BackupValidationResult(
-                            isValid = true,
-                            availableCategories = categories,
-                            errorMessage = null,
-                        )
-                    }
-                } catch (e: Exception) {
-                    reportException(e)
-                    BackupValidationResult(
-                        isValid = false,
-                        availableCategories = emptySet(),
-                        errorMessage = context.getString(R.string.restore_corrupted),
-                    )
+        ): BackupValidationResult {
+            val result = backupArchiveRepository.validateBackup(uri, onError = ::reportException)
+            val errorMessage =
+                when (result.error) {
+                    BackupValidationError.SOURCE_NOT_FOUND -> context.getString(R.string.restore_file_not_found)
+                    BackupValidationError.EMPTY_ARCHIVE -> context.getString(R.string.restore_invalid_file)
+                    BackupValidationError.MISSING_CONTENT -> context.getString(R.string.restore_missing_content)
+                    BackupValidationError.CORRUPTED -> context.getString(R.string.restore_corrupted)
+                    null -> null
                 }
-            }
+            return BackupValidationResult(
+                isValid = result.isValid,
+                availableCategories =
+                    result.availableCategories.mapTo(linkedSetOf()) { category ->
+                        BackupCategory.valueOf(category.name)
+                    },
+                errorMessage = errorMessage,
+            )
+        }
 
         companion object {
-            const val SETTINGS_FILENAME = "settings.preferences_pb"
+            const val SETTINGS_FILENAME = BackupArchiveConstants.SETTINGS_PB_FILENAME
             const val SETTINGS_XML_FILENAME = BackupArchiveRepository.SETTINGS_XML_FILENAME
 
             val ACCOUNT_PREF_KEYS: Set<String> = BackupArchiveRepository.ACCOUNT_PREFERENCE_KEYS
