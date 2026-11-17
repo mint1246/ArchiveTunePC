@@ -113,10 +113,10 @@ import moe.rukamori.archivetune.extensions.move
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.extensions.toggleRepeatMode
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.playback.android.toQueueReorderWindow
 import moe.rukamori.archivetune.playback.api.QueueDragDestination
 import moe.rukamori.archivetune.playback.api.QueueReorderAction
 import moe.rukamori.archivetune.playback.api.QueueReorderPlanner
-import moe.rukamori.archivetune.playback.api.QueueReorderWindow
 import moe.rukamori.archivetune.together.permissionsFor
 import moe.rukamori.archivetune.ui.component.BottomSheet
 import moe.rukamori.archivetune.ui.component.BottomSheetState
@@ -816,7 +816,7 @@ fun Queue(
                 when (
                     val action =
                         QueueReorderPlanner.planReorder(
-                            windows = queueWindows.map { QueueReorderWindow(it.uid, it.firstPeriodIndex) },
+                            windows = queueWindows.map { it.toQueueReorderWindow() },
                             draggedItemUid = completedDrag.draggedItemUid,
                             destination = completedDrag.destination,
                             shuffleEnabled = playerConnection.player.shuffleModeEnabled,

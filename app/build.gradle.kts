@@ -436,6 +436,7 @@ dependencies {
     ksp(libs.kotlin.metadata.jvm)
 
     implementation(project(":playback-core"))
+    implementation(project(":android-playback"))
     implementation(project(":audio-analysis-sdk"))
     implementation(project(":statistics-sdk"))
     implementation(project(":account-sdk")) {

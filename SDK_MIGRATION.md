@@ -237,6 +237,8 @@ Android manual and scheduled backups now use `backup-sdk` for archive handling, 
 
 Desktop queue checkpoint timing now comes from `playback-core`. Its existing tests moved with it and cover periodic checkpoints, queue changes, pause and seek, and forced shutdown saves. Desktop continues using its existing queue store and file format.
 
+The Android app now uses `android-playback` for its Media3 queue traversal, transport helpers and observable player state. The app supplies its existing player and remains responsible for its background service, stream resolution wiring and guest controls. All 16 adapter tests pass and the release AAR publishes locally. The integrated Android build and physical playback remain to be verified.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.

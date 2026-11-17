@@ -14,7 +14,6 @@ import androidx.media3.common.Player.REPEAT_MODE_ALL
 import androidx.media3.common.Player.REPEAT_MODE_OFF
 import androidx.media3.common.Player.REPEAT_MODE_ONE
 import androidx.media3.common.Timeline
-import moe.rukamori.archivetune.models.MediaMetadata
 import java.util.ArrayDeque
 
 fun Player.togglePlayPause() {
@@ -94,9 +93,6 @@ fun Player.getCurrentQueueIndex(): Int {
     }
     return index
 }
-
-val Player.currentMetadata: MediaMetadata?
-    get() = currentMediaItem?.metadata
 
 val Player.mediaItems: List<MediaItem>
     get() =

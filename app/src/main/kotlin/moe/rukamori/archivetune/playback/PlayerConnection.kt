@@ -9,14 +9,6 @@ package moe.rukamori.archivetune.playback
 
 import android.content.Context
 import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.PlaybackParameters
-import androidx.media3.common.Player
-import androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM
-import androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
-import androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
-import androidx.media3.common.Player.REPEAT_MODE_OFF
-import androidx.media3.common.Timeline
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,10 +28,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import moe.rukamori.archivetune.db.MusicDatabase
 import moe.rukamori.archivetune.extensions.currentMetadata
-import moe.rukamori.archivetune.extensions.getCurrentQueueIndex
-import moe.rukamori.archivetune.extensions.getQueueWindows
 import moe.rukamori.archivetune.models.MediaMetadata
 import moe.rukamori.archivetune.playback.MusicService.MusicBinder
+import moe.rukamori.archivetune.playback.android.Media3PlayerStateObserver
 import moe.rukamori.archivetune.playback.queues.Queue
 import moe.rukamori.archivetune.canvas.CanvasPlaybackRequest
 import moe.rukamori.archivetune.utils.isLocalMediaId
@@ -58,15 +49,21 @@ class PlayerConnection(
     binder: MusicBinder,
     val database: MusicDatabase,
     scope: CoroutineScope,
-) : Player.Listener {
+) {
     val service = binder.service
     val player = service.player
     val localPlayer = service.localPlayer
 
-    val playbackState = MutableStateFlow(player.playbackState)
-    private val _isPlaying = MutableStateFlow(player.isPlaying)
-    val isPlaying = _isPlaying.asStateFlow()
-    val playbackParameters = MutableStateFlow(player.playbackParameters)
+    val queueTitle = MutableStateFlow(service.queueTitle)
+    private val media3State = Media3PlayerStateObserver(
+        player = player,
+        onPlayerError = ::reportException,
+        onTimelineUpdated = { _, _ -> queueTitle.value = service.queueTitle },
+    )
+
+    val playbackState = media3State.playbackState
+    val isPlaying = media3State.isPlaying
+    val playbackParameters = media3State.playbackParameters
     val mediaMetadata = service.currentMediaMetadata
     val currentSong =
         mediaMetadata.flatMapLatest {
@@ -81,21 +78,19 @@ class PlayerConnection(
             database.format(mediaMetadata?.id)
         }
 
-    val queueTitle = MutableStateFlow<String?>(null)
-    val queueWindows = MutableStateFlow<List<Timeline.Window>>(emptyList())
-    val currentMediaItemIndex = MutableStateFlow(-1)
-    val currentWindowIndex = MutableStateFlow(-1)
+    val queueWindows = media3State.queueWindows
+    val currentMediaItemIndex = media3State.currentMediaItemIndex
+    val currentWindowIndex = media3State.currentWindowIndex
 
-    val shuffleModeEnabled = MutableStateFlow(false)
-    val repeatMode = MutableStateFlow(REPEAT_MODE_OFF)
+    val shuffleModeEnabled = media3State.shuffleModeEnabled
+    val repeatMode = media3State.repeatMode
 
-    val canSkipPrevious = MutableStateFlow(true)
-    val canSkipNext = MutableStateFlow(true)
+    val canSkipPrevious = media3State.canSkipPrevious
+    val canSkipNext = media3State.canSkipNext
 
     val aodModeEnabled = MutableStateFlow(false)
 
-    val error = MutableStateFlow<PlaybackException?>(null)
-    private var dismissedPlaybackError: PlaybackException? = null
+    val error = media3State.error
     val waitingForNetworkConnection = service.waitingForNetworkConnection
     val queueRestoreCompleted = service.queueRestoreCompleted
 
@@ -110,17 +105,6 @@ class PlayerConnection(
     private var metadataExtractionJob: Job? = null
 
     init {
-        player.addListener(this)
-
-        playbackState.value = player.playbackState
-        _isPlaying.value = player.isPlaying
-        playbackParameters.value = player.playbackParameters
-        queueTitle.value = service.queueTitle
-        queueWindows.value = player.getQueueWindows()
-        currentWindowIndex.value = player.getCurrentQueueIndex()
-        currentMediaItemIndex.value = player.currentMediaItemIndex
-        shuffleModeEnabled.value = player.shuffleModeEnabled
-        repeatMode.value = player.repeatMode
         if (player.mediaItemCount > 0 && service.currentMediaMetadata.value == null) {
             service.currentMediaMetadata.value = player.currentMetadata
         }
@@ -293,10 +277,7 @@ class PlayerConnection(
         }
     }
 
-    fun dismissPlaybackError() {
-        dismissedPlaybackError = error.value ?: player.playerError
-        error.value = null
-    }
+    fun dismissPlaybackError() = media3State.dismissPlaybackError()
 
     fun seekToNext() {
         val state = service.togetherSessionState.value as? moe.rukamori.archivetune.together.TogetherSessionState.Joined
@@ -304,9 +285,7 @@ class PlayerConnection(
             service.requestTogetherControl(moe.rukamori.archivetune.together.ControlAction.SkipNext)
             return
         }
-        player.seekToNext()
-        player.prepare()
-        player.playWhenReady = true
+        media3State.seekToNext()
     }
 
     fun seekToPrevious() {
@@ -315,95 +294,11 @@ class PlayerConnection(
             service.requestTogetherControl(moe.rukamori.archivetune.together.ControlAction.SkipPrevious)
             return
         }
-        player.seekToPrevious()
-        player.prepare()
-        player.playWhenReady = true
-    }
-
-    override fun onPlaybackStateChanged(state: Int) {
-        playbackState.value = state
-        updatePlaybackError(player.playerError)
-    }
-
-    override fun onIsPlayingChanged(isPlaying: Boolean) {
-        _isPlaying.value = isPlaying
-    }
-
-    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-        this.playbackParameters.value = playbackParameters
-    }
-
-    override fun onMediaItemTransition(
-        mediaItem: MediaItem?,
-        reason: Int,
-    ) {
-        currentMediaItemIndex.value = player.currentMediaItemIndex
-        currentWindowIndex.value = player.getCurrentQueueIndex()
-        updateCanSkipPreviousAndNext()
-    }
-
-    override fun onTimelineChanged(
-        timeline: Timeline,
-        reason: Int,
-    ) {
-        queueWindows.value = player.getQueueWindows()
-        queueTitle.value = service.queueTitle
-        currentMediaItemIndex.value = player.currentMediaItemIndex
-        currentWindowIndex.value = player.getCurrentQueueIndex()
-        updateCanSkipPreviousAndNext()
-    }
-
-    override fun onShuffleModeEnabledChanged(enabled: Boolean) {
-        shuffleModeEnabled.value = enabled
-        queueWindows.value = player.getQueueWindows()
-        currentWindowIndex.value = player.getCurrentQueueIndex()
-        updateCanSkipPreviousAndNext()
-    }
-
-    override fun onRepeatModeChanged(mode: Int) {
-        repeatMode.value = mode
-        updateCanSkipPreviousAndNext()
-    }
-
-    override fun onPlayerErrorChanged(playbackError: PlaybackException?) {
-        if (playbackError != null) {
-            reportException(playbackError)
-        }
-        updatePlaybackError(playbackError)
-    }
-
-    private fun updatePlaybackError(playbackError: PlaybackException?) {
-        when {
-            playbackError == null -> {
-                dismissedPlaybackError = null
-                error.value = null
-            }
-
-            playbackError !== dismissedPlaybackError -> {
-                dismissedPlaybackError = null
-                error.value = playbackError
-            }
-        }
-    }
-
-    private fun updateCanSkipPreviousAndNext() {
-        if (!player.currentTimeline.isEmpty) {
-            val window =
-                player.currentTimeline.getWindow(player.currentMediaItemIndex, Timeline.Window())
-            canSkipPrevious.value = player.isCommandAvailable(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) ||
-                !window.isLive ||
-                player.isCommandAvailable(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            canSkipNext.value = window.isLive &&
-                window.isDynamic ||
-                player.isCommandAvailable(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-        } else {
-            canSkipPrevious.value = false
-            canSkipNext.value = false
-        }
+        media3State.seekToPrevious()
     }
 
     fun dispose() {
-        player.removeListener(this)
+        media3State.close()
         metadataExtractionJob?.cancel()
         metadataExtractionJob = null
     }
