@@ -11,15 +11,7 @@ import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.supervisorScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import moe.rukamori.archivetune.constants.EnablePaxsenixLyricsKey
 import moe.rukamori.archivetune.constants.LyricsProviderOrderKey
 import moe.rukamori.archivetune.constants.PaxsenixApiKeyKey
@@ -34,6 +26,12 @@ import moe.rukamori.archivetune.utils.reportException
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Android lyrics lookup facade. Provider ordering, bounded concurrency, per-provider timeouts,
+ * priority selection and cancellation now live in the headless [LyricsFetchCoordinator] in
+ * `lyrics-sdk`; this class retains only platform concerns: enabled/ordered preferences, the
+ * request cache, connectivity, logging and error reporting.
+ */
 @Singleton
 class LyricsHelper
     @Inject
@@ -59,7 +57,22 @@ class LyricsHelper
             )
 
         private val requestCache = LyricsRequestCache()
-        private val providerPermits = Semaphore(MAX_CONCURRENT_PROVIDERS)
+        private val fetchCoordinator =
+            LyricsFetchCoordinator(
+                LyricsFetchCoordinatorConfig(
+                    normalize = ::normalizeForLookup,
+                    isMeaningful = ::isMeaningfulLyrics,
+                    onError = ::reportException,
+                    onTimeout = { providerName, phase ->
+                        GlobalLog.append(
+                            Log.WARN,
+                            "LyricsHelper",
+                            "$providerName timed out during ${if (phase == "search") "lyrics search" else "automatic lookup"}",
+                        )
+                    },
+                    isNetworkAvailable = ::isNetworkAvailable,
+                ),
+            )
 
         suspend fun getLyrics(
             mediaMetadata: MediaMetadata,
@@ -85,7 +98,7 @@ class LyricsHelper
                     GlobalLog.append(Log.WARN, "LyricsHelper", "Network unavailable, aborting lyrics fetch")
                     LYRICS_NOT_FOUND
                 } else {
-                    fetchPriorityLyrics(providers, mediaMetadata)
+                    fetchCoordinator.fetchOrdered(providers, mediaMetadata.toQuery())
                 }
             }
         }
@@ -146,47 +159,18 @@ class LyricsHelper
                     forceRefresh = forceRefresh,
                 ) {
                     fetchedFresh = true
-                    if (!isNetworkAvailable()) {
-                        providers.forEachIndexed { index, provider ->
-                            onProviderUpdate(
-                                LyricsProviderSearchUpdate(
-                                    providerIndex = index,
-                                    providerName = provider.name,
-                                    status = LyricsProviderSearchStatus.FAILED,
-                                ),
-                            )
-                        }
-                        return@getOrFetchSearch emptyList()
-                    }
-
-                    supervisorScope {
-                        providers
-                            .mapIndexed { index, provider ->
-                                async(Dispatchers.IO) {
-                                    val outcome =
-                                        providerPermits.withPermit {
-                                            fetchAllProviderLyrics(
-                                                provider = provider,
-                                                mediaId = mediaId,
-                                                songTitle = songTitle,
-                                                songArtists = songArtists,
-                                                songAlbum = songAlbum,
-                                                duration = duration,
-                                            )
-                                        }
-                                    onProviderUpdate(
-                                        LyricsProviderSearchUpdate(
-                                            providerIndex = index,
-                                            providerName = provider.name,
-                                            status = outcome.status,
-                                            results = outcome.results,
-                                        ),
-                                    )
-                                    outcome
-                                }
-                            }.map { it.await() }
-                            .flatMap(ProviderSearchOutcome::results)
-                    }
+                    fetchCoordinator.searchAll(
+                        providers = providers,
+                        query =
+                            LyricsQuery(
+                                mediaId = mediaId,
+                                title = songTitle,
+                                artists = songArtists,
+                                album = songAlbum,
+                                duration = duration,
+                            ),
+                        onProviderUpdate = onProviderUpdate,
+                    )
                 }
 
             if (!fetchedFresh) {
@@ -211,102 +195,18 @@ class LyricsHelper
             return results
         }
 
-        private suspend fun fetchAllProviderLyrics(
-            provider: LyricsProvider,
-            mediaId: String,
-            songTitle: String,
-            songArtists: String,
-            songAlbum: String?,
-            duration: Int,
-        ): ProviderSearchOutcome =
+        private fun normalizeForLookup(lyrics: String): String = LyricsUtils.lyricsOrNotFound(lyrics)
+
+        private fun isMeaningfulLyrics(lyrics: String): Boolean = LyricsUtils.hasMeaningfulLyricsContent(lyrics)
+
+        private fun isNetworkAvailable(): Boolean =
             try {
-                withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
-                    for (title in LyricsQueryPolicy.titleVariants(songTitle)) {
-                        val results = mutableListOf<LyricsResult>()
-                        provider.getAllLyrics(mediaId, title, songArtists, songAlbum, duration) lyricsCallback@{ lyrics ->
-                            val normalizedLyrics = LyricsUtils.lyricsOrNotFound(lyrics)
-                            if (normalizedLyrics == LYRICS_NOT_FOUND) return@lyricsCallback
-                            results += LyricsResult(provider.name, normalizedLyrics)
-                        }
-                        if (results.isNotEmpty()) {
-                            return@withTimeout ProviderSearchOutcome(
-                                status = LyricsProviderSearchStatus.FOUND,
-                                results = results,
-                            )
-                        }
-                    }
-                    ProviderSearchOutcome(LyricsProviderSearchStatus.NO_MATCH)
-                }
-            } catch (_: TimeoutCancellationException) {
-                GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during lyrics search")
-                ProviderSearchOutcome(LyricsProviderSearchStatus.TIMED_OUT)
+                networkConnectivity.isCurrentlyConnected()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 reportException(e)
-                ProviderSearchOutcome(LyricsProviderSearchStatus.FAILED)
-            }
-
-        private suspend fun fetchPriorityLyrics(
-            providers: List<LyricsProvider>,
-            mediaMetadata: MediaMetadata,
-        ): String {
-            if (providers.isEmpty()) return LYRICS_NOT_FOUND
-
-            val artist = mediaMetadata.artists.joinToString { it.name }
-            val results =
-                supervisorScope {
-                    providers
-                        .map { provider ->
-                            async(Dispatchers.IO) {
-                                providerPermits.withPermit {
-                                    fetchProviderLyrics(provider, mediaMetadata, artist)
-                                }
-                            }
-                        }.map { it.await() }
-                }
-            // Provider order is authoritative, matching desktop. A lower-priority provider must
-            // not silently win just because it returned a richer sync format.
-            return selectProviderOrderedLyrics(results) ?: LYRICS_NOT_FOUND
-        }
-
-        private suspend fun fetchProviderLyrics(
-            provider: LyricsProvider,
-            mediaMetadata: MediaMetadata,
-            artist: String,
-        ): String? =
-            try {
-                withTimeout(LyricsQueryPolicy.PROVIDER_TIMEOUT_MS) {
-                    for (title in LyricsQueryPolicy.titleVariants(mediaMetadata.title)) {
-                        val lyrics =
-                            provider
-                                .getLyrics(
-                                    mediaMetadata.id,
-                                    title,
-                                    artist,
-                                    mediaMetadata.album?.title,
-                                    mediaMetadata.duration,
-                                ).fold(
-                                    onSuccess = { value ->
-                                        LyricsUtils.lyricsOrNotFound(value).takeIf { it != LYRICS_NOT_FOUND }
-                                    },
-                                    onFailure = {
-                                        reportException(it)
-                                        null
-                                    },
-                                )
-                        if (lyrics != null) return@withTimeout lyrics
-                    }
-                    null
-                }
-            } catch (_: TimeoutCancellationException) {
-                GlobalLog.append(Log.WARN, "LyricsHelper", "${provider.name} timed out during automatic lookup")
-                null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                reportException(e)
-                null
+                true
             }
 
         private suspend fun orderedProviders(): List<LyricsProvider> {
@@ -336,18 +236,6 @@ class LyricsHelper
             }
         }
 
-        private fun isMeaningfulLyrics(lyrics: String): Boolean = LyricsUtils.hasMeaningfulLyricsContent(lyrics)
-
-        private fun isNetworkAvailable(): Boolean =
-            try {
-                networkConnectivity.isCurrentlyConnected()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                reportException(e)
-                true
-            }
-
         fun clearCache() {
             requestCache.clear()
         }
@@ -362,8 +250,16 @@ class LyricsHelper
                 providers = providers.map(LyricsProvider::name),
             )
 
+        private fun MediaMetadata.toQuery(): LyricsQuery =
+            LyricsQuery(
+                mediaId = id,
+                title = title,
+                artists = artists.joinToString { it.name },
+                album = album?.title,
+                duration = duration,
+            )
+
         companion object {
-            private const val MAX_CONCURRENT_PROVIDERS = 6
             private val paxsenixProviders =
                 setOf(
                     PaxsenixAppleMusicLyricsProvider,
@@ -371,24 +267,4 @@ class LyricsHelper
                     PaxsenixMusixmatchLyricsProvider,
                 )
         }
-
-        private data class ProviderSearchOutcome(
-            val status: LyricsProviderSearchStatus,
-            val results: List<LyricsResult> = emptyList(),
-        )
     }
-
-enum class LyricsProviderSearchStatus {
-    SEARCHING,
-    FOUND,
-    NO_MATCH,
-    TIMED_OUT,
-    FAILED,
-}
-
-data class LyricsProviderSearchUpdate(
-    val providerIndex: Int,
-    val providerName: String,
-    val status: LyricsProviderSearchStatus,
-    val results: List<LyricsResult> = emptyList(),
-)

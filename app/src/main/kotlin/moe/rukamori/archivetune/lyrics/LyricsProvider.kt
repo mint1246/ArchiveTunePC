@@ -9,27 +9,10 @@ package moe.rukamori.archivetune.lyrics
 
 import android.content.Context
 
-interface LyricsProvider {
-    val name: String
-
+/**
+ * Android platform provider. It keeps the `isEnabled(Context)` check in the application while
+ * implementing the headless [LyricsFetchProvider] contract consumed by [LyricsFetchCoordinator].
+ */
+interface LyricsProvider : LyricsFetchProvider {
     fun isEnabled(context: Context): Boolean
-
-    suspend fun getLyrics(
-        id: String,
-        title: String,
-        artist: String,
-        album: String?,
-        duration: Int,
-    ): Result<String>
-
-    suspend fun getAllLyrics(
-        id: String,
-        title: String,
-        artist: String,
-        album: String?,
-        duration: Int,
-        callback: (String) -> Unit,
-    ) {
-        getLyrics(id, title, artist, album, duration).onSuccess(callback)
-    }
 }

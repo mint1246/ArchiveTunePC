@@ -7,8 +7,14 @@
 
 package moe.rukamori.archivetune.lyrics
 
-/** Small provider-query policy shared by automatic lyrics lookup paths. */
-internal object LyricsQueryPolicy {
+/**
+ * Platform-independent provider-query policy shared by automatic lyrics lookup paths.
+ *
+ * The original title-variant and cache-key behavior is preserved verbatim, including its
+ * Unicode behaviour: matching is case-insensitive over the original code points and the
+ * metadata key uses a NUL separator so artist/title combinations cannot collide.
+ */
+object LyricsQueryPolicy {
     const val PROVIDER_TIMEOUT_MS = 8_000L
 
     fun titleVariants(title: String): List<String> {
