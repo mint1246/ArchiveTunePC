@@ -1,4 +1,4 @@
-package moe.rukamori.archivetune.desktop.platform
+package moe.rukamori.archivetune.playback.desktop.stream
 
 import java.nio.file.Files
 import kotlinx.coroutines.runBlocking

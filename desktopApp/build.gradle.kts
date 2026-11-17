@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":account-sdk"))
     implementation(project(":desktop-social"))
     implementation(project(":desktop-playback"))
+    implementation(project(":desktop-stream-playback"))
     implementation(project(":desktop-play-together"))
     implementation(project(":desktop-library"))
     implementation(project(":playlist-sdk"))

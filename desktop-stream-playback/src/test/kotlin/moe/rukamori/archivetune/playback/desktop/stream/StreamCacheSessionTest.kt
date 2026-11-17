@@ -1,4 +1,4 @@
-package moe.rukamori.archivetune.desktop.platform
+package moe.rukamori.archivetune.playback.desktop.stream
 
 import kotlin.test.Test
 import kotlin.test.assertFalse
