@@ -42,7 +42,11 @@ application path or feature is available as an independent service.
 
 The Android AAR needs Android SDK 37.2 at build time and supports API 26 or later at runtime.
 The consumer example builds as a separate Gradle project and resolves the published AAR and
-`playback-core` from Maven Local.
+`playback-core` from Maven Local. When an Android application or AAR also consumes pure-JVM SDK
+modules that depend on `org.json:json` (such as `stream-resolver`, `account-sdk`, `social-sdk`,
+`chords-sdk`, `stems-sdk` or `update-sdk`), exclude `org.json:json` on non-unit-test resolvable
+configurations so R8 treats `org.json.*` as Android bootclasspath (`core-libart.jar`) library
+classes rather than rewriting program method signatures.
 
 For example, to publish the playback contracts and desktop backend and run the queue example:
 

@@ -480,7 +480,9 @@ dependencies {
     implementation(project(":together-transport"))
     implementation(project(":core"))
     implementation(project(":moriextractor"))
-    implementation(project(":stream-resolver"))
+    implementation(project(":stream-resolver")) {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(project(":lyrics:kugou"))
     implementation(project(":lyrics:lrclib"))
     implementation(project(":lyrics:simpmusic"))
@@ -574,6 +576,9 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 }
 
 configurations.configureEach {
+    if (isCanBeResolved && !name.contains("UnitTest", ignoreCase = true) && !name.startsWith("test", ignoreCase = true)) {
+        exclude(group = "org.json", module = "json")
+    }
     resolutionStrategy.eachDependency {
         when (requested.group) {
             "androidx.compose.runtime",

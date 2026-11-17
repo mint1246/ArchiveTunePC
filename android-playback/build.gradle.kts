@@ -47,6 +47,12 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
 }
 
+configurations.configureEach {
+    if (isCanBeResolved && !name.contains("UnitTest", ignoreCase = true) && !name.startsWith("test", ignoreCase = true)) {
+        exclude(group = "org.json", module = "json")
+    }
+}
+
 publishing {
     publications {
         create<MavenPublication>("androidPlayback") {
