@@ -216,7 +216,7 @@ class AndroidSocialApi(
     }
 }
 
-internal fun parseSocialUser(value: JSONObject): SocialUser =
+fun parseSocialUser(value: JSONObject): SocialUser =
     SocialUser(
         id = value.getString("id"),
         discordId = value.getString("discordId"),
@@ -231,7 +231,7 @@ private fun parseFriendRequest(value: JSONObject): SocialFriendRequest =
         createdAt = value.getLong("createdAt"),
     )
 
-internal fun parseSocialPresence(value: JSONObject): SocialPresence =
+fun parseSocialPresence(value: JSONObject): SocialPresence =
     SocialPresence(
         online = value.optBoolean("online", false),
         songId = value.optNullableString("songId"),
@@ -241,7 +241,7 @@ internal fun parseSocialPresence(value: JSONObject): SocialPresence =
         partyJoinable = value.optBoolean("partyJoinable", false),
     )
 
-internal fun parseSocialChatMessage(value: JSONObject): SocialChatMessage {
+fun parseSocialChatMessage(value: JSONObject): SocialChatMessage {
     val kind = when (value.getString("kind").lowercase()) {
         "text" -> SocialChatMessageKind.TEXT
         "song" -> SocialChatMessageKind.SONG
@@ -263,7 +263,7 @@ internal fun parseSocialChatMessage(value: JSONObject): SocialChatMessage {
     )
 }
 
-internal fun parseSocialStatisticsSnapshot(value: JSONObject): SocialStatisticsSnapshot {
+fun parseSocialStatisticsSnapshot(value: JSONObject): SocialStatisticsSnapshot {
     val rangesJson = value.optJSONObject("ranges") ?: JSONObject()
     val ranges = buildMap {
         val keys = rangesJson.keys()
@@ -326,7 +326,7 @@ private fun JSONArray?.toStatisticsBucketList(): List<SocialStatisticsBucket> =
         }
     }
 
-internal fun socialStatisticsSnapshotJson(snapshot: SocialStatisticsSnapshot): JSONObject =
+fun socialStatisticsSnapshotJson(snapshot: SocialStatisticsSnapshot): JSONObject =
     JSONObject()
         .put("updatedAt", snapshot.updatedAt)
         .put(
@@ -379,7 +379,7 @@ private fun List<SocialStatisticsBucket>.toBucketJsonArray(): JSONArray =
 private fun List<SocialStatisticsMedia>.toMediaJsonArray(): JSONArray =
     JSONArray().also { array -> forEach { array.put(it.toJson()) } }
 
-internal fun SocialOutgoingMessage.toWirePayload(): Pair<String, JSONObject> = when (this) {
+fun SocialOutgoingMessage.toWirePayload(): Pair<String, JSONObject> = when (this) {
     is SocialOutgoingMessage.Text -> "text" to JSONObject().put("text", text.trim())
     is SocialOutgoingMessage.Song -> "song" to song.toJson()
     is SocialOutgoingMessage.Queue -> "queue" to queue.toJson()

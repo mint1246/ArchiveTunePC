@@ -380,7 +380,10 @@ class LocalSongScanner @Inject constructor(
         val unknownArtist = context.getString(R.string.unknown_artist)
         val unknownTitle = context.getString(R.string.unknown)
         val tracks = mutableListOf<LocalTrackRecord>()
-        val lyricsExtractor = EmbeddedLyricsExtractor(context.contentResolver)
+        val lyricsParser =
+            EmbeddedLyricsParser(
+                onError = { error -> Timber.tag(LogTag).w(error, "Failed to extract embedded lyrics") },
+            )
         val cursor = context.contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             projection,
@@ -440,8 +443,13 @@ class LocalSongScanner @Inject constructor(
                     thumbnailUrl = metadata.thumbnailUrl,
                     mediaStoreThumbnailUrl = albumId?.takeIf { album != null }
                         ?.let { value -> ContentUris.withAppendedId(AlbumArtUri, value).toString() },
-                    embeddedLyrics = lyricsExtractor.extract(contentUri = uri, displayName = displayName, mimeType = mime)
-                        ?.let(LyricsUtils::lyricsOrNotFound)?.takeIf { value -> value != LyricsEntity.LYRICS_NOT_FOUND },
+                    embeddedLyrics =
+                        lyricsParser.parse(
+                            openStream = { context.contentResolver.openInputStream(uri)?.buffered() },
+                            displayName = displayName,
+                            mimeType = mime,
+                        )
+                            ?.let(LyricsUtils::lyricsOrNotFound)?.takeIf { value -> value != LyricsEntity.LYRICS_NOT_FOUND },
                 )
             }
         }

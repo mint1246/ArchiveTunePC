@@ -439,6 +439,10 @@ dependencies {
     implementation(project(":audio-analysis-sdk"))
     implementation(project(":statistics-sdk"))
     implementation(project(":account-sdk"))
+    implementation(project(":social-sdk")) {
+        exclude(group = "org.json", module = "json")
+    }
+    implementation(project(":local-media-sdk"))
     implementation(project(":lyrics-sdk"))
     implementation(project(":lyrics-timeline"))
     implementation(project(":playlist-import-sdk"))

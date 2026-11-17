@@ -7,40 +7,45 @@
 
 package moe.rukamori.archivetune.localmedia
 
-import android.content.ContentResolver
-import android.net.Uri
-import kotlinx.coroutines.CancellationException
-import timber.log.Timber
 import java.io.EOFException
 import java.io.InputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.CancellationException
 
-class EmbeddedLyricsExtractor(
-    private val contentResolver: ContentResolver,
+/**
+ * Headless reader for lyrics embedded in local audio tags (ID3, MP4, FLAC and Ogg).
+ *
+ * The caller supplies a fresh stream opener for each format attempt and keeps
+ * platform concerns (content providers, logging, caching) outside the parser.
+ * Tag parsing, decoding rules and the emitted LRC text are unchanged from the
+ * original Android scanner implementation.
+ */
+class EmbeddedLyricsParser(
+    private val onError: (Throwable) -> Unit = {},
 ) {
-    fun extract(
-        contentUri: Uri,
+    fun parse(
+        openStream: () -> InputStream?,
         displayName: String?,
         mimeType: String?,
     ): String? =
         try {
-            extractId3Lyrics(contentUri)
+            extractId3Lyrics(openStream)
                 ?: when {
-                    isMp4(displayName, mimeType) -> extractMp4Lyrics(contentUri)
-                    isFlac(displayName, mimeType) -> extractFlacLyrics(contentUri)
-                    isOgg(displayName, mimeType) -> extractOggLyrics(contentUri)
-                    else -> extractVorbisCommentLyrics(contentUri)
+                    isMp4(displayName, mimeType) -> extractMp4Lyrics(openStream)
+                    isFlac(displayName, mimeType) -> extractFlacLyrics(openStream)
+                    isOgg(displayName, mimeType) -> extractOggLyrics(openStream)
+                    else -> extractVorbisCommentLyrics(openStream)
                 }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
-            Timber.tag(LogTag).w(error, "Failed to extract embedded lyrics for %s", contentUri)
+            onError(error)
             null
         }
 
-    private fun extractId3Lyrics(contentUri: Uri): String? {
-        return contentResolver.openInputStream(contentUri)?.buffered()?.use { input ->
+    private fun extractId3Lyrics(openStream: () -> InputStream?): String? {
+        return openStream()?.buffered()?.use { input ->
             val header = input.readByteArray(10) ?: return null
             if (!header.startsWith(Id3Header)) return null
 
@@ -156,8 +161,8 @@ class EmbeddedLyricsExtractor(
             .joinToString("\n") { (timeMs, text) -> "${formatLrcTimestamp(timeMs)}$text" }
     }
 
-    private fun extractMp4Lyrics(contentUri: Uri): String? =
-        contentResolver.openInputStream(contentUri)?.buffered()?.use { input ->
+    private fun extractMp4Lyrics(openStream: () -> InputStream?): String? =
+        openStream()?.buffered()?.use { input ->
             parseMp4Boxes(input, Long.MAX_VALUE)
         }
 
@@ -259,8 +264,8 @@ class EmbeddedLyricsExtractor(
         )
     }
 
-    private fun extractFlacLyrics(contentUri: Uri): String? {
-        return contentResolver.openInputStream(contentUri)?.buffered()?.use { input ->
+    private fun extractFlacLyrics(openStream: () -> InputStream?): String? {
+        return openStream()?.buffered()?.use { input ->
             val marker = input.readByteArray(4) ?: return null
             if (!marker.startsWith(FlacMarker)) return null
 
@@ -282,10 +287,10 @@ class EmbeddedLyricsExtractor(
         }
     }
 
-    private fun extractOggLyrics(contentUri: Uri): String? = extractVorbisCommentLyrics(contentUri)
+    private fun extractOggLyrics(openStream: () -> InputStream?): String? = extractVorbisCommentLyrics(openStream)
 
-    private fun extractVorbisCommentLyrics(contentUri: Uri): String? {
-        return contentResolver.openInputStream(contentUri)?.buffered()?.use { input ->
+    private fun extractVorbisCommentLyrics(openStream: () -> InputStream?): String? {
+        return openStream()?.buffered()?.use { input ->
             val bytes = input.readUpTo(MaxMetadataBytes)
             val opusOffset = bytes.indexOf(OpusTagsMarker)
             if (opusOffset >= 0) {
@@ -613,6 +618,5 @@ class EmbeddedLyricsExtractor(
         const val Id3TimestampMilliseconds = 2
         const val Mp4HeaderSize = 8
         const val Mp4DataHeaderSize = 8
-        const val LogTag = "EmbeddedLyricsExtractor"
     }
 }
