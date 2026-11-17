@@ -137,6 +137,9 @@ import moe.rukamori.archivetune.innertube.pages.ArtistPage
 import moe.rukamori.archivetune.innertube.pages.ArtistSectionLayout
 import moe.rukamori.archivetune.innertube.pages.PlaylistPage
 import moe.rukamori.archivetune.innertube.pages.PodcastPage
+import moe.rukamori.archivetune.innertube.playback.DesktopUpNextDiagnostics
+import moe.rukamori.archivetune.innertube.playback.DesktopUpNextQueueResolver
+import moe.rukamori.archivetune.innertube.playback.toPlaybackItem as sdkToPlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackAlbum
 import moe.rukamori.archivetune.playback.api.PlaybackArtist
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -144,6 +147,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackMetadata
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
+import moe.rukamori.archivetune.playback.api.requestedQueueItemIndex
 import moe.rukamori.archivetune.sdk.playlist.LibraryFilterResult
 import moe.rukamori.archivetune.sdk.playlist.PlaylistSongOccurrence as SdkPlaylistSongOccurrence
 import moe.rukamori.archivetune.sdk.playlist.PlaylistSongSort
@@ -443,60 +447,21 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                 if (guestInParty && !partyState.canChangeSong) return
                 scope.launch {
                     browse.failure = null
-                    services.upNext(item.id)
-                    .onSuccess { next ->
-                        val songs = next.items
-                        if (songs.isEmpty()) {
-                            logger.info(
-                                "up_next_selection event=empty requestedVideoId=${item.id} backendCurrentIndex=${next.currentIndex}",
-                            )
-                            playTogether.playQueue(
-                                listOf(toPlaybackItem(item, services.albumIndex)),
-                                title = "Up next",
-                            )
-                            return@onSuccess
-                        }
-
-                        // Search and artist-profile clicks are explicit requests for this exact
-                        // video. YouTube's `selected` flag/currentIndex can point at a different
-                        // queue entry for some account/region responses, so never let it override
-                        // the song the user actually clicked.
-                        val selectedIndex = requestedSongQueueIndex(songs.map(SongItem::id), item.id)
-                        val backendSelectedId = next.currentIndex?.let(songs::getOrNull)?.id
-                        logger.info(
-                            "up_next_selection event=resolved requestedVideoId=${item.id} " +
-                                "backendCurrentIndex=${next.currentIndex} backendSelectedVideoId=$backendSelectedId " +
-                                "matchedIndex=$selectedIndex queueSize=${songs.size}",
-                        )
-                        if (selectedIndex == null) {
-                            logger.warning(
-                                "up_next_selection event=requested_missing requestedVideoId=${item.id} " +
-                                    "backendCurrentIndex=${next.currentIndex} backendSelectedVideoId=$backendSelectedId " +
-                                    "queueVideoIds=${songs.take(12).joinToString(",") { it.id }}",
-                            )
-                            playTogether.playQueue(
-                                listOf(toPlaybackItem(item, services.albumIndex)),
-                                title = next.title ?: "Up next",
-                            )
-                            return@onSuccess
-                        }
-                        playTogether.playQueue(
-                            songs.map { toPlaybackItem(it, services.albumIndex) },
-                            selectedIndex,
-                            title = next.title ?: "Up next",
-                        )
-                    }
-                    .onFailure { failure ->
-                        logger.warning(
-                            "up_next_selection event=failure requestedVideoId=${item.id} " +
-                                "errorType=${failure::class.simpleName} error=${failure.message?.replace(Regex("\\s+"), " ")?.take(240)}",
-                        )
-                        browse.failure = failure.message ?: "Could not load Up next"
-                        playTogether.playQueue(
-                            listOf(toPlaybackItem(item, services.albumIndex)),
-                            title = "Up next",
-                        )
-                    }
+                    val resolution = DesktopUpNextQueueResolver(
+                        fetchUpNext = services::upNext,
+                        learnAlbum = services.albumIndex::learn,
+                        lookupAlbum = services.albumIndex::albumFor,
+                        diagnostics = object : DesktopUpNextDiagnostics {
+                            override fun info(message: String) = logger.info(message)
+                            override fun warning(message: String) = logger.warning(message)
+                        },
+                    ).resolve(item)
+                    resolution.failureMessage?.let { browse.failure = it }
+                    playTogether.playQueue(
+                        items = resolution.selection.items,
+                        startIndex = resolution.selection.startIndex,
+                        title = resolution.selection.title,
+                    )
                 }
             }
             is AlbumItem -> browse.openAlbum(item.browseId, scope)
@@ -1372,16 +1337,17 @@ internal fun localSearchMatches(
     tracks: List<LocalTrack>,
     maxResults: Int = 20,
 ): List<LocalTrack> {
-    val needle = query.trim()
-    if (needle.isEmpty() || maxResults <= 0) return emptyList()
-    return tracks.asSequence()
-        .filter { track ->
-            track.title.contains(needle, ignoreCase = true) ||
-                track.artist.contains(needle, ignoreCase = true) ||
-                track.album?.contains(needle, ignoreCase = true) == true
-        }
-        .take(maxResults)
-        .toList()
+    if (query.isBlank() || maxResults <= 0) return emptyList()
+    return filterLibraryContent(
+        playlists = emptyList<PlaylistItem>(),
+        tracks = tracks,
+        query = query,
+        playlistTitle = { "" },
+        playlistAuthor = { null },
+        trackTitle = LocalTrack::title,
+        trackArtist = LocalTrack::artist,
+        trackAlbum = LocalTrack::album,
+    ).tracks.take(maxResults)
 }
 
 internal typealias DesktopSongSort = PlaylistSongSort
@@ -1407,12 +1373,12 @@ internal fun sortLocalTracks(tracks: List<LocalTrack>, sort: DesktopSongSort): L
 internal fun requestedSongQueueIndex(
     songIds: List<String>,
     requestedVideoId: String,
-): Int? = songIds.indexOf(requestedVideoId).takeIf { it >= 0 }
+): Int? = requestedQueueItemIndex(songIds, requestedVideoId)
 
 internal fun requestedEpisodeQueueIndex(
     episodeIds: List<String>,
     requestedEpisodeId: String,
-): Int? = episodeIds.indexOf(requestedEpisodeId).takeIf { it >= 0 }
+): Int? = requestedQueueItemIndex(episodeIds, requestedEpisodeId)
 
 @Composable
 private fun SearchResults(
@@ -2532,33 +2498,10 @@ private fun BeatSyncedArtwork(
         },
     )
 }
-private fun toPlaybackItem(song: SongItem, albumIndex: DesktopAlbumIndex) = PlaybackItem(
-    PlaybackMetadata(
-        id = song.id,
-        title = song.title,
-        artists = song.artists.map { PlaybackArtist(it.id, it.name) },
-        album =
-            song.album?.let { PlaybackAlbum(it.id, it.name) }
-                ?.takeIf { !it.id.isNullOrBlank() && !it.title.isBlank() }
-                ?.also { albumIndex.learn(song.id, it) }
-                ?: albumIndex.albumFor(song.id),
-        artworkUri = song.thumbnail,
-        durationHintMs = song.duration?.times(1000L),
-        explicit = song.explicit,
-        isPodcast = song.isPodcast,
-    ),
-)
-private fun toPlaybackItem(episode: EpisodeItem): PlaybackItem = PlaybackItem(
-    PlaybackMetadata(
-        id = episode.id,
-        title = episode.title,
-        artists = listOf(PlaybackArtist(episode.podcast?.id, episode.podcast?.name ?: "Podcast")),
-        album = PlaybackAlbum(episode.podcast?.id ?: episode.browseId, episode.podcast?.name ?: "Podcast"),
-        artworkUri = episode.thumbnail,
-        durationHintMs = episode.duration?.times(1000L),
-        isPodcast = true,
-    ),
-)
+private fun toPlaybackItem(song: SongItem, albumIndex: DesktopAlbumIndex): PlaybackItem =
+    song.sdkToPlaybackItem(albumIndex::learn, albumIndex::albumFor)
+
+private fun toPlaybackItem(episode: EpisodeItem): PlaybackItem = episode.sdkToPlaybackItem()
 internal fun toPlaybackItem(track: LocalTrack) = PlaybackItem(
     PlaybackMetadata(
         id = track.id,

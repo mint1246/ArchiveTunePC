@@ -46,8 +46,13 @@ data class VlcRuntimeConfiguration(
  * Overrides remain preferred so a packaged runtime can take precedence over the system version.
  */
 object VlcRuntimeLocator {
-    fun find(configuration: VlcRuntimeConfiguration = VlcRuntimeConfiguration()): VlcRuntimeLayout? {
-        val os = VlcRuntimeOs.current()
+    fun find(configuration: VlcRuntimeConfiguration = VlcRuntimeConfiguration()): VlcRuntimeLayout? =
+        find(configuration, VlcRuntimeOs.current())
+
+    internal fun find(
+        configuration: VlcRuntimeConfiguration,
+        os: VlcRuntimeOs,
+    ): VlcRuntimeLayout? {
         val candidates = buildList {
             configuration.directory?.let(::add)
             System.getProperty("archivetune.vlc.dir")

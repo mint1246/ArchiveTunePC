@@ -35,7 +35,7 @@ class VlcRuntimeTest {
         assertEquals(root.resolve("libvlc.so"), layout.libVlc)
         assertEquals(root.resolve("libvlccore.so"), layout.libVlcCore)
         assertEquals(pluginDirectory, layout.plugins)
-        assertEquals(layout, VlcRuntimeLocator.find(VlcRuntimeConfiguration(directory = root)))
+        assertEquals(layout, VlcRuntimeLocator.find(VlcRuntimeConfiguration(directory = root), VlcRuntimeOs.LINUX))
         assertNull(VlcRuntimeLocator.inspectDirectory(root, VlcRuntimeOs.WINDOWS))
     }
 

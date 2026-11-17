@@ -50,6 +50,7 @@ dependencies {
     implementation(project(":desktop-library"))
     implementation(project(":playlist-sdk"))
     implementation(project(":desktop-settings"))
+    implementation(project(":sdk-lifecycle"))
     implementation(project(":desktop-statistics"))
     implementation(project(":desktop-audio-analysis"))
     implementation(project(":desktop-audio-analysis-runtime"))

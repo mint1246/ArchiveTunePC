@@ -10,6 +10,7 @@ dependencies {
     api(project(":desktop-resource-core"))
     api(project(":core"))
     api(project(":chords-sdk"))
+    api(project(":playback-core"))
     implementation(project(":spotifycore"))
     implementation(project(":stream-resolver"))
     implementation(project(":morideobfuscator:jvm"))

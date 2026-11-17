@@ -13,6 +13,8 @@ import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.api.PlaybackSource
+import moe.rukamori.archivetune.playback.session.PersistedPlaybackQueue
+import moe.rukamori.archivetune.playback.session.PlaybackQueuePersistence
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.file.AtomicMoveNotSupportedException
@@ -56,6 +58,27 @@ class PlaybackQueueStore(private val file: Path) {
     }
 
     fun clear() = lock.withLock { Files.deleteIfExists(normalized) }
+
+    fun asQueuePersistence(): PlaybackQueuePersistence =
+        object : PlaybackQueuePersistence {
+            override fun load(): PersistedPlaybackQueue? =
+                this@PlaybackQueueStore.load()?.let { persisted ->
+                    PersistedPlaybackQueue(
+                        title = persisted.title,
+                        items = persisted.items,
+                        currentIndex = persisted.currentIndex,
+                        positionMs = persisted.positionMs,
+                    )
+                }
+
+            override fun save(snapshot: PlaybackSnapshot) {
+                this@PlaybackQueueStore.save(snapshot)
+            }
+
+            override fun clear() {
+                this@PlaybackQueueStore.clear()
+            }
+        }
 
     private fun read(file: Path): Persisted {
         val json = JSONObject(Files.readString(file))

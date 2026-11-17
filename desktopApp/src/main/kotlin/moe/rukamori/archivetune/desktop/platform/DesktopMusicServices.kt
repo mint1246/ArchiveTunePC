@@ -18,19 +18,13 @@ import moe.rukamori.archivetune.desktop.settings.DesktopKeybindAction
 import moe.rukamori.archivetune.sdk.settings.DesktopSettingsPolicy
 import moe.rukamori.archivetune.desktop.statistics.DesktopListenTracker
 import moe.rukamori.archivetune.desktop.statistics.DesktopStatisticsStore
-import moe.rukamori.archivetune.innertube.models.Album
-import moe.rukamori.archivetune.innertube.models.AlbumItem
-import moe.rukamori.archivetune.innertube.models.Artist
-import moe.rukamori.archivetune.innertube.models.ArtistItem
-import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.cache.DesktopRequestPriority
 import moe.rukamori.archivetune.innertube.cache.DesktopResourceCoordinator
 import moe.rukamori.archivetune.innertube.home.DesktopHomeRepository
 import moe.rukamori.archivetune.innertube.home.DesktopHomeStore
 import moe.rukamori.archivetune.innertube.home.DesktopLibraryRepository
-import moe.rukamori.archivetune.innertube.home.DesktopPlayEvent
+import moe.rukamori.archivetune.innertube.home.DesktopPersonalizationCoordinator
 import moe.rukamori.archivetune.innertube.home.DesktopSimilarRecommendation
-import moe.rukamori.archivetune.innertube.home.quickPickSeedIds
 import moe.rukamori.archivetune.innertube.search.DesktopSearchRepository
 import moe.rukamori.archivetune.spotify.DesktopSpotifyPlaylistImporter
 import moe.rukamori.archivetune.spotify.SpotifyPlaylistImportProgress
@@ -61,7 +55,6 @@ import java.io.File
 import java.awt.Window
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
@@ -152,7 +145,6 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
             override fun warning(message: String) = runtime.logger.warning(message)
         },
     )
-    private val relatedSongFetches = ConcurrentHashMap.newKeySet<String>()
     val playback = VlcjPlaybackController(
         mediaHttpClient = moe.rukamori.archivetune.innertube.desktopStreamHttpClient(),
         sourceResolver = streamSourceResolver,
@@ -231,9 +223,16 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
     @Volatile private var statisticsPartyActive = false
     /** Song→album knowledge for backfilling album links on tracks served without album metadata. */
     val albumIndex = DesktopAlbumIndex(runtime.paths.data.resolve("album-index.json"))
-    private val _similarRecommendations = MutableStateFlow<List<DesktopSimilarRecommendation>>(emptyList())
-    val similarRecommendations = _similarRecommendations.asStateFlow()
-    private var playHistoryCurrent: Pair<SongItem, Long>? = null
+    val personalization = DesktopPersonalizationCoordinator(
+        backend = backend,
+        homeStore = homeStore,
+        coordinator = contentCoordinator,
+        scope = runtime.applicationScope,
+        accountScopeProvider = ::accountCacheScope,
+        isSignedInProvider = { account.state.value is DesktopAccountState.SignedIn },
+    )
+    val similarRecommendations: StateFlow<List<DesktopSimilarRecommendation>>
+        get() = personalization.similarRecommendations
 
     suspend fun importSpotifyPlaylist(
         link: String,
@@ -618,88 +617,14 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         ) { backend.upNext(videoId) }
 
     /** Syncs liked songs, library songs, liked albums and subscribed artists into the home store. */
-    suspend fun syncHomeLibrary() {
-        if (account.state.value !is DesktopAccountState.SignedIn) {
-            homeStore.clearAccountData()
-            _similarRecommendations.value = emptyList()
-            return
-        }
-        backend.likedSongs().onSuccess { homeStore.replaceLikedSongs(it.songs.distinctBy(SongItem::id)) }
-        backend.librarySongs().onSuccess { homeStore.replaceLibrarySongs(it.items.filterIsInstance<SongItem>().distinctBy(SongItem::id)) }
-        backend.libraryAlbums().onSuccess { homeStore.replaceLikedAlbums(it.items.filterIsInstance<AlbumItem>().distinctBy(AlbumItem::id)) }
-        backend.libraryArtists().onSuccess { homeStore.replaceSubscribedArtists(it.items.filterIsInstance<ArtistItem>().distinctBy(ArtistItem::id)) }
-    }
+    suspend fun syncHomeLibrary() = personalization.syncHomeLibrary()
 
     /**
      * Builds "Similar to ..." shelves from the user's most-played artists and songs, mirroring
      * Android's loadSimilarRecommendations. Artist seeds expand their top sections; song seeds use
      * the related-items endpoint.
      */
-    suspend fun loadSimilarRecommendations() {
-        val snapshot = homeStore.snapshot.value
-        val accountScope = accountCacheScope()
-        val playTimeBySong =
-            snapshot.playHistory.groupBy { it.song.id }.mapValues { (_, events) -> events.sumOf { it.playTimeMs.toLong() } }
-        val mostPlayedSongs =
-            snapshot.playHistory.map { it.song }.distinctBy { it.id }
-                .sortedByDescending { playTimeBySong[it.id] ?: 0L }
-                .take(2)
-        val recommendations = mutableListOf<DesktopSimilarRecommendation>()
-
-        // Artist seeds, mirroring Android's artistRecommendations: expand the last two sections of
-        // each most-played artist's page into a "Similar to ..." shelf.
-        val playTimeByArtist = mutableMapOf<String, Pair<Artist, Long>>()
-        snapshot.playHistory.forEach { event ->
-            event.song.artists.forEach { artist ->
-                artist.id?.let { artistId ->
-                    val previous = playTimeByArtist[artistId]
-                    playTimeByArtist[artistId] = artist to ((previous?.second ?: 0L) + event.playTimeMs)
-                }
-            }
-        }
-        val mostPlayedArtists =
-            playTimeByArtist.values
-                .sortedByDescending { it.second }
-                .map { it.first }
-                .distinctBy { it.id }
-                .take(3)
-        for (artist in mostPlayedArtists) {
-            val artistId = artist.id ?: continue
-            val page =
-                contentCoordinator.singleFlight(
-                    "recommendation-artist:$accountScope:$artistId",
-                    DesktopRequestPriority.MAINTENANCE,
-                ) { backend.artist(artistId) }.getOrNull() ?: continue
-            val items =
-                (page.sections.getOrNull(page.sections.size - 2)?.items.orEmpty() + page.sections.lastOrNull()?.items.orEmpty())
-                    .shuffled()
-                    .takeIf { it.isNotEmpty() }
-                    ?: continue
-            recommendations += DesktopSimilarRecommendation(title = page.artist, items = items)
-        }
-
-        // Song seeds: fetch related artists/albums/playlists through the related-items endpoint.
-        for (song in mostPlayedSongs) {
-            val relatedEndpoint =
-                contentCoordinator.singleFlight(
-                    "related-next:$accountScope:${song.id}",
-                    DesktopRequestPriority.MAINTENANCE,
-                ) { backend.next(song.id) }.getOrNull()?.relatedEndpoint ?: continue
-            val page =
-                contentCoordinator.singleFlight(
-                    "related-page:$accountScope:${song.id}",
-                    DesktopRequestPriority.MAINTENANCE,
-                ) { backend.related(relatedEndpoint) }.getOrNull() ?: continue
-            val items =
-                (page.songs.shuffled().take(8) + page.albums.shuffled().take(4) + page.artists.shuffled().take(4) + page.playlists.shuffled().take(4))
-                    .shuffled()
-                    .takeIf { it.isNotEmpty() }
-                    ?: continue
-            recommendations += DesktopSimilarRecommendation(title = song, items = items)
-        }
-
-        _similarRecommendations.value = recommendations
-    }
+    suspend fun loadSimilarRecommendations() = personalization.loadSimilarRecommendations()
 
     private fun startHomeSyncObserver() {
         runtime.applicationScope.launch {
@@ -739,14 +664,13 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                             launch(Dispatchers.IO) {
                                 delay(BACKGROUND_MAINTENANCE_START_DELAY_MS)
                                 runCatching {
-                                    warmQuickPickRelatedCache()
+                                    personalization.warmQuickPickRelatedCache()
                                     loadSimilarRecommendations()
                                 }
                             }
                         }
                     } else {
-                        homeStore.clearAccountData()
-                        _similarRecommendations.value = emptyList()
+                        personalization.clearAccountData()
                     }
             }
         }
@@ -782,62 +706,14 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
                     eligible = statisticsListeningEligible() && snapshot.currentItem?.metadata?.isPodcast != true,
                     previousTrackId = event.previous?.metadata?.id,
                 )
-                val now = System.currentTimeMillis()
-                flushPlayHistoryCurrent(now)
-                playHistoryCurrent =
-                    event.current
-                        ?.let(::songFromPlaybackItem)
-                        ?.takeIf { it.id.isNotBlank() }
-                        ?.also { song ->
-                            runtime.applicationScope.launch { cacheRelatedSongsIfNeeded(song.id) }
-                        }
-                        ?.let { it to now }
+                personalization.onMediaTransition(event.current)
             }
         }
-    }
-
-    /** Mirrors Android MusicService: cache related songs the first time a played seed is seen. */
-    private suspend fun cacheRelatedSongsIfNeeded(videoId: String) {
-        if (homeStore.hasRelatedSongs(videoId)) return
-        if (!relatedSongFetches.add(videoId)) return
-        try {
-            val accountScope = accountCacheScope()
-            val relatedEndpoint =
-                contentCoordinator.singleFlight(
-                    "related-next:$accountScope:$videoId",
-                    DesktopRequestPriority.MAINTENANCE,
-                ) { backend.next(videoId) }.getOrNull()?.relatedEndpoint ?: return
-            val relatedSongs =
-                contentCoordinator.singleFlight(
-                    "related-page:$accountScope:$videoId",
-                    DesktopRequestPriority.MAINTENANCE,
-                ) { backend.related(relatedEndpoint) }.getOrNull()?.songs.orEmpty()
-            if (relatedSongs.isNotEmpty()) {
-                homeStore.replaceRelatedSongs(videoId, relatedSongs)
-            }
-        } finally {
-            relatedSongFetches.remove(videoId)
-        }
-    }
-
-    /** Backfills Android-style related rows for desktop listens recorded before this cache existed. */
-    private suspend fun warmQuickPickRelatedCache() {
-        for (videoId in quickPickSeedIds(homeStore.snapshot.value)) {
-            cacheRelatedSongsIfNeeded(videoId)
-        }
-    }
-
-    private fun flushPlayHistoryCurrent(now: Long) {
-        val current = playHistoryCurrent ?: return
-        playHistoryCurrent = null
-        val playTimeMs = (now - current.second).coerceIn(0L, MAX_PLAY_HISTORY_EVENT_MS)
-        if (playTimeMs < MIN_PLAY_HISTORY_EVENT_MS) return
-        homeStore.recordPlay(DesktopPlayEvent(current.first, current.second, playTimeMs))
     }
 
     override fun close() {
         val state = playback.state.value
-        flushPlayHistoryCurrent(System.currentTimeMillis())
+        personalization.flushPlayHistoryCurrent()
         if (queuePersistencePolicy.shouldPersist(state, force = true)) queueStore.save(state)
         val policy = partyPlaybackPolicy()
         settings.update {
@@ -893,20 +769,7 @@ class DesktopMusicServices(private val runtime: DesktopRuntime) : AutoCloseable 
         }
     }
 
-    private fun songFromPlaybackItem(item: PlaybackItem): SongItem =
-        SongItem(
-            id = item.metadata.id,
-            title = item.metadata.title,
-            artists = item.metadata.artists.map { Artist(id = it.id, name = it.name) },
-            album = item.metadata.album?.let { Album(id = it.id.orEmpty(), name = it.title) },
-            duration = item.metadata.durationHintMs?.div(1_000L)?.toInt(),
-            thumbnail = item.metadata.artworkUri.orEmpty(),
-            explicit = item.metadata.explicit,
-        )
-
     private companion object {
-        const val MIN_PLAY_HISTORY_EVENT_MS = 5_000L
-        const val MAX_PLAY_HISTORY_EVENT_MS = 1_800_000L
         const val BACKGROUND_MAINTENANCE_START_DELAY_MS = 1_500L
         const val KEYBIND_VOLUME_STEP = 0.02f
         const val KEYBIND_SPEED_STEP = 0.05f

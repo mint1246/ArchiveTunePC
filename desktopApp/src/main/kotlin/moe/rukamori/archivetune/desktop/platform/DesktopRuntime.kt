@@ -9,10 +9,8 @@ package moe.rukamori.archivetune.desktop.platform
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import moe.rukamori.archivetune.desktop.settings.DesktopSettingsStore
-import java.util.concurrent.CopyOnWriteArrayList
+import moe.rukamori.archivetune.sdk.lifecycle.SdkLifecycle
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 
@@ -22,23 +20,27 @@ class DesktopRuntime private constructor(
     val settings: DesktopSettingsStore,
     private val logging: LoggingHandle,
 ) : AutoCloseable {
-    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ArchiveTuneDesktop"))
+    private val lifecycle = SdkLifecycle(Dispatchers.Default + CoroutineName("ArchiveTuneDesktop"))
+    val applicationScope: CoroutineScope = lifecycle.scope()
     val logger get() = logging.logger
 
-    private val resources = CopyOnWriteArrayList<AutoCloseable>()
     private val isClosed = AtomicBoolean(false)
 
-    fun <T : AutoCloseable> own(resource: T): T = resource.also(resources::add)
+    fun <T : AutoCloseable> own(resource: T): T {
+        lifecycle.register(
+            AutoCloseable {
+                runCatching(resource::close).onFailure { error ->
+                    logger.log(Level.WARNING, "A desktop service failed to close cleanly", error)
+                }
+            },
+        )
+        return resource
+    }
 
     override fun close() {
         if (!isClosed.compareAndSet(false, true)) return
         logger.info("ArchiveTune Desktop is shutting down")
-        applicationScope.cancel("Desktop application is closing")
-        resources.asReversed().forEach { resource ->
-            runCatching(resource::close).onFailure { error ->
-                logger.log(Level.WARNING, "A desktop service failed to close cleanly", error)
-            }
-        }
+        lifecycle.close()
         runCatching(settings::close).onFailure { error ->
             logger.log(Level.WARNING, "Desktop settings failed to flush cleanly", error)
         }
