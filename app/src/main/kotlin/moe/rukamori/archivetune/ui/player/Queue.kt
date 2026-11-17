@@ -113,6 +113,10 @@ import moe.rukamori.archivetune.extensions.move
 import moe.rukamori.archivetune.extensions.togglePlayPause
 import moe.rukamori.archivetune.extensions.toggleRepeatMode
 import moe.rukamori.archivetune.models.MediaMetadata
+import moe.rukamori.archivetune.playback.api.QueueDragDestination
+import moe.rukamori.archivetune.playback.api.QueueReorderAction
+import moe.rukamori.archivetune.playback.api.QueueReorderPlanner
+import moe.rukamori.archivetune.playback.api.QueueReorderWindow
 import moe.rukamori.archivetune.together.permissionsFor
 import moe.rukamori.archivetune.ui.component.BottomSheet
 import moe.rukamori.archivetune.ui.component.BottomSheetState
@@ -808,30 +812,30 @@ fun Queue(
 
             val completedDrag = dragInfo
             if (completedDrag != null) {
-                val sourceIndex = queueWindows.indexOfFirst { it.uid == completedDrag.draggedItemUid }
-                val destinationIndex = completedDrag.destination.resolveIndex(queueWindows, sourceIndex)
                 dragInfo = null
-
-                if (
-                    sourceIndex != -1 &&
-                    destinationIndex != null &&
-                    sourceIndex != destinationIndex
+                when (
+                    val action =
+                        QueueReorderPlanner.planReorder(
+                            windows = queueWindows.map { QueueReorderWindow(it.uid, it.firstPeriodIndex) },
+                            draggedItemUid = completedDrag.draggedItemUid,
+                            destination = completedDrag.destination,
+                            shuffleEnabled = playerConnection.player.shuffleModeEnabled,
+                        )
                 ) {
-                    if (!playerConnection.player.shuffleModeEnabled) {
-                        playerConnection.player.moveMediaItem(sourceIndex, destinationIndex)
-                    } else {
+                    QueueReorderAction.NoOp -> Unit
+                    is QueueReorderAction.MoveLogical -> {
+                        playerConnection.player.moveMediaItem(action.fromIndex, action.toIndex)
+                        return@LaunchedEffect
+                    }
+                    is QueueReorderAction.UpdateShuffleOrder -> {
                         playerConnection.localPlayer.setShuffleOrder(
                             DefaultShuffleOrder(
-                                queueWindows
-                                    .map { it.firstPeriodIndex }
-                                    .toMutableList()
-                                    .move(sourceIndex, destinationIndex)
-                                    .toIntArray(),
+                                action.shuffledPeriodIndices,
                                 System.currentTimeMillis(),
                             ),
                         )
+                        return@LaunchedEffect
                     }
-                    return@LaunchedEffect
                 }
             }
 
@@ -1250,32 +1254,6 @@ private data class QueueDragInfo(
     public val draggedItemUid: Any,
     public val destination: QueueDragDestination,
 )
-
-@Immutable
-private sealed interface QueueDragDestination {
-    public data object Start : QueueDragDestination
-
-    public data class After(
-        public val itemUid: Any,
-    ) : QueueDragDestination
-}
-
-private fun QueueDragDestination.resolveIndex(
-    queueWindows: List<Timeline.Window>,
-    sourceIndex: Int,
-): Int? =
-    when (this) {
-        QueueDragDestination.Start -> if (queueWindows.isEmpty()) null else 0
-        is QueueDragDestination.After -> {
-            val anchorIndex = queueWindows.indexOfFirst { it.uid == itemUid }
-            when {
-                sourceIndex !in queueWindows.indices -> null
-                anchorIndex == -1 -> null
-                sourceIndex < anchorIndex -> anchorIndex
-                else -> (anchorIndex + 1).coerceAtMost(queueWindows.lastIndex)
-            }
-        }
-    }
 
 @Composable
 private fun QueueSelectionFloatingToolbar(

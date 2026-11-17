@@ -227,6 +227,8 @@ Android's SponsorBlock monitor now uses the headless skip planner for range acti
 
 Android statistics overview queries, time bucketing and trend construction now use a headless query service; the existing Room store supplies its query interface and continues to own persistence. The statistics SDK tests pass. Combined Android compilation and actual database/device verification remain outstanding for this milestone.
 
+Android queue drag reorder planning now lives in `playback-core`, using window identity to distinguish duplicate tracks and preserving the existing shuffled traversal ordering. Focused planner tests pass; Media3 UI and device verification remain outstanding.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.
