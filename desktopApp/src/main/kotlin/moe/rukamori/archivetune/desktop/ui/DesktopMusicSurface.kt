@@ -143,6 +143,13 @@ import moe.rukamori.archivetune.playback.api.PlaybackMetadata
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
 import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
+import moe.rukamori.archivetune.sdk.playlist.LibraryFilterResult
+import moe.rukamori.archivetune.sdk.playlist.PlaylistSongOccurrence as SdkPlaylistSongOccurrence
+import moe.rukamori.archivetune.sdk.playlist.PlaylistSongSort
+import moe.rukamori.archivetune.sdk.playlist.filterLibraryContent
+import moe.rukamori.archivetune.sdk.playlist.playlistSongOccurrences as sdkPlaylistSongOccurrences
+import moe.rukamori.archivetune.sdk.playlist.sortBySongSort
+import moe.rukamori.archivetune.sdk.playlist.sortPlaylistSongOccurrences as sdkSortPlaylistSongOccurrences
 import kotlin.math.roundToLong
 
 internal sealed interface Detail {
@@ -974,30 +981,22 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     }
 }
 
-internal data class LocalLibraryFilterResult(
-    val playlists: List<PlaylistItem>,
-    val tracks: List<LocalTrack>,
-)
+internal typealias LocalLibraryFilterResult = LibraryFilterResult<PlaylistItem, LocalTrack>
 
 internal fun filterLocalLibrary(
     playlists: List<PlaylistItem>,
     tracks: List<LocalTrack>,
     query: String,
-): LocalLibraryFilterResult {
-    val trimmedQuery = query.trim()
-    if (trimmedQuery.isEmpty()) return LocalLibraryFilterResult(playlists, tracks)
-    return LocalLibraryFilterResult(
-        playlists = playlists.filter { playlist ->
-            playlist.title.contains(trimmedQuery, ignoreCase = true) ||
-                playlist.author?.name?.contains(trimmedQuery, ignoreCase = true) == true
-        },
-        tracks = tracks.filter { track ->
-            track.title.contains(trimmedQuery, ignoreCase = true) ||
-                track.artist.contains(trimmedQuery, ignoreCase = true) ||
-                track.album?.contains(trimmedQuery, ignoreCase = true) == true
-        },
-    )
-}
+): LocalLibraryFilterResult = filterLibraryContent(
+    playlists = playlists,
+    tracks = tracks,
+    query = query,
+    playlistTitle = PlaylistItem::title,
+    playlistAuthor = { it.author?.name },
+    trackTitle = LocalTrack::title,
+    trackArtist = LocalTrack::artist,
+    trackAlbum = LocalTrack::album,
+)
 
 @Composable private fun LocalLibrary(tracks: List<LocalTrack>, onlinePlaylists: List<PlaylistItem>, folders: List<java.nio.file.Path>, savedPodcasts: List<PodcastItem>, savedEpisodes: List<EpisodeItem>, loading: Boolean, error: String?, onAddFolder: () -> Unit, onRescan: () -> Unit, spotifyImportEnabled: Boolean, onImportSpotify: () -> Unit, onCreatePlaylist: () -> Unit, onOpenPlaylist: (PlaylistItem) -> Unit, onOpenPodcast: (PodcastItem) -> Unit, onRefreshPodcastLibrary: () -> Unit, onPlayEpisode: (EpisodeItem) -> Unit, onPlay: (LocalTrack) -> Unit, onPlayNext: (LocalTrack) -> Unit, onAddToQueue: (LocalTrack) -> Unit, modifier: Modifier) {
     val listState = rememberPersistedLazyListState("library")
@@ -1388,29 +1387,25 @@ internal fun localSearchMatches(
         .toList()
 }
 
-internal enum class DesktopSongSort(val label: String) {
-    ORIGINAL("Original order"),
-    TITLE("Title"),
-    ARTIST("Artist"),
-    ALBUM("Album"),
-    DURATION("Duration"),
-}
+internal typealias DesktopSongSort = PlaylistSongSort
 
-internal fun sortSongs(songs: List<SongItem>, sort: DesktopSongSort): List<SongItem> = when (sort) {
-    DesktopSongSort.ORIGINAL -> songs
-    DesktopSongSort.TITLE -> songs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SongItem::title))
-    DesktopSongSort.ARTIST -> songs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artists.firstOrNull()?.name.orEmpty() })
-    DesktopSongSort.ALBUM -> songs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.album?.name.orEmpty() })
-    DesktopSongSort.DURATION -> songs.sortedBy { it.duration?.toLong() ?: Long.MAX_VALUE }
-}
+internal fun sortSongs(songs: List<SongItem>, sort: DesktopSongSort): List<SongItem> = sortBySongSort(
+    items = songs,
+    sort = sort,
+    title = SongItem::title,
+    firstArtist = { it.artists.firstOrNull()?.name.orEmpty() },
+    album = { it.album?.name.orEmpty() },
+    duration = { it.duration?.toLong() },
+)
 
-internal fun sortLocalTracks(tracks: List<LocalTrack>, sort: DesktopSongSort): List<LocalTrack> = when (sort) {
-    DesktopSongSort.ORIGINAL -> tracks
-    DesktopSongSort.TITLE -> tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, LocalTrack::title))
-    DesktopSongSort.ARTIST -> tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, LocalTrack::artist))
-    DesktopSongSort.ALBUM -> tracks.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.album.orEmpty() })
-    DesktopSongSort.DURATION -> tracks.sortedBy { it.durationMs ?: Long.MAX_VALUE }
-}
+internal fun sortLocalTracks(tracks: List<LocalTrack>, sort: DesktopSongSort): List<LocalTrack> = sortBySongSort(
+    items = tracks,
+    sort = sort,
+    title = LocalTrack::title,
+    firstArtist = LocalTrack::artist,
+    album = { it.album.orEmpty() },
+    duration = LocalTrack::durationMs,
+)
 
 internal fun requestedSongQueueIndex(
     songIds: List<String>,
@@ -1878,53 +1873,31 @@ private fun PodcastDetailPage(
     }
 }
 
-internal data class PlaylistSongOccurrence(
-    val song: SongItem,
-    val originalIndex: Int,
-) {
-    val stableKey: String
-        get() = "${song.id}:$originalIndex"
-}
+internal typealias PlaylistSongOccurrence = SdkPlaylistSongOccurrence<SongItem>
 
 internal fun playlistSongOccurrences(
     songs: List<SongItem>,
     query: String,
-): List<PlaylistSongOccurrence> =
-    songs.mapIndexedNotNull { index, song ->
-        if (
-            query.isBlank() ||
-            song.title.contains(query, ignoreCase = true) ||
-            song.artists.any { it.name.contains(query, ignoreCase = true) } ||
-            song.album?.name?.contains(query, ignoreCase = true) == true
-        ) {
-            PlaylistSongOccurrence(song, index)
-        } else {
-            null
-        }
-    }
+): List<PlaylistSongOccurrence> = sdkPlaylistSongOccurrences(
+    songs = songs,
+    query = query,
+    id = SongItem::id,
+    title = SongItem::title,
+    artists = { it.artists.map { artist -> artist.name } },
+    album = { it.album?.name },
+)
 
 internal fun sortPlaylistSongOccurrences(
     songs: List<PlaylistSongOccurrence>,
     sort: DesktopSongSort,
-): List<PlaylistSongOccurrence> = when (sort) {
-    DesktopSongSort.ORIGINAL -> songs.sortedBy(PlaylistSongOccurrence::originalIndex)
-    DesktopSongSort.TITLE -> songs.sortedWith(
-        compareBy<PlaylistSongOccurrence, String>(String.CASE_INSENSITIVE_ORDER) { it.song.title }
-            .thenBy(PlaylistSongOccurrence::originalIndex),
-    )
-    DesktopSongSort.ARTIST -> songs.sortedWith(
-        compareBy<PlaylistSongOccurrence, String>(String.CASE_INSENSITIVE_ORDER) { it.song.artists.firstOrNull()?.name.orEmpty() }
-            .thenBy(PlaylistSongOccurrence::originalIndex),
-    )
-    DesktopSongSort.ALBUM -> songs.sortedWith(
-        compareBy<PlaylistSongOccurrence, String>(String.CASE_INSENSITIVE_ORDER) { it.song.album?.name.orEmpty() }
-            .thenBy(PlaylistSongOccurrence::originalIndex),
-    )
-    DesktopSongSort.DURATION -> songs.sortedWith(
-        compareBy<PlaylistSongOccurrence> { it.song.duration?.toLong() ?: Long.MAX_VALUE }
-            .thenBy(PlaylistSongOccurrence::originalIndex),
-    )
-}
+): List<PlaylistSongOccurrence> = sdkSortPlaylistSongOccurrences(
+    occurrences = songs,
+    sort = sort,
+    title = SongItem::title,
+    firstArtist = { it.artists.firstOrNull()?.name.orEmpty() },
+    album = { it.album?.name.orEmpty() },
+    duration = { it.duration?.toLong() },
+)
 
 @Composable
 private fun PlaylistDetailPage(

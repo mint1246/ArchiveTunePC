@@ -229,6 +229,8 @@ Android statistics overview queries, time bucketing and trend construction now u
 
 Android queue drag reorder planning now lives in `playback-core`, using window identity to distinguish duplicate tracks and preserving the existing shuffled traversal ordering. Focused planner tests pass; Media3 UI and device verification remain outstanding.
 
+Desktop playlist CSV export, picker state, ordering and local filtering now use `playlist-sdk` through app adapters. SDK tests and desktop application and test-source compilation pass; actual desktop UI and exported files remain to be exercised.
+
 A separate untracked `backend-sdk/` draft and `examples/headless-backend/` were generated during exploration but are not integrated: they duplicate the active desktop coordinator, and their diagnostic formatting can expose arbitrary exception text. The original coordinator was extracted to `desktop-resource-core` instead. Do not ship or adopt the draft without resolving those issues.
 
 A separate `library-sdk/` draft from an interrupted desktop worker is also unintegrated. Its proposed UI patch and adapter were preserved inside that directory after restoring the existing desktop UI; it requires review and behavior tests before adoption.

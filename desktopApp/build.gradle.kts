@@ -47,6 +47,7 @@ dependencies {
     implementation(project(":desktop-playback"))
     implementation(project(":desktop-play-together"))
     implementation(project(":desktop-library"))
+    implementation(project(":playlist-sdk"))
     implementation(project(":desktop-settings"))
     implementation(project(":desktop-statistics"))
     implementation(project(":desktop-audio-analysis"))
