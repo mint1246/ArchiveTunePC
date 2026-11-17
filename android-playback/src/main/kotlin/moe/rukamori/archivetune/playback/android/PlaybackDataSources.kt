@@ -12,7 +12,13 @@ import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.ContentMetadata
+import java.io.IOException
 import java.util.Locale
+import kotlinx.coroutines.runBlocking
+import moe.rukamori.archivetune.playback.api.PlaybackItem
+import moe.rukamori.archivetune.playback.api.PlaybackMetadata
+import moe.rukamori.archivetune.playback.api.PlaybackSource
+import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 
 /** Keeps the stable media identity in the queue so resolution can happen when Media3 opens it. */
 @UnstableApi
@@ -32,6 +38,53 @@ fun resolvingPlaybackUpstream(
         val mediaId = request.key
         if (mediaId == null || request.uri.bypassesDeferredPlaybackResolution()) request else resolveDeferred(request, mediaId)
     }
+}
+
+/**
+ * Adapts a [PlaybackSourceResolver] onto [resolvingPlaybackUpstream] so Media3 resolves deferred
+ * queue items lazily on its loading thread, including during automatic queue advancement.
+ */
+@UnstableApi
+fun resolvingPlaybackSourceUpstream(
+    context: Context,
+    httpFactory: DataSource.Factory,
+    chunkLength: Long = 8L * 1024 * 1024,
+    itemForKey: (key: String) -> PlaybackItem = { key ->
+        PlaybackItem(
+            metadata = PlaybackMetadata(id = key, title = ""),
+            source = PlaybackSource.Deferred(key),
+        )
+    },
+    sourceResolver: PlaybackSourceResolver,
+): DataSource.Factory = resolvingPlaybackUpstream(
+    context = context,
+    httpFactory = httpFactory,
+    chunkLength = chunkLength,
+) { request, key ->
+    resolvePlaybackDataSpec(
+        request = request,
+        key = key,
+        itemForKey = itemForKey,
+        sourceResolver = sourceResolver,
+    )
+}
+
+@UnstableApi
+internal fun resolvePlaybackDataSpec(
+    request: DataSpec,
+    key: String,
+    itemForKey: (key: String) -> PlaybackItem,
+    sourceResolver: PlaybackSourceResolver,
+    parseUri: (String) -> Uri = Uri::parse,
+): DataSpec {
+    val resolved = runBlocking { sourceResolver.resolve(itemForKey(key)) }.getOrElse { error ->
+        throw IOException(error.message ?: "Failed to resolve playback source for '$key'", error)
+    }
+    var updated = request.withUri(parseUri(resolved.uri))
+    if (resolved.headers.isNotEmpty()) {
+        updated = updated.withAdditionalHeaders(resolved.headers)
+    }
+    return updated
 }
 
 /** Chooses the source at open time so cache policy changes also apply to already queued items. */

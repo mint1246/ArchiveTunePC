@@ -39,9 +39,11 @@ dependencies {
     api(project(":playback-core"))
     api("androidx.media3:media3-common:${libs.versions.media3.get()}")
     api("androidx.media3:media3-datasource:${libs.versions.media3.get()}")
+    api("androidx.media3:media3-exoplayer:${libs.versions.media3.get()}")
     api(libs.coroutines.core)
 
     testImplementation(libs.junit)
+    testImplementation(libs.json)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
 }
 

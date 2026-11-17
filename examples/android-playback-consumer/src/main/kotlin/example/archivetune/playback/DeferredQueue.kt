@@ -7,8 +7,29 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import moe.rukamori.archivetune.playback.android.Media3PlaybackSession
+import moe.rukamori.archivetune.playback.android.createMedia3PlaybackSession
 import moe.rukamori.archivetune.playback.android.resolvingPlaybackUpstream
 import moe.rukamori.archivetune.playback.android.setPlaybackAddress
+import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
+
+/**
+ * Creates a turnkey [Media3PlaybackSession] wired with lazy data-source deferred resolution and
+ * optional durable JSON queue persistence. Close the returned session on the main thread when done.
+ */
+@UnstableApi
+fun prepareDeferredSession(
+    context: Context,
+    queueFile: File? = null,
+    resolver: PlaybackSourceResolver,
+): Media3PlaybackSession = createMedia3PlaybackSession(
+    context = context,
+    sourceResolver = resolver,
+    queueFile = queueFile,
+    playerDispatcher = Dispatchers.Main.immediate,
+)
 
 /** The host supplies stream resolution, calls play(), and releases the player when finished. */
 @UnstableApi
