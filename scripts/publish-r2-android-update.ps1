@@ -10,7 +10,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Bucket,
     [Parameter(Mandatory = $true)][string]$Endpoint,
     [Parameter(Mandatory = $true)][string]$PublicBaseUrl,
-    [string]$ManifestPath = (Join-Path $PSScriptRoot "..\release\latest.json"),
+    [string]$ManifestPath = (Join-Path (Join-Path $PSScriptRoot "..") "release/latest.json"),
     [string]$AwsProfile = "",
     [switch]$SkipUpload
 )
