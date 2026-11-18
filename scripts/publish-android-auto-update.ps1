@@ -5,7 +5,7 @@ param(
     [ValidateSet("stable", "canary")][string]$Channel = "stable",
     [string]$AwsProfile = "archivetune-r2",
     [string]$Bucket = "archivetune-updates",
-    [string]$Endpoint = "https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com",
+    [string]$Endpoint = $(if ($env:R2_ENDPOINT) { $env:R2_ENDPOINT } else { "" }),
     [string]$PublicBaseUrl = "https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev",
     [string]$ExpectedSignerSha256 = "cd0f69369f343d3fa9e66fd353953a53c789bc16bf3374a339c33389cc82df81",
     [switch]$SkipPush
@@ -69,6 +69,14 @@ try {
     }
     if (-not (Test-Path -LiteralPath $publisher)) {
         throw "Could not find scripts/publish-r2-android-update.ps1"
+    }
+    if ([string]::IsNullOrWhiteSpace($Endpoint)) {
+        $localEndpointFile = Join-Path $repoRoot ".secrets/android-signing/r2-endpoint.txt"
+        if (Test-Path -LiteralPath $localEndpointFile) {
+            $Endpoint = [IO.File]::ReadAllText($localEndpointFile).Trim()
+        } else {
+            throw "R2 endpoint is required via -Endpoint, R2_ENDPOINT env var, or .secrets/android-signing/r2-endpoint.txt"
+        }
     }
 
     $branch = (git branch --show-current).Trim()

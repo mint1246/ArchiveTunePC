@@ -410,7 +410,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           R2_BUCKET: archivetune-updates
-          R2_ENDPOINT: https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_PUBLIC_URL: https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev
           DESKTOP_VERSION: ${{ needs.classify.outputs.desktop_version }}
           MSI_NAME: ${{ needs.build-desktop.outputs.msi_name }}

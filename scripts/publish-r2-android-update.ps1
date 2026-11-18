@@ -23,7 +23,11 @@ $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedApk).Hash.ToLowe
 $size = (Get-Item -LiteralPath $resolvedApk).Length
 $artifactKey = "$Distribution-$Device-$Architecture"
 $publicBase = $PublicBaseUrl.TrimEnd('/')
-$versionedObjectKey = "releases/android/ArchiveTune-$Version-$artifactKey.apk"
+$versionedObjectKey = if ($Channel -eq "stable") {
+    "releases/android/ArchiveTune-$Version-$artifactKey.apk"
+} else {
+    "releases/android/ArchiveTune-$Version-canary-$($sha256.Substring(0, 12))-$artifactKey.apk"
+}
 $aliasName = if ($Channel -eq "stable") { "latest" } else { "canary" }
 $aliasObjectKey = "releases/android/$aliasName-$artifactKey.apk"
 $downloadUrl = "${publicBase}/${versionedObjectKey}?sha256=$sha256"
