@@ -1,7 +1,17 @@
-name: Build GraalVM Native Image MSI
+name: Build & Publish ArchiveTune
 
 on:
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: 'Release classification (auto checks whether Android versionCode changed)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - full
+          - nightly
   push:
     branches: [ 'main', 'dev' ]
     paths-ignore:
@@ -12,22 +22,251 @@ on:
       - '.github/FUNDING.yml'
       - '.github/ISSUE_TEMPLATE/**'
 
+concurrency:
+  group: build-publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build GraalVM Native Image MSI
+  classify:
+    name: Classify version & release channel
     if: github.actor != 'dependabot[bot]' && github.actor != 'renovate[bot]'
-    runs-on: windows-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: auto
-      R2_BUCKET: archivetune-updates
-      R2_ENDPOINT: https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com
-      R2_PUBLIC_URL: https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev
+    runs-on: ubuntu-latest
+    outputs:
+      android_version: ${{ steps.meta.outputs.android_version }}
+      android_version_code: ${{ steps.meta.outputs.android_version_code }}
+      desktop_version: ${{ steps.meta.outputs.desktop_version }}
+      release_mode: ${{ steps.meta.outputs.release_mode }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+      r2_android_channel: ${{ steps.meta.outputs.r2_android_channel }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_title: ${{ steps.meta.outputs.release_title }}
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
+      - name: Determine version metadata and release tier
+        id: meta
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          DISPATCH_MODE: ${{ inputs.release_mode }}
+          RUN_NUMBER: ${{ github.run_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $appBuild = Get-Content -Raw -LiteralPath 'app/build.gradle.kts'
+          $codeMatch = [regex]::Match($appBuild, 'versionCode\s*=\s*(\d+)')
+          $nameMatch = [regex]::Match($appBuild, 'versionName\s*=\s*"([^"]+)"')
+          if (-not $codeMatch.Success -or -not $nameMatch.Success) {
+            throw 'Could not parse Android versionCode/versionName from app/build.gradle.kts'
+          }
+          $androidCode = [int]$codeMatch.Groups[1].Value
+          $androidVersion = $nameMatch.Groups[1].Value.Trim()
+
+          $desktopBuild = Get-Content -Raw -LiteralPath 'desktopApp/build.gradle.kts'
+          $desktopMatch = [regex]::Match($desktopBuild, '(?m)^version\s*=\s*"([^"]+)"')
+          if (-not $desktopMatch.Success) {
+            throw 'Could not parse desktop version from desktopApp/build.gradle.kts'
+          }
+          $desktopVersion = $desktopMatch.Groups[1].Value.Trim()
+          $shortSha = (& git rev-parse --short=7 HEAD).Trim()
+
+          $mode = 'nightly'
+          if ($env:EVENT_NAME -eq 'workflow_dispatch' -and $env:DISPATCH_MODE -in @('full', 'nightly')) {
+            $mode = $env:DISPATCH_MODE
+          } else {
+            $beforeCode = $null
+            if (
+              $env:EVENT_NAME -eq 'push' -and
+              -not [string]::IsNullOrWhiteSpace($env:BEFORE_SHA) -and
+              $env:BEFORE_SHA -notmatch '^0+$'
+            ) {
+              $beforeContent = & git show "$($env:BEFORE_SHA):app/build.gradle.kts" 2>$null | Out-String
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($beforeContent)) {
+                $prevMatch = [regex]::Match($beforeContent, 'versionCode\s*=\s*(\d+)')
+                if ($prevMatch.Success) {
+                  $beforeCode = [int]$prevMatch.Groups[1].Value
+                }
+              }
+            }
+
+            if ($null -ne $beforeCode) {
+              # Explicit rule: same versionCode -> beta/nightly pre-release; new versionCode -> full release.
+              $mode = if ($androidCode -gt $beforeCode) { 'full' } else { 'nightly' }
+              Write-Host "Push versionCode comparison: before=$beforeCode -> head=$androidCode => mode=$mode"
+            } else {
+              # Fallback for workflow_dispatch(auto) or initial branch push: check existing full GitHub Releases & R2.
+              $alreadyFullReleased = $false
+              $releasesJson = & gh api "repos/$($env:REPO)/releases?per_page=30" 2>$null | Out-String
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($releasesJson)) {
+                $releases = $releasesJson | ConvertFrom-Json
+                foreach ($rel in $releases) {
+                  if (-not $rel.prerelease -and -not $rel.draft) {
+                    if ($rel.tag_name -eq "v$androidVersion") {
+                      $alreadyFullReleased = $true
+                      break
+                    }
+                    $bodyText = [string]$rel.body
+                    $marker = [regex]::Match($bodyText, 'archivetune:versionCode=(\d+)')
+                    if ($marker.Success -and [int]$marker.Groups[1].Value -ge $androidCode) {
+                      $alreadyFullReleased = $true
+                      break
+                    }
+                  }
+                }
+              }
+              $mode = if ($alreadyFullReleased) { 'nightly' } else { 'full' }
+              Write-Host "Release history comparison for versionCode=$androidCode (v$androidVersion) => mode=$mode"
+            }
+          }
+
+          if ($mode -eq 'full') {
+            $isPrerelease = 'false'
+            $r2Channel = 'stable'
+            $candidateTag = "v$androidVersion"
+            & git rev-parse "$candidateTag" *> $null
+            $releaseTag = if ($LASTEXITCODE -eq 0) { "v$androidVersion+$androidCode" } else { $candidateTag }
+            $releaseTitle = "ArchiveTune $androidVersion"
+          } else {
+            $isPrerelease = 'true'
+            $r2Channel = 'canary'
+            $releaseTag = "v$androidVersion-beta.$($env:RUN_NUMBER).$shortSha"
+            $releaseTitle = "ArchiveTune $androidVersion Beta/Nightly ($shortSha)"
+          }
+
+          @(
+            "android_version=$androidVersion",
+            "android_version_code=$androidCode",
+            "desktop_version=$desktopVersion",
+            "release_mode=$mode",
+            "is_prerelease=$isPrerelease",
+            "r2_android_channel=$r2Channel",
+            "release_tag=$releaseTag",
+            "release_title=$releaseTitle"
+          ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Write-Host "Classified build: Android $androidVersion ($androidCode), Desktop $desktopVersion, mode=$mode, tag=$releaseTag"
+
+  build-android:
+    name: Build & Sign Android Release APK
+    needs: classify
+    runs-on: ubuntu-latest
+    outputs:
+      apk_name: ${{ steps.apk.outputs.name }}
+      apk_sha256: ${{ steps.apk.outputs.sha256 }}
+      signed: ${{ steps.apk.outputs.signed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Generate translation contributor credits
+        run: python scripts/generate_translation_contributors.py
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          architecture: 'x64'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: on-success
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
+
+      - name: Assemble Android GMS Mobile Arm64 Release APK
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./gradlew :app:assembleGmsMobileArm64Release --stacktrace -x :spotlessApply
+
+      - name: Sign & verify Android APK
+        id: apk
+        shell: pwsh
+        # Signing secrets are scoped strictly to this step so Gradle/compiler plugins never see them.
+        env:
+          ANDROID_VERSION: ${{ needs.classify.outputs.android_version }}
+          ANDROID_VERSION_CODE: ${{ needs.classify.outputs.android_version_code }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          ANDROID_LEGACY_KEYSTORE_BASE64: ${{ secrets.ANDROID_LEGACY_KEYSTORE_BASE64 }}
+          ANDROID_LEGACY_KEY_ALIAS: ${{ secrets.ANDROID_LEGACY_KEY_ALIAS }}
+          ANDROID_LEGACY_STORE_PASSWORD: ${{ secrets.ANDROID_LEGACY_STORE_PASSWORD }}
+          ANDROID_SIGNING_LINEAGE_BASE64: ${{ secrets.ANDROID_SIGNING_LINEAGE_BASE64 }}
+          ANDROID_EXPECTED_SIGNER_SHA256: ${{ secrets.ANDROID_EXPECTED_SIGNER_SHA256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $unsigned = Get-ChildItem 'app/build/outputs/apk/gmsMobileArm64/release' -Filter '*.apk' -File |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $unsigned) {
+            throw 'No gmsMobileArm64 release APK was produced by Gradle.'
+          }
+
+          $outDir = 'release/android'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_RELEASE_KEYSTORE_BASE64)) {
+            $apkName = "ArchiveTune-$($env:ANDROID_VERSION)-gms-mobile-arm64.apk"
+            $outPath = Join-Path $outDir $apkName
+            ./scripts/sign-android-release-apk.ps1 `
+              -UnsignedApkPath $unsigned.FullName `
+              -OutputApkPath $outPath `
+              -ExpectedVersionCode ([int]$env:ANDROID_VERSION_CODE)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $isSigned = 'true'
+          } elseif ($env:IS_MAIN -eq 'true') {
+            throw 'ANDROID_RELEASE_KEYSTORE_BASE64 secret is required for main branch releases.'
+          } else {
+            $apkName = "ArchiveTune-$($env:ANDROID_VERSION)-gms-mobile-arm64-unsigned.apk"
+            $outPath = Join-Path $outDir $apkName
+            Copy-Item -LiteralPath $unsigned.FullName -Destination $outPath -Force
+            $isSigned = 'false'
+          }
+
+          $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $outPath).Hash.ToLowerInvariant()
+          @(
+            "path=$outPath",
+            "name=$apkName",
+            "sha256=$sha256",
+            "signed=$isSigned"
+          ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ArchiveTune-Android-APK
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+  build-desktop:
+    name: Build GraalVM Native Image MSI
+    needs: classify
+    runs-on: windows-latest
+    outputs:
+      msi_name: ${{ steps.msi.outputs.name }}
+      msi_sha256: ${{ steps.msi.outputs.msi_sha256 }}
+      exe_sha256: ${{ steps.msi.outputs.exe_sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -84,30 +323,10 @@ jobs:
             notifications
             nucleus
 
-      - name: Verify Java runtime
-        shell: pwsh
-        run: java -version
-
-      - name: Install AWS CLI
-        if: github.ref == 'refs/heads/main'
-        shell: pwsh
-        run: python -m pip install awscli
-
-      - name: Verify R2 credentials
-        if: github.ref == 'refs/heads/main'
-        shell: pwsh
-        run: |
-          aws s3api list-objects-v2 `
-            --bucket $env:R2_BUCKET `
-            --max-keys 1 `
-            --endpoint-url $env:R2_ENDPOINT `
-            --region auto | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "R2 credential preflight failed (aws exit code $LASTEXITCODE)."
-          }
-
       - name: Build GraalVM Native Image MSI
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -120,7 +339,7 @@ jobs:
             exit $LASTEXITCODE
           }
 
-      - name: Locate MSI
+      - name: Locate MSI and compute SHA-256 digests
         id: msi
         shell: pwsh
         run: |
@@ -130,30 +349,170 @@ jobs:
           if (-not $msi) {
             throw 'Windows MSI was not produced.'
           }
-          "path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
-          "name=$($msi.Name)" >> $env:GITHUB_OUTPUT
-          Write-Host "Built $($msi.FullName)"
+          $exePath = 'desktopApp\build\compose\binaries\main-native\app\ArchiveTune\ArchiveTune.exe'
+          if (-not (Test-Path -LiteralPath $exePath)) {
+            throw "Staged native executable was not found at $exePath"
+          }
+          $msiSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi.FullName).Hash.ToLowerInvariant()
+          $exeSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLowerInvariant()
+          @(
+            "path=$($msi.FullName)",
+            "name=$($msi.Name)",
+            "msi_sha256=$msiSha",
+            "exe_sha256=$exeSha"
+          ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Built $($msi.FullName) (msiSha256=$msiSha, exeSha256=$exeSha)"
 
-      - name: Upload Windows MSI
+      - name: Upload Windows MSI artifact
         uses: actions/upload-artifact@v7
         with:
           name: ArchiveTune-Windows-MSI
           path: ${{ steps.msi.outputs.path }}
           if-no-files-found: error
 
-      - name: Publish desktop update to R2
-        if: github.ref == 'refs/heads/main'
+  publish:
+    name: Publish R2 Auto-Updates & GitHub Release
+    needs: [ classify, build-android, build-desktop ]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout publisher scripts
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download Android APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ArchiveTune-Android-APK
+          path: dist/android
+
+      - name: Download Windows MSI artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ArchiveTune-Windows-MSI
+          path: dist/desktop
+
+      - name: Ensure AWS CLI is available
         shell: pwsh
         run: |
-          $versionLine = Select-String -Path 'desktopApp/build.gradle.kts' -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
-          if (-not $versionLine) {
-            throw 'Could not determine desktop version from desktopApp/build.gradle.kts.'
+          if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
+            python3 -m pip install --quiet awscli
           }
-          $version = $versionLine.Matches[0].Groups[1].Value
-          .\scripts\publish-r2-update.ps1 `
-            -MsiPath '${{ steps.msi.outputs.path }}' `
-            -ExecutablePath 'desktopApp\build\compose\binaries\main-native\app\ArchiveTune\ArchiveTune.exe' `
-            -Version $version `
+          aws --version
+
+      - name: Publish Desktop MSI and Android APK to Cloudflare R2
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_BUCKET: archivetune-updates
+          R2_ENDPOINT: https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com
+          R2_PUBLIC_URL: https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev
+          DESKTOP_VERSION: ${{ needs.classify.outputs.desktop_version }}
+          MSI_NAME: ${{ needs.build-desktop.outputs.msi_name }}
+          EXE_SHA256: ${{ needs.build-desktop.outputs.exe_sha256 }}
+          ANDROID_VERSION: ${{ needs.classify.outputs.android_version }}
+          ANDROID_VERSION_CODE: ${{ needs.classify.outputs.android_version_code }}
+          APK_NAME: ${{ needs.build-android.outputs.apk_name }}
+          R2_ANDROID_CHANNEL: ${{ needs.classify.outputs.r2_android_channel }}
+          RELEASE_TITLE: ${{ needs.classify.outputs.release_title }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          aws s3api list-objects-v2 `
+            --bucket $env:R2_BUCKET `
+            --max-keys 1 `
+            --endpoint-url $env:R2_ENDPOINT `
+            --region auto | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "R2 credential preflight failed (aws exit code $LASTEXITCODE)."
+          }
+
+          $msiPath = Join-Path 'dist/desktop' $env:MSI_NAME
+          $apkPath = Join-Path 'dist/android' $env:APK_NAME
+          if (-not (Test-Path -LiteralPath $msiPath)) { throw "Missing MSI artifact: $msiPath" }
+          if (-not (Test-Path -LiteralPath $apkPath)) { throw "Missing APK artifact: $apkPath" }
+
+          # 1. Publish Windows Native MSI directly under /releases/ and update desktop fields in latest.json
+          ./scripts/publish-r2-update.ps1 `
+            -MsiPath $msiPath `
+            -ExecutableSha256 $env:EXE_SHA256 `
+            -Version $env:DESKTOP_VERSION `
             -Bucket $env:R2_BUCKET `
             -Endpoint $env:R2_ENDPOINT `
             -PublicBaseUrl $env:R2_PUBLIC_URL
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # 2. Publish signed Android APK and merge into latest.json (stable for new versionCode, canary for same versionCode)
+          $tempManifest = Join-Path $env:RUNNER_TEMP 'latest-merged.json'
+          ./scripts/publish-r2-android-update.ps1 `
+            -ApkPath $apkPath `
+            -Version $env:ANDROID_VERSION `
+            -VersionCode ([int]$env:ANDROID_VERSION_CODE) `
+            -Channel $env:R2_ANDROID_CHANNEL `
+            -Distribution 'gms' `
+            -Device 'mobile' `
+            -Architecture 'arm64' `
+            -ReleaseNotes $env:RELEASE_TITLE `
+            -Bucket $env:R2_BUCKET `
+            -Endpoint $env:R2_ENDPOINT `
+            -PublicBaseUrl $env:R2_PUBLIC_URL `
+            -ManifestPath $tempManifest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish GitHub Release (Full Release or Beta/Nightly)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.classify.outputs.release_tag }}
+          RELEASE_TITLE: ${{ needs.classify.outputs.release_title }}
+          RELEASE_MODE: ${{ needs.classify.outputs.release_mode }}
+          IS_PRERELEASE: ${{ needs.classify.outputs.is_prerelease }}
+          ANDROID_VERSION: ${{ needs.classify.outputs.android_version }}
+          ANDROID_VERSION_CODE: ${{ needs.classify.outputs.android_version_code }}
+          DESKTOP_VERSION: ${{ needs.classify.outputs.desktop_version }}
+          APK_NAME: ${{ needs.build-android.outputs.apk_name }}
+          APK_SHA256: ${{ needs.build-android.outputs.apk_sha256 }}
+          MSI_NAME: ${{ needs.build-desktop.outputs.msi_name }}
+          MSI_SHA256: ${{ needs.build-desktop.outputs.msi_sha256 }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msiPath = Join-Path 'dist/desktop' $env:MSI_NAME
+          $apkPath = Join-Path 'dist/android' $env:APK_NAME
+
+          $tierLabel = if ($env:IS_PRERELEASE -eq 'true') { 'Beta / Nightly (same `versionCode`)' } else { 'Full Release' }
+          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          @(
+            "### Build Summary",
+            "- **Release Tier**: $tierLabel",
+            "- **Android**: ``$($env:ANDROID_VERSION)`` (``versionCode = $($env:ANDROID_VERSION_CODE)``)",
+            "- **Windows Desktop (GraalVM Native)**: ``$($env:DESKTOP_VERSION)``",
+            "",
+            "### SHA-256 Checksums",
+            "- ``$($env:APK_NAME)``: ``$($env:APK_SHA256)``",
+            "- ``$($env:MSI_NAME)``: ``$($env:MSI_SHA256)``",
+            "",
+            "<!-- archivetune:versionCode=$($env:ANDROID_VERSION_CODE) -->"
+          ) -join "`n" | Out-File -FilePath $notesFile -Encoding utf8
+
+          $ghArgs = @(
+            'release', 'create', $env:RELEASE_TAG,
+            '--target', $env:TARGET_SHA,
+            '--title', $env:RELEASE_TITLE,
+            '--notes-file', $notesFile,
+            '--generate-notes'
+          )
+          if ($env:IS_PRERELEASE -eq 'true') {
+            $ghArgs += '--prerelease'
+          } else {
+            $ghArgs += '--latest'
+          }
+          $ghArgs += @($apkPath, $msiPath)
+
+          & gh @ghArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

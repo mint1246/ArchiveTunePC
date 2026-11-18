@@ -1,4 +1,4 @@
-name: Build Pull Request GraalVM Native Image MSI
+name: Build Pull Request (Desktop & Android)
 
 on:
   pull_request:
@@ -9,7 +9,52 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-android:
+    name: Build Android Release APK (Unsigned PR Check)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Generate translation contributor credits
+        run: python scripts/generate_translation_contributors.py
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          architecture: 'x64'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+          cache-cleanup: on-success
+
+      - name: Assemble Android GMS Mobile Arm64 Release APK (Unsigned)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./gradlew :app:assembleGmsMobileArm64Release --stacktrace -x :spotlessApply
+
+      - name: Upload Unsigned Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: ArchiveTune-Android-APK-PR-${{ github.event.number }}
+          path: app/build/outputs/apk/gmsMobileArm64/release/*.apk
+          if-no-files-found: error
+
+  build-desktop:
     name: Build GraalVM Native Image MSI
     runs-on: windows-latest
 
@@ -75,6 +120,8 @@ jobs:
 
       - name: Build GraalVM Native Image MSI
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath

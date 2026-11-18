@@ -7,7 +7,7 @@ param(
     [string]$Bucket = "archivetune-updates",
     [string]$Endpoint = "https://b6d8d21b428522e1a0ab90b4f3c0bdea.r2.cloudflarestorage.com",
     [string]$PublicBaseUrl = "https://pub-90881360725b42cab24caebe4e55fa2d.r2.dev",
-    [string]$ExpectedSignerSha256 = "6db8326a550861f0f96b9adcb706207d75ac4480de454fb8af95daa5d6c7f9d9",
+    [string]$ExpectedSignerSha256 = "cd0f69369f343d3fa9e66fd353953a53c789bc16bf3374a339c33389cc82df81",
     [switch]$SkipPush
 )
 
@@ -133,54 +133,20 @@ try {
 
     New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
     $signedApk = Join-Path $artifactDirectory "ArchiveTune-$versionName-gms-mobile-arm64.apk"
-    $buildTools = Get-BuildToolsDirectory
-    $apksigner = Join-Path $buildTools "apksigner.bat"
-    $aapt = Join-Path $buildTools "aapt.exe"
-    $keystore = Join-Path $repoRoot "app\persistent-debug.keystore"
-    if (-not (Test-Path -LiteralPath $keystore)) {
-        throw "Expected updater signing keystore was not found at $keystore"
+    $signerScript = Join-Path $PSScriptRoot "sign-android-release-apk.ps1"
+    if (-not (Test-Path -LiteralPath $signerScript)) {
+        throw "Expected Android release signing script was not found at $signerScript"
     }
 
-    if ([string]::IsNullOrWhiteSpace($env:ARCHIVETUNE_APK_KS_PASS)) {
-        $env:ARCHIVETUNE_APK_KS_PASS = "android"
-    }
-    if ([string]::IsNullOrWhiteSpace($env:ARCHIVETUNE_APK_KEY_PASS)) {
-        $env:ARCHIVETUNE_APK_KEY_PASS = $env:ARCHIVETUNE_APK_KS_PASS
-    }
-
-    Invoke-Native -FilePath $apksigner -Arguments @(
-        "sign",
-        "--ks", $keystore,
-        "--ks-key-alias", "androiddebugkey",
-        "--ks-pass", "env:ARCHIVETUNE_APK_KS_PASS",
-        "--key-pass", "env:ARCHIVETUNE_APK_KEY_PASS",
-        "--out", $signedApk,
-        $unsignedApk.FullName
-    )
-
-    $verifyOutput = (& $apksigner verify --verbose --print-certs $signedApk 2>&1 | Out-String)
+    & $signerScript `
+        -UnsignedApkPath $unsignedApk.FullName `
+        -OutputApkPath $signedApk `
+        -ExpectedVersionCode $nextCode `
+        -ExpectedSignerSha256 $ExpectedSignerSha256
     if ($LASTEXITCODE -ne 0) {
-        throw "APK signature verification failed:`n$verifyOutput"
+        throw "Android release signing failed with exit code $LASTEXITCODE"
     }
-    $signerMatch = [regex]::Match($verifyOutput, 'certificate SHA-256 digest:\s*([0-9a-fA-F]{64})')
-    if (-not $signerMatch.Success) {
-        throw "Could not read APK signer SHA-256 from apksigner output"
-    }
-    $signerSha256 = $signerMatch.Groups[1].Value.ToLowerInvariant()
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedSignerSha256) -and $signerSha256 -ne $ExpectedSignerSha256.ToLowerInvariant()) {
-        throw "APK signer mismatch. Expected $ExpectedSignerSha256, got $signerSha256"
-    }
-
-    $badgingOutput = & $aapt dump badging $signedApk 2>&1
-    $aaptExitCode = $LASTEXITCODE
-    if ($aaptExitCode -ne 0) {
-        throw "aapt could not inspect the signed APK (exit code $aaptExitCode):`n$($badgingOutput | Out-String)"
-    }
-    $badging = ($badgingOutput | Select-Object -First 1 | Out-String).Trim()
-    $builtCodeMatch = [regex]::Match($badging, "versionCode='(\d+)'")
-    if (-not $builtCodeMatch.Success -or [int]$builtCodeMatch.Groups[1].Value -ne $nextCode) {
-        throw "Built APK does not contain versionCode ${nextCode}: $badging"
-    }
+    $signerSha256 = $ExpectedSignerSha256.ToLowerInvariant()
 
     $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $signedApk).Hash.ToLowerInvariant()
     $size = (Get-Item -LiteralPath $signedApk).Length

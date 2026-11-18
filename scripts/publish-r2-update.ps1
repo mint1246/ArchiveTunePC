@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$MsiPath,
-    [Parameter(Mandatory = $true)][string]$ExecutablePath,
+    [string]$ExecutablePath = "",
+    [string]$ExecutableSha256 = "",
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$Bucket,
     [Parameter(Mandatory = $true)][string]$Endpoint,
@@ -21,10 +22,20 @@ if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
 }
 
 $resolvedMsi = (Resolve-Path -LiteralPath $MsiPath).Path
-$resolvedExecutable = (Resolve-Path -LiteralPath $ExecutablePath).Path
 $fileName = [IO.Path]::GetFileName($resolvedMsi)
 $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedMsi).Hash.ToLowerInvariant()
-$exeSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedExecutable).Hash.ToLowerInvariant()
+$exeSha256 = if (-not [string]::IsNullOrWhiteSpace($ExecutableSha256)) {
+    $trimmed = $ExecutableSha256.Trim().ToLowerInvariant()
+    if ($trimmed -notmatch '^[0-9a-f]{64}$') {
+        throw "ExecutableSha256 must be a 64-character hex SHA-256 digest."
+    }
+    $trimmed
+} elseif (-not [string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    $resolvedExecutable = (Resolve-Path -LiteralPath $ExecutablePath).Path
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedExecutable).Hash.ToLowerInvariant()
+} else {
+    throw "Either -ExecutablePath or -ExecutableSha256 must be provided."
+}
 $objectKey = "releases/$fileName"
 $publicBase = $PublicBaseUrl.TrimEnd('/')
 $existingManifestUrl = "$publicBase/latest.json"
@@ -51,7 +62,8 @@ if ($null -ne $existingManifest.android) {
 }
 $manifest = $manifestData | ConvertTo-Json -Depth 20
 
-$manifestPath = Join-Path $env:TEMP "archivetune-latest-$Version.json"
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+$manifestPath = Join-Path $tempRoot "archivetune-latest-$Version.json"
 try {
     [IO.File]::WriteAllText($manifestPath, $manifest, [Text.UTF8Encoding]::new($false))
     aws s3 cp $manifestPath "s3://$Bucket/latest.json" @awsCommonArgs --content-type "application/json" --cache-control "no-cache"

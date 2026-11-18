@@ -4,7 +4,7 @@ on:
   workflow_call:
   workflow_run:
     workflows:
-      - Build Windows MSI
+      - Build & Publish ArchiveTune
     types:
       - completed
     branches:
