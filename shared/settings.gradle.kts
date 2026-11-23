@@ -20,3 +20,17 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ArchiveTuneShared"
+
+listOf(
+    "sdk-lifecycle",
+    "playback-core",
+    "ios-playback",
+    "discovery-sdk",
+    "lyrics-sdk",
+    "playlist-sdk",
+    "social-sdk",
+    "social-session",
+).forEach { moduleName ->
+    include(":$moduleName")
+    project(":$moduleName").projectDir = file("../$moduleName")
+}

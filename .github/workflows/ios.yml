@@ -6,6 +6,14 @@ on:
     paths:
       - 'shared/**'
       - 'iosApp/**'
+      - 'sdk-lifecycle/**'
+      - 'playback-core/**'
+      - 'ios-playback/**'
+      - 'discovery-sdk/**'
+      - 'lyrics-sdk/**'
+      - 'playlist-sdk/**'
+      - 'social-sdk/**'
+      - 'social-session/**'
       - 'gradle/libs.versions.toml'
       - 'gradle/wrapper/**'
       - 'gradlew'
@@ -29,8 +37,19 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           xcodebuild -version
-      - name: Shared behavior tests
-        run: ./gradlew -p shared jvmTest --no-daemon --stacktrace
+      - name: Shared and KMP SDK tests
+        run: >-
+          ./gradlew -p shared
+          jvmTest
+          :sdk-lifecycle:jvmTest
+          :playback-core:jvmTest
+          :ios-playback:jvmTest
+          :discovery-sdk:jvmTest
+          :lyrics-sdk:jvmTest
+          :playlist-sdk:jvmTest
+          :social-sdk:jvmTest
+          :social-session:jvmTest
+          --no-daemon --stacktrace
       - name: Build unsigned iOS simulator application
         run: >-
           xcodebuild -project iosApp/ArchiveTune.xcodeproj

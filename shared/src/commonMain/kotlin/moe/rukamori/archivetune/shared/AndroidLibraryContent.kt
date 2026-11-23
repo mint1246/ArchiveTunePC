@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.compose.resources.painterResource
+import moe.rukamori.archivetune.sdk.playlist.PlaylistSongSort
+import moe.rukamori.archivetune.sdk.playlist.sortBySongSort
 import moe.rukamori.archivetune.shared.resources.Res
 import moe.rukamori.archivetune.shared.resources.favorite
 import moe.rukamori.archivetune.shared.resources.library_filled
@@ -167,7 +169,18 @@ internal fun AndroidLibraryContent(controller: MusicController, modifier: Modifi
                         Box { TextButton(onClick = { sortMenu = true }) { Text(sort); Icon(painterResource(Res.drawable.expand_more), null, Modifier.size(16.dp)) }; DropdownMenu(sortMenu, { sortMenu = false }) { listOf("Recently added", "Name").forEach { choice -> DropdownMenuItem(text = { Text(choice) }, onClick = { sort = choice; sortMenu = false }) } } }
                         Spacer(Modifier.weight(1f)); TextButton(onClick = { grid = !grid }) { Text(if (grid) "List" else "Grid") }
                     } }
-                    val playlists = if (sort == "Name") library.playlists.sortedBy { it.name.lowercase() } else library.playlists.asReversed()
+                    val playlists = if (sort == "Name") {
+                        sortBySongSort(
+                            items = library.playlists,
+                            sort = PlaylistSongSort.TITLE,
+                            title = { it.name },
+                            firstArtist = { "" },
+                            album = { "" },
+                            duration = { null },
+                        )
+                    } else {
+                        library.playlists.asReversed()
+                    }
                     if (playlists.isEmpty()) item {
                         Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(horizontal = 24.dp, vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {

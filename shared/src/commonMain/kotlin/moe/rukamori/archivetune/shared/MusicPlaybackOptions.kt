@@ -1,6 +1,9 @@
 package moe.rukamori.archivetune.shared
 
-enum class MusicRepeatMode { OFF, ALL, ONE }
+import moe.rukamori.archivetune.playback.api.RepeatMode
+
+typealias MusicRepeatMode = RepeatMode
+
 data class MusicPlaybackOptions(
     val shuffle: Boolean = false,
     val repeatMode: MusicRepeatMode = MusicRepeatMode.OFF,

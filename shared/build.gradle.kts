@@ -19,6 +19,14 @@ kotlin {
     }
     sourceSets {
         commonMain.dependencies {
+            api(project(":sdk-lifecycle"))
+            api(project(":playback-core"))
+            api(project(":ios-playback"))
+            api(project(":discovery-sdk"))
+            api(project(":lyrics-sdk"))
+            api(project(":playlist-sdk"))
+            api(project(":social-sdk"))
+            api(project(":social-session"))
             implementation(compose.components.resources)
             implementation("org.jetbrains.compose.runtime:runtime:1.10.3")
             implementation("org.jetbrains.compose.foundation:foundation:1.10.3")

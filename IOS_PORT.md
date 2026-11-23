@@ -7,17 +7,18 @@ parity with either existing application.
 
 ## Source boundaries
 
-- `shared/src/commonMain`: portable catalog contracts, InnerTube networking,
-  application-owned search/queue controller, persistent local library/settings,
-  LRCLIB timed lyrics, and Compose music/lyrics surfaces.
-- `shared/src/iosMain`: Darwin transport, AVFoundation playback, audio session,
-  Now Playing/remote controls, and the UIViewController entry point.
+The iOS port now consumes ArchiveTune's Kotlin Multiplatform SDK modules directly:
+
+- `ios-playback` (`commonMain` + `iosMain`): iOS `PlaybackController` (`IosPlaybackController`), `AvFoundationPlaybackEngine` (`AVPlayer`, `AVAudioSession`, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`), source validation, queue JSON codec, and `createIosPlaybackSession`.
+- Shared KMP SDK modules (`sdk-lifecycle`, `playback-core`, `discovery-sdk`, `lyrics-sdk`, `playlist-sdk`, `social-sdk`, `social-session`): lifecycle ownership, queue/sleep-timer/clicked-item policies, bounded discovery caches & fan-out, LRC + YouLyPlus syllable timeline parsing + single-flight lyrics cache, playlist sorting, and Ktor Discord social auth/session APIs.
+- `shared/src/commonMain`: portable InnerTube catalog networking (`InnerTubeCatalog`, `CatalogParsing`), local library/settings persistence, thin SDK coordinators, and Compose music/lyrics UI surfaces.
+- `shared/src/iosMain`: Darwin `HttpClient` wiring, Foundation file persistence (`IosMusicStore`), `WKWebView` OAuth modal (`IosSocialLogin`), share sheet (`IosShare`), and the `UIViewController` entry point (`MainViewController`) wired via `SdkLifecycle` and `AvFoundationPlaybackEngine`.
 - `iosApp`: native Swift entry, Xcode project, signing/build instructions.
 - `shared/src/commonTest`: deterministic queue, request, parser and cancellation
   tests that run on JVM without an Apple SDK.
 
-The existing `core` and `stream-resolver` projects depend on JVM libraries and
-cannot be linked into an Apple framework as-is. The new native-compatible path
+The existing `core` and `stream-resolver` projects still depend on JVM libraries and
+cannot be linked into an Apple framework as-is. The KMP `InnerTubeCatalog` path
 uses the existing request/client conventions as a reference, without pretending
 that NewPipe, JavaScript deciphering, yt-dlp, VLC, or a JVM is available on iOS.
 

@@ -12,7 +12,7 @@ ArchiveTune separates platform-independent domain policies, state machines, and 
 ```text
 +-------------------------------------------------------------------------+
 |                           Host Applications                             |
-|   Android App (app/)  |  Desktop App (desktopApp/)  |  Headless / Unity |
+|   Android App (app/)  |  Desktop App (desktopApp/)  |  iOS App (shared/ + iosApp/) |
 +-------------------------------------------------------------------------+
                                     |
                                     v
@@ -42,6 +42,7 @@ ArchiveTune separates platform-independent domain policies, state machines, and 
 |                        Platform Implementations                         |
 |  Android: Media3 AAR (android-playback), DataStore, Room, MediaCodec    |
 |  Desktop: libVLC/VLCJ (desktop-playback), DPAPI, Rust+DirectML runner   |
+|  iOS: AVFoundation KMP (ios-playback), Foundation storage, Darwin Ktor  |
 +-------------------------------------------------------------------------+
 ```
 
@@ -62,8 +63,8 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 
 | Module | Artifact / Role | Key Types & Boundaries |
 | --- | --- | --- |
-| `playback-core` | Published JVM (`playback-core`) | `PlaybackController`, `PlaybackSessionHost`, `PlaybackQueue`, `PlaybackSnapshot`, `PlaybackFailure`, `NextTrackPrefetcher`, `SleepTimerController`, `equalPowerCrossfadeGains`, `AudioOutputPolicy`, `PlaybackParameterPersistence`, `QueueReorderPlanner`, `PlaybackResumptionPlanner`. Zero player implementation. |
-| `sdk-lifecycle` | Published JVM (`sdk-lifecycle`) | `SdkLifecycle` — deterministic child `SupervisorJob` `CoroutineScope`s, named `onClosing` hooks, and reverse-order `AutoCloseable` cleanup. |
+| `playback-core` | Published KMP (`playback-core`, JVM + iOS) | `PlaybackController`, `PlaybackSessionHost`, `PlaybackQueue`, `PlaybackSnapshot`, `PlaybackFailure`, `NextTrackPrefetcher`, `SleepTimerController`, `equalPowerCrossfadeGains`, `AudioOutputPolicy`, `PlaybackParameterPersistence`, `QueueReorderPlanner`, `PlaybackResumptionPlanner`. Zero player implementation. |
+| `sdk-lifecycle` | Published KMP (`sdk-lifecycle`, JVM + iOS) | `SdkLifecycle` — deterministic child `SupervisorJob` `CoroutineScope`s, named `onClosing` hooks, and reverse-order `AutoCloseable` cleanup. |
 | `desktop-resource-core` | Desktop JVM | Bounded content cache and single-flight request coordinator for desktop repositories. Callers own account-scoped keys. |
 | `core` | Git submodule (`core/`) | Shared InnerTube/YouTube models, page parsers, and HTTP client (`YouTube`). Not yet an isolated multi-client public SDK. |
 
@@ -74,6 +75,7 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 | `stream-resolver` | JVM | `StreamResolutionCoordinator` (bounded in-memory cache, single-flight coalescing, priority, expiry), `NextStreamPreloadCoordinator`, `PlaybackStreamRecoveryTracker`, `StreamChunkResolver`, `DesktopStreamResolutionMode` / `resolveDesktopStream` / `directAudioFastPathUrl`, `AudioQuality`, `PlaybackStreamResolver`. |
 | `android-playback` | Published Android AAR (`android-playback`) | `Media3PlaybackSession` (`createMedia3PlaybackSession`), `Media3PlaybackController`, `AndroidPlaybackQueueStore`, `resolvingPlaybackSourceUpstream`, `resolvingPlaybackUpstream`, `cachedPlaybackDataSourceFactory`, `setPlaybackAddress`, `ChunkedDataSource`, `Media3PlayerStateObserver`, `Media3PlaybackMappings`. |
 | `desktop-playback` | Published JVM (`desktop-playback`) | `createDesktopPlaybackSession`, `VlcjPlaybackController`, `DesktopCrossfade`, `DesktopAudioEffects` (libVLC live `aout` pitch/speed), `DesktopAudioOutput`, `PlaybackQueueStore`, `VlcRuntime`. Requires caller-supplied `PlaybackSourceResolver` and compatible libVLC runtime. |
+| `ios-playback` | Published KMP (`ios-playback`, JVM + iOS) | `createIosPlaybackSession`, `IosPlaybackController`, `IosPlaybackEngine`, `AvFoundationPlaybackEngine` (`AVPlayer`, `AVAudioSession`, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`), `validateIosPlaybackSource`, `IosPlaybackQueueCodec`, `StringBackedPlaybackQueuePersistence`. |
 | `desktop-stream-playback` | Desktop JVM | Desktop stream selection, completed-download fallback, signed-source memory caching, and HTTP recovery. |
 | `equalizer-sdk` | Published JVM (`equalizer-sdk`) | `EqualizerPreferences`, `EqualizerPreferenceReader`/`Writer`, `EqualizerProfileIds`. |
 | `audio-analysis-sdk` | Published JVM (`audio-analysis-sdk`) | UI-independent PCM beat tracker, beat-timeline sampling, and energy detector. |
@@ -91,8 +93,8 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 
 | Module | Artifact / Role | Key Types & Boundaries |
 | --- | --- | --- |
-| `discovery-sdk` | Published JVM (`discovery-sdk`) | `DiscoveryContentCache`, `DiscoveryFanOut`, `DiscoveryKeys`, `DiscoveryLists`, `DiscoverySuggestionsPolicy`, `QuickPickSeedPolicy`, `RelatedSongsResolver`, `RadioContinuationPolicy`, `PodcastLibraryPolicy`. |
-| `playlist-sdk` | Published JVM (`playlist-sdk`) | `PlaylistCsvExporter`, `PlaylistOrdering` (`playlistSongOccurrences`, `sortPlaylistSongOccurrences`, `filterLibraryContent`), `AddToPlaylistPickerSession`, `PlaylistTagPolicy`, `LibraryTopMixPolicy`, `AiContentFilterMatcher`. |
+| `discovery-sdk` | Published KMP (`discovery-sdk`, JVM + iOS) | `DiscoveryContentCache`, `DiscoveryFanOut`, `DiscoveryKeys`, `DiscoveryLists`, `DiscoverySuggestionsPolicy`, `QuickPickSeedPolicy`, `RelatedSongsResolver`, `RadioContinuationPolicy`, `PodcastLibraryPolicy`. |
+| `playlist-sdk` | Published KMP (`playlist-sdk`, JVM + iOS) | `PlaylistCsvExporter`, `PlaylistOrdering` (`playlistSongOccurrences`, `sortPlaylistSongOccurrences`, `filterLibraryContent`), `AddToPlaylistPickerSession`, `PlaylistTagPolicy`, `LibraryTopMixPolicy`, `AiContentFilterMatcher`. |
 | `playlist-import-sdk` | JVM | Fuzzy matching and ordered, bounded-concurrency import song resolution (preserves duplicates and order). |
 | `desktop-spotify-import` | Desktop JVM | Real Spotify playlist importer wired to `desktop-backend` and `:spotifycore`. |
 | `local-media-sdk` | JVM | `EmbeddedLyricsParser` (ID3v2, MP4 `©lyr`, FLAC, Ogg/Opus) and `SupportedLocalAudio` policy. |
@@ -105,17 +107,17 @@ All modules are configured in `settings.gradle.kts` and target **JDK 21** / **Ko
 
 | Module | Artifact / Role | Key Types & Boundaries |
 | --- | --- | --- |
-| `lyrics-sdk` | Published JVM (`lyrics-sdk`) | Bounded single-flight lyrics request cache and provider-order selection. |
+| `lyrics-sdk` | Published KMP (`lyrics-sdk`, JVM + iOS) | Bounded single-flight lyrics request cache, provider-order selection, and portable LRC + YouLyPlus v2 syllable timeline parsing (`LyricsTimelineParser`, `LyricsLine`, `LyricsWord`). |
 | `lyrics-timeline` | JVM | Prepared lyric models, word/grapheme timing, and instrumental-gap insertion. |
 | `desktop-lyrics-engine` | Desktop JVM | Playback-observing lyrics/chord presenter and timeline parsing. |
 | `desktop-lyrics-translation` | Desktop JVM | Desktop lyrics translation service and credential/cache orchestration. |
 | `desktop-canvas` | Desktop JVM | Canvas provider lookup, cancellation, and video caching. |
 | `account-sdk` | Published JVM (`account-sdk`) | `SavedAccount` JSON codec, `YouTubeCookieJsonImporter`, `YouTubeAccountCoordinator` (verify -> lookup -> `DataSyncId` -> persist). |
 | `desktop-auth` | Desktop JVM | `SecureSessionStore` (Windows DPAPI), `DesktopSessionManager`, `ManagedChromiumLogin`, `DesktopBotGuardPoTokenProvider`. |
-| `social-sdk` | Published JVM (`social-sdk`) | Social HTTP client, wire models, platform-neutral Rich Presence policy (`PresencePolicy`), and `ScrobbleSessionCoordinator` (caller supplies token/sink). |
-| `social-session` | JVM | Social session orchestration with caller-injected login, storage, and transport. |
+| `social-sdk` | Published KMP (`social-sdk`, JVM + iOS) | Social HTTP client (`AndroidSocialApi` on JVM, `KtorSocialClient` KMP), `SocialWireJson`, `parseLocalhostDiscordCallbackCode`, wire models, platform-neutral Rich Presence policy (`PresencePolicy`), and `ScrobbleSessionCoordinator` (caller supplies token/sink). |
+| `social-session` | Published KMP (`social-session`, JVM + iOS) | Social session orchestration (`AndroidSocialManager`, `SocialSessionCoordinator`, `InMemorySocialSessionStore`, `NoOpSocialRealtimeTransport`) with caller-injected login, storage, and transport. |
 | `social-realtime` | JVM | Optional WebSocket client (`close()` owned by caller). |
-| `social-login` | JVM | Optional nonce-checked loopback OAuth callback flow. |
+| `social-login` | JVM | Optional nonce-checked loopback OAuth callback flow (`AndroidSocialLogin` on JVM; callback parser shared in KMP `social-sdk`). |
 | `desktop-social` | Desktop JVM | Desktop Last.fm authorization, playback observation, and scrobbling. |
 | `together-sdk` | Published JVM (`together-sdk`) | Play Together models, wire messages, permission decisions, `TogetherGuestPlaybackPlanner`, `TogetherPlaybackSync`, `TogetherLink`, `TogetherDesktopPartyProtocol`. |
 | `together-transport` | Published JVM (`together-transport`) | Direct WebSocket client/host server and online HTTP API (`AutoCloseable`). |
