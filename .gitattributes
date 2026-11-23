@@ -1,1 +1,5 @@
 packaging/mpv/common/native/windows-x64/mpv.exe filter=lfs diff=lfs merge=lfs -text
+
+# The Unix wrapper is invoked by Xcode and must remain executable shell text.
+/gradlew text eol=lf
+/iosApp/**/*.sh text eol=lf

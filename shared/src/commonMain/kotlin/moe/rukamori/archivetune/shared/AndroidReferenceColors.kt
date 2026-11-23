@@ -1,0 +1,88 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+package moe.rukamori.archivetune.shared
+
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
+
+/**
+ * Android 16 reference emulator, resolved through its framework color resources.
+ * Mapping follows AndroidX Material3 dynamic{Light,Dark}ColorScheme34:
+ * https://android.googlesource.com/platform/frameworks/support/+/b976b3b88e7acea5c0023c93c7b2d08822d9e576/compose/material3/material3/src/androidMain/kotlin/androidx/compose/material3/DynamicTonalPalette.android.kt
+ * These values are a reproducible reference preset, not iOS wallpaper-derived colors.
+ */
+internal object AndroidReferenceColors {
+    val light = lightColorScheme(
+        primary = Color(0xFF475D92),
+        onPrimary = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFFD9E2FF),
+        onPrimaryContainer = Color(0xFF2F4578),
+        inversePrimary = Color(0xFFB0C6FF),
+        secondary = Color(0xFF575E71),
+        onSecondary = Color(0xFFFFFFFF),
+        secondaryContainer = Color(0xFFDCE2F9),
+        onSecondaryContainer = Color(0xFF404659),
+        tertiary = Color(0xFF725572),
+        onTertiary = Color(0xFFFFFFFF),
+        tertiaryContainer = Color(0xFFFDD7FA),
+        onTertiaryContainer = Color(0xFF593D59),
+        background = Color(0xFFFAF8FF),
+        onBackground = Color(0xFF1A1B20),
+        surface = Color(0xFFFAF8FF),
+        onSurface = Color(0xFF1A1B20),
+        surfaceVariant = Color(0xFFE1E2EC),
+        onSurfaceVariant = Color(0xFF44464F),
+        inverseSurface = Color(0xFF121318),
+        inverseOnSurface = Color(0xFFE2E2E9),
+        outline = Color(0xFF757780),
+        outlineVariant = Color(0xFFC5C6D0),
+        surfaceBright = Color(0xFFFAF8FF),
+        surfaceDim = Color(0xFFDAD9E0),
+        surfaceContainer = Color(0xFFEEEDF4),
+        surfaceContainerHigh = Color(0xFFE8E7EF),
+        surfaceContainerHighest = Color(0xFFE2E2E9),
+        surfaceContainerLow = Color(0xFFF4F3FA),
+        surfaceContainerLowest = Color(0xFFFFFFFF),
+        surfaceTint = Color(0xFF475D92),
+    )
+
+    val dark = darkColorScheme(
+        primary = Color(0xFFB0C6FF),
+        onPrimary = Color(0xFF152E60),
+        primaryContainer = Color(0xFF2F4578),
+        onPrimaryContainer = Color(0xFFD9E2FF),
+        inversePrimary = Color(0xFF475D92),
+        secondary = Color(0xFFC0C6DC),
+        onSecondary = Color(0xFF2A3042),
+        secondaryContainer = Color(0xFF404659),
+        onSecondaryContainer = Color(0xFFDCE2F9),
+        tertiary = Color(0xFFE0BBDD),
+        onTertiary = Color(0xFF412742),
+        tertiaryContainer = Color(0xFF593D59),
+        onTertiaryContainer = Color(0xFFFDD7FA),
+        background = Color(0xFF121318),
+        onBackground = Color(0xFFE2E2E9),
+        surface = Color(0xFF121318),
+        onSurface = Color(0xFFE2E2E9),
+        surfaceVariant = Color(0xFF44464F),
+        onSurfaceVariant = Color(0xFFC5C6D0),
+        inverseSurface = Color(0xFFFAF8FF),
+        inverseOnSurface = Color(0xFF1A1B20),
+        outline = Color(0xFF8F9099),
+        outlineVariant = Color(0xFF44464F),
+        surfaceBright = Color(0xFF38393F),
+        surfaceDim = Color(0xFF121318),
+        surfaceContainer = Color(0xFF1E1F25),
+        surfaceContainerHigh = Color(0xFF282A2F),
+        surfaceContainerHighest = Color(0xFF33343A),
+        surfaceContainerLow = Color(0xFF1A1B20),
+        surfaceContainerLowest = Color(0xFF0C0E13),
+        surfaceTint = Color(0xFFB0C6FF),
+    )
+
+}

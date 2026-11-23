@@ -1,0 +1,11 @@
+MaterialKolor 5.0.0-alpha07 common sources are from the Maven Central
+com.materialkolor:material-kolor:5.0.0-alpha07 sources jar, copyright its
+contributors, licensed under the MIT license in MATERIALKOLOR-LICENSE.
+
+Material Color Utilities 5.0.0-alpha07 common sources are from the Maven Central
+com.materialkolor:material-color-utilities:5.0.0-alpha07 sources jar, licensed
+under Apache License 2.0 in LICENSE; copyright notices remain in source files.
+
+ArchiveTune portability adaptation: six Poko-decorated value classes use Kotlin
+data-class structural equality instead of requiring Poko's compiler plugin.
+Their color algorithms and constructor properties are unchanged.

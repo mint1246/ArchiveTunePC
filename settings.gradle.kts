@@ -57,6 +57,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "ArchiveTune"
 include(":app")
+include(":shared")
 include(":audio-analysis-sdk")
 include(":statistics-sdk")
 include(":account-sdk")

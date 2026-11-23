@@ -1,0 +1,61 @@
+name: iOS shared tests and simulator build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'shared/**'
+      - 'iosApp/**'
+      - 'gradle/libs.versions.toml'
+      - 'gradle/wrapper/**'
+      - 'gradlew'
+      - '.github/workflows/ios.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-15 # standard Apple Silicon (arm64) runner
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Verify Apple Silicon toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+      - name: Shared behavior tests
+        run: ./gradlew -p shared jvmTest --no-daemon --stacktrace
+      - name: Build unsigned iOS simulator application
+        run: >-
+          xcodebuild -project iosApp/ArchiveTune.xcodeproj
+          -scheme ArchiveTune -configuration Debug
+          -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath iosApp/build
+          ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
+      - name: Package simulator app
+        run: |
+          test -d iosApp/build/Build/Products/Debug-iphonesimulator/ArchiveTune.app
+          ditto -c -k --sequesterRsrc --keepParent \
+            iosApp/build/Build/Products/Debug-iphonesimulator/ArchiveTune.app \
+            iosApp/build/ArchiveTune-simulator.zip
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v7
+        with:
+          name: ArchiveTune-iOS-simulator
+          path: iosApp/build/ArchiveTune-simulator.zip
+          if-no-files-found: error
+      - name: Upload shared test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ArchiveTune-iOS-shared-tests
+          path: |
+            shared/build/reports/tests/jvmTest/**
+            shared/build/test-results/jvmTest/**
+          if-no-files-found: warn

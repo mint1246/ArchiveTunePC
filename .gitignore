@@ -150,3 +150,6 @@ core.*
 
 # Local resolver development tools (official binaries are provisioned for packages by Gradle).
 /.tools/
+
+# Local Expo/EAS session state (project identity is in app.json).
+/.expo/
