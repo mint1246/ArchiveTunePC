@@ -23,6 +23,7 @@ data class AudioStreamProbeResult(
     val httpStatus: Int,
     val bytesRead: Int,
     val rangedResponse: Boolean,
+    val resolvedUrl: String? = null,
 )
 
 /** HTTP-only probe failure; deliberately carries no signed URL or request headers. */
@@ -42,27 +43,45 @@ class AudioStreamProbeHttpException(
  */
 fun probeResolvedAudioStream(stream: ResolvedAudioStream): Result<AudioStreamProbeResult> =
     runCatching {
-        val first = probeRange(stream, 0L, MAX_PROBE_BYTES)
+        val first = probeRange(stream.url, stream.requestHeaders, 0L, MAX_PROBE_BYTES)
+        val effectiveUrl = adoptRedirectedMediaUrl(stream.url, first.finalUrl)
         val totalLength = first.contentRangeTotal
-        if (totalLength != null && totalLength > first.bytesRead) {
-            val tailStart = (totalLength - MAX_PROBE_BYTES).coerceAtLeast(first.bytesRead.toLong())
-            probeRange(stream, tailStart, MAX_PROBE_BYTES)
-        }
+        val tailFinalUrl =
+            if (totalLength != null && totalLength > first.bytesRead) {
+                val tailStart = (totalLength - MAX_PROBE_BYTES).coerceAtLeast(first.bytesRead.toLong())
+                probeRange(effectiveUrl, stream.requestHeaders, tailStart, MAX_PROBE_BYTES).finalUrl
+            } else {
+                effectiveUrl
+            }
         AudioStreamProbeResult(
             httpStatus = first.httpStatus,
             bytesRead = first.bytesRead,
             rangedResponse = first.rangedResponse,
+            resolvedUrl = adoptRedirectedMediaUrl(effectiveUrl, tailFinalUrl),
         )
     }
 
 /** The process resolver's CDN validation must also stop promptly on queue changes/cancellation. */
 suspend fun probeResolvedAudioStreamCancellable(stream: ResolvedAudioStream): Result<AudioStreamProbeResult> =
     try {
-        val first = probeRangeCancellable(stream, 0L)
-        first.contentRangeTotal?.takeIf { it > first.bytesRead }?.let { length ->
-            probeRangeCancellable(stream, (length - MAX_PROBE_BYTES).coerceAtLeast(first.bytesRead.toLong()))
-        }
-        Result.success(AudioStreamProbeResult(first.httpStatus, first.bytesRead, first.rangedResponse))
+        val first = probeRangeCancellable(stream.url, stream.requestHeaders, 0L)
+        val effectiveUrl = adoptRedirectedMediaUrl(stream.url, first.finalUrl)
+        val tailFinalUrl =
+            first.contentRangeTotal?.takeIf { it > first.bytesRead }?.let { length ->
+                probeRangeCancellable(
+                    effectiveUrl,
+                    stream.requestHeaders,
+                    (length - MAX_PROBE_BYTES).coerceAtLeast(first.bytesRead.toLong()),
+                ).finalUrl
+            } ?: effectiveUrl
+        Result.success(
+            AudioStreamProbeResult(
+                httpStatus = first.httpStatus,
+                bytesRead = first.bytesRead,
+                rangedResponse = first.rangedResponse,
+                resolvedUrl = adoptRedirectedMediaUrl(effectiveUrl, tailFinalUrl),
+            ),
+        )
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (failure: AudioStreamProbeHttpException) {
@@ -71,9 +90,13 @@ suspend fun probeResolvedAudioStreamCancellable(stream: ResolvedAudioStream): Re
         Result.failure(IOException("Resolved audio stream probe failed"))
     }
 
-private suspend fun probeRangeCancellable(stream: ResolvedAudioStream, offset: Long): RangeProbeResult {
-    val request = Request.Builder().url(stream.url)
-        .apply { stream.requestHeaders.forEach { (name, value) -> header(name, value) } }
+private suspend fun probeRangeCancellable(
+    url: String,
+    requestHeaders: Map<String, String>,
+    offset: Long,
+): RangeProbeResult {
+    val request = Request.Builder().url(url)
+        .apply { requestHeaders.forEach { (name, value) -> header(name, value) } }
         .header("Range", "bytes=$offset-${offset + MAX_PROBE_BYTES - 1}")
         .build()
     val result = suspendCancellableCoroutine<Result<RangeProbeResult>> { continuation ->
@@ -91,8 +114,13 @@ private suspend fun probeRangeCancellable(stream: ResolvedAudioStream, offset: L
                         val bytesRead = it.body.byteStream().readNBytes(MAX_PROBE_BYTES).size
                         check(bytesRead > 0) { "Resolved audio stream probe returned no audio bytes" }
                         val range = it.header("Content-Range")
-                        RangeProbeResult(it.code, bytesRead, it.code == 206 || range != null,
-                            range?.substringAfterLast('/')?.toLongOrNull())
+                        RangeProbeResult(
+                            httpStatus = it.code,
+                            bytesRead = bytesRead,
+                            rangedResponse = it.code == 206 || range != null,
+                            contentRangeTotal = range?.substringAfterLast('/')?.toLongOrNull(),
+                            finalUrl = it.request.url.toString(),
+                        )
                     }
                 }
                 continuation.resume(probed)
@@ -107,19 +135,21 @@ private data class RangeProbeResult(
     val bytesRead: Int,
     val rangedResponse: Boolean,
     val contentRangeTotal: Long?,
+    val finalUrl: String,
 )
 
 private fun probeRange(
-    stream: ResolvedAudioStream,
+    url: String,
+    requestHeaders: Map<String, String>,
     offset: Long,
     maxBytes: Int,
 ): RangeProbeResult {
     val endInclusive = offset + maxBytes - 1L
     val request =
         Request.Builder()
-            .url(stream.url)
+            .url(url)
             .header("Range", "bytes=$offset-$endInclusive")
-            .apply { stream.requestHeaders.forEach { (name, value) -> header(name, value) } }
+            .apply { requestHeaders.forEach { (name, value) -> header(name, value) } }
             .build()
     PROBE_CLIENT.newCall(request).execute().use { response ->
         if (!response.isSuccessful) throw AudioStreamProbeHttpException(response.code)
@@ -134,8 +164,31 @@ private fun probeRange(
                 ?.substringAfterLast('/', missingDelimiterValue = "")
                 ?.takeUnless { it == "*" }
                 ?.toLongOrNull(),
+            finalUrl = response.request.url.toString(),
         )
     }
+}
+
+/**
+ * Keeps a CDN 302 redirect target (common on niche/cold-edge googlevideo tracks) so the tail probe
+ * and libVLC's ranged callback transport reuse the warm edge socket instead of re-paying 302 hops.
+ * Refuses HTTPS->HTTP downgrades or redirects off the googlevideo CDN host family.
+ */
+internal fun adoptRedirectedMediaUrl(originalUrl: String, finalUrl: String): String {
+    if (originalUrl == finalUrl) return originalUrl
+    val originalUri = runCatching { java.net.URI(originalUrl) }.getOrNull() ?: return originalUrl
+    val finalUri = runCatching { java.net.URI(finalUrl) }.getOrNull() ?: return originalUrl
+    val originalScheme = originalUri.scheme?.lowercase() ?: return originalUrl
+    val finalScheme = finalUri.scheme?.lowercase() ?: return originalUrl
+    if (originalScheme == "https" && finalScheme != "https") return originalUrl
+    if (finalScheme !in setOf("http", "https")) return originalUrl
+    val originalHost = originalUri.host?.lowercase().orEmpty()
+    val finalHost = finalUri.host?.lowercase().orEmpty()
+    if (finalHost.isBlank()) return originalUrl
+    val originalIsGoogleVideo = originalHost == "googlevideo.com" || originalHost.endsWith(".googlevideo.com")
+    val finalIsGoogleVideo = finalHost == "googlevideo.com" || finalHost.endsWith(".googlevideo.com")
+    if (originalIsGoogleVideo && !finalIsGoogleVideo) return originalUrl
+    return finalUrl
 }
 
 private const val MAX_PROBE_BYTES = 1_024
@@ -146,9 +199,9 @@ private val PROBE_CLIENT: OkHttpClient =
         // playable 301/302 here would discard a stream the player can actually open.
         .followRedirects(true)
         .followSslRedirects(true)
-        // This probe runs inside the per-client resolver race. A CDN that cannot serve the first
-        // kilobyte promptly should lose to another YouTube client instead of stalling the wave.
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.SECONDS)
+        // Tolerate high-RTT / 302-redirecting niche CDN edges while still staying bounded inside
+        // the native fast-path timeout budget.
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
         .build()

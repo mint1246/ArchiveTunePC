@@ -952,8 +952,16 @@ class ArchiveTuneJvmClient(
                 expiresAtEpochMillis = System.currentTimeMillis() + expiresInSeconds * 1_000L,
                 authFingerprint = authState.fingerprint,
             )
-            val probeFailure = probeResolvedAudioStreamCancellable(stream).exceptionOrNull()
-            if (probeFailure == null) return stream
+            val probeResult = probeResolvedAudioStreamCancellable(stream)
+            val probeFailure = probeResult.exceptionOrNull()
+            if (probeFailure == null) {
+                val resolvedUrl = probeResult.getOrNull()?.resolvedUrl
+                return if (!resolvedUrl.isNullOrBlank() && resolvedUrl != stream.url) {
+                    stream.copy(url = resolvedUrl)
+                } else {
+                    stream
+                }
+            }
 
             val probeHttpStatus = (probeFailure as? AudioStreamProbeHttpException)?.httpStatus
             if (probeHttpStatus != null && probeHttpStatus in RETRYABLE_STREAM_RESPONSE_CODES) {

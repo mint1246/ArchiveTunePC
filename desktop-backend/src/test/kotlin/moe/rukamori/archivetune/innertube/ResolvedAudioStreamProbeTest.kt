@@ -43,6 +43,51 @@ class ResolvedAudioStreamProbeTest {
             assertEquals(206, result.httpStatus)
             assertEquals(4, result.bytesRead)
             assertTrue(result.rangedResponse)
+            assertEquals("http://127.0.0.1:${server.address.port}/audio", result.resolvedUrl)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `tail probe reuses redirected url without re-hitting redirector`() {
+        var redirectHits = 0
+        val audioRanges = mutableListOf<String>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/redirect") { exchange ->
+            redirectHits++
+            exchange.responseHeaders.add("Location", "/audio")
+            exchange.sendResponseHeaders(302, -1)
+            exchange.close()
+        }
+        server.createContext("/audio") { exchange ->
+            audioRanges += exchange.requestHeaders.getFirst("Range").orEmpty()
+            exchange.responseHeaders.add("Content-Range", "bytes 0-1023/8192")
+            exchange.sendResponseHeaders(206, 1024)
+            exchange.responseBody.use { it.write(ByteArray(1024) { 1 }) }
+        }
+        server.start()
+        try {
+            val stream =
+                ResolvedAudioStream(
+                    videoId = "test",
+                    url = "http://127.0.0.1:${server.address.port}/redirect",
+                    format = audioFormat(),
+                    videoDetails = null,
+                    playbackTracking = null,
+                    audioConfig = null,
+                    clientName = "test",
+                    clientVersion = "test",
+                    requestHeaders = emptyMap(),
+                    expiresAtEpochMillis = System.currentTimeMillis() + 60_000,
+                    authFingerprint = "test",
+                )
+
+            val result = probeResolvedAudioStream(stream).getOrThrow()
+
+            assertEquals(1, redirectHits)
+            assertEquals(listOf("bytes=0-1023", "bytes=7168-8191"), audioRanges)
+            assertEquals("http://127.0.0.1:${server.address.port}/audio", result.resolvedUrl)
         } finally {
             server.stop(0)
         }

@@ -111,22 +111,13 @@ class VlcjCallbackMediaTest {
     @Test
     fun `closing one media cancels only its active call`() {
         val slowStarted = CountDownLatch(1)
+        val releaseHeaders = CountDownLatch(1)
         val slowServer = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         slowServer.createContext("/audio") { exchange ->
-            val chunk = ByteArray(64 * 1024) { 7 }
-            exchange.responseHeaders.add("Content-Range", "bytes 0-${8 * 1024 * 1024 - 1}/${8 * 1024 * 1024}")
-            exchange.sendResponseHeaders(206, (8 * 1024 * 1024).toLong())
             slowStarted.countDown()
             try {
-                exchange.responseBody.use { output ->
-                    repeat(128) {
-                        output.write(chunk)
-                        output.flush()
-                        Thread.sleep(25)
-                    }
-                }
-            } catch (_: IOException) {
-                // Expected when the media-specific OkHttp call is cancelled.
+                // Hold response headers until the media cancels the active OkHttp call.
+                releaseHeaders.await(5, TimeUnit.SECONDS)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             } finally {
@@ -164,11 +155,72 @@ class VlcjCallbackMediaTest {
             }
             assertFalse(transport.client.dispatcher.executorService.isShutdown)
         } finally {
+            releaseHeaders.countDown()
             first.close()
             transport.close()
             executor.shutdownNow()
             slowServer.stop(0)
             fastServer.stop(0)
+        }
+    }
+
+    @Test
+    fun `streaming open returns before full range completes and caches head across rewinds`() {
+        val body = ByteArray(128 * 1024) { index -> (index % 251).toByte() }
+        val allowRemainingBody = CountDownLatch(1)
+        val requestCount = AtomicInteger()
+        val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        server.createContext("/audio") { exchange ->
+            requestCount.incrementAndGet()
+            val range = exchange.requestHeaders.getFirst("Range") ?: "bytes=0-${body.lastIndex}"
+            val bounds = range.removePrefix("bytes=").split('-', limit = 2)
+            val start = bounds[0].toLong().toInt()
+            val end = minOf(bounds[1].toLong().toInt(), body.lastIndex)
+            val length = end - start + 1
+            exchange.responseHeaders.add("Content-Range", "bytes $start-$end/${body.size}")
+            exchange.sendResponseHeaders(206, length.toLong())
+            try {
+                exchange.responseBody.use { output ->
+                    val firstChunk = minOf(4096, length)
+                    output.write(body, start, firstChunk)
+                    output.flush()
+                    if (length > firstChunk) {
+                        allowRemainingBody.await(5, TimeUnit.SECONDS)
+                        output.write(body, start + firstChunk, length - firstChunk)
+                    }
+                }
+            } catch (_: IOException) {
+                // Expected if closed early.
+            } finally {
+                exchange.close()
+            }
+        }
+        server.start()
+        val url = "http://${server.address.hostString}:${server.address.port}/audio"
+        VlcjRangeHttpTransport().use { transport ->
+            try {
+                transport.media(url).use { media ->
+                    assertEquals(body.size.toLong(), media.openSize())
+                    val first = ByteArray(4096)
+                    assertEquals(4096, media.readInto(first, first.size))
+                    assertContentEquals(body.copyOfRange(0, 4096), first)
+
+                    assertTrue(media.seekTo(0L))
+                    val reread = ByteArray(4096)
+                    assertEquals(4096, media.readInto(reread, reread.size))
+                    assertContentEquals(body.copyOfRange(0, 4096), reread)
+                    assertEquals(1, requestCount.get())
+
+                    allowRemainingBody.countDown()
+                    val next = ByteArray(4096)
+                    assertEquals(4096, media.readInto(next, next.size))
+                    assertContentEquals(body.copyOfRange(4096, 8192), next)
+                    assertEquals(1, requestCount.get())
+                }
+            } finally {
+                allowRemainingBody.countDown()
+                server.stop(0)
+            }
         }
     }
 

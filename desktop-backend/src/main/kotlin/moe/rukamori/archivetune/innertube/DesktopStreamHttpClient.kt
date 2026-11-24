@@ -6,6 +6,7 @@
  */
 package moe.rukamori.archivetune.innertube
 
+import okhttp3.ConnectionPool
 import okhttp3.Credentials
 import okhttp3.Dns
 import okhttp3.OkHttpClient
@@ -13,9 +14,10 @@ import java.net.ProxySelector
 import java.net.SocketAddress
 import java.net.URI
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
-/** Use the application's current media route for probes, VLC callback reads and downloads alike. */
-fun desktopStreamHttpClient(): OkHttpClient = OkHttpClient.Builder()
+private val SHARED_DESKTOP_STREAM_HTTP_CLIENT: OkHttpClient = OkHttpClient.Builder()
+    .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
     .proxySelector(object : ProxySelector() {
         override fun select(uri: URI) = listOf(YouTube.streamOkHttpProxy)
         override fun connectFailed(uri: URI, address: SocketAddress, failure: IOException) = Unit
@@ -30,3 +32,11 @@ fun desktopStreamHttpClient(): OkHttpClient = OkHttpClient.Builder()
         override fun lookup(hostname: String) = YouTube.dns.lookup(hostname)
     })
     .build()
+
+/**
+ * Use the application's current media route for probes, VLC callback reads and downloads alike.
+ *
+ * Returns a client sharing the underlying [ConnectionPool] and [okhttp3.Dispatcher] so the stream
+ * probe warms the exact HTTP/2 TLS socket that libVLC's ranged callback transport immediately reuses.
+ */
+fun desktopStreamHttpClient(): OkHttpClient = SHARED_DESKTOP_STREAM_HTTP_CLIENT.newBuilder().build()

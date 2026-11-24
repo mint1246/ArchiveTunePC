@@ -8,6 +8,8 @@
 package moe.rukamori.archivetune.playback.desktop
 
 import java.io.IOException
+import java.io.InputStream
+import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -90,10 +92,19 @@ internal class VlcjRangeCallbackMedia(
         private val lock = Any()
         private val closed = AtomicBoolean(false)
         private val activeCalls = ConcurrentHashMap.newKeySet<Call>()
+        private var effectiveUrl: String = url
         private var contentLength: Long? = null
         private var cursor = 0L
-        private var windowStart = -1L
-        private var window: ByteArray? = null
+        private var activeCall: Call? = null
+        private var activeResponse: Response? = null
+        private var activeStream: InputStream? = null
+        private var streamPos = 0L
+        private var streamEndExclusive = 0L
+        private var headCache: ByteArray? = null
+        private var headCacheLen = 0
+        private var tailCacheStart = -1L
+        private var tailCache: ByteArray? = null
+        private var tailCacheLen = 0
         private var fallbackPath: Path? = null
         private var fallbackChannel: FileChannel? = null
         private var opened = false
@@ -104,7 +115,7 @@ internal class VlcjRangeCallbackMedia(
         fun open(): Long? = synchronized(lock) {
             if (!opened) {
                 try {
-                    fetchWindow(0L)
+                    openStreamLocked(0L)
                     opened = true
                 } catch (failure: RangeHttpException) {
                     throw failure
@@ -112,113 +123,113 @@ internal class VlcjRangeCallbackMedia(
                     return null
                 }
             }
-            contentLength ?: window?.size?.toLong()
+            contentLength ?: streamEndExclusive.takeIf { it > 0L && it < Long.MAX_VALUE }
         }
 
         fun seek(offset: Long): Boolean = synchronized(lock) {
             if (offset < 0L) return false
-            if (fallbackChannel != null) {
-                cursor = contentLength?.let { minOf(offset, it) } ?: offset
-                return true
-            }
-            val activeWindow = window
-            if (
-                activeWindow != null &&
-                offset >= windowStart &&
-                offset <= windowStart + activeWindow.size
-            ) {
-                // libVLC probes/rewinds container headers during startup. Do not discard bytes we
-                // already own just because it moved the cursor inside the current HTTP range; doing
-                // so creates a second Googlevideo request immediately after playback starts.
-                cursor = offset
-                return true
-            }
-            if (contentLength != null && offset >= contentLength!!) {
-                cursor = contentLength!!
-                window = null
-            } else {
-                cursor = offset
-                window = null
-            }
+            cursor = contentLength?.let { minOf(offset, it) } ?: offset
+            // Keep any open HTTP stream alive across seeks: libVLC frequently probes/rewinds
+            // container headers near offset 0, and headCache/tailCache let it jump back to
+            // streamPos without tearing down the HTTP/2 stream or paying another RTT.
             true
         }
 
         @Throws(IOException::class)
         fun read(buffer: ByteArray, length: Int): Int = synchronized(lock) {
+            if (closed.get()) throw IOException("HTTP media source is closed")
             if (contentLength != null && cursor >= contentLength!!) return -1
+            val requested = minOf(length.coerceAtLeast(0), buffer.size)
+            if (requested <= 0) return -1
+
             fallbackChannel?.let { channel ->
                 val remaining = contentLength?.minus(cursor)?.coerceAtLeast(0L) ?: Long.MAX_VALUE
-                val requested = minOf(length.coerceAtLeast(0), buffer.size, remaining.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
-                if (requested <= 0) return -1
+                val toRead = minOf(requested.toLong(), remaining).toInt()
+                if (toRead <= 0) return -1
                 channel.position(cursor)
-                val count = channel.read(ByteBuffer.wrap(buffer, 0, requested))
+                val count = channel.read(ByteBuffer.wrap(buffer, 0, toRead))
                 if (count <= 0) return -1
                 cursor += count
                 return count
             }
-            if (window == null || cursor < windowStart || cursor >= windowStart + window!!.size) {
-                fetchWindow(cursor)
-            }
-            val activeWindow = window ?: throw IOException("HTTP media window is unavailable")
-            val offset = (cursor - windowStart).toInt()
-            val available = activeWindow.size - offset
-            if (available <= 0) return -1
-            val count = minOf(length.coerceAtLeast(0), buffer.size, available)
-            if (count <= 0) return -1
-            System.arraycopy(activeWindow, offset, buffer, 0, count)
-            cursor += count
-            count
-        }
 
-        @Throws(IOException::class)
-        private fun fetchWindow(offset: Long) {
-            if (closed.get()) throw IOException("HTTP media source is closed")
-            val end = offset + windowSize - 1
+            // 1. Serve from cached head prefix (offset 0..headCacheLen) in 0ms RAM hit.
+            val cachedHead = headCache
+            if (cachedHead != null && cursor < headCacheLen.toLong()) {
+                val offsetInCache = cursor.toInt()
+                val available = headCacheLen - offsetInCache
+                val count = minOf(requested, available)
+                System.arraycopy(cachedHead, offsetInCache, buffer, 0, count)
+                cursor += count
+                return count
+            }
+
+            // 2. Serve from cached tail metadata region (e.g. WebM Cues / MP4 moov) in 0ms.
+            val cachedTail = tailCache
+            if (cachedTail != null && tailCacheStart >= 0L &&
+                cursor >= tailCacheStart && cursor < tailCacheStart + tailCacheLen.toLong()
+            ) {
+                val offsetInTail = (cursor - tailCacheStart).toInt()
+                val available = tailCacheLen - offsetInTail
+                val count = minOf(requested, available)
+                System.arraycopy(cachedTail, offsetInTail, buffer, 0, count)
+                cursor += count
+                return count
+            }
+
+            // 3. Stream progressively from the active HTTP 206 range, re-opening on demand or on transient error.
             var lastFailure: IOException? = null
             repeat(MAX_FETCH_ATTEMPTS) { attempt ->
-                val requestBuilder = Request.Builder()
-                    .url(url)
-                    .header("Range", "bytes=$offset-$end")
-                headers.forEach { (name, value) ->
-                    if (name.isNotBlank() && value.isNotBlank() &&
-                        !name.equals("Range", ignoreCase = true)
-                    ) {
-                        requestBuilder.header(name, value)
-                    }
-                }
+                if (closed.get()) throw IOException("HTTP media source is closed")
+                if (contentLength != null && cursor >= contentLength!!) return -1
 
                 try {
-                    executeRequest(requestBuilder.build()) { response ->
-                        if (!response.isSuccessful) {
-                            if (
-                                response.code in FULL_OBJECT_FALLBACK_STATUS_CODES &&
-                                fetchWholeObjectFallback(offset)
-                            ) {
-                                return
-                            }
-                            if (closed.get()) throw IOException("HTTP media source is closed")
-                            throw RangeHttpException(response.code)
-                        }
-                        if (response.code != 206) {
-                            if (installWholeObjectFallback(response, offset)) return
-                            throw IOException("HTTP server ignored the media range and the full response was unusable")
-                        }
-                        val bytes = response.body.bytes()
-                        if (bytes.isEmpty() && contentLength?.let { offset < it } != false) {
-                            throw IOException("YouTube returned an empty media range")
-                        }
-                        contentLength = response.header("Content-Range")
-                            ?.substringAfter('/')
-                            ?.toLongOrNull()
-                        windowStart = response.header("Content-Range")
-                            ?.substringBefore('-')
-                            ?.substringAfter("bytes ")
-                            ?.toLongOrNull()
-                            ?: offset
-                        window = bytes
-                        return
+                    ensureStreamPositionedLocked(cursor)
+                    // openStreamLocked may have installed the file-backed whole-object fallback.
+                    fallbackChannel?.let { channel ->
+                        val remaining = contentLength?.minus(cursor)?.coerceAtLeast(0L) ?: Long.MAX_VALUE
+                        val toRead = minOf(requested.toLong(), remaining).toInt()
+                        if (toRead <= 0) return -1
+                        channel.position(cursor)
+                        val count = channel.read(ByteBuffer.wrap(buffer, 0, toRead))
+                        if (count <= 0) return -1
+                        cursor += count
+                        return count
                     }
+
+                    val stream = activeStream ?: throw IOException("HTTP media stream is unavailable")
+                    val remainingInWindow = (streamEndExclusive - streamPos).coerceAtLeast(0L)
+                    if (remainingInWindow <= 0L) {
+                        closeActiveStreamLocked()
+                        openStreamLocked(cursor)
+                        return@repeat
+                    }
+                    val toRead = minOf(requested.toLong(), remainingInWindow).toInt()
+                    val count = stream.read(buffer, 0, toRead)
+                    if (count < 0) {
+                        closeActiveStreamLocked()
+                        val total = contentLength
+                        if (total != null && cursor >= total) return -1
+                        if (total == null) {
+                            contentLength = cursor
+                            return -1
+                        }
+                        throw IOException("YouTube media range ended early at offset $cursor of $total")
+                    }
+                    if (count == 0) return@repeat
+
+                    recordReadBytesLocked(cursor, buffer, count)
+                    streamPos += count
+                    cursor += count
+                    if (streamPos >= streamEndExclusive) {
+                        closeActiveStreamLocked()
+                    }
+                    return count
+                } catch (failure: RangeHttpException) {
+                    closeActiveStreamLocked()
+                    throw failure
                 } catch (failure: IOException) {
+                    closeActiveStreamLocked()
                     lastFailure = failure
                     if (closed.get()) throw IOException("HTTP media source is closed", failure)
                     if (attempt + 1 < MAX_FETCH_ATTEMPTS) {
@@ -231,7 +242,217 @@ internal class VlcjRangeCallbackMedia(
                     }
                 }
             }
+            throw lastFailure ?: IOException("Unable to read YouTube media range")
+        }
+
+        private fun ensureStreamPositionedLocked(targetOffset: Long) {
+            val stream = activeStream
+            if (stream != null && streamPos <= targetOffset && targetOffset < streamEndExclusive) {
+                val gap = targetOffset - streamPos
+                if (gap == 0L) return
+                if (gap <= MAX_FORWARD_SKIP_BYTES) {
+                    val skipBuffer = ByteArray(minOf(gap, 8192L).toInt())
+                    var remaining = gap
+                    while (remaining > 0L) {
+                        if (closed.get()) throw IOException("HTTP media source is closed")
+                        val count = stream.read(skipBuffer, 0, minOf(remaining, skipBuffer.size.toLong()).toInt())
+                        if (count < 0) {
+                            closeActiveStreamLocked()
+                            openStreamLocked(targetOffset)
+                            return
+                        }
+                        if (count == 0) continue
+                        recordReadBytesLocked(streamPos, skipBuffer, count)
+                        streamPos += count
+                        remaining -= count
+                    }
+                    if (streamPos >= streamEndExclusive) {
+                        closeActiveStreamLocked()
+                        openStreamLocked(targetOffset)
+                    }
+                    return
+                }
+            }
+            closeActiveStreamLocked()
+            openStreamLocked(targetOffset)
+        }
+
+        private fun recordReadBytesLocked(offset: Long, data: ByteArray, count: Int) {
+            // Retain the initial header/audio prefix so libVLC rewinds and post-Cue seeks back to 0 hit RAM.
+            if (offset == headCacheLen.toLong() && headCacheLen < HEAD_CACHE_MAX_BYTES) {
+                val cache = headCache ?: ByteArray(HEAD_CACHE_MAX_BYTES).also { headCache = it }
+                val toCopy = minOf(count, HEAD_CACHE_MAX_BYTES - headCacheLen)
+                System.arraycopy(data, 0, cache, headCacheLen, toCopy)
+                headCacheLen += toCopy
+            }
+            // Retain tail bytes (Cues / moov) when libVLC probes near EOF.
+            val total = contentLength
+            if (total != null && total > HEAD_CACHE_MAX_BYTES.toLong()) {
+                val tailRegionStart = (total - TAIL_CACHE_MAX_BYTES.toLong()).coerceAtLeast(HEAD_CACHE_MAX_BYTES.toLong())
+                if (offset >= tailRegionStart) {
+                    if (tailCache == null || tailCacheStart < 0L) {
+                        tailCacheStart = offset
+                        tailCache = ByteArray((total - offset).coerceAtMost(TAIL_CACHE_MAX_BYTES.toLong()).toInt())
+                        tailCacheLen = 0
+                    }
+                    val cache = tailCache
+                    if (cache != null && offset == tailCacheStart + tailCacheLen.toLong() && tailCacheLen < cache.size) {
+                        val toCopy = minOf(count, cache.size - tailCacheLen)
+                        System.arraycopy(data, 0, cache, tailCacheLen, toCopy)
+                        tailCacheLen += toCopy
+                    }
+                }
+            }
+        }
+
+        @Throws(IOException::class)
+        private fun openStreamLocked(offset: Long) {
+            if (closed.get()) throw IOException("HTTP media source is closed")
+            closeActiveStreamLocked()
+            val requestWindowSize =
+                when {
+                    offset == 0L -> minOf(windowSize, INITIAL_WINDOW_SIZE)
+                    offset <= INITIAL_WINDOW_SIZE.toLong() -> minOf(windowSize, RAMP_WINDOW_SIZE)
+                    else -> windowSize
+                }
+            val end = offset + requestWindowSize - 1L
+            var lastFailure: IOException? = null
+            var retriedOriginalUrl = false
+            var attempt = 0
+            while (attempt < MAX_FETCH_ATTEMPTS) {
+                val requestUrl = effectiveUrl
+                val requestBuilder = Request.Builder()
+                    .url(requestUrl)
+                    .header("Range", "bytes=$offset-$end")
+                headers.forEach { (name, value) ->
+                    if (name.isNotBlank() && value.isNotBlank() &&
+                        !name.equals("Range", ignoreCase = true)
+                    ) {
+                        requestBuilder.header(name, value)
+                    }
+                }
+
+                try {
+                    val call = createTrackedCall(requestBuilder.build())
+                    var keepOpen = false
+                    var response: Response? = null
+                    try {
+                        response = call.execute()
+                        if (!response.isSuccessful) {
+                            val code = response.code
+                            response.close()
+                            activeCalls.remove(call)
+                            if (code in REDIRECT_FALLBACK_STATUS_CODES && requestUrl != url && !retriedOriginalUrl) {
+                                // A sticky redirected edge rejected this range; fall back to the original signed URL once.
+                                effectiveUrl = url
+                                retriedOriginalUrl = true
+                                continue
+                            }
+                            if (
+                                code in FULL_OBJECT_FALLBACK_STATUS_CODES &&
+                                fetchWholeObjectFallback(offset)
+                            ) {
+                                return
+                            }
+                            if (closed.get()) throw IOException("HTTP media source is closed")
+                            throw RangeHttpException(code)
+                        }
+                        if (response.code != 206) {
+                            val installed = response.use { installWholeObjectFallback(it, offset) }
+                            activeCalls.remove(call)
+                            if (installed) return
+                            throw IOException("HTTP server ignored the media range and the full response was unusable")
+                        }
+
+                        val contentRange = response.header("Content-Range")
+                        val parsedTotal = contentRange
+                            ?.substringAfter('/', missingDelimiterValue = "")
+                            ?.trim()
+                            ?.takeUnless { it == "*" }
+                            ?.toLongOrNull()
+                        if (parsedTotal != null) {
+                            contentLength = parsedTotal
+                        }
+                        val returnedStart = contentRange
+                            ?.substringBefore('-')
+                            ?.substringAfter("bytes ")
+                            ?.trim()
+                            ?.toLongOrNull()
+                            ?: offset
+                        val returnedEnd = contentRange
+                            ?.substringAfter('-', missingDelimiterValue = "")
+                            ?.substringBefore('/')
+                            ?.trim()
+                            ?.toLongOrNull()
+                        val declaredBodyLen = response.body.contentLength().takeIf { it > 0L }
+                        val resolvedEndExclusive = when {
+                            returnedEnd != null -> returnedEnd + 1L
+                            declaredBodyLen != null -> returnedStart + declaredBodyLen
+                            parsedTotal != null -> minOf(returnedStart + requestWindowSize.toLong(), parsedTotal)
+                            else -> returnedStart + requestWindowSize.toLong()
+                        }
+
+                        val finalUrl = response.request.url.toString()
+                        if (isSafeRedirectTarget(url, finalUrl)) {
+                            effectiveUrl = finalUrl
+                        }
+
+                        activeCall = call
+                        activeResponse = response
+                        activeStream = response.body.byteStream()
+                        streamPos = returnedStart
+                        streamEndExclusive = resolvedEndExclusive
+                        keepOpen = true
+                        return
+                    } finally {
+                        if (!keepOpen) {
+                            runCatching { response?.close() }
+                            activeCalls.remove(call)
+                        }
+                    }
+                } catch (failure: RangeHttpException) {
+                    throw failure
+                } catch (failure: IOException) {
+                    lastFailure = failure
+                    if (closed.get()) throw IOException("HTTP media source is closed", failure)
+                    attempt++
+                    if (attempt < MAX_FETCH_ATTEMPTS) {
+                        try {
+                            Thread.sleep(FETCH_RETRY_DELAY_MS * attempt.toLong())
+                        } catch (interrupted: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            throw IOException("Interrupted while retrying YouTube media range", interrupted)
+                        }
+                    }
+                }
+            }
             throw lastFailure ?: IOException("Unable to fetch YouTube media range")
+        }
+
+        private fun createTrackedCall(request: Request): Call {
+            if (closed.get()) throw IOException("HTTP media source is closed")
+            val call = client.newCall(request)
+            activeCalls += call
+            if (closed.get()) {
+                activeCalls.remove(call)
+                call.cancel()
+                throw IOException("HTTP media source is closed")
+            }
+            return call
+        }
+
+        private fun closeActiveStreamLocked() {
+            val call = activeCall
+            val response = activeResponse
+            activeCall = null
+            activeResponse = null
+            activeStream = null
+            streamPos = 0L
+            streamEndExclusive = 0L
+            if (call != null) {
+                activeCalls.remove(call)
+            }
+            runCatching { response?.close() }
         }
 
         /**
@@ -290,8 +511,7 @@ internal class VlcjRangeCallbackMedia(
                 fallbackPath = path
                 fallbackChannel = channel
                 contentLength = total
-                windowStart = -1L
-                window = null
+                closeActiveStreamLocked()
                 installed = true
                 return true
             } finally {
@@ -300,14 +520,7 @@ internal class VlcjRangeCallbackMedia(
         }
 
         private inline fun <T> executeRequest(request: Request, block: (Response) -> T): T {
-            if (closed.get()) throw IOException("HTTP media source is closed")
-            val call = client.newCall(request)
-            activeCalls += call
-            if (closed.get()) {
-                activeCalls.remove(call)
-                call.cancel()
-                throw IOException("HTTP media source is closed")
-            }
+            val call = createTrackedCall(request)
             return try {
                 call.execute().use(block)
             } finally {
@@ -315,33 +528,61 @@ internal class VlcjRangeCallbackMedia(
             }
         }
 
+        private fun isSafeRedirectTarget(originalUrl: String, finalUrl: String): Boolean {
+            if (originalUrl == finalUrl) return false
+            val originalUri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
+            val finalUri = runCatching { URI(finalUrl) }.getOrNull() ?: return false
+            val originalScheme = originalUri.scheme?.lowercase() ?: return false
+            val finalScheme = finalUri.scheme?.lowercase() ?: return false
+            if (originalScheme == "https" && finalScheme != "https") return false
+            if (finalScheme !in setOf("http", "https")) return false
+            val originalHost = originalUri.host?.lowercase().orEmpty()
+            val finalHost = finalUri.host?.lowercase().orEmpty()
+            if (finalHost.isBlank()) return false
+            val originalIsGoogleVideo = originalHost == "googlevideo.com" || originalHost.endsWith(".googlevideo.com")
+            val finalIsGoogleVideo = finalHost == "googlevideo.com" || finalHost.endsWith(".googlevideo.com")
+            return !originalIsGoogleVideo || finalIsGoogleVideo
+        }
+
         override fun close() {
             if (!closed.compareAndSet(false, true)) return
             activeCalls.toList().forEach(Call::cancel)
             synchronized(lock) {
+                closeActiveStreamLocked()
                 runCatching { fallbackChannel?.close() }
                 fallbackChannel = null
                 fallbackPath?.let { runCatching { Files.deleteIfExists(it) } }
                 fallbackPath = null
-                window = null
+                headCache = null
+                headCacheLen = 0
+                tailCache = null
+                tailCacheLen = 0
+                tailCacheStart = -1L
                 opened = false
             }
         }
     }
 
     private companion object {
+        const val INITIAL_WINDOW_SIZE = 64 * 1024
+        const val RAMP_WINDOW_SIZE = 256 * 1024
         const val DEFAULT_WINDOW_SIZE = 512 * 1024
+        const val HEAD_CACHE_MAX_BYTES = 128 * 1024
+        const val TAIL_CACHE_MAX_BYTES = 64 * 1024
+        const val MAX_FORWARD_SKIP_BYTES = 16 * 1024L
         const val MAX_FETCH_ATTEMPTS = 3
         const val FETCH_RETRY_DELAY_MS = 100L
         const val MAX_FULL_OBJECT_FALLBACK_BYTES = 32L * 1024L * 1024L
         const val FALLBACK_COPY_BUFFER_SIZE = 64 * 1024
         val FULL_OBJECT_FALLBACK_STATUS_CODES = setOf(403, 416)
+        val REDIRECT_FALLBACK_STATUS_CODES = setOf(403, 404, 410, 416)
     }
 }
 
 /** One reusable HTTP transport per playback controller; individual media never own its pool. */
 internal class VlcjRangeHttpTransport(
     internal val client: OkHttpClient = newRangeHttpClient(),
+    private val ownsClient: Boolean = true,
 ) : AutoCloseable {
     private val closed = AtomicBoolean(false)
 
@@ -387,7 +628,7 @@ internal class VlcjRangeHttpTransport(
                 StandardOpenOption.TRUNCATE_EXISTING,
                 StandardOpenOption.WRITE,
             ).use { output ->
-                while (totalLength == null || offset < totalLength!!) {
+                while (totalLength == null || offset < totalLength) {
                     if (closed.get()) throw IOException("HTTP transport is closed")
                     val end = offset + MATERIALIZE_RANGE_SIZE - 1L
                     val requestBuilder = Request.Builder()
@@ -437,7 +678,7 @@ internal class VlcjRangeHttpTransport(
                         val copied = copyResponseBody(body.byteStream(), output)
                         if (copied <= 0L) throw IOException("YouTube returned an empty media range")
                         offset += copied
-                        if (totalLength != null && offset > totalLength!!) {
+                        if (totalLength != null && offset > totalLength) {
                             throw IOException("Downloaded media exceeded declared content length")
                         }
                     }
@@ -457,10 +698,12 @@ internal class VlcjRangeHttpTransport(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        client.dispatcher.cancelAll()
-        client.connectionPool.evictAll()
-        client.dispatcher.executorService.shutdown()
-        runCatching { client.cache?.close() }
+        if (ownsClient) {
+            client.dispatcher.cancelAll()
+            client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdown()
+            runCatching { client.cache?.close() }
+        }
     }
 
     private fun copyResponseBody(input: java.io.InputStream, output: FileChannel): Long {

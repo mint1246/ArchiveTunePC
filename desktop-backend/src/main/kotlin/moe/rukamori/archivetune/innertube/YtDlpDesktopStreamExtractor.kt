@@ -74,7 +74,15 @@ class YtDlpDesktopStreamExtractor(
                         clientName = "YT_DLP", clientVersion = resolver.verifyToolchain().ytDlpVersion,
                         requestHeaders = extracted.headers, expiresAtEpochMillis = extracted.expiresAtEpochMillis,
                         authFingerprint = authState.fingerprint,
-                    ).also { probeResolvedAudioStreamCancellable(it).getOrThrow() }
+                    ).let { candidate ->
+                        val probed = probeResolvedAudioStreamCancellable(candidate).getOrThrow()
+                        val resolvedUrl = probed.resolvedUrl
+                        if (!resolvedUrl.isNullOrBlank() && resolvedUrl != candidate.url) {
+                            candidate.copy(url = resolvedUrl)
+                        } else {
+                            candidate
+                        }
+                    }
                 } ?: throw YtDlpException(YtDlpFailure.TIMEOUT)
                 return@coroutineScope stream
             } catch (failure: YtDlpException) {

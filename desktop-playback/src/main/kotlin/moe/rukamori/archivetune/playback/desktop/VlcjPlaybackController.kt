@@ -98,7 +98,10 @@ class VlcjPlaybackController(
     private val nativeLifecycleLock = Any()
     private val queue = PlaybackQueue()
     private val logger = Logger.getLogger("moe.rukamori.archivetune.desktop.playback")
-    private val rangeHttpTransport = VlcjRangeHttpTransport(newRangeHttpClient(mediaHttpClient ?: okhttp3.OkHttpClient()))
+    private val rangeHttpTransport = VlcjRangeHttpTransport(
+        client = newRangeHttpClient(mediaHttpClient ?: okhttp3.OkHttpClient()),
+        ownsClient = mediaHttpClient == null,
+    )
     private val initialSafePitchSemitones =
         initialPitchSemitones.takeIf(Float::isFinite)?.coerceIn(MIN_PITCH, MAX_PITCH) ?: 0f
     internal var applicationHttpTransportPredicate: (ResolvedPlaybackSource) -> Boolean =
@@ -2356,8 +2359,12 @@ private fun ResolvedPlaybackSource.shouldUseApplicationHttpTransport(): Boolean 
 
 private fun ResolvedPlaybackSource.toCallbackMediaOptions(): List<String> =
     when (mimeType?.substringBefore(';')?.trim()?.lowercase()) {
-        "audio/mp4" -> listOf(":demux=mp4")
-        "audio/webm" -> listOf(":demux=mkv")
+        // Prefer FFmpeg's avformat demuxer when installed: it streams WebM SimpleBlocks and
+        // fragmented MP4 audio incrementally (~32-45 KB to first audio) instead of buffering an
+        // entire 10-second YouTube cluster/fragment (~160-185 KB). Fall back automatically to the
+        // native mp4/mkv plugins on trimmed runtimes where libavformat_plugin is not packaged.
+        "audio/mp4" -> listOf(":demux=avformat,mp4")
+        "audio/webm" -> listOf(":demux=avformat,mkv")
         else -> emptyList()
     }
 

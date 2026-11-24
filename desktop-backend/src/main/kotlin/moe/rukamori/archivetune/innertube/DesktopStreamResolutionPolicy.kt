@@ -25,7 +25,7 @@ internal fun configuredDesktopStreamResolutionMode(
  */
 internal suspend fun <T> resolveDesktopStream(
     mode: DesktopStreamResolutionMode,
-    nativeTimeoutMillis: Long = 2_000,
+    nativeTimeoutMillis: Long = 6_000,
     native: suspend () -> T,
     upstream: suspend () -> T,
 ): T =
