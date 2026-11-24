@@ -23,3 +23,7 @@ internal expect class PlaybackAtomicLong(initial: Long) {
     fun get(): Long
     fun incrementAndGet(): Long
 }
+
+internal expect class PlaybackLock() {
+    fun <T> withLock(block: () -> T): T
+}

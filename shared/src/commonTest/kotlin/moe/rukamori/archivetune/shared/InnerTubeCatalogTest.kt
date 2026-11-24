@@ -57,7 +57,7 @@ class InnerTubeCatalogTest {
     fun radioFollowsAndroidAutomixAndBoundsRepeatedPreviewEndpoints() = runTest {
         val requestBodies = mutableListOf<kotlinx.serialization.json.JsonObject>()
         val engine = testEngine { request ->
-            val response = if (request.url.encodedPath.endsWith("/browse")) {
+            val response = if (request.url.encodedPath.endsWith("/visitor_id") || request.url.encodedPath.endsWith("/browse")) {
                 """{"responseContext":{"visitorData":"fixture-visitor"}}"""
             } else {
                 val body = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
@@ -100,6 +100,12 @@ class InnerTubeCatalogTest {
         onRequest: (HttpRequestData) -> Unit = {},
     ): InnerTubeCatalog {
         val engine = testEngine { request ->
+            if (request.url.encodedPath.endsWith("/visitor_id")) {
+                return@testEngine respond(
+                    """{"responseContext":{"visitorData":"fixture-visitor"}}""",
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
             if (request.url.encodedPath.endsWith("/browse")) {
                 return@testEngine respond("""{"responseContext":{"visitorData":"fixture-visitor"}}""",
                     headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -229,6 +235,40 @@ class InnerTubeCatalogTest {
                 payload["context"]?.jsonObject?.get("client")?.jsonObject
                     ?.get("clientName")?.jsonPrimitive?.content,
             )
+
+            // Subsequent resolve for the same track hits the in-memory ResolvedSourceCache.
+            val cached = catalog.resolve(track())
+            assertEquals(result, cached)
+            assertEquals(1, requests.size)
+
+            // Explicit invalidation forces a fresh resolution on retry.
+            catalog.invalidateResolved(CatalogFixtures.CLICKED)
+            catalog.resolve(track())
+            assertEquals(2, requests.size)
+        } finally {
+            catalog.close()
+        }
+    }
+
+    @Test
+    fun ensureVisitorContextPrefersLightweightVisitorIdWithoutFetchingHomeBrowse() = runTest {
+        val paths = mutableListOf<String>()
+        val engine = testEngine { request ->
+            paths += request.url.encodedPath
+            val body = when {
+                request.url.encodedPath.endsWith("/visitor_id") ->
+                    """{"responseContext":{"visitorData":"lightweight-visitor"}}"""
+                request.url.encodedPath.endsWith("/player") ->
+                    CatalogFixtures.player()
+                else -> error("Unexpected endpoint: ${request.url.encodedPath}")
+            }
+            respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val catalog = InnerTubeCatalog(HttpClient(engine) { expectSuccess = false })
+        try {
+            val resolved = catalog.resolve(track())
+            assertEquals(CatalogFixtures.AUDIO_HIGH, resolved.url)
+            assertEquals(listOf("/youtubei/v1/visitor_id", "/youtubei/v1/player"), paths)
         } finally {
             catalog.close()
         }
@@ -454,6 +494,7 @@ class InnerTubeCatalogTest {
         val catalog = InnerTubeCatalog(HttpClient(engine))
         try {
             catalog.resolve(track())
+            catalog.invalidateResolved(CatalogFixtures.CLICKED)
             catalog.resolve(track())
             assertEquals(1, bootstraps)
             assertEquals(2, players)

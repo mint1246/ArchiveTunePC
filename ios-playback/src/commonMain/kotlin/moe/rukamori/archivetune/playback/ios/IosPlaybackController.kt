@@ -32,6 +32,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
+import moe.rukamori.archivetune.playback.api.ResolvedSourceCache
 import moe.rukamori.archivetune.playback.api.TransitionReason
 import moe.rukamori.archivetune.sdk.lifecycle.SdkLifecycle
 
@@ -47,6 +48,7 @@ class IosPlaybackController(
     private val ownsEngine: Boolean = true,
     parentContext: CoroutineContext = Dispatchers.Default,
     random: Random = Random.Default,
+    private val sourceCache: ResolvedSourceCache? = null,
 ) : PlaybackController {
     private val lifecycle = SdkLifecycle(parentContext)
     private val controllerScope = lifecycle.scope()
@@ -103,6 +105,11 @@ class IosPlaybackController(
                 commandMutex.withLock {
                     if (lifecycle.isClosed) return@withLock
                     if (engineState.error != null && controllerFailure == null && loadedInEngine) {
+                        queue.current?.let { failedItem ->
+                            (failedItem.source as? PlaybackSource.Deferred)?.let {
+                                sourceCache?.invalidate(it.key)
+                            }
+                        }
                         playWhenReady = false
                         controllerFailure = engineState.error
                         mutableEvents.tryEmit(PlaybackEvent.Failure(engineState.error, queue.current))
@@ -432,6 +439,7 @@ class IosPlaybackController(
         commandMutex.withLock {
             if (lifecycle.isClosed) return
             val current = queue.current ?: return
+            (current.source as? PlaybackSource.Deferred)?.let { sourceCache?.invalidate(it.key) }
             pendingStartPositionMs = currentPositionLocked(engine.state.value)
             controllerFailure = null
             playWhenReady = true
@@ -456,6 +464,7 @@ class IosPlaybackController(
     override fun close() {
         resolveJob?.cancel()
         resolveJob = null
+        sourceCache?.clear()
         lifecycle.close()
     }
 
@@ -611,7 +620,12 @@ class IosPlaybackController(
                     ),
                 ),
             )
-            is PlaybackSource.Deferred -> sourceResolver.resolve(item)
+            is PlaybackSource.Deferred -> {
+                sourceCache?.get(source.key)?.let { return Result.success(it) }
+                sourceResolver.resolve(item).onSuccess { resolved ->
+                    sourceCache?.put(source.key, resolved)
+                }
+            }
         }
 
     private fun toPlaybackFailure(

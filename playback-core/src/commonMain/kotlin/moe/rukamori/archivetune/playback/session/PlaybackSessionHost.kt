@@ -21,6 +21,7 @@ import moe.rukamori.archivetune.playback.api.NextTrackPrefetcher
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackSnapshot
+import moe.rukamori.archivetune.playback.api.PlaybackStartupContentionGate
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import moe.rukamori.archivetune.playback.internal.PlaybackAtomicBoolean
 import moe.rukamori.archivetune.playback.internal.platformIoDispatcher
@@ -66,13 +67,21 @@ class PlaybackSessionHost(
     private val prefetcher: NextTrackPrefetcher? =
         prefetchResolver?.let { resolver -> NextTrackPrefetcher(sessionScope, resolver) }
 
+    /**
+     * Startup bandwidth gate fed automatically from [controller]'s state stream so hosts can defer
+     * non-critical background fetches (related tracks, radio queues, artwork, beat analysis) until
+     * initial playback reaches READY.
+     */
+    val startupContentionGate: PlaybackStartupContentionGate = PlaybackStartupContentionGate()
+
     val isClosed: Boolean
         get() = closed.get()
 
     init {
-        if (prefetcher != null) {
-            sessionScope.launch {
-                controller.state.collect(prefetcher::onSnapshot)
+        sessionScope.launch {
+            controller.state.collect { snapshot ->
+                startupContentionGate.observeSnapshot(snapshot)
+                prefetcher?.onSnapshot(snapshot)
             }
         }
         if (queuePersistence != null) {
@@ -144,6 +153,7 @@ class PlaybackSessionHost(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         var failure: Throwable? = null
+        startupContentionGate.reset()
         sessionScope.cancel("PlaybackSessionHost closed")
         prefetcher?.let {
             runCatching(it::close).onFailure { error -> failure = accumulate(failure, error) }

@@ -3,6 +3,7 @@ package moe.rukamori.archivetune.shared
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,6 +11,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import moe.rukamori.archivetune.playback.api.PlaybackParameterPersistence
 import moe.rukamori.archivetune.playback.api.PlaybackQueue
+import moe.rukamori.archivetune.playback.api.PlaybackStartupContentionGate
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.SleepTimerController
 import moe.rukamori.archivetune.playback.api.fallbackClickedItemQueue
@@ -157,9 +159,14 @@ class MusicController(
     private var suggestionGeneration = 0
     private var searchJob: Job? = null
     private var resolveJob: Job? = null
+    private var nextTrackPrefetchJob: Job? = null
+    private var lastPrefetchedTrackId: String? = null
     private var searchGeneration = 0
     private var playbackGeneration = 0
     private var endedWithoutAdvanceGeneration: Int? = null
+
+    /** Coordinates non-critical background fetches so they never starve cold track startup. */
+    val startupContentionGate: PlaybackStartupContentionGate = PlaybackStartupContentionGate()
 
     init {
         lyricsController?.let { lifecycle.register(it) }
@@ -202,10 +209,16 @@ class MusicController(
             playback.collect { transport ->
                 val settings = libraryController?.state?.value?.settings ?: MusicSettings()
                 if (transport.isPlaying) {
+                    if (!transport.isBuffering) {
+                        startupContentionGate.markReady()
+                        scheduleNextTrackPrefetch()
+                    }
                     transport.track?.let {
                         libraryController?.recordPlay(it)
                         libraryController?.recordCachedTrack(it)
                     }
+                } else if (transport.error != null || transport.ended) {
+                    startupContentionGate.markReady()
                 }
                 // Authoritative audible-time statistics (monotonic clock; never counts paused/buffering/seeking)
                 val delta = statisticsSession.onSample(
@@ -230,7 +243,7 @@ class MusicController(
                         ),
                     )
                 }
-                if (transport.track != lyricsTrack) {
+                if (transport.track != lyricsTrack && (transport.track == null || transport.isPlaying || !startupContentionGate.isStartingUp.value)) {
                     lyricsTrack = transport.track
                     lyricsController?.select(transport.track)
                 }
@@ -360,6 +373,10 @@ class MusicController(
         playlistPlayJob?.cancel()
         val expected = ++playbackGeneration
         resolveJob?.cancel()
+        nextTrackPrefetchJob?.cancel()
+        nextTrackPrefetchJob = null
+        lastPrefetchedTrackId = null
+        val startupToken = startupContentionGate.beginStartup()
         player.pause()
         mutableState.update { it.copy(resolvingTrackId = item.id, error = null) }
         playlistPlayJob = applicationScope.launch {
@@ -370,8 +387,10 @@ class MusicController(
                 playAt(0, page.tracks)
                 mutableState.update { it.copy(queueTitle = page.title.ifBlank { item.title }) }
             } catch (cancelled: CancellationException) {
+                startupContentionGate.markReady(startupToken)
                 throw cancelled
             } catch (_: Exception) {
+                startupContentionGate.markReady(startupToken)
                 if (!lifecycle.isClosed && playbackGeneration == expected) mutableState.update {
                     it.copy(resolvingTrackId = null, error = "This playlist could not be played. Try again.")
                 }
@@ -521,6 +540,9 @@ class MusicController(
         val generation = playbackGeneration
         radioQueueJob = applicationScope.launch {
             try {
+                // Wait for the clicked track to finish initial startup before pulling radio/automix pages.
+                startupContentionGate.awaitStartupClear()
+                if (lifecycle.isClosed || generation != playbackGeneration) return@launch
                 val queue = catalog.radioQueue(track)
                 if (lifecycle.isClosed || generation != playbackGeneration) return@launch
                 val selection = selectClickedItemQueue(
@@ -577,6 +599,10 @@ class MusicController(
             mutablePlaybackOptions.update { it.copy(sleepAfterCurrent = false) }
         }
         resolveJob?.cancel()
+        nextTrackPrefetchJob?.cancel()
+        nextTrackPrefetchJob = null
+        lastPrefetchedTrackId = null
+        val startupToken = startupContentionGate.beginStartup()
         player.pause()
         mutableState.update {
             it.copy(
@@ -617,9 +643,15 @@ class MusicController(
                 if (player.canAdjustVolume) player.setVolume(playbackOptions.value.volume)
                 player.play()
                 mutableState.update { it.copy(resolvingTrackId = null) }
+                if (playback.value.isPlaying && !playback.value.isBuffering) {
+                    startupContentionGate.markReady(startupToken)
+                    scheduleNextTrackPrefetch()
+                }
             } catch (cancelled: CancellationException) {
+                startupContentionGate.markReady(startupToken)
                 throw cancelled
             } catch (failure: Exception) {
+                startupContentionGate.markReady(startupToken)
                 if (generation == playbackGeneration) {
                     val autoSkip = libraryController?.state?.value?.settings?.autoSkipNextOnError == true
                     if (autoSkip && playbackQueue.canAdvance) {
@@ -976,6 +1008,10 @@ class MusicController(
         if (lifecycle.isClosed) return
         ++playbackGeneration
         resolveJob?.cancel()
+        nextTrackPrefetchJob?.cancel()
+        nextTrackPrefetchJob = null
+        lastPrefetchedTrackId = null
+        startupContentionGate.reset()
         playlistPlayJob?.cancel()
         radioQueueJob?.cancel()
         sleepTimer.clear()
@@ -1071,7 +1107,31 @@ class MusicController(
 
     fun retryPlayback() {
         if (!lifecycle.isClosed && (state.value.failedPlayback || playback.value.error != null)) {
+            state.value.queue.getOrNull(state.value.queueIndex)?.id?.let(catalog::invalidateResolved)
             playAt(state.value.queueIndex)
+        }
+    }
+
+    private fun scheduleNextTrackPrefetch() {
+        if (lifecycle.isClosed || startupContentionGate.isStartingUp.value) return
+        val nextIndex = thumbnailNeighbor(+1) ?: return
+        val nextTrack = state.value.queue.getOrNull(nextIndex) ?: return
+        if (nextTrack.id == state.value.queue.getOrNull(state.value.queueIndex)?.id) return
+        if (nextTrack.localFilePath != null) return
+        if (lastPrefetchedTrackId == nextTrack.id) return
+        lastPrefetchedTrackId = nextTrack.id
+        nextTrackPrefetchJob?.cancel()
+        nextTrackPrefetchJob = applicationScope.launch {
+            try {
+                // Allow the active track to build steady-state buffer and avoid wasted resolves during rapid skips.
+                delay(NEXT_TRACK_PREFETCH_DELAY_MS)
+                if (lifecycle.isClosed || startupContentionGate.isStartingUp.value) return@launch
+                catalog.resolve(nextTrack)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Speculative prefetch failure is benign; playback will resolve on transition.
+            }
         }
     }
 
@@ -1087,6 +1147,9 @@ class MusicController(
         if (lifecycle.isClosed) return
         ++searchGeneration
         ++playbackGeneration
+        nextTrackPrefetchJob?.cancel()
+        nextTrackPrefetchJob = null
+        startupContentionGate.reset()
         browseBackStack.clear()
         lifecycle.close()
     }
@@ -1100,6 +1163,7 @@ class MusicController(
 
     private companion object {
         const val ANON_SCOPE = "anon"
+        const val NEXT_TRACK_PREFETCH_DELAY_MS = 2_000L
     }
 }
 

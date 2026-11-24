@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
+import moe.rukamori.archivetune.playback.api.ResolvedSourceCache
 import moe.rukamori.archivetune.playback.session.PlaybackQueuePersistence
 import moe.rukamori.archivetune.playback.session.PlaybackSessionHost
 import moe.rukamori.archivetune.playback.session.QueuePersistencePolicy
@@ -32,6 +33,7 @@ fun createIosPlaybackSession(
     prefetchResolver: (suspend (item: PlaybackItem, cacheAllowed: () -> Boolean) -> Result<ResolvedPlaybackSource>)? = null,
     parentContext: CoroutineContext = Dispatchers.Default,
     random: Random = Random.Default,
+    sourceCache: ResolvedSourceCache? = ResolvedSourceCache(),
 ): PlaybackSessionHost {
     val controller = IosPlaybackController(
         engine = engine,
@@ -39,6 +41,7 @@ fun createIosPlaybackSession(
         ownsEngine = ownsEngine,
         parentContext = parentContext,
         random = random,
+        sourceCache = sourceCache,
     )
     return try {
         PlaybackSessionHost(

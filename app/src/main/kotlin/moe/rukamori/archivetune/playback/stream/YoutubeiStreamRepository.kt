@@ -71,29 +71,37 @@ class YoutubeiStreamRepository
             }
 
             val locale = YouTube.locale
+            val resolvedVisitorData =
+                authState.visitorData?.takeIf(String::isNotBlank)
+                    ?: if (!authState.hasLoginCookie) {
+                        YouTube.visitorData().getOrNull()?.takeIf(String::isNotBlank)
+                    } else {
+                        null
+                    }
+            val primaryRequest =
+                YoutubeiStreamRequest(
+                    mediaId = request.mediaId,
+                    quality = request.quality.toYoutubeiQuality(),
+                    networkMetered = request.networkMetered,
+                    authFingerprint = authState.streamCacheFingerprint,
+                    pinnedItag = request.pinnedFormatId,
+                    requiresSongMetadata = request.requiresSongMetadata,
+                    cookie = authState.cookie.takeIf { authState.hasLoginCookie },
+                    visitorData = resolvedVisitorData,
+                    dataSyncId = authState.dataSyncId.takeIf { authState.hasLoginCookie },
+                    sessionPoToken = authState.poTokenGvsSession.takeIf { authState.hasLoginCookie },
+                    videoPoToken =
+                        authState.poTokenGvs?.takeIf {
+                            authState.hasLoginCookie && authState.poTokenGvsVideoId == request.mediaId
+                        },
+                    language = locale.hl,
+                    location = locale.gl,
+                    timezone = TimeZone.getDefault().id,
+                )
             val resolved =
                 try {
                     resolver.resolve(
-                        request =
-                            YoutubeiStreamRequest(
-                                mediaId = request.mediaId,
-                                quality = request.quality.toYoutubeiQuality(),
-                                networkMetered = request.networkMetered,
-                                authFingerprint = authState.streamCacheFingerprint,
-                                pinnedItag = request.pinnedFormatId,
-                                requiresSongMetadata = request.requiresSongMetadata,
-                                cookie = authState.cookie.takeIf { authState.hasLoginCookie },
-                                visitorData = authState.visitorData,
-                                dataSyncId = authState.dataSyncId.takeIf { authState.hasLoginCookie },
-                                sessionPoToken = authState.poTokenGvsSession.takeIf { authState.hasLoginCookie },
-                                videoPoToken =
-                                    authState.poTokenGvs?.takeIf {
-                                        authState.hasLoginCookie && authState.poTokenGvsVideoId == request.mediaId
-                                    },
-                                language = locale.hl,
-                                location = locale.gl,
-                                timezone = TimeZone.getDefault().id,
-                            ),
+                        request = primaryRequest,
                         priority = priority.toYoutubeiPriority(),
                         videoPoTokenProvider = { replacementMediaId ->
                             val replacementAuthState =
@@ -109,41 +117,76 @@ class YoutubeiStreamRepository
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (failure: YoutubeiException) {
-                    if (failure.kind == YoutubeiFailureKind.PO_TOKEN ||
-                        failure.kind == YoutubeiFailureKind.LOGIN_REQUIRED &&
-                        YTPlayerUtils.isBotDetectionError(failure.message.orEmpty())
-                    ) {
-                        throw YTPlayerUtils.BotDetectionPlaybackException(
-                            videoId = request.mediaId,
-                            clients = setOf(if (authState.hasLoginCookie) "WEB_CREATOR" else "VISIONOS"),
-                            cause = failure,
-                        )
-                    }
-                    if (failure.kind == YoutubeiFailureKind.LOGIN_REQUIRED ||
-                        failure.kind == YoutubeiFailureKind.HTTP && failure.httpStatus == 401
-                    ) {
-                        if (!failure.requiresContentConfirmation()) {
-                            if (!authState.hasLoginCookie) {
-                                throw YTPlayerUtils.BadStreamPlayerResponseException(
-                                    videoId = request.mediaId,
-                                    failedClients = setOf("VISIONOS"),
-                                    cause = failure,
+                    val fallbackResolved =
+                        if (shouldFallbackToAnonymousVisionOs(authState.hasLoginCookie, failure)) {
+                            Timber.tag("YoutubeiResolver").w(
+                                "Authenticated WEB_CREATOR failed for %s (%s); retrying with anonymous VISIONOS",
+                                request.mediaId,
+                                failure.kind,
+                            )
+                            val fallbackVisitorData =
+                                resolvedVisitorData
+                                    ?: YouTube.visitorData().getOrNull()?.takeIf(String::isNotBlank)
+                            try {
+                                resolver.resolve(
+                                    request =
+                                        primaryRequest.copy(
+                                            authFingerprint = "anon:${fallbackVisitorData.orEmpty()}",
+                                            cookie = null,
+                                            visitorData = fallbackVisitorData,
+                                            dataSyncId = null,
+                                            sessionPoToken = null,
+                                            videoPoToken = null,
+                                        ),
+                                    priority = priority.toYoutubeiPriority(),
                                 )
+                            } catch (fallbackCancellation: CancellationException) {
+                                throw fallbackCancellation
+                            } catch (_: Throwable) {
+                                null
                             }
-                            throw YTPlayerUtils.InvalidPlaybackLoginContextException(
+                        } else {
+                            null
+                        }
+                    if (fallbackResolved != null) {
+                        fallbackResolved
+                    } else {
+                        if (failure.kind == YoutubeiFailureKind.PO_TOKEN ||
+                            failure.kind == YoutubeiFailureKind.LOGIN_REQUIRED &&
+                            YTPlayerUtils.isBotDetectionError(failure.message.orEmpty())
+                        ) {
+                            throw YTPlayerUtils.BotDetectionPlaybackException(
                                 videoId = request.mediaId,
-                                targetUrl = request.mediaUrl,
+                                clients = setOf(if (authState.hasLoginCookie) "WEB_CREATOR" else "VISIONOS"),
                                 cause = failure,
                             )
                         }
-                        throw YTPlayerUtils.LoginRequiredForPlaybackException(
-                            videoId = request.mediaId,
-                            targetUrl = request.mediaUrl,
-                            reason = failure.message,
-                            cause = failure,
-                        )
+                        if (failure.kind == YoutubeiFailureKind.LOGIN_REQUIRED ||
+                            failure.kind == YoutubeiFailureKind.HTTP && failure.httpStatus == 401
+                        ) {
+                            if (!failure.requiresContentConfirmation()) {
+                                if (!authState.hasLoginCookie) {
+                                    throw YTPlayerUtils.BadStreamPlayerResponseException(
+                                        videoId = request.mediaId,
+                                        failedClients = setOf("VISIONOS"),
+                                        cause = failure,
+                                    )
+                                }
+                                throw YTPlayerUtils.InvalidPlaybackLoginContextException(
+                                    videoId = request.mediaId,
+                                    targetUrl = request.mediaUrl,
+                                    cause = failure,
+                                )
+                            }
+                            throw YTPlayerUtils.LoginRequiredForPlaybackException(
+                                videoId = request.mediaId,
+                                targetUrl = request.mediaUrl,
+                                reason = failure.message,
+                                cause = failure,
+                            )
+                        }
+                        throw failure
                     }
-                    throw failure
                 }
 
             return ResolvedAudioStream(
@@ -197,13 +240,10 @@ class YoutubeiStreamRepository
         private val AudioStreamRequest.mediaUrl: String
             get() = "https://music.youtube.com/watch?v=$mediaId"
 
-        private fun YoutubeiException.requiresContentConfirmation(): Boolean {
-            if (httpStatus == 401) return false
-            val reason = message.orEmpty()
-            return CONTENT_CONFIRMATION_REASONS.any { reason.contains(it, ignoreCase = true) }
-        }
+        private fun YoutubeiException.requiresContentConfirmation(): Boolean =
+            isContentConfirmationFailure(this)
 
-        private companion object {
+        internal companion object {
             val CONTENT_CONFIRMATION_REASONS =
                 listOf(
                     "confirm your age",
@@ -220,5 +260,34 @@ class YoutubeiStreamRepository
                     "members-only",
                     "members only",
                 )
+
+            internal fun isContentConfirmationFailure(failure: YoutubeiException): Boolean {
+                if (failure.httpStatus == 401) return false
+                val reason = failure.message.orEmpty()
+                return CONTENT_CONFIRMATION_REASONS.any { reason.contains(it, ignoreCase = true) }
+            }
+
+            /**
+             * Returns true when an authenticated WEB_CREATOR failure should retry with anonymous
+             * VISIONOS (for example `Release - Topic` auto-generated tracks rejected by WEB_CREATOR
+             * or slow-network PoToken/decipher failures), while keeping 401 and age/private/members
+             * restrictions on the login-recovery path.
+             */
+            internal fun shouldFallbackToAnonymousVisionOs(
+                hasLoginCookie: Boolean,
+                failure: YoutubeiException,
+            ): Boolean {
+                if (!hasLoginCookie) return false
+                if (failure.httpStatus == 401 || isContentConfirmationFailure(failure)) return false
+                return when (failure.kind) {
+                    YoutubeiFailureKind.UNAVAILABLE,
+                    YoutubeiFailureKind.NO_FORMAT,
+                    YoutubeiFailureKind.PO_TOKEN,
+                    YoutubeiFailureKind.DECIPHER,
+                    YoutubeiFailureKind.HTTP,
+                    -> true
+                    else -> false
+                }
+            }
         }
     }

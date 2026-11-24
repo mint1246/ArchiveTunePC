@@ -34,3 +34,7 @@ internal actual class PlaybackAtomicLong actual constructor(initial: Long) {
 
     actual fun incrementAndGet(): Long = delegate.incrementAndGet()
 }
+
+internal actual class PlaybackLock actual constructor() {
+    actual fun <T> withLock(block: () -> T): T = synchronized(this) { block() }
+}

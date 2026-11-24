@@ -112,6 +112,7 @@ interface MusicCatalog : AutoCloseable {
     suspend fun search(query: String): List<MusicTrack>
     suspend fun resolve(track: MusicTrack): ResolvedAudio
     suspend fun resolveForDownload(track: MusicTrack): ResolvedAudio = resolve(track)
+    fun invalidateResolved(trackId: String) {}
     fun setLocale(language: String, country: String) {}
     fun setAudioQuality(quality: MusicAudioQuality) {}
     fun setAuth(auth: MusicYouTubeAuth?) {}

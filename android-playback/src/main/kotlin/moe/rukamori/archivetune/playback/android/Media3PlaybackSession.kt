@@ -26,8 +26,10 @@ import kotlinx.coroutines.Dispatchers
 import moe.rukamori.archivetune.playback.api.PlaybackController
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
+import moe.rukamori.archivetune.playback.api.PlaybackRedirectCache
 import moe.rukamori.archivetune.playback.api.PlaybackSource
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
+import moe.rukamori.archivetune.playback.api.PlaybackStartupContentionGate
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 import moe.rukamori.archivetune.playback.session.PlaybackSessionHost
 
@@ -48,6 +50,9 @@ class Media3PlaybackSession(
 
     val isClosed: Boolean
         get() = closed.get() || host.isClosed
+
+    val startupContentionGate: PlaybackStartupContentionGate
+        get() = host.startupContentionGate
 
     suspend fun restorePersistedQueue(playWhenReady: Boolean = false): Boolean =
         host.restorePersistedQueue(playWhenReady = playWhenReady)
@@ -94,6 +99,7 @@ fun createMedia3PlaybackSession(
     queueFile: File? = null,
     httpDataSourceFactory: DataSource.Factory = DefaultHttpDataSource.Factory(),
     chunkLength: Long = 8L * 1024 * 1024,
+    redirectCache: PlaybackRedirectCache = PlaybackRedirectCache(),
     exoPlayer: ExoPlayer? = null,
     ownsPlayer: Boolean = exoPlayer == null,
     playerDispatcher: CoroutineDispatcher? = null,
@@ -104,12 +110,14 @@ fun createMedia3PlaybackSession(
 ): Media3PlaybackSession {
     val controllerRef = AtomicReference<Media3PlaybackController?>()
     val resolvedPlayer = exoPlayer ?: ExoPlayer.Builder(context)
+        .setLoadControl(createLowLatencyPlaybackLoadControl())
         .setMediaSourceFactory(
             DefaultMediaSourceFactory(
                 resolvingPlaybackSourceUpstream(
                     context = context,
                     httpFactory = httpDataSourceFactory,
                     chunkLength = chunkLength,
+                    redirectCache = redirectCache,
                     itemForKey = { key ->
                         controllerRef.get()?.findDeferredItemByKey(key) ?: PlaybackItem(
                             metadata = PlaybackMetadata(id = key, title = ""),

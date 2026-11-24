@@ -235,6 +235,8 @@ import moe.rukamori.archivetune.playback.preload.NextStreamPreloader
 import moe.rukamori.archivetune.playback.android.bypassesDeferredPlaybackResolution
 import moe.rukamori.archivetune.playback.android.bypassesPlaybackCache
 import moe.rukamori.archivetune.playback.android.cachedPlaybackDataSourceFactory
+import moe.rukamori.archivetune.playback.android.createCrossfadePlaybackLoadControl
+import moe.rukamori.archivetune.playback.android.createLowLatencyPlaybackLoadControl
 import moe.rukamori.archivetune.playback.android.isFullyCached
 import moe.rukamori.archivetune.playback.android.resolvingPlaybackUpstream
 import moe.rukamori.archivetune.playback.preload.ObservePlaybackPreloadConfigurationUseCase
@@ -266,8 +268,11 @@ import moe.rukamori.archivetune.playback.api.hasPlaybackPositionAdvanced
 import moe.rukamori.archivetune.playback.api.needsCorrectiveCrossfadeSeek
 import moe.rukamori.archivetune.playback.api.playbackLoudnessNormalizationFactor
 import moe.rukamori.archivetune.playback.api.PlaybackParameterPersistence
+import moe.rukamori.archivetune.playback.api.PlaybackRedirectCache
+import moe.rukamori.archivetune.playback.api.PlaybackStartupContentionGate
 import moe.rukamori.archivetune.playback.api.PersistedPlaybackParameters
 import moe.rukamori.archivetune.playback.api.sharedCrossfadeAudioSessionId
+import okhttp3.ConnectionPool
 import moe.rukamori.archivetune.playback.session.AudioFocusCoordinator
 import moe.rukamori.archivetune.playback.session.CrossfadeTriggerPlanner
 import moe.rukamori.archivetune.playback.session.FocusPlaybackAction
@@ -510,10 +515,14 @@ class MusicService :
         }
     private val streamingExtractionManager by streamingExtractionManagerDelegate
     private val cacheBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
+    private val mediaRedirectCache = PlaybackRedirectCache()
+    private val startupContentionGate = PlaybackStartupContentionGate()
     private val mediaOkHttpClient: OkHttpClient by lazy {
         OkHttpClient
             .Builder()
             .proxy(YouTube.streamOkHttpProxy)
+            .dns(YouTube.dns)
+            .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
             .followRedirects(true)
             .followSslRedirects(true)
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -4237,6 +4246,7 @@ if (
         }
         if (mediaMetadata.isPodcast) return
         if (!database.hasRelatedSongs(mediaId)) {
+            startupContentionGate.awaitStartupClear()
             val relatedEndpoint =
                 YouTube.next(WatchEndpoint(videoId = mediaId)).getOrNull()?.relatedEndpoint
                     ?: return
@@ -7182,6 +7192,11 @@ if (
         super.onPlaybackStateChanged(playbackState)
 
         updateHistoryTrackingPlaybackState()
+        if (playbackState == Player.STATE_BUFFERING && player.playWhenReady && player.currentPosition <= 500L) {
+            startupContentionGate.beginStartup()
+        } else if (playbackState == Player.STATE_READY || playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+            startupContentionGate.markReady()
+        }
         if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
             enqueueCurrentHistorySessionForFinalization()
             if (!isCrossfading || playbackState == Player.STATE_IDLE) {
@@ -7346,7 +7361,9 @@ if (
     ) {
         updateNextTrackPreResolution()
         if (::beatAnalysis.isInitialized && dataStore.get(moe.rukamori.archivetune.constants.BeatSyncedVisualsEnabledKey, true)) {
-            updateBeatAnalysisQueue()
+            if (player.mediaItemCount <= 0 || player.playbackState == Player.STATE_READY) {
+                updateBeatAnalysisQueue()
+            }
         }
         sampleAuthoritativeStatistics()
         if (events.containsAny(
@@ -7899,7 +7916,7 @@ if (
     }
 
     private fun nextTrackPreResolutionCandidate(): NextTrackPreResolutionCandidate? {
-        if (!::player.isInitialized || preferredStreamClient != PlayerStreamClient.WEB_REMIX || isLowDataModeActive()) return null
+        if (!::player.isInitialized || player.playbackState != Player.STATE_READY || preferredStreamClient != PlayerStreamClient.WEB_REMIX || isLowDataModeActive()) return null
         if (player.mediaItemCount <= 1 || player.currentTimeline.isEmpty) return null
         val currentIndex = player.currentMediaItemIndex
         val nextIndex = player.nextMediaItemIndex
@@ -7921,7 +7938,12 @@ if (
 
     private fun createDataSourceFactory() =
         cachedPlaybackDataSourceFactory(
-            upstream = resolvingPlaybackUpstream(this, OkHttpDataSource.Factory(mediaOkHttpClient), CHUNK_LENGTH) { request, mediaId ->
+            upstream = resolvingPlaybackUpstream(
+                context = this,
+                httpFactory = OkHttpDataSource.Factory(mediaOkHttpClient),
+                chunkLength = CHUNK_LENGTH,
+                redirectCache = mediaRedirectCache,
+            ) { request, mediaId ->
                 resolveDeferredPlaybackDataSpec(request, mediaId, allowCacheShortCircuit = true)
             },
             playerCache = playerCache,
@@ -8043,6 +8065,9 @@ if (
         }
 
         val lowDataModeActive = isLowDataModeActive()
+        if (!speculative) {
+            startupContentionGate.beginStartup()
+        }
         var resolvedRequestHeaders: Map<String, String> = emptyMap()
         val playbackData =
             runCatching {
@@ -8202,12 +8227,14 @@ if (
             }
         }
 
-        database.query {
-            upsert(
-                formatEntity,
-            )
+        ioScope.launch {
+            database.query {
+                upsert(
+                    formatEntity,
+                )
+            }
+            recoverSong(mediaId, nonNullPlayback)
         }
-        scope.launch(Dispatchers.IO) { recoverSong(mediaId, nonNullPlayback) }
 
         val streamUrl = nonNullPlayback.streamUrl
 
@@ -8292,26 +8319,20 @@ if (
     }
 
     private fun createPrimaryLoadControl(): DefaultLoadControl =
-        DefaultLoadControl
-            .Builder()
-            .setBufferDurationsMs(
-                PRIMARY_MIN_BUFFER_MS,
-                PRIMARY_MAX_BUFFER_MS,
-                PRIMARY_BUFFER_FOR_PLAYBACK_MS,
-                PRIMARY_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
-            ).setPrioritizeTimeOverSizeThresholds(true)
-            .build()
+        createLowLatencyPlaybackLoadControl(
+            minBufferMs = PRIMARY_MIN_BUFFER_MS,
+            maxBufferMs = PRIMARY_MAX_BUFFER_MS,
+            bufferForPlaybackMs = PRIMARY_BUFFER_FOR_PLAYBACK_MS,
+            bufferForPlaybackAfterRebufferMs = PRIMARY_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+        )
 
     private fun createCrossfadeLoadControl(): DefaultLoadControl =
-        DefaultLoadControl
-            .Builder()
-            .setBufferDurationsMs(
-                CROSSFADE_MIN_BUFFER_MS,
-                CROSSFADE_MAX_BUFFER_MS,
-                CROSSFADE_MIN_BUFFER_BEFORE_START_MS.toInt(),
-                CROSSFADE_MIN_BUFFER_BEFORE_START_MS.toInt(),
-            ).setPrioritizeTimeOverSizeThresholds(true)
-            .build()
+        createCrossfadePlaybackLoadControl(
+            minBufferMs = CROSSFADE_MIN_BUFFER_MS,
+            maxBufferMs = CROSSFADE_MAX_BUFFER_MS,
+            bufferForPlaybackMs = CROSSFADE_MIN_BUFFER_BEFORE_START_MS.toInt(),
+            bufferForPlaybackAfterRebufferMs = CROSSFADE_MIN_BUFFER_BEFORE_START_MS.toInt(),
+        )
 
     private fun createRenderersFactory() =
         object : DefaultRenderersFactory(this) {
@@ -9052,8 +9073,8 @@ if (
         const val CROSSFADE_MAX_BUFFER_BEFORE_START_MS = 12_500L
         const val PRIMARY_MIN_BUFFER_MS = 20_000
         const val PRIMARY_MAX_BUFFER_MS = 60_000
-        const val PRIMARY_BUFFER_FOR_PLAYBACK_MS = 750
-        const val PRIMARY_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_500
+        const val PRIMARY_BUFFER_FOR_PLAYBACK_MS = 500
+        const val PRIMARY_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2_000
         const val CROSSFADE_MIN_BUFFER_MS = 15_000
         const val CROSSFADE_MAX_BUFFER_MS = 45_000
         const val CROSSFADE_FRAME_MS = 32L

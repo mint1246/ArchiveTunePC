@@ -24,6 +24,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
+import moe.rukamori.archivetune.playback.api.ResolvedSourceCache
 
 /**
  * Minimal KMP youtubei implementation using only Ktor core + kotlinx.serialization JSON.
@@ -74,20 +76,30 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
     private var localeGl: String = "US"
     private var audioQuality: MusicAudioQuality = MusicAudioQuality.AUTO
     private var auth: MusicYouTubeAuth? = null
+    private val resolvedSourceCache = ResolvedSourceCache()
 
     override fun setLocale(language: String, country: String) {
         localeHl = language.takeIf { it.isNotBlank() && it != "system" } ?: "en"
         localeGl = country.takeIf { it.isNotBlank() && it != "system" } ?: "US"
+        resolvedSourceCache.clear()
     }
 
     override fun setAudioQuality(quality: MusicAudioQuality) {
-        audioQuality = quality
+        if (audioQuality != quality) {
+            audioQuality = quality
+            resolvedSourceCache.clear()
+        }
     }
 
     override fun setAuth(auth: MusicYouTubeAuth?) {
         this.auth = auth?.takeIf { it.cookie.isNotBlank() && it.sapisid.isNotBlank() }
         visitorData = null
         cachedHomeChips = null
+        resolvedSourceCache.clear()
+    }
+
+    override fun invalidateResolved(trackId: String) {
+        resolvedSourceCache.invalidatePrefix("$trackId|")
     }
 
     override suspend fun fetchAccountInfo(): MusicYouTubeAccount? {
@@ -256,6 +268,15 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
                 "This item does not have a valid YouTube video ID and cannot be played.",
             )
         }
+        val cacheKey = resolveCacheKey(clickedId)
+        resolvedSourceCache.get(cacheKey)?.let { cached ->
+            return ResolvedAudio(
+                trackId = clickedId,
+                url = cached.uri,
+                mimeType = cached.mimeType ?: "audio/mp4",
+                headers = cached.headers,
+            )
+        }
         ensureVisitorContext()
         // Never search by title here, and never accept a different ID returned by the player API.
         val body = buildJsonObject {
@@ -268,24 +289,56 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
             preferHls = preferHls,
             audioQuality = audioQuality,
         )
-        if (resolved.mimeType != "application/vnd.apple.mpegurl") return resolved
-        // Use the master manifest's audio rendition when available, so a music player
-        // need not download/decode its accompanying video variants. URLs stay ephemeral.
-        return try {
-            val audioUrl = withTimeoutOrNull(3_000) {
-                val response = httpClient.get(resolved.url)
-                if (response.status != HttpStatusCode.OK) return@withTimeoutOrNull null
-                val manifest = response.bodyAsText()
-                CatalogParsing.hlsAudioRendition(manifest)
+        val finalResolved =
+            if (resolved.mimeType != "application/vnd.apple.mpegurl") {
+                resolved
+            } else {
+                // Use the master manifest's audio rendition when available, so a music player
+                // need not download/decode its accompanying video variants. URLs stay ephemeral.
+                try {
+                    val audioUrl = withTimeoutOrNull(HLS_RENDITION_TIMEOUT_MS) {
+                        val response = httpClient.get(resolved.url)
+                        if (response.status != HttpStatusCode.OK) return@withTimeoutOrNull null
+                        val manifest = response.bodyAsText()
+                        CatalogParsing.hlsAudioRendition(manifest)
+                    }
+                    if (audioUrl == null) resolved else resolved.copy(url = audioUrl)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    resolved
+                }
             }
-            if (audioUrl == null) resolved else resolved.copy(url = audioUrl)
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { resolved }
+        resolvedSourceCache.put(
+            cacheKey,
+            ResolvedPlaybackSource(
+                uri = finalResolved.url,
+                mimeType = finalResolved.mimeType,
+                headers = finalResolved.headers,
+            ),
+        )
+        return finalResolved
     }
+
+    private fun resolveCacheKey(videoId: String): String =
+        "$videoId|${audioQuality.name}|$preferHls|$localeHl|$localeGl|${auth != null}"
 
     private suspend fun ensureVisitorContext() {
         if (visitorData != null) return
         visitorMutex.withLock {
+            if (visitorData != null) return@withLock
+            // Prefer YouTube's tiny /visitor_id endpoint (~320 B on wire) over fetching the full
+            // FEmusic_home browse payload (~225 KB JSON) just to obtain an anonymous visitorData.
+            val lightweightBody = buildJsonObject {
+                put("context", SEARCH_CLIENT.context(hl = localeHl, gl = localeGl))
+            }
+            try {
+                request(SEARCH_CLIENT, "visitor_id", lightweightBody.toString())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Fall back to FEmusic_home below when visitor_id is unavailable.
+            }
             if (visitorData != null) return@withLock
             // Restored queues can be played before search has established an anonymous session.
             // This bootstrap never chooses a song or changes the requested video identity.
@@ -372,6 +425,7 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
         if (closed) return
         closed = true
         visitorData = null
+        resolvedSourceCache.clear()
         httpClient.close()
     }
 
@@ -429,6 +483,8 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
     }
 
     private companion object {
+        private const val HLS_RENDITION_TIMEOUT_MS = 8_000L
+
         // See core/ InnerTube.ytClient(), and yt-dlp's public youtubei client profiles.
         private val SEARCH_CLIENT = ClientProfile(
             clientName = "WEB_REMIX",

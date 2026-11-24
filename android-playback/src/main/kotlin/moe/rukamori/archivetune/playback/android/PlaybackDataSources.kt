@@ -17,6 +17,7 @@ import java.util.Locale
 import kotlinx.coroutines.runBlocking
 import moe.rukamori.archivetune.playback.api.PlaybackItem
 import moe.rukamori.archivetune.playback.api.PlaybackMetadata
+import moe.rukamori.archivetune.playback.api.PlaybackRedirectCache
 import moe.rukamori.archivetune.playback.api.PlaybackSource
 import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 
@@ -31,9 +32,15 @@ fun resolvingPlaybackUpstream(
     context: Context,
     httpFactory: DataSource.Factory,
     chunkLength: Long,
+    redirectCache: PlaybackRedirectCache = PlaybackRedirectCache(),
     resolveDeferred: (request: DataSpec, mediaId: String) -> DataSpec,
 ): DataSource.Factory {
-    val chunkedFactory = DataSource.Factory { ChunkedDataSource(httpFactory.createDataSource(), chunkLength) }
+    val chunkedFactory = DataSource.Factory {
+        ChunkedDataSource(
+            upstream = RedirectCachingDataSource(httpFactory.createDataSource(), redirectCache),
+            chunkLength = chunkLength,
+        )
+    }
     return ResolvingDataSource.Factory(DefaultDataSource.Factory(context, chunkedFactory)) { request ->
         val mediaId = request.key
         if (mediaId == null || request.uri.bypassesDeferredPlaybackResolution()) request else resolveDeferred(request, mediaId)
@@ -49,6 +56,7 @@ fun resolvingPlaybackSourceUpstream(
     context: Context,
     httpFactory: DataSource.Factory,
     chunkLength: Long = 8L * 1024 * 1024,
+    redirectCache: PlaybackRedirectCache = PlaybackRedirectCache(),
     itemForKey: (key: String) -> PlaybackItem = { key ->
         PlaybackItem(
             metadata = PlaybackMetadata(id = key, title = ""),
@@ -60,6 +68,7 @@ fun resolvingPlaybackSourceUpstream(
     context = context,
     httpFactory = httpFactory,
     chunkLength = chunkLength,
+    redirectCache = redirectCache,
 ) { request, key ->
     resolvePlaybackDataSpec(
         request = request,

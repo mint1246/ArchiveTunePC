@@ -33,6 +33,7 @@ import moe.rukamori.archivetune.playback.api.PlaybackSourceResolver
 import moe.rukamori.archivetune.playback.api.PlaybackStatus
 import moe.rukamori.archivetune.playback.api.RepeatMode
 import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
+import moe.rukamori.archivetune.playback.api.ResolvedSourceCache
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class IosPlaybackControllerTest {
@@ -161,6 +162,43 @@ class IosPlaybackControllerTest {
         controller.close()
         assertTrue(engine.closed)
         assertNull(engine.remoteHandlers)
+    }
+
+    @Test
+    fun sourceCacheReusesResolvedSourceAcrossSkipsAndInvalidatesOnRetry() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val engine = FakeIosEngine()
+        var resolveCount = 0
+        val cache = ResolvedSourceCache()
+        val controller = IosPlaybackController(
+            engine = engine,
+            sourceResolver = PlaybackSourceResolver { item ->
+                resolveCount++
+                Result.success(validSource(item.metadata.id))
+            },
+            parentContext = dispatcher,
+            sourceCache = cache,
+        )
+
+        controller.replaceQueue(listOf(track("a"), track("b")), startIndex = 0, playWhenReady = true)
+        advanceUntilIdle()
+        assertEquals(1, resolveCount)
+
+        controller.seekToItem(1)
+        advanceUntilIdle()
+        assertEquals(2, resolveCount)
+
+        // Going back to "a" should reuse the cached resolved source without re-resolving.
+        controller.seekToItem(0)
+        advanceUntilIdle()
+        assertEquals(2, resolveCount)
+
+        // Explicit retry invalidates the cached source and resolves fresh.
+        controller.retry()
+        advanceUntilIdle()
+        assertEquals(3, resolveCount)
+
+        controller.close()
     }
 
     @Test

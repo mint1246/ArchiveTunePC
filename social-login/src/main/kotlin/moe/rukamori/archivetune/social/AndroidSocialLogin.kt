@@ -14,16 +14,9 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
-import java.net.URI
-import java.net.URLDecoder
 import java.security.SecureRandom
 import java.util.Base64
 import kotlin.coroutines.coroutineContext
-
-internal data class SocialLoginCallback(
-    val code: String?,
-    val error: String?,
-)
 
 class AndroidSocialLogin(
     private val api: SocialApi,
@@ -104,28 +97,4 @@ class AndroidSocialLogin(
         SecureRandom().nextBytes(bytes)
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     }
-}
-
-internal fun parseSocialLoginCallbackTarget(
-    target: String,
-    expectedNonce: String,
-): SocialLoginCallback {
-    val uri = URI("http://127.0.0.1$target")
-    require(uri.path == "/archivetune-auth") { "Unexpected ArchiveTune social callback target" }
-    val query = buildMap {
-        uri.rawQuery.orEmpty().split('&').filter(String::isNotBlank).forEach { pair ->
-            val separator = pair.indexOf('=')
-            val key = if (separator >= 0) pair.substring(0, separator) else pair
-            val value = if (separator >= 0) pair.substring(separator + 1) else ""
-            put(
-                URLDecoder.decode(key, Charsets.UTF_8.name()),
-                URLDecoder.decode(value, Charsets.UTF_8.name()),
-            )
-        }
-    }
-    require(query["nonce"] == expectedNonce) { "Discord login callback did not match this sign-in" }
-    return SocialLoginCallback(
-        code = query["code"],
-        error = query["error"],
-    )
 }

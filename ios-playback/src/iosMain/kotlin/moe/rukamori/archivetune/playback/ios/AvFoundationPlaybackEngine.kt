@@ -113,13 +113,17 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
     private var lastNowPlayingRate = -1.0
     private var nowPlayingArtworkItemId: String? = null
     private var nowPlayingArtwork: MPMediaItemArtwork? = null
+    private var pendingArtworkItem: PlaybackItem? = null
+    private var pendingArtworkGeneration: Long = -1L
+    private var artworkGraceTimer: NSTimer? = null
+    private var expandedBufferGeneration: Long = -1L
 
     init {
         timeObserver = player.addPeriodicTimeObserverForInterval(
             CMTimeMake(1, 4),
             queue = null,
         ) { _ -> refresh() }
-        heartbeat = NSTimer.scheduledTimerWithTimeInterval(0.5, repeats = true) { _ -> refresh() }
+        heartbeat = NSTimer.scheduledTimerWithTimeInterval(STARTUP_HEARTBEAT_INTERVAL_SECONDS, repeats = true) { _ -> refresh() }
 
         globalObservers += observe(AVAudioSessionInterruptionNotification, audioSession) { notice ->
             val type = number(notice, AVAudioSessionInterruptionTypeKey)?.toULong()
@@ -198,13 +202,21 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
 
         val avItem = AVPlayerItem(uRL = url).apply {
             audioTimePitchAlgorithm = AVAudioTimePitchAlgorithmSpectral
+            // Start playback with a compact initial forward buffer (~1.5s / first HLS segment)
+            // instead of AVFoundation's default ~5-10s buffer, then expand once audible.
+            preferredForwardBufferDuration = STARTUP_FORWARD_BUFFER_SECONDS
         }
         currentItem = avItem
         currentPlaybackItem = item
         nowPlayingArtworkItemId = null
         nowPlayingArtwork = null
+        expandedBufferGeneration = -1L
+        artworkGraceTimer?.invalidate()
+        artworkGraceTimer = null
+        pendingArtworkItem = item
+        pendingArtworkGeneration = generation
         player.replaceCurrentItemWithPlayerItem(avItem)
-        loadNowPlayingArtwork(expectedGeneration = generation, item = item)
+        scheduleDeferredNowPlayingArtwork(expectedGeneration = generation)
 
         val clampedStart = startPositionMs.coerceAtLeast(0L)
         val initialDuration = item.metadata.durationHintMs?.coerceAtLeast(0L) ?: 0L
@@ -331,6 +343,11 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         wantsPlayback = false
         resumeAfterInterruption = false
         clearItemObservers()
+        artworkGraceTimer?.invalidate()
+        artworkGraceTimer = null
+        pendingArtworkItem = null
+        pendingArtworkGeneration = -1L
+        expandedBufferGeneration = -1L
         player.pause()
         player.replaceCurrentItemWithPlayerItem(null)
         currentItem = null
@@ -434,6 +451,13 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         }
         val audible = wantsPlayback && !old.ended && old.error == null &&
             player.timeControlStatus == AVPlayerTimeControlStatusPlaying && player.rate > 0f
+        if (audible) {
+            if (expandedBufferGeneration != generation) {
+                expandedBufferGeneration = generation
+                item.preferredForwardBufferDuration = STEADY_FORWARD_BUFFER_SECONDS
+            }
+            flushDeferredNowPlayingArtwork()
+        }
         val safePosition = position.coerceAtLeast(0L)
         mutableState.value = old.copy(
             positionMs = safePosition,
@@ -507,6 +531,30 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         nowPlayingArtwork = null
     }
 
+    private fun scheduleDeferredNowPlayingArtwork(expectedGeneration: Long) {
+        artworkGraceTimer?.invalidate()
+        artworkGraceTimer = NSTimer.scheduledTimerWithTimeInterval(
+            ARTWORK_DEFER_GRACE_SECONDS,
+            repeats = false,
+        ) { _ ->
+            if (!closed && generation == expectedGeneration) {
+                flushDeferredNowPlayingArtwork()
+            }
+        }
+    }
+
+    private fun flushDeferredNowPlayingArtwork() {
+        val item = pendingArtworkItem ?: return
+        val expectedGeneration = pendingArtworkGeneration
+        pendingArtworkItem = null
+        pendingArtworkGeneration = -1L
+        artworkGraceTimer?.invalidate()
+        artworkGraceTimer = null
+        if (!closed && generation == expectedGeneration) {
+            loadNowPlayingArtwork(expectedGeneration = expectedGeneration, item = item)
+        }
+    }
+
     private fun loadNowPlayingArtwork(expectedGeneration: Long, item: PlaybackItem) {
         val artUri = item.metadata.artworkUri?.takeIf { it.startsWith("https://", ignoreCase = true) } ?: return
         val url = NSURL(string = artUri) ?: return
@@ -566,5 +614,12 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         lastNowPlayingSecond = elapsedSeconds
         lastNowPlayingDuration = current.durationMs
         lastNowPlayingRate = playbackRate
+    }
+
+    private companion object {
+        const val STARTUP_FORWARD_BUFFER_SECONDS: Double = 1.5
+        const val STEADY_FORWARD_BUFFER_SECONDS: Double = 15.0
+        const val ARTWORK_DEFER_GRACE_SECONDS: Double = 2.5
+        const val STARTUP_HEARTBEAT_INTERVAL_SECONDS: Double = 0.2
     }
 }
