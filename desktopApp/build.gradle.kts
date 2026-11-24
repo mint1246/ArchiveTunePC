@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "moe.rukamori.archivetune"
-version = "15.10"
+version = "15.11"
 val windowsPackageVersion = version.toString().let { value ->
     if (value.count { it == '.' } == 1) "$value.0" else value
 }
