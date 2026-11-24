@@ -56,13 +56,19 @@ fun ArchiveTuneApp(controller: MusicController) {
     val browse by controller.browse.collectAsState()
     val library = controller.library?.collectAsState()?.value
     val track by remember(controller) { controller.playback.map { it.track }.distinctUntilChanged() }.collectAsState(null)
-    var page by rememberSaveable { mutableStateOf("Home") }
+    val settings = library?.settings ?: MusicSettings()
+    val newsState = controller.news?.state?.collectAsState()?.value
+    val hasUnreadNews = remember(newsState?.items, library?.readNewsIds) {
+        val items = newsState?.items.orEmpty()
+        items.isNotEmpty() && items.any { it.id !in library?.readNewsIds.orEmpty() }
+    }
+    var page by rememberSaveable { mutableStateOf(settings.defaultOpenTab.routeName) }
     var route by rememberSaveable { mutableStateOf("main") }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
     var playerProgress by remember { mutableFloatStateOf(0f) }
     var playerPresence by remember { mutableFloatStateOf(0f) }
     var more by remember { mutableStateOf(false) }
-    val theme = library?.settings?.theme ?: MusicThemeChoice.SYSTEM
+    val theme = settings.theme
     val screenStates = rememberSaveableStateHolder()
     val scrollRequests = remember { MutableSharedFlow<String>(extraBufferCapacity = 1) }
     val navigationScope = rememberCoroutineScope()
@@ -88,9 +94,15 @@ fun ArchiveTuneApp(controller: MusicController) {
     val motionClock = remember { TimeSource.Monotonic.markNow() }
     val doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
     var lastSearchClick by remember { mutableStateOf<Long?>(null) }
-    ArchiveTuneTheme(theme, artworkUrl = track?.artworkUrl) {
+    val useDynamicBackdrop = settings.dynamicTheme && !settings.disableBlur && settings.playerBackgroundStyle != MusicPlayerBackgroundStyle.SOLID
+    ArchiveTuneTheme(
+        theme = theme,
+        artworkUrl = if (useDynamicBackdrop) track?.artworkUrl else null,
+        pureBlack = settings.pureBlack,
+        dynamicTheme = useDynamicBackdrop,
+    ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 1f))) {
-            ShellArtworkBackdrop(controller)
+            if (useDynamicBackdrop) ShellArtworkBackdrop(controller)
             // MainActivity hides the shell's drawing as soon as the dynamic player's
             // expanded anchor is targeted. Keep its composition/scroll state alive.
             Box(Modifier.fillMaxSize().drawWithContent { if (!playerOpen) drawContent() }
@@ -101,7 +113,7 @@ fun ArchiveTuneApp(controller: MusicController) {
                         headerHeight = it.height
                     }.offset { IntOffset(0, if (page in listOf("Home", "Search", "Library")) currentHeader.state.heightOffset.roundToInt() else 0) }, actions = {
                         ShellAction(Res.drawable.history, "History") { route = "history" }
-                        ShellAction(Res.drawable.newspaper, "News") { controller.news?.load(); route = "news" }
+                        ShellAction(Res.drawable.newspaper, "News", showBadge = hasUnreadNews) { controller.news?.load(); route = "news" }
                         ShellAction(Res.drawable.new_release, "New release albums") { controller.openBrowse(MusicCatalogItem.Browse("FEmusic_new_releases_albums", "New release albums")) }
                         ShellAction(Res.drawable.settings, "Settings") { route = "settings" }
                     })
@@ -127,7 +139,12 @@ fun ArchiveTuneApp(controller: MusicController) {
                 when {
                     displayed.browse.item != null -> AndroidBrowseContent(controller, Modifier.weight(1f))
                     displayed.route == "query" -> AndroidQueryContent(controller, { route = "main" }, Modifier.weight(1f))
-                    displayed.route == "settings" -> AndroidSettingsContent(controller, onBack = { route = "main" }, modifier = Modifier.weight(1f))
+                    displayed.route == "settings" -> AndroidFullSettingsContent(
+                        controller = controller,
+                        onBack = { route = "main" },
+                        onOpenFriends = { route = "main"; page = "Friends" },
+                        modifier = Modifier.weight(1f),
+                    )
                     displayed.route == "history" -> AndroidHistoryContent(controller, { route = "main" }, Modifier.weight(1f))
                     displayed.route == "news" -> AndroidNewsContent(controller, onBack = { route = "main" }, modifier = Modifier.weight(1f))
                     displayed.page == "Home" -> AndroidHomeContent(controller, Modifier.weight(1f))
@@ -207,10 +224,27 @@ private fun ShellArtworkBackdrop(controller: MusicController) {
 }
 
 @Composable
-private fun ShellAction(resource: org.jetbrains.compose.resources.DrawableResource, description: String, action: () -> Unit) {
-    IconButton(onClick = action, colors = IconButtonDefaults.iconButtonColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = .48f),
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) { Icon(painterResource(resource), description) }
+private fun ShellAction(
+    resource: org.jetbrains.compose.resources.DrawableResource,
+    description: String,
+    showBadge: Boolean = false,
+    action: () -> Unit,
+) {
+    IconButton(
+        onClick = action,
+        colors = IconButtonDefaults.iconButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = .48f),
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        if (showBadge) {
+            BadgedBox(badge = { Badge(containerColor = MaterialTheme.colorScheme.error, modifier = Modifier.size(8.dp)) }) {
+                Icon(painterResource(resource), description)
+            }
+        } else {
+            Icon(painterResource(resource), description)
+        }
+    }
 }
 
 @Composable

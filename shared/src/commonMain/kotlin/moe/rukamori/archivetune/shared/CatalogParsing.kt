@@ -52,6 +52,86 @@ internal object CatalogParsing {
         return items.values.toList()
     }
 
+    /** Grouped search sections for Android's "All" search results (Top Result + categorized shelves). */
+    fun searchSections(response: JsonElement): List<MusicSearchSection> {
+        val sections = mutableListOf<MusicSearchSection>()
+        walkRenderers(response) { key, child ->
+            when (key) {
+                "musicCardShelfRenderer" -> {
+                    val headerTitle = child.field("header").field("musicCardShelfHeaderBasicRenderer")
+                        .field("title").displayText() ?: "Top result"
+                    val items = mutableListOf<MusicCatalogItem>()
+                    parseCatalogItem(key, child)?.let(items::add)
+                    child.field("contents").elements().take(6).forEach { wrapper ->
+                        (wrapper as? JsonObject)?.forEach { (type, renderer) ->
+                            if (renderer is JsonObject && type in rendererNames) {
+                                parseCatalogItem(type, renderer)?.let(items::add)
+                            }
+                        }
+                    }
+                    if (items.isNotEmpty()) {
+                        sections += MusicSearchSection(headerTitle, items)
+                    }
+                    true
+                }
+
+                "musicShelfRenderer" -> {
+                    val title = child.field("title").displayText().orEmpty().ifBlank { "Results" }
+                    val filterParams = child.field("bottomEndpoint").field("searchEndpoint").field("params").str()
+                    val items = mutableListOf<MusicCatalogItem>()
+                    child.field("contents").elements().take(20).forEach { wrapper ->
+                        (wrapper as? JsonObject)?.forEach { (type, renderer) ->
+                            if (renderer is JsonObject && type in rendererNames) {
+                                parseCatalogItem(type, renderer)?.let(items::add)
+                            }
+                        }
+                    }
+                    if (items.isNotEmpty()) {
+                        sections += MusicSearchSection(title, items, filterParams)
+                    }
+                    true
+                }
+
+                else -> false
+            }
+        }
+        return sections
+    }
+
+    fun homeContinuation(response: JsonElement): String? {
+        var token: String? = null
+        walkRenderers(response) { key, child ->
+            if (key == "nextContinuationData") {
+                if (token == null) token = child.field("continuation").str()
+                true
+            } else false
+        }
+        return token
+    }
+
+    fun accountInfo(response: JsonElement): MusicYouTubeAccount? {
+        var account: MusicYouTubeAccount? = null
+        walkRenderers(response) { key, child ->
+            if (key == "activeAccountHeaderRenderer") {
+                val name = child.field("accountName").displayText().orEmpty()
+                val email = child.field("email").displayText().orEmpty()
+                val handle = child.field("channelHandle").displayText().orEmpty()
+                val avatar = artwork(child) ?: child.field("accountPhoto").field("thumbnails").elements()
+                    .asReversed().firstNotNullOfOrNull { it.field("url").str()?.takeIf(::isPublicThumbnail) }
+                if (name.isNotBlank() || email.isNotBlank() || handle.isNotBlank()) {
+                    account = MusicYouTubeAccount(
+                        name = name.ifBlank { handle.ifBlank { email } },
+                        email = email,
+                        handle = handle,
+                        avatarUrl = avatar,
+                    )
+                }
+                true
+            } else false
+        }
+        return account
+    }
+
     fun searchSuggestions(response: JsonElement): List<String> {
         val queries = mutableListOf<String>()
         walkRenderers(response) { key, value ->
@@ -331,7 +411,12 @@ internal object CatalogParsing {
      * Stream response is bound to the *clicked* video ID, never to a title or search guess.
      * Unsupported media/cipher/SABR/POT cannot be made playable by passing it to AVPlayer.
      */
-    fun resolve(response: JsonElement, clickedId: String, preferHls: Boolean = false): ResolvedAudio {
+    fun resolve(
+        response: JsonElement,
+        clickedId: String,
+        preferHls: Boolean = false,
+        audioQuality: MusicAudioQuality = MusicAudioQuality.AUTO,
+    ): ResolvedAudio {
         val player = response.field("playerResponse") ?: response
         val playability = player.field("playabilityStatus")
         val status = playability.field("status").str()?.uppercase()
@@ -400,7 +485,7 @@ internal object CatalogParsing {
             candidate.field("signatureCipher").str() != null ||
                 candidate.field("cipher").str() != null
         }
-        val aac = formats.mapNotNull { candidate ->
+        val aacCandidates = formats.mapNotNull { candidate ->
             val mime = candidate.field("mimeType").str().orEmpty()
             if (!isSupportedAac(mime, candidate.field("itag").str()?.toIntOrNull())) return@mapNotNull null
             val rawUrl = candidate.field("url").str() ?: return@mapNotNull null
@@ -413,7 +498,11 @@ internal object CatalogParsing {
                 ?: candidate.field("averageBitrate").str()?.toLongOrNull()?.coerceAtLeast(0)
                 ?: 0L
             bitrate to safeUrl
-        }.maxByOrNull { it.first }
+        }
+        val aac = when (audioQuality) {
+            MusicAudioQuality.LOW -> aacCandidates.minByOrNull { it.first }
+            MusicAudioQuality.AUTO, MusicAudioQuality.HIGH -> aacCandidates.maxByOrNull { it.first }
+        }
 
         if (aac != null) {
             return ResolvedAudio(
@@ -499,6 +588,37 @@ internal object CatalogParsing {
 
         val secondaryColumn = renderer.field("flexColumns").elements().drop(1).firstOrNull()
             .field("musicResponsiveListItemFlexColumnRenderer").field("text")
+        val allRuns = buildList {
+            addAll(renderer.field("ownerText").field("runs").elements())
+            addAll(renderer.field("shortBylineText").field("runs").elements())
+            addAll(renderer.field("longBylineText").field("runs").elements())
+            addAll(secondaryColumn.field("runs").elements())
+            addAll(renderer.field("subtitle").field("runs").elements())
+            renderer.field("flexColumns").elements().drop(2).forEach { col ->
+                addAll(col.field("musicResponsiveListItemFlexColumnRenderer").field("text").field("runs").elements())
+            }
+        }
+        var artistId: String? = null
+        var albumId: String? = null
+        var albumName: String? = null
+        allRuns.forEach { run ->
+            val endpoint = run.field("navigationEndpoint").field("browseEndpoint")
+            val browseId = endpoint.field("browseId").str()
+            val pageType = endpoint.field("browseEndpointContextSupportedConfigs")
+                .field("browseEndpointContextMusicConfig").field("pageType").str().orEmpty()
+            val runText = run.field("text").str()?.trim()
+            if (browseId != null) {
+                if (artistId == null && (pageType.contains("ARTIST") || browseId.startsWith("UC"))) {
+                    artistId = browseId
+                } else if (albumId == null && (pageType.contains("ALBUM") || browseId.startsWith("MPRE"))) {
+                    albumId = browseId
+                    if (!runText.isNullOrBlank()) albumName = runText
+                }
+            }
+        }
+        val explicit = renderer.field("badges").elements().any { badge ->
+            badge.field("musicInlineBadgeRenderer").field("icon").field("iconType").str() == "MUSIC_EXPLICIT_BADGE"
+        }
         val artist = (
             renderer.field("ownerText").displayText()
                 ?: renderer.field("shortBylineText").displayText()
@@ -531,7 +651,17 @@ internal object CatalogParsing {
                 thumb.field("url").str()?.takeIf(::isPublicThumbnail)
             }
         }
-        return MusicTrack(id = id, title = title, artist = artist, artworkUrl = artwork, durationMs = duration)
+        return MusicTrack(
+            id = id,
+            title = title,
+            artist = artist,
+            artworkUrl = artwork,
+            durationMs = duration,
+            artistId = artistId,
+            albumId = albumId,
+            albumName = albumName,
+            explicit = explicit,
+        )
     }
 
     private fun artistFromRuns(text: JsonElement?): String? =

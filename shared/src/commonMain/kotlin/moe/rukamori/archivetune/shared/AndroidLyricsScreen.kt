@@ -1,14 +1,8 @@
 package moe.rukamori.archivetune.shared
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,15 +12,11 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.delay
-import kotlin.math.abs
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import moe.rukamori.archivetune.shared.resources.*
@@ -42,25 +32,23 @@ internal fun AndroidLyricsScreen(
 ) {
     val playback by controller.playback.collectAsState()
     val lyrics by controller.lyrics.collectAsState()
-    val list = rememberLazyListState()
-    val dragging by list.interactionSource.collectIsDraggedAsState()
-    var manual by remember { mutableStateOf(false) }
+    val settings = controller.library?.collectAsState()?.value?.settings ?: MusicSettings()
     var menu by remember { mutableStateOf(false) }
     var scrub by remember(playback.track?.id) { mutableStateOf<Float?>(null) }
-    val active = lyrics.activeLines((scrub?.toLong() ?: playback.positionMs))
-    LaunchedEffect(dragging) {
-        if (dragging) manual = true else if (manual) { delay(3000); manual = false }
-    }
-    LaunchedEffect(lyrics.trackId) { list.scrollToItem(0) }
-    LaunchedEffect(lyrics.trackId, active?.first, manual) {
-        if (!manual && active != null) {
-            val viewport = list.layoutInfo.viewportSize.height
-            list.animateScrollToItem(active!!.first + 1, -(viewport * .45f).toInt())
-        }
-    }
+    val activePos = scrub?.toLong() ?: playback.positionMs
+
     Box(modifier.fillMaxSize().background(Color(0xff242329))) {
-        playback.track?.artworkUrl?.let { url ->
-            AsyncImage(url, null, Modifier.fillMaxSize().blur(48.dp).graphicsLayer { alpha = .45f }, contentScale = ContentScale.Crop)
+        if (settings.lyricsBackgroundStyle != MusicLyricsBackgroundStyle.SOLID) {
+            playback.track?.artworkUrl?.let { url ->
+                AsyncImage(
+                    url,
+                    null,
+                    Modifier.fillMaxSize()
+                        .then(if (!settings.disableBlur) Modifier.blur(48.dp) else Modifier)
+                        .graphicsLayer { alpha = .45f },
+                    contentScale = ContentScale.Crop,
+                )
+            }
         }
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .48f)))
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
@@ -83,35 +71,68 @@ internal fun AndroidLyricsScreen(
                         DropdownMenuItem(text = { Text("Find another version") }, onClick = { menu = false; onFindVersions() })
                         DropdownMenuItem(text = { Text("Queue") }, onClick = { menu = false; onQueueClick() })
                         DropdownMenuItem(text = { Text("Refresh lyrics") }, onClick = { menu = false; controller.retryLyrics() })
+                        if (lyrics.lines.isNotEmpty() && controller.canShare) {
+                            DropdownMenuItem(text = { Text("Share lyrics") }, onClick = {
+                                menu = false
+                                val header = playback.track?.let { "${it.title} — ${it.artist}\n\n" }.orEmpty()
+                                controller.shareText(header + lyrics.lines.joinToString("\n") { it.text })
+                            })
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Timing offset -200 ms (${settings.lyricsOffsetMs} ms)") },
+                            onClick = {
+                                controller.updateSettings { it.copy(lyricsOffsetMs = (it.lyricsOffsetMs - 200L).coerceIn(-5000L, 5000L)) }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Timing offset +200 ms (${settings.lyricsOffsetMs} ms)") },
+                            onClick = {
+                                controller.updateSettings { it.copy(lyricsOffsetMs = (it.lyricsOffsetMs + 200L).coerceIn(-5000L, 5000L)) }
+                            },
+                        )
                     }
                 }
             }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                val horizontal = (maxWidth * .06f).coerceIn(20.dp, 48.dp)
+                val horizontal = (maxWidth * .04f).coerceIn(12.dp, 36.dp)
                 when {
                     lyrics.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
                     lyrics.error != null || lyrics.lines.isEmpty() -> Column(Modifier.align(Alignment.Center).padding(horizontal = horizontal), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(lyrics.error?.message ?: "Lyrics not found", color = Color.White.copy(alpha = .72f))
                         TextButton(onClick = onFindVersions) { Text("Find another version", color = Color.White) }
                     }
-                    else -> LazyColumn(state = list, modifier = Modifier.fillMaxSize().padding(horizontal = horizontal)) {
-                        item { Spacer(Modifier.height(120.dp)) }
-                        itemsIndexed(lyrics.lines, key = { index, _ -> "${lyrics.trackId}:$index" }) { index, line ->
-                            val synced = line.startTimeMs != null && active != null
-                            val distance = if (synced) active!!.minOf { abs(index - it) } else 0
-                            val alpha by animateFloatAsState(if (synced) (1f / (1f + distance * .8f)).coerceIn(.25f, 1f) else .92f, spring(dampingRatio = .92f, stiffness = 180f))
-                            val scale by animateFloatAsState(if (synced) (1.05f - distance * .06f).coerceIn(.97f, 1.05f) else 1f, spring(dampingRatio = .88f, stiffness = 180f))
-                            val blur by animateFloatAsState(if (synced && !manual) (1.15f * distance).coerceIn(0f, 3.5f) else 0f, spring(dampingRatio = 1f, stiffness = 220f))
-                            Text(line.text, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.4.dp).blur(blur.dp).graphicsLayer { this.alpha = alpha; scaleX = scale; scaleY = scale; transformOrigin = TransformOrigin(0f, .5f) }.clickable(enabled = line.startTimeMs != null) { line.startTimeMs?.let(controller::seekTo) }, color = Color.White, fontSize = 26.sp, lineHeight = 33.8.sp, fontWeight = FontWeight.Bold)
-                        }
-                        item { Spacer(Modifier.height(300.dp)) }
-                    }
+                    else -> AndroidTimedLyrics(
+                        lines = lyrics.lines,
+                        positionMs = activePos,
+                        isPlaying = playback.isPlaying && scrub == null,
+                        onSeek = controller::seekTo,
+                        modifier = Modifier.fillMaxSize().padding(horizontal = horizontal),
+                        textSizeSp = settings.lyricsTextSize,
+                        lineSpacingMultiplier = settings.lyricsLineSpacing,
+                        alignment = settings.lyricsAlignment,
+                        lineBlurEnabled = settings.lyricsLineBlur && !settings.disableBlur,
+                        clickToSeek = settings.lyricsClick,
+                        autoScroll = settings.lyricsScroll,
+                        offsetMs = settings.lyricsOffsetMs,
+                        textColor = Color.White,
+                    )
                 }
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 val duration = playback.durationMs.coerceAtLeast(1L)
                 val position = (scrub ?: playback.positionMs.toFloat()).coerceIn(0f, duration.toFloat())
-                Slider(value = position, onValueChange = { scrub = it }, onValueChangeFinished = { scrub?.let { controller.seekTo(it.toLong()) }; scrub = null }, valueRange = 0f..duration.toFloat(), enabled = playback.durationMs > 0, colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = .28f)))
+                AndroidStyledPlaybackSlider(
+                    value = position,
+                    onValueChange = { scrub = it },
+                    onValueChangeFinished = { scrub?.let { controller.seekTo(it.toLong()) }; scrub = null },
+                    valueRange = 0f..duration.toFloat(),
+                    style = settings.sliderStyle,
+                    isPlaying = playback.isPlaying,
+                    activeColor = Color.White,
+                    inactiveColor = Color.White.copy(alpha = .28f),
+                    enabled = playback.durationMs > 0,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(lyricsTime(position.toLong()), color = Color.White.copy(alpha = .54f), style = MaterialTheme.typography.labelMedium)
                     Text(if (playback.durationMs > 0) "-${lyricsTime(duration - position.toLong())}" else "", color = Color.White.copy(alpha = .54f), style = MaterialTheme.typography.labelMedium)

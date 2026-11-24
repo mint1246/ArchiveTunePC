@@ -28,6 +28,7 @@ data class MusicUiState(
     val queueTitle: String? = null,
     val results: List<MusicTrack> = emptyList(),
     val searchItems: List<MusicCatalogItem> = emptyList(),
+    val searchSections: List<MusicSearchSection> = emptyList(),
     val suggestions: List<String> = emptyList(),
     val searching: Boolean = false,
     val queue: List<MusicTrack> = emptyList(),
@@ -51,6 +52,7 @@ class MusicController(
     private val onShareTrack: ((MusicTrack) -> Unit)? = null,
     val social: MusicSocialController? = null,
     val news: MusicNewsController? = null,
+    val platformBridge: MusicPlatformBridge = NoOpPlatformBridge,
 ) : AutoCloseable {
     constructor(
         catalog: MusicCatalog,
@@ -61,6 +63,7 @@ class MusicController(
         onShareTrack: ((MusicTrack) -> Unit)? = null,
         social: MusicSocialController? = null,
         news: MusicNewsController? = null,
+        platformBridge: MusicPlatformBridge = NoOpPlatformBridge,
     ) : this(
         catalog = catalog,
         player = IosEnginePlayerBridge(engine, scope),
@@ -70,6 +73,7 @@ class MusicController(
         onShareTrack = onShareTrack,
         social = social,
         news = news,
+        platformBridge = platformBridge,
     ) {
         engine.bindRemoteCommands(
             IosRemoteCommandHandlers(
@@ -98,7 +102,7 @@ class MusicController(
         ),
     )
     private val searchCache = lifecycle.register(
-        DiscoveryContentCache<List<MusicCatalogItem>>(
+        DiscoveryContentCache<Pair<List<MusicCatalogItem>, List<MusicSearchSection>>>(
             accountScopeProvider = { ANON_SCOPE },
             maxEntries = 12,
             loaderContext = scope.coroutineContext,
@@ -122,13 +126,22 @@ class MusicController(
         ),
     )
 
-    val canShare: Boolean get() = onShareTrack != null
+    val canShare: Boolean get() = onShareTrack != null || platformBridge.canShare
     val canAdjustVolume: Boolean get() = player.canAdjustVolume
     val library: StateFlow<MusicLibraryState>? = libraryController?.state
     val lyrics: StateFlow<LyricsState> = lyricsController?.state ?: MutableStateFlow(LyricsState())
     private val mutableHome = MutableStateFlow(MusicHomeState())
     val home: StateFlow<MusicHomeState> = mutableHome.asStateFlow()
+    private val mutableDownloading = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val downloading: StateFlow<Map<String, Float>> = mutableDownloading.asStateFlow()
+    private val mutableYouTubeSigningIn = MutableStateFlow(false)
+    val youtubeSigningIn: StateFlow<Boolean> = mutableYouTubeSigningIn.asStateFlow()
+    private val mutableYouTubeAuthError = MutableStateFlow<String?>(null)
+    val youtubeAuthError: StateFlow<String?> = mutableYouTubeAuthError.asStateFlow()
+    private val downloadJobs = mutableMapOf<String, Job>()
+    private val statisticsSession = AudibleStatisticsSession()
     private var homeJob: Job? = null
+    private var homeMoreJob: Job? = null
     private var homeGeneration = 0
     private var browseJob: Job? = null
     private var playlistPlayJob: Job? = null
@@ -154,23 +167,69 @@ class MusicController(
         lifecycle.register(player)
         lifecycle.register(catalog)
 
+        // Restore persisted YouTube auth from Keychain if present
+        platformBridge.loadYouTubeAuth()?.let { savedAuth ->
+            catalog.setAuth(savedAuth)
+            savedAuth.account?.let { libraryController?.setYouTubeAccount(it) }
+        }
+
         libraryController?.let { saved ->
             applicationScope.launch {
                 saved.awaitLoaded()
-                if (!lifecycle.isClosed && playbackGeneration == 0) {
-                    val restoredQueue = saved.state.value.queue
-                    val restoredIndex = saved.state.value.queueIndex
-                    playbackQueue.replace(restoredQueue.map(MusicTrack::toPlaybackItem), restoredIndex.coerceAtLeast(0))
-                    syncRemoteNavigationAvailability()
-                    mutableState.update { it.copy(queue = restoredQueue, queueIndex = restoredIndex) }
+                if (!lifecycle.isClosed) {
+                    val settings = saved.state.value.settings
+                    catalog.setLocale(settings.contentLanguage, settings.contentCountry)
+                    catalog.setAudioQuality(settings.audioQuality)
+                    platformBridge.setKeepScreenAwake(settings.keepScreenAwake)
+                    if (settings.playbackSpeed != 1f) {
+                        setSpeed(settings.playbackSpeed)
+                    }
+                    if (playbackGeneration == 0 && settings.persistentQueue) {
+                        val restoredQueue = saved.state.value.queue
+                        val restoredIndex = saved.state.value.queueIndex
+                        playbackQueue.replace(restoredQueue.map(MusicTrack::toPlaybackItem), restoredIndex.coerceAtLeast(0))
+                        syncRemoteNavigationAvailability()
+                        mutableState.update { it.copy(queue = restoredQueue, queueIndex = restoredIndex) }
+                    }
                 }
             }
         }
         applicationScope.launch {
             var wasEnded = false
             var lyricsTrack: MusicTrack? = null
+            var lastPresenceTrackId: String? = null
+            var lastPresencePlaying = false
             playback.collect { transport ->
-                if (transport.isPlaying) transport.track?.let { libraryController?.recordPlay(it) }
+                val settings = libraryController?.state?.value?.settings ?: MusicSettings()
+                if (transport.isPlaying) {
+                    transport.track?.let {
+                        libraryController?.recordPlay(it)
+                        libraryController?.recordCachedTrack(it)
+                    }
+                }
+                // Authoritative audible-time statistics (monotonic clock; never counts paused/buffering/seeking)
+                val delta = statisticsSession.onSample(
+                    track = transport.track,
+                    isAudiblePlaying = transport.isPlaying && !transport.isBuffering && !transport.ended,
+                    eligible = !settings.pauseListenHistory,
+                )
+                if (delta != null && delta.listeningMs > 0L) {
+                    libraryController?.recordAudibleDelta(delta, currentLocalDateTimeParts())
+                }
+                // Publish social listening presence when track or play state changes
+                if (transport.track?.id != lastPresenceTrackId || transport.isPlaying != lastPresencePlaying) {
+                    lastPresenceTrackId = transport.track?.id
+                    lastPresencePlaying = transport.isPlaying
+                    social?.publishPresence(
+                        moe.rukamori.archivetune.social.SocialPresence(
+                            online = true,
+                            songId = if (transport.isPlaying) transport.track?.id else null,
+                            title = if (transport.isPlaying) transport.track?.title else null,
+                            artist = if (transport.isPlaying) transport.track?.artist else null,
+                            artworkUrl = if (transport.isPlaying) transport.track?.artworkUrl else null,
+                        ),
+                    )
+                }
                 if (transport.track != lyricsTrack) {
                     lyricsTrack = transport.track
                     lyricsController?.select(transport.track)
@@ -199,22 +258,59 @@ class MusicController(
     /** Home survives route changes; refresh retains visible shelves and coalesces requests. */
     fun loadHome(force: Boolean = false) {
         if (lifecycle.isClosed || homeJob?.isActive == true || (!force && home.value.loaded)) return
+        homeMoreJob?.cancel()
         mutableHome.update { it.copy(loading = true, error = null) }
         val generation = ++homeGeneration
         homeJob = applicationScope.launch {
             try {
                 val selected = home.value.selectedChip
-                val shelves = if (selected == null) catalog.home()
-                else catalog.browse(selected.browseId, selected.params).shelves
-                val chips = catalog.homeChips()
+                val page = if (selected == null) {
+                    catalog.homePage(null)
+                } else {
+                    val browsed = catalog.browse(selected.browseId, selected.params)
+                    MusicHomePage(browsed.shelves, catalog.homeChips(), browsed.continuation)
+                }
                 if (!lifecycle.isClosed && generation == homeGeneration) mutableHome.value = MusicHomeState(
-                    shelves = shelves, chips = chips, selectedChip = selected, loaded = true,
+                    shelves = page.shelves,
+                    chips = page.chips,
+                    selectedChip = selected,
+                    continuation = page.continuation,
+                    loaded = true,
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 if (!lifecycle.isClosed && generation == homeGeneration) mutableHome.update {
                     it.copy(loading = false, error = "Home could not connect. Try again.")
+                }
+            }
+        }
+    }
+
+    fun loadMoreHome() {
+        val token = home.value.continuation?.takeIf(String::isNotBlank) ?: return
+        if (lifecycle.isClosed || homeMoreJob?.isActive == true || home.value.loading || home.value.loadingMore) return
+        val generation = homeGeneration
+        mutableHome.update { it.copy(loadingMore = true) }
+        homeMoreJob = applicationScope.launch {
+            try {
+                val next = catalog.homePage(token)
+                if (!lifecycle.isClosed && generation == homeGeneration) {
+                    mutableHome.update { current ->
+                        val existingTitles = current.shelves.map { it.title }.toSet()
+                        val added = next.shelves.filterNot { it.title in existingTitles }
+                        current.copy(
+                            shelves = current.shelves + added,
+                            continuation = next.continuation?.takeIf { it != token },
+                            loadingMore = false,
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (!lifecycle.isClosed && generation == homeGeneration) {
+                    mutableHome.update { it.copy(loadingMore = false, continuation = null) }
                 }
             }
         }
@@ -364,15 +460,16 @@ class MusicController(
         mutableState.update {
             it.copy(
                 query = query,
-                searchItems = cached ?: it.searchItems,
-                results = cached?.mapNotNull { item -> (item as? MusicCatalogItem.Track)?.track } ?: it.results,
+                searchItems = cached?.first ?: it.searchItems,
+                searchSections = cached?.second ?: it.searchSections,
+                results = cached?.first?.mapNotNull { item -> (item as? MusicCatalogItem.Track)?.track } ?: it.results,
                 searching = normalized.isNotEmpty(),
                 error = null,
                 failedPlayback = false,
             )
         }
         if (normalized.isEmpty()) {
-            mutableState.update { it.copy(results = emptyList(), searchItems = emptyList(), searching = false) }
+            mutableState.update { it.copy(results = emptyList(), searchItems = emptyList(), searchSections = emptyList(), searching = false) }
             return
         }
         if (cached != null) {
@@ -381,11 +478,25 @@ class MusicController(
         }
         searchJob = applicationScope.launch {
             try {
-                val results = searchCache.getOrLoad(cacheKey) { catalog.searchItems(normalized, params).take(60) }
+                val (results, sections) = searchCache.getOrLoad(cacheKey) {
+                    if (params == null) {
+                        val secs = catalog.searchSections(normalized)
+                        val flat = secs.flatMap { it.items }.distinctBy { item ->
+                            when (item) {
+                                is MusicCatalogItem.Track -> "track:${item.track.id}"
+                                is MusicCatalogItem.Browse -> "browse:${item.id}"
+                            }
+                        }.take(60)
+                        flat to secs
+                    } else {
+                        catalog.searchItems(normalized, params).take(60) to emptyList()
+                    }
+                }
                 if (lifecycle.isClosed || generation != searchGeneration) return@launch
                 mutableState.update {
                     it.copy(
                         searchItems = results,
+                        searchSections = sections,
                         results = results.mapNotNull { item -> (item as? MusicCatalogItem.Track)?.track },
                         searching = false,
                     )
@@ -480,7 +591,22 @@ class MusicController(
         libraryController?.saveQueue(tracks, index)
         resolveJob = applicationScope.launch {
             try {
-                val source = catalog.resolve(track)
+                val offlineFile = track.localFilePath?.takeIf { platformBridge.fileExists(it) }
+                    ?: libraryController?.state?.value?.downloads
+                        ?.firstOrNull { it.track.id == track.id }
+                        ?.filePath
+                        ?.takeIf { platformBridge.fileExists(it) }
+                val source = if (offlineFile != null) {
+                    val mime = when {
+                        offlineFile.endsWith(".mp3", true) -> "audio/mpeg"
+                        offlineFile.endsWith(".wav", true) -> "audio/wav"
+                        offlineFile.endsWith(".flac", true) -> "audio/flac"
+                        else -> "audio/mp4"
+                    }
+                    ResolvedAudio(trackId = track.id, url = offlineFile, mimeType = mime)
+                } else {
+                    catalog.resolve(track)
+                }
                 if (lifecycle.isClosed || generation != playbackGeneration) return@launch
                 require(source.trackId == track.id) { "Resolved track does not match the selected song" }
                 validateIosPlaybackSource(source.toResolvedPlaybackSource())?.let { failure ->
@@ -494,18 +620,212 @@ class MusicController(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                if (generation == playbackGeneration) mutableState.update {
-                    it.copy(
-                        resolvingTrackId = null,
-                        failedPlayback = true,
-                        error = (failure as? CatalogException)?.message ?: "This song could not be played. Try another song or retry.",
-                    )
+                if (generation == playbackGeneration) {
+                    val autoSkip = libraryController?.state?.value?.settings?.autoSkipNextOnError == true
+                    if (autoSkip && playbackQueue.canAdvance) {
+                        next()
+                    } else {
+                        mutableState.update {
+                            it.copy(
+                                resolvingTrackId = null,
+                                failedPlayback = true,
+                                error = (failure as? CatalogException)?.message ?: "This song could not be played. Try another song or retry.",
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 
-    fun shareCurrentTrack() { if (!lifecycle.isClosed) playback.value.track?.let { onShareTrack?.invoke(it) } }
+    fun shareCurrentTrack() {
+        if (!lifecycle.isClosed) playback.value.track?.let { shareTrack(it) }
+    }
+
+    fun shareTrack(track: MusicTrack) {
+        if (lifecycle.isClosed) return
+        if (onShareTrack != null) onShareTrack.invoke(track)
+        else platformBridge.shareText("${track.title} — ${track.artist}\nhttps://music.youtube.com/watch?v=${track.id}")
+    }
+
+    fun shareText(text: String) {
+        if (!lifecycle.isClosed && text.isNotBlank()) platformBridge.shareText(text)
+    }
+
+    fun copyText(text: String) {
+        if (!lifecycle.isClosed && text.isNotBlank()) platformBridge.copyToClipboard(text)
+    }
+
+    fun openUrl(url: String) {
+        if (!lifecycle.isClosed && url.isNotBlank()) platformBridge.openUrl(url)
+    }
+
+    fun playNext(tracks: List<MusicTrack>) {
+        if (lifecycle.isClosed || tracks.isEmpty()) return
+        if (state.value.queue.isEmpty()) {
+            playAt(0, tracks)
+            return
+        }
+        playbackQueue.insertNext(tracks.map(MusicTrack::toPlaybackItem))
+        syncRemoteNavigationAvailability()
+        val updated = playbackQueue.items.map(moe.rukamori.archivetune.playback.api.PlaybackItem::toMusicTrack)
+        val idx = playbackQueue.currentIndex
+        mutableState.update { it.copy(queue = updated, queueIndex = idx) }
+        libraryController?.saveQueue(updated, idx)
+    }
+
+    fun addToQueue(tracks: List<MusicTrack>) {
+        if (lifecycle.isClosed || tracks.isEmpty()) return
+        if (state.value.queue.isEmpty()) {
+            playAt(0, tracks)
+            return
+        }
+        playbackQueue.append(tracks.map(MusicTrack::toPlaybackItem))
+        syncRemoteNavigationAvailability()
+        val updated = playbackQueue.items.map(moe.rukamori.archivetune.playback.api.PlaybackItem::toMusicTrack)
+        val idx = playbackQueue.currentIndex
+        mutableState.update { it.copy(queue = updated, queueIndex = idx) }
+        libraryController?.saveQueue(updated, idx)
+    }
+
+    fun saveQueueAsPlaylist(name: String): String? {
+        if (lifecycle.isClosed) return null
+        val tracks = state.value.queue
+        if (tracks.isEmpty()) return null
+        val id = libraryController?.createPlaylist(name) ?: return null
+        tracks.forEach { libraryController.addToPlaylist(id, it) }
+        return id
+    }
+
+    fun downloadTrack(track: MusicTrack) {
+        if (lifecycle.isClosed || !platformBridge.canDownload || track.localFilePath != null) return
+        if (downloadJobs[track.id]?.isActive == true) return
+        if (libraryController?.state?.value?.downloads?.any { it.track.id == track.id } == true) return
+        mutableDownloading.update { it + (track.id to 0.05f) }
+        downloadJobs[track.id] = applicationScope.launch {
+            try {
+                val resolved = catalog.resolveForDownload(track)
+                val result = platformBridge.downloadAudio(track.id, resolved) { progress ->
+                    mutableDownloading.update { it + (track.id to progress) }
+                }
+                result.onSuccess { (fileUrl, sizeBytes) ->
+                    libraryController?.recordDownload(
+                        MusicDownloadedTrack(
+                            track = track,
+                            filePath = fileUrl,
+                            sizeBytes = sizeBytes,
+                            downloadedAtMs = currentEpochMillis(),
+                        ),
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Keep UI responsive; download can be retried.
+            } finally {
+                mutableDownloading.update { it - track.id }
+                downloadJobs.remove(track.id)
+            }
+        }
+    }
+
+    fun downloadTracks(tracks: List<MusicTrack>) {
+        tracks.forEach(::downloadTrack)
+    }
+
+    fun removeDownload(trackId: String) {
+        if (lifecycle.isClosed) return
+        downloadJobs.remove(trackId)?.cancel()
+        mutableDownloading.update { it - trackId }
+        val existing = libraryController?.state?.value?.downloads?.firstOrNull { it.track.id == trackId }
+        existing?.filePath?.let(platformBridge::deleteLocalFile)
+        libraryController?.removeDownload(trackId)
+    }
+
+    fun clearAllDownloads() {
+        if (lifecycle.isClosed) return
+        downloadJobs.values.forEach { it.cancel() }
+        downloadJobs.clear()
+        mutableDownloading.value = emptyMap()
+        libraryController?.state?.value?.downloads?.forEach { platformBridge.deleteLocalFile(it.filePath) }
+        libraryController?.clearDownloads()
+    }
+
+    fun importLocalAudioFiles() {
+        if (lifecycle.isClosed || !platformBridge.canImportLocalFiles) return
+        applicationScope.launch {
+            val imported = platformBridge.importLocalAudioFiles()
+            imported.forEach { libraryController?.addLocalTrack(it) }
+        }
+    }
+
+    fun removeLocalTrack(trackId: String) {
+        if (lifecycle.isClosed) return
+        val existing = libraryController?.state?.value?.localTracks?.firstOrNull { it.id == trackId }
+        existing?.localFilePath?.let(platformBridge::deleteLocalFile)
+        libraryController?.removeLocalTrack(trackId)
+    }
+
+    fun signInYouTube() {
+        if (lifecycle.isClosed || !platformBridge.canSignInYouTube || mutableYouTubeSigningIn.value) return
+        mutableYouTubeSigningIn.value = true
+        mutableYouTubeAuthError.value = null
+        applicationScope.launch {
+            try {
+                val result = platformBridge.signInYouTube()
+                result.onSuccess { auth ->
+                    catalog.setAuth(auth)
+                    val account = catalog.fetchAccountInfo() ?: MusicYouTubeAccount(name = "YouTube Music Account")
+                    val enriched = auth.copy(account = account)
+                    platformBridge.saveYouTubeAuth(enriched)
+                    libraryController?.setYouTubeAccount(account)
+                    loadHome(force = true)
+                }.onFailure { err ->
+                    mutableYouTubeAuthError.value = err.message ?: "YouTube sign-in failed"
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                mutableYouTubeAuthError.value = "YouTube sign-in failed"
+            } finally {
+                mutableYouTubeSigningIn.value = false
+            }
+        }
+    }
+
+    fun signOutYouTube() {
+        if (lifecycle.isClosed) return
+        catalog.setAuth(null)
+        platformBridge.saveYouTubeAuth(null)
+        libraryController?.setYouTubeAccount(null)
+        mutableYouTubeAuthError.value = null
+        loadHome(force = true)
+    }
+
+    fun exportBackup() {
+        if (lifecycle.isClosed) return
+        val json = libraryController?.exportBackupJson() ?: return
+        platformBridge.shareText(json)
+    }
+
+    fun importBackup(onResult: (Boolean) -> Unit = {}) {
+        if (lifecycle.isClosed || !platformBridge.canBackupRestore) {
+            onResult(false)
+            return
+        }
+        applicationScope.launch {
+            val raw = platformBridge.importBackupJson()
+            val ok = raw != null && libraryController?.importBackupJson(raw) == true
+            onResult(ok)
+        }
+    }
+
+    fun storageUsage(): MusicStorageUsage = platformBridge.computeStorageUsage()
+    fun clearImageCache() { platformBridge.clearImageCache() }
+    fun clearAudioCache() {
+        platformBridge.clearAudioCache()
+        libraryController?.clearCachedTracks()
+    }
 
     /** Null cancels; delegates to `playback-core` [SleepTimerController]. */
     fun setSleepTimer(minutes: Int?) {
@@ -694,9 +1014,40 @@ class MusicController(
         if (!lifecycle.isClosed && state.value.resolvingTrackId == null) player.seekTo(positionMs.coerceAtLeast(0))
     }
 
-    fun toggleFavorite(track: MusicTrack) { if (!lifecycle.isClosed) libraryController?.toggleFavorite(track) }
+    fun toggleFavorite(track: MusicTrack) {
+        if (lifecycle.isClosed) return
+        val wasFav = libraryController?.state?.value?.favorites?.any { it.id == track.id } == true
+        libraryController?.toggleFavorite(track)
+        if (!wasFav && libraryController?.state?.value?.settings?.autoDownloadOnLike == true) {
+            downloadTrack(track)
+        }
+    }
 
     fun setTheme(theme: MusicThemeChoice) { if (!lifecycle.isClosed) libraryController?.setTheme(theme) }
+
+    fun updateSettings(transform: (MusicSettings) -> MusicSettings) {
+        if (lifecycle.isClosed) return
+        libraryController?.updateSettings(transform)
+        val updated = libraryController?.state?.value?.settings ?: return
+        catalog.setLocale(updated.contentLanguage, updated.contentCountry)
+        catalog.setAudioQuality(updated.audioQuality)
+        platformBridge.setKeepScreenAwake(updated.keepScreenAwake)
+        if (updated.playbackSpeed != playbackOptions.value.speed) {
+            setSpeed(updated.playbackSpeed)
+        }
+    }
+
+    fun toggleSpeedDialPin(pin: MusicSpeedDialPin) { if (!lifecycle.isClosed) libraryController?.toggleSpeedDialPin(pin) }
+    fun toggleSavedBrowse(item: MusicCatalogItem.Browse) { if (!lifecycle.isClosed) libraryController?.toggleSavedBrowse(item) }
+    fun clearHistory() { if (!lifecycle.isClosed) libraryController?.clearHistory() }
+    fun removeFromHistory(trackId: String) { if (!lifecycle.isClosed) libraryController?.removeFromHistory(trackId) }
+    fun clearSearchHistory() { if (!lifecycle.isClosed) libraryController?.clearSearchHistory() }
+    fun resetStatistics() { if (!lifecycle.isClosed) libraryController?.resetStatistics() }
+    fun reorderPlaylistTrack(playlistId: String, from: Int, to: Int) { if (!lifecycle.isClosed) libraryController?.reorderPlaylistTrack(playlistId, from, to) }
+    fun createPlaylistTag(name: String): String? = if (lifecycle.isClosed) null else libraryController?.createPlaylistTag(name)
+    fun deletePlaylistTag(tagId: String) { if (!lifecycle.isClosed) libraryController?.deletePlaylistTag(tagId) }
+    fun togglePlaylistTag(tagId: String, playlistId: String) { if (!lifecycle.isClosed) libraryController?.togglePlaylistTag(tagId, playlistId) }
+    fun markNewsRead(newsId: String) { if (!lifecycle.isClosed) libraryController?.markNewsRead(newsId) }
 
     fun removeSearchHistory(query: String) { if (!lifecycle.isClosed) libraryController?.removeSearch(query) }
 

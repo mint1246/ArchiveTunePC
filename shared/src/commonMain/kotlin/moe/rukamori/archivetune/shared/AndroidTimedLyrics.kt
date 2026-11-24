@@ -43,15 +43,27 @@ import kotlin.math.abs
 /** Android V2 lyrics scene. Timings are always supplied by the lyrics provider. */
 @Composable
 fun AndroidTimedLyrics(
-    lines: List<LyricsLine>, positionMs: Long, isPlaying: Boolean,
-    onSeek: (Long) -> Unit, modifier: Modifier = Modifier,
+    lines: List<LyricsLine>,
+    positionMs: Long,
+    isPlaying: Boolean,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    textSizeSp: Float = 26f,
+    lineSpacingMultiplier: Float = 1.3f,
+    alignment: MusicLyricsAlignment = MusicLyricsAlignment.CENTER,
+    lineBlurEnabled: Boolean = true,
+    clickToSeek: Boolean = true,
+    autoScroll: Boolean = true,
+    offsetMs: Long = 0L,
+    textColor: Color = Color.Unspecified,
 ) {
     val synced = remember(lines) { lines.any { it.startTimeMs != null } }
     val state = rememberLazyListState()
-    var visualPosition by remember(lines) { mutableLongStateOf(positionMs) }
-    val latestPosition by rememberUpdatedState(positionMs)
-    LaunchedEffect(lines, positionMs, isPlaying) {
-        visualPosition = positionMs
+    val adjustedPosition = (positionMs + offsetMs).coerceAtLeast(0L)
+    var visualPosition by remember(lines) { mutableLongStateOf(adjustedPosition) }
+    val latestPosition by rememberUpdatedState(adjustedPosition)
+    LaunchedEffect(lines, adjustedPosition, isPlaying) {
+        visualPosition = adjustedPosition
         if (isPlaying && synced) {
             var origin = 0L
             while (isActive) withFrameNanos { now ->
@@ -76,8 +88,8 @@ fun AndroidTimedLyrics(
     }
     LaunchedEffect(manual, manualGeneration) { if (manual) { delay(3000); manual = false } }
     var anchor by remember(lines) { mutableIntStateOf(-1) }
-    LaunchedEffect(active, manual, lines) {
-        if (!synced || manual || active < 0) return@LaunchedEffect
+    LaunchedEffect(active, manual, lines, autoScroll) {
+        if (!synced || !autoScroll || manual || active < 0) return@LaunchedEffect
         if (anchor < 0 || active < anchor || active - anchor >= 2 || lines[active].text.isBlank()) anchor = active
         val target = anchor + 1 // leading spacer
         var velocity = 0f
@@ -102,38 +114,92 @@ fun AndroidTimedLyrics(
         }
     }
     val font = FontFamily(Font(Res.font.sfprodisplaybold))
-    val color = MaterialTheme.colorScheme.onBackground
+    val color = if (textColor != Color.Unspecified) textColor else MaterialTheme.colorScheme.onBackground
+    val textAlign = when (alignment) {
+        MusicLyricsAlignment.LEFT -> TextAlign.Start
+        MusicLyricsAlignment.CENTER -> TextAlign.Center
+        MusicLyricsAlignment.RIGHT -> TextAlign.End
+    }
+    val horizontalAlign = when (alignment) {
+        MusicLyricsAlignment.LEFT -> Alignment.Start
+        MusicLyricsAlignment.CENTER -> Alignment.CenterHorizontally
+        MusicLyricsAlignment.RIGHT -> Alignment.End
+    }
+    val clampedSize = textSizeSp.coerceIn(16f, 40f)
+    val clampedSpacing = lineSpacingMultiplier.coerceIn(1.0f, 2.0f)
+
     Box(modifier.fillMaxSize().padding(bottom = 12.dp)) {
-        LazyColumn(state = state, modifier = Modifier.fillMaxSize().nestedScroll(nested), horizontalAlignment = Alignment.CenterHorizontally) {
+        LazyColumn(
+            state = state,
+            modifier = Modifier.fillMaxSize().nestedScroll(nested),
+            horizontalAlignment = horizontalAlign,
+        ) {
             if (synced) item { Spacer(Modifier.height(120.dp)) }
             itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
                 val distance = if (synced && active >= 0) abs(index - active) else 0
-                val alpha by animateFloatAsState(if (!synced) .92f else (1f / (1f + distance * .8f)).coerceIn(.25f, 1f), spring(dampingRatio = .92f, stiffness = 180f), label = "lyric alpha")
-                val scale by animateFloatAsState((1.05f - distance * .06f).coerceIn(.97f, 1.05f), spring(dampingRatio = .88f, stiffness = 180f), label = "lyric scale")
-                val blur by animateFloatAsState(if (!synced || manual || distance == 0) 0f else (1.15f * distance).coerceAtMost(3.5f), spring(dampingRatio = 1f, stiffness = 220f), label = "lyric blur")
+                val alpha by animateFloatAsState(
+                    if (!synced) .92f else (1f / (1f + distance * .8f)).coerceIn(.25f, 1f),
+                    spring(dampingRatio = .92f, stiffness = 180f),
+                    label = "lyric alpha",
+                )
+                val scale by animateFloatAsState(
+                    (1.05f - distance * .06f).coerceIn(.97f, 1.05f),
+                    spring(dampingRatio = .88f, stiffness = 180f),
+                    label = "lyric scale",
+                )
+                val blur by animateFloatAsState(
+                    if (!synced || !lineBlurEnabled || manual || distance == 0) 0f else (1.15f * distance).coerceAtMost(3.5f),
+                    spring(dampingRatio = 1f, stiffness = 220f),
+                    label = "lyric blur",
+                )
                 if (synced && line.text.isBlank()) {
                     if (index == active) Canvas(Modifier.fillMaxWidth().height(64.dp)) {
-                        repeat(3) { i -> drawCircle(color.copy(alpha = .85f), 7.5.dp.toPx(), Offset(size.width / 2 + (i - 1) * 24.dp.toPx(), size.height / 2)) }
+                        repeat(3) { i ->
+                            drawCircle(
+                                color.copy(alpha = .85f),
+                                7.5.dp.toPx(),
+                                Offset(size.width / 2 + (i - 1) * 24.dp.toPx(), size.height / 2),
+                            )
+                        }
                     }
                 } else {
-                    Box(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = if (index == 0) 0.dp else 10.4.dp, bottom = 10.4.dp)
-                        .blur(blur.dp, edgeTreatment = BlurredEdgeTreatment.Rectangle)
-                        .graphicsLayer { this.alpha = alpha; scaleX = scale; scaleY = scale }
-                        .clickable(enabled = line.startTimeMs != null) { line.startTimeMs?.let(onSeek) }) {
-                        TimedParagraph(line, visualPosition, font, color, synced)
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = if (index == 0) 0.dp else 10.4.dp, bottom = 10.4.dp)
+                            .then(if (blur > 0.05f) Modifier.blur(blur.dp, edgeTreatment = BlurredEdgeTreatment.Rectangle) else Modifier)
+                            .graphicsLayer { this.alpha = alpha; scaleX = scale; scaleY = scale }
+                            .clickable(enabled = clickToSeek && line.startTimeMs != null) {
+                                line.startTimeMs?.let { onSeek((it - offsetMs).coerceAtLeast(0L)) }
+                            },
+                    ) {
+                        TimedParagraph(line, visualPosition, font, color, synced, clampedSize, clampedSpacing, textAlign)
                     }
                 }
             }
             if (synced) item { Spacer(Modifier.height(300.dp)) }
         }
-        if (manual && synced) FilledTonalButton(onClick = { manual = false }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)) { Text("Resume") }
+        if (manual && synced && autoScroll) {
+            FilledTonalButton(
+                onClick = { manual = false },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+            ) { Text("Resume") }
+        }
     }
 }
 
 private data class TimedRange(val start: Int, val end: Int, val word: LyricsWord)
 
 @Composable
-private fun TimedParagraph(line: LyricsLine, position: Long, font: FontFamily, color: Color, synced: Boolean) {
+private fun TimedParagraph(
+    line: LyricsLine,
+    position: Long,
+    font: FontFamily,
+    color: Color,
+    synced: Boolean,
+    textSizeSp: Float,
+    lineSpacingMultiplier: Float,
+    textAlign: TextAlign,
+) {
     val ranges = remember(line) {
         var cursor = 0
         line.words.mapNotNull { word ->
@@ -143,26 +209,46 @@ private fun TimedParagraph(line: LyricsLine, position: Long, font: FontFamily, c
         }
     }
     var layout by remember(line.text) { mutableStateOf<TextLayoutResult?>(null) }
-    val style = MaterialTheme.typography.headlineMedium.copy(fontSize = 26.sp, fontWeight = FontWeight.Bold,
-        lineHeight = (26 * if (ranges.isEmpty()) 1.3f else 1.35f).sp, fontFamily = font,
-        letterSpacing = 0.sp, textAlign = TextAlign.Center, textDirection = TextDirection.Content)
+    val effectiveLineHeight = (textSizeSp * if (ranges.isEmpty()) lineSpacingMultiplier else (lineSpacingMultiplier + 0.05f)).sp
+    val style = MaterialTheme.typography.headlineMedium.copy(
+        fontSize = textSizeSp.sp,
+        fontWeight = FontWeight.Bold,
+        lineHeight = effectiveLineHeight,
+        fontFamily = font,
+        letterSpacing = 0.sp,
+        textAlign = textAlign,
+        textDirection = TextDirection.Content,
+    )
     val textModifier = Modifier.fillMaxWidth().padding(horizontal = if (ranges.isEmpty()) 0.dp else 24.dp)
     Box(Modifier.fillMaxWidth()) {
-        Text(line.text, modifier = textModifier, style = style, color = color.copy(alpha = if (synced && ranges.isNotEmpty()) .38f else 1f), onTextLayout = { layout = it })
-        if (ranges.isNotEmpty()) Text(line.text, style = style, color = color, modifier = textModifier.drawWithContent {
-            val measured = layout ?: return@drawWithContent
-            ranges.forEach { range ->
-                val duration = (range.word.endTimeMs - range.word.startTimeMs).coerceAtLeast(1)
-                val progress = ((position - range.word.startTimeMs).toFloat() / duration).coerceIn(0f, 1f)
-                if (progress > 0f) {
-                    // Clip each glyph separately so wrapping and bidirectional text retain shaping.
-                    for (i in range.start until range.end.coerceAtMost(line.text.length)) {
-                        val box = measured.getBoundingBox(i)
-                        val local = (progress * (range.end - range.start) - (i - range.start)).coerceIn(0f, 1f)
-                        if (local > 0f) clipRect(box.left, box.top, box.left + box.width * local, box.bottom) { this@drawWithContent.drawContent() }
+        Text(
+            line.text,
+            modifier = textModifier,
+            style = style,
+            color = color.copy(alpha = if (synced && ranges.isNotEmpty()) .38f else 1f),
+            onTextLayout = { layout = it },
+        )
+        if (ranges.isNotEmpty()) Text(
+            line.text,
+            style = style,
+            color = color,
+            modifier = textModifier.drawWithContent {
+                val measured = layout ?: return@drawWithContent
+                ranges.forEach { range ->
+                    val duration = (range.word.endTimeMs - range.word.startTimeMs).coerceAtLeast(1)
+                    val progress = ((position - range.word.startTimeMs).toFloat() / duration).coerceIn(0f, 1f)
+                    if (progress > 0f) {
+                        // Clip each glyph separately so wrapping and bidirectional text retain shaping.
+                        for (i in range.start until range.end.coerceAtMost(line.text.length)) {
+                            val box = measured.getBoundingBox(i)
+                            val local = (progress * (range.end - range.start) - (i - range.start)).coerceIn(0f, 1f)
+                            if (local > 0f) clipRect(box.left, box.top, box.left + box.width * local, box.bottom) {
+                                this@drawWithContent.drawContent()
+                            }
+                        }
                     }
                 }
-            }
-        })
+            },
+        )
     }
 }

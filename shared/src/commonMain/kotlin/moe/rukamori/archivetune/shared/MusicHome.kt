@@ -43,7 +43,9 @@ data class MusicHomeState(
     val chips: List<MusicHomeChip> = emptyList(),
     val selectedChip: MusicHomeChip? = null,
     val shelves: List<MusicShelf> = emptyList(),
+    val continuation: String? = null,
     val loading: Boolean = false,
+    val loadingMore: Boolean = false,
     val loaded: Boolean = false,
     val error: String? = null,
 )

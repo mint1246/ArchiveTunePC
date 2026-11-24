@@ -42,6 +42,8 @@ internal fun ArchiveTuneTheme(
     theme: MusicThemeChoice,
     artworkUrl: String? = null,
     isPlaying: Boolean = false,
+    pureBlack: Boolean = false,
+    dynamicTheme: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val dark = when (theme) {
@@ -69,9 +71,26 @@ internal fun ArchiveTuneTheme(
         labelSmall = base.labelSmall.copy(fontFamily = family),
     )
     val schemes = LocalArchiveTuneColorSchemes.current
-    val artworkPalette by rememberArtworkThemePalette(artworkUrl)
-    val baseColors = remember(artworkPalette, dark, schemes) { artworkPalette?.let { exactPaletteColorScheme(it, dark) } ?: if (dark) schemes.dark else schemes.light }
-    val colors = remember(baseColors, artworkUrl != null) { if (artworkUrl != null) baseColors.dynamicBackdropGlass() else baseColors }
+    val effectiveArtwork = if (dynamicTheme) artworkUrl else null
+    val artworkPalette by rememberArtworkThemePalette(effectiveArtwork)
+    val baseColors = remember(artworkPalette, dark, schemes, pureBlack) {
+        val scheme = artworkPalette?.let { exactPaletteColorScheme(it, dark) } ?: if (dark) schemes.dark else schemes.light
+        if (dark && pureBlack) {
+            scheme.copy(
+                background = Color.Black,
+                surface = Color.Black,
+                surfaceDim = Color.Black,
+                surfaceContainerLowest = Color.Black,
+                surfaceContainerLow = Color(0xFF0A0A0A),
+                surfaceContainer = Color(0xFF121212),
+                surfaceContainerHigh = Color(0xFF1A1A1A),
+                surfaceContainerHighest = Color(0xFF222222),
+            )
+        } else {
+            scheme
+        }
+    }
+    val colors = remember(baseColors, effectiveArtwork != null) { if (effectiveArtwork != null) baseColors.dynamicBackdropGlass() else baseColors }
     val motionScheme = MotionScheme.expressive()
     val animatedColors = animateColorScheme(colors, motionScheme.defaultEffectsSpec())
     MaterialExpressiveTheme(colorScheme = animatedColors, typography = typography, motionScheme = motionScheme, shapes = Shapes(

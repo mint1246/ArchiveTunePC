@@ -29,7 +29,8 @@ private object IosServices {
     init {
         setUnhandledExceptionHook { failure ->
             val detail = failure.stackTraceToString().replace(Regex("https?://\\S+"), "[redacted URL]")
-            NSLog("%@", "ArchiveTune uncaught Kotlin exception: $detail")
+            // Use %s (not %@): Kotlin/Native bridges varargs String to C char*, not NSString*.
+            NSLog("%s", "ArchiveTune uncaught Kotlin exception: $detail")
             terminateWithUnhandledException(failure)
         }
         // App.kt configures the same Coil transition for all Android artwork.
@@ -52,6 +53,7 @@ private object IosServices {
         expectSuccess = false
         install(HttpTimeout) { requestTimeoutMillis = 15_000 }
     }), scope)
+    private val platformBridge = IosPlatformBridge()
     private val social = MusicSocialController(
         http = HttpClient(Darwin) {
             expectSuccess = false
@@ -60,6 +62,7 @@ private object IosServices {
         scope = scope,
         login = ::iosDiscordLogin,
         nonce = { NSUUID().UUIDString + NSUUID().UUIDString },
+        sessionStore = IosSocialSessionStore(),
     )
     private val news = MusicNewsController(HttpClient(Darwin) {
         expectSuccess = false
@@ -75,6 +78,7 @@ private object IosServices {
             onShareTrack = ::shareIosTrack,
             social = social,
             news = news,
+            platformBridge = platformBridge,
         ),
     )
 

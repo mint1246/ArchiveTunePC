@@ -42,15 +42,27 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
         ensureOpen()
         val normalized = query.trim().take(200)
         if (normalized.isEmpty()) return emptyList()
-        val body = buildJsonObject { put("context", SEARCH_CLIENT.context(visitorData)); put("query", normalized); if (params != null && params.length <= 4096) put("params", params) }
+        val body = buildJsonObject { put("context", SEARCH_CLIENT.context(visitorData, localeHl, localeGl)); put("query", normalized); if (params != null && params.length <= 4096) put("params", params) }
         return CatalogParsing.searchItems(request(SEARCH_CLIENT, "search", body.toString()))
+    }
+
+    override suspend fun searchSections(query: String): List<MusicSearchSection> {
+        ensureOpen()
+        val normalized = query.trim().take(200)
+        if (normalized.isEmpty()) return emptyList()
+        val body = buildJsonObject { put("context", SEARCH_CLIENT.context(visitorData, localeHl, localeGl)); put("query", normalized) }
+        val response = request(SEARCH_CLIENT, "search", body.toString())
+        val sections = CatalogParsing.searchSections(response)
+        if (sections.isNotEmpty()) return sections
+        val flat = CatalogParsing.searchItems(response)
+        return if (flat.isEmpty()) emptyList() else listOf(MusicSearchSection("Results", flat))
     }
 
     override suspend fun searchSuggestions(query: String): List<String> {
         ensureOpen()
         val normalized = query.trim().take(200)
         if (normalized.isEmpty()) return emptyList()
-        val body = buildJsonObject { put("context", SEARCH_CLIENT.context(visitorData)); put("input", normalized) }
+        val body = buildJsonObject { put("context", SEARCH_CLIENT.context(visitorData, localeHl, localeGl)); put("input", normalized) }
         return CatalogParsing.searchSuggestions(request(SEARCH_CLIENT, "music/get_search_suggestions", body.toString()))
     }
 
@@ -58,6 +70,83 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
     private var visitorData: String? = null
     private val visitorMutex = Mutex()
     private var cachedHomeChips: List<MusicHomeChip>? = null
+    private var localeHl: String = "en"
+    private var localeGl: String = "US"
+    private var audioQuality: MusicAudioQuality = MusicAudioQuality.AUTO
+    private var auth: MusicYouTubeAuth? = null
+
+    override fun setLocale(language: String, country: String) {
+        localeHl = language.takeIf { it.isNotBlank() && it != "system" } ?: "en"
+        localeGl = country.takeIf { it.isNotBlank() && it != "system" } ?: "US"
+    }
+
+    override fun setAudioQuality(quality: MusicAudioQuality) {
+        audioQuality = quality
+    }
+
+    override fun setAuth(auth: MusicYouTubeAuth?) {
+        this.auth = auth?.takeIf { it.cookie.isNotBlank() && it.sapisid.isNotBlank() }
+        visitorData = null
+        cachedHomeChips = null
+    }
+
+    override suspend fun fetchAccountInfo(): MusicYouTubeAccount? {
+        ensureOpen()
+        if (auth == null) return null
+        val body = buildJsonObject {
+            put("context", SEARCH_CLIENT.context(visitorData, localeHl, localeGl))
+            put("deviceTheme", "DEVICE_THEME_SUPPORTED")
+            put("userInterfaceTheme", "USER_INTERFACE_THEME_DARK")
+        }
+        return try {
+            CatalogParsing.accountInfo(request(SEARCH_CLIENT, "account/account_menu", body.toString()))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    override suspend fun homePage(continuation: String?): MusicHomePage {
+        ensureOpen()
+        ensureVisitorContext()
+        val body = buildJsonObject {
+            put("context", SEARCH_CLIENT.context(visitorData, localeHl, localeGl))
+            if (continuation == null) put("browseId", "FEmusic_home")
+            else put("continuation", continuation)
+        }
+        val response = request(SEARCH_CLIENT, "browse", body.toString())
+        if (continuation == null) {
+            cachedHomeChips = CatalogParsing.homeChips(response)
+        }
+        return MusicHomePage(
+            shelves = CatalogParsing.home(response),
+            chips = cachedHomeChips.orEmpty(),
+            continuation = CatalogParsing.homeContinuation(response),
+        )
+    }
+
+    override suspend fun resolveForDownload(track: MusicTrack): ResolvedAudio {
+        ensureOpen()
+        val clickedId = track.id
+        if (!CatalogParsing.isYouTubeVideoId(clickedId)) {
+            throw CatalogException(
+                CatalogException.Reason.BAD_VIDEO_ID,
+                "This item does not have a valid YouTube video ID and cannot be downloaded.",
+            )
+        }
+        ensureVisitorContext()
+        val body = buildJsonObject {
+            put("context", PLAYER_CLIENT.context(visitorData, localeHl, localeGl))
+            put("videoId", clickedId)
+        }
+        return CatalogParsing.resolve(
+            response = request(PLAYER_CLIENT, "player", body.toString()),
+            clickedId = clickedId,
+            preferHls = false,
+            audioQuality = audioQuality,
+        )
+    }
 
     override suspend fun radioQueue(clicked: MusicTrack): MusicRadioQueue {
         ensureOpen()
@@ -173,7 +262,12 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
             put("context", PLAYER_CLIENT.context(visitorData))
             put("videoId", clickedId)
         }
-        val resolved = CatalogParsing.resolve(request(PLAYER_CLIENT, "player", body.toString()), clickedId, preferHls)
+        val resolved = CatalogParsing.resolve(
+            response = request(PLAYER_CLIENT, "player", body.toString()),
+            clickedId = clickedId,
+            preferHls = preferHls,
+            audioQuality = audioQuality,
+        )
         if (resolved.mimeType != "application/vnd.apple.mpegurl") return resolved
         // Use the master manifest's audio rendition when available, so a music player
         // need not download/decode its accompanying video variants. URLs stay ephemeral.
@@ -219,6 +313,13 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
                     header(HttpHeaders.Origin, profile.baseUrl)
                     header(HttpHeaders.Referrer, profile.baseUrl + "/")
                     header(HttpHeaders.UserAgent, profile.userAgent)
+                    val activeAuth = auth
+                    if (activeAuth != null && profile.clientName == "WEB_REMIX") {
+                        header(HttpHeaders.Cookie, activeAuth.cookie)
+                        header("X-Goog-AuthUser", "0")
+                        val tsSeconds = (currentEpochMillis() / 1000L).coerceAtLeast(1L)
+                        header(HttpHeaders.Authorization, KmpSha1.sapisidHash(activeAuth.sapisid, profile.baseUrl, tsSeconds))
+                    }
                     setBody(body)
                 }
                 if (response.status.value !in 200..299) throw httpFailure(response.status)
@@ -309,13 +410,13 @@ class InnerTubeCatalog(private val httpClient: HttpClient, private val preferHls
         val deviceMake: String? = null,
         val deviceModel: String? = null,
     ) {
-        fun context(visitorData: String? = null) = buildJsonObject {
+        fun context(visitorData: String? = null, hl: String = "en", gl: String = "US") = buildJsonObject {
             put("client", buildJsonObject {
                 put("clientName", clientName)
                 put("clientVersion", version)
                 put("userAgent", userAgent)
-                put("hl", "en")
-                put("gl", "US")
+                put("hl", hl)
+                put("gl", gl)
                 if (visitorData != null) put("visitorData", visitorData)
                 if (osName != null) put("osName", osName)
                 if (osVersion != null) put("osVersion", osVersion)

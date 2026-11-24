@@ -70,6 +70,7 @@ private fun PlayerArtwork(track: MusicTrack, modifier: Modifier, circular: Boole
 internal fun AndroidMiniPlayer(controller: MusicController, onOpen: () -> Unit, modifier: Modifier = Modifier, navigationAttached: Boolean = true, navigationProximity: Float = if (navigationAttached) 1f else 0f) {
     val playback by controller.playback.collectAsState()
     val state by controller.state.collectAsState()
+    val settings = controller.library?.collectAsState()?.value?.settings ?: MusicSettings()
     val track = playback.track ?: return
     val progress = if (playback.durationMs > 0) (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f) else 0f
     val scope = rememberCoroutineScope()
@@ -81,11 +82,17 @@ internal fun AndroidMiniPlayer(controller: MusicController, onOpen: () -> Unit, 
         topEnd = (32f - 4f * proximity).dp,
         bottomStart = (32f - 20f * proximity).dp,
         bottomEnd = (32f - 20f * proximity).dp)
-    Row(modifier.fillMaxWidth().height(70.dp).pointerInput(state.queueIndex, state.queue.size, direction) {
+    val bgColor = when (settings.miniPlayerBackgroundStyle) {
+        MusicMiniPlayerBackgroundStyle.THEME -> MaterialTheme.colorScheme.surfaceContainerHigh
+        MusicMiniPlayerBackgroundStyle.ARTWORK -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f)
+        MusicMiniPlayerBackgroundStyle.GRADIENT -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
+    }
+    Row(modifier.fillMaxWidth().height(70.dp).pointerInput(state.queueIndex, state.queue.size, direction, settings.swipeToSong, settings.swipeSensitivity) {
+        if (!settings.swipeToSong) return@pointerInput
         var started = TimeSource.Monotonic.markNow()
         var distance = 0f
         var dragOffset = 0f
-        val sensitivity = .73f
+        val sensitivity = settings.swipeSensitivity.coerceIn(0.1f, 1f)
         val threshold = (600 / (1f + exp(-(-11.44748f * sensitivity + 9.04945f)))).roundToInt()
         detectHorizontalDragGestures(
             onDragStart = { started = TimeSource.Monotonic.markNow(); distance = 0f; dragOffset = 0f },
@@ -109,7 +116,7 @@ internal fun AndroidMiniPlayer(controller: MusicController, onOpen: () -> Unit, 
                 }
             },
         )
-    }.offset { IntOffset((if (direction == LayoutDirection.Rtl) -offset.value else offset.value).roundToInt(), 0) }.clip(miniShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onOpen).padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    }.offset { IntOffset((if (direction == LayoutDirection.Rtl) -offset.value else offset.value).roundToInt(), 0) }.clip(miniShape).background(bgColor).clickable(onClick = onOpen).padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
             if (playback.isBuffering || state.resolvingTrackId != null) CircularWavyProgressIndicator(
                 modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.primary,
@@ -146,6 +153,7 @@ internal fun AndroidFullPlayer(controller: MusicController, onClose: () -> Unit,
     val state by controller.state.collectAsState()
     val options by controller.playbackOptions.collectAsState()
     val library = controller.library?.collectAsState()?.value
+    val settings = library?.settings ?: MusicSettings()
     val track = playback.track ?: return
     val playPauseCorner by animateDpAsState(if (playback.isPlaying) 28.dp else 44.dp,
         spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "cinematicPlayPauseCorner")
@@ -156,6 +164,15 @@ internal fun AndroidFullPlayer(controller: MusicController, onClose: () -> Unit,
     DisposableEffect(Unit) { onDispose { onOverlayVisibilityChange(false) } }
     var menuExpanded by remember { mutableStateOf(false) }
     var timerExpanded by remember { mutableStateOf(false) }
+    if (menuExpanded) {
+        AndroidPlayerMenuSheet(
+            track = track,
+            controller = controller,
+            onDismiss = { menuExpanded = false },
+            onOpenSleepTimer = { timerExpanded = true },
+            onCollapsePlayer = onClose,
+        )
+    }
     if (timerExpanded) {
         var minutes by remember { mutableFloatStateOf(30f) }
         AndroidActionPromptDialog(
@@ -210,15 +227,37 @@ internal fun AndroidFullPlayer(controller: MusicController, onClose: () -> Unit,
                                 Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground.copy(alpha = .8f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.basicMarquee())
                             }
                         }
-                        AndroidThumbnail(controller, Modifier.weight(1f).fillMaxWidth())
+                        if (!settings.hidePlayerThumbnail) {
+                            AndroidThumbnail(controller, Modifier.weight(1f).fillMaxWidth())
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
                     }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             AnimatedContent(track.title, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "player title") { title ->
-                                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.basicMarquee())
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).basicMarquee())
+                                    if (track.explicit) {
+                                        PlayerIcon(Res.drawable.explicit, "Explicit", Modifier.size(18.dp), MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f))
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(6.dp))
-                            Text(track.artist, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                track.artist,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .basicMarquee()
+                                    .then(
+                                        if (track.artistId != null) Modifier.clickable {
+                                            controller.openBrowse(MusicCatalogItem.Browse(track.artistId, track.artist.ifBlank { "Artist" }, kind = MusicBrowseKind.ARTIST))
+                                            onClose()
+                                        } else Modifier,
+                                    ),
+                            )
                         }
                         Spacer(Modifier.width(12.dp))
                         if (controller.canShare) {
@@ -227,23 +266,50 @@ internal fun AndroidFullPlayer(controller: MusicController, onClose: () -> Unit,
                         }
                         if (library != null) PlayerSquare(if (library.favorites.any { it.id == track.id }) Res.drawable.favorite else Res.drawable.favorite_border, "Favorite", 44, 22, action = { controller.toggleFavorite(track) })
                         Spacer(Modifier.width(10.dp))
-                        Box {
-                            PlayerSquare(Res.drawable.more_horiz, "More", 44, 22, action = { menuExpanded = true })
-                            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                                listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
-                                    DropdownMenuItem(text = { Text("${speed}x" + if (options.speed == speed) " ✓" else "") }, onClick = { controller.setSpeed(speed); menuExpanded = false })
-                                }
-                            }
-                        }
+                        PlayerSquare(Res.drawable.more_horiz, "More", 44, 22, action = { menuExpanded = true })
                     }
                     Spacer(Modifier.height(12.dp))
                     var seeking by remember(track.id) { mutableStateOf<Float?>(null) }
                     val duration = playback.durationMs.coerceAtLeast(1).toFloat()
-                    Slider(value = seeking ?: playback.positionMs.toFloat().coerceIn(0f, duration), onValueChange = { seeking = it }, onValueChangeFinished = { seeking?.let { controller.seekTo(it.toLong()) }; seeking = null }, valueRange = 0f..duration, enabled = playback.durationMs > 0 && state.resolvingTrackId == null, colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.onBackground, activeTrackColor = MaterialTheme.colorScheme.onBackground, inactiveTrackColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .24f)), modifier = Modifier.padding(horizontal = 32.dp))
+                    AndroidStyledPlaybackSlider(
+                        value = seeking ?: playback.positionMs.toFloat().coerceIn(0f, duration),
+                        valueRange = 0f..duration,
+                        onValueChange = { seeking = it },
+                        onValueChangeFinished = { seeking?.let { controller.seekTo(it.toLong()) }; seeking = null },
+                        style = settings.sliderStyle,
+                        isPlaying = playback.isPlaying,
+                        enabled = playback.durationMs > 0 && state.resolvingTrackId == null,
+                        activeColor = MaterialTheme.colorScheme.onBackground,
+                        inactiveColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .24f),
+                        thumbColor = MaterialTheme.colorScheme.onBackground,
+                        hapticsEnabled = settings.enableHapticFeedback,
+                        modifier = Modifier.padding(horizontal = 32.dp),
+                    )
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth().padding(horizontal = 36.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime((seeking ?: playback.positionMs.toFloat()).toLong()), style = MaterialTheme.typography.labelMedium)
                         Text(formatTime(playback.durationMs), style = MaterialTheme.typography.labelMedium)
+                    }
+                    if (settings.showPlayerVolumeBar && controller.canAdjustVolume) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PlayerIcon(Res.drawable.volume_off, null, Modifier.size(16.dp), MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+                            Slider(
+                                value = options.volume,
+                                onValueChange = controller::setVolume,
+                                valueRange = 0f..1f,
+                                modifier = Modifier.weight(1f),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.onBackground,
+                                    activeTrackColor = MaterialTheme.colorScheme.onBackground,
+                                    inactiveTrackColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .24f),
+                                ),
+                            )
+                            PlayerIcon(Res.drawable.volume_up, null, Modifier.size(16.dp), MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 32.dp)) {

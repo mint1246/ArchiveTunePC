@@ -45,6 +45,7 @@ internal fun AndroidThumbnail(controller: MusicController, modifier: Modifier = 
     val state by controller.state.collectAsState()
     val playback by controller.playback.collectAsState()
     val options by controller.playbackOptions.collectAsState()
+    val settings = controller.library?.collectAsState()?.value?.settings ?: MusicSettings()
     val current = playback.track ?: return
     val pages = remember(state.queue, state.queueIndex, current, options.shuffle) {
         buildList {
@@ -86,25 +87,36 @@ internal fun AndroidThumbnail(controller: MusicController, modifier: Modifier = 
         val pageWidth = maxWidth
         val coverSize = (pageWidth - 64.dp).coerceAtLeast(1.dp)
         LazyHorizontalGrid(rows = GridCells.Fixed(1), state = grid,
+            userScrollEnabled = settings.swipeThumbnail,
             flingBehavior = rememberSnapFlingBehavior(snap), modifier = Modifier.fillMaxSize()) {
             items(pages, key = { "${it.slot}:${it.index}:${it.track.id}" }, contentType = { "thumbnailPage" }) { page ->
+                val seekStepMs = if (settings.seekExtraSeconds) 10_000L else 5_000L
+                val seekStepSec = (seekStepMs / 1000L).toInt()
                 Box(Modifier.width(pageWidth).fillMaxHeight().padding(horizontal = 32.dp)
-                    .pointerInput(page.track.id, direction) {
+                    .pointerInput(page.track.id, direction, seekStepMs) {
                         detectTapGestures(onDoubleTap = { offset ->
                             val backward = if (direction == LayoutDirection.Ltr) offset.x < size.width / 2 else offset.x > size.width / 2
                             val old = controller.playback.value
-                            controller.seekTo(if (backward) (old.positionMs - 5000).coerceAtLeast(0)
-                                else (old.positionMs + 5000).coerceAtMost(old.durationMs.coerceAtLeast(0)))
-                            seekEffect = if (backward) "-5 seconds" else "+5 seconds"
+                            controller.seekTo(if (backward) (old.positionMs - seekStepMs).coerceAtLeast(0)
+                                else (old.positionMs + seekStepMs).coerceAtMost(old.durationMs.coerceAtLeast(0)))
+                            seekEffect = if (backward) "-$seekStepSec seconds" else "+$seekStepSec seconds"
                             seekSequence++
                         })
                     }, contentAlignment = Alignment.Center) {
                     val url = page.track.artworkUrl?.androidHighResArtwork()
-                    Box(Modifier.size(coverSize).clip(RoundedCornerShape(16.dp))) {
-                        AsyncImage(url, null, Modifier.fillMaxSize().graphicsLayer {
-                            renderEffect = BlurEffect(36f, 36f); alpha = .6f
-                        }, contentScale = ContentScale.FillBounds)
-                        AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    val corner = settings.thumbnailCornerRadius.coerceIn(0f, 36f).dp
+                    Box(Modifier.size(coverSize).clip(RoundedCornerShape(corner))) {
+                        if (!settings.cropThumbnailToSquare && !settings.disableBlur) {
+                            AsyncImage(url, null, Modifier.fillMaxSize().graphicsLayer {
+                                renderEffect = BlurEffect(36f, 36f); alpha = .6f
+                            }, contentScale = ContentScale.FillBounds)
+                        }
+                        AsyncImage(
+                            url,
+                            null,
+                            Modifier.fillMaxSize(),
+                            contentScale = if (settings.cropThumbnailToSquare) ContentScale.Crop else ContentScale.Fit,
+                        )
                     }
                 }
             }

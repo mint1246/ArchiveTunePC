@@ -1,6 +1,7 @@
 package moe.rukamori.archivetune.shared
 
 import kotlinx.coroutines.flow.StateFlow
+import moe.rukamori.archivetune.playback.api.PlaybackAlbum
 import moe.rukamori.archivetune.playback.api.PlaybackArtist
 import moe.rukamori.archivetune.playback.api.PlaybackFailure
 import moe.rukamori.archivetune.playback.api.PlaybackItem
@@ -16,17 +17,53 @@ data class MusicTrack(
     val artist: String = "",
     val artworkUrl: String? = null,
     val durationMs: Long? = null,
+    val artistId: String? = null,
+    val albumId: String? = null,
+    val albumName: String? = null,
+    val explicit: Boolean = false,
+    val localFilePath: String? = null,
 )
+
+data class MusicSearchSection(
+    val title: String,
+    val items: List<MusicCatalogItem>,
+    val filterParams: String? = null,
+)
+
+data class MusicHomePage(
+    val shelves: List<MusicShelf> = emptyList(),
+    val chips: List<MusicHomeChip> = emptyList(),
+    val continuation: String? = null,
+)
+
+enum class MusicAudioQuality { AUTO, LOW, HIGH }
+
+data class MusicYouTubeAccount(
+    val name: String,
+    val email: String = "",
+    val handle: String = "",
+    val avatarUrl: String? = null,
+)
+
+data class MusicYouTubeAuth(
+    val cookie: String,
+    val sapisid: String,
+    val account: MusicYouTubeAccount? = null,
+) {
+    override fun toString(): String = "MusicYouTubeAuth(signedIn=${cookie.isNotBlank()})"
+}
 
 fun MusicTrack.toPlaybackItem(): PlaybackItem = PlaybackItem(
     metadata = PlaybackMetadata(
         id = id,
         title = title,
-        artists = artist.takeIf(String::isNotBlank)?.let { listOf(PlaybackArtist(name = it)) }.orEmpty(),
+        artists = artist.takeIf(String::isNotBlank)?.let { listOf(PlaybackArtist(id = artistId, name = it)) }.orEmpty(),
+        album = albumName?.takeIf(String::isNotBlank)?.let { PlaybackAlbum(id = albumId, title = it) },
         artworkUri = artworkUrl,
         durationHintMs = durationMs,
+        explicit = explicit,
     ),
-    source = PlaybackSource.Deferred(id),
+    source = localFilePath?.takeIf(String::isNotBlank)?.let { PlaybackSource.LocalFile(it) } ?: PlaybackSource.Deferred(id),
 )
 
 fun PlaybackItem.toMusicTrack(): MusicTrack = MusicTrack(
@@ -35,6 +72,11 @@ fun PlaybackItem.toMusicTrack(): MusicTrack = MusicTrack(
     artist = metadata.artistText,
     artworkUrl = metadata.artworkUri,
     durationMs = metadata.durationHintMs,
+    artistId = metadata.artists.firstOrNull()?.id,
+    albumId = metadata.album?.id,
+    albumName = metadata.album?.title,
+    explicit = metadata.explicit,
+    localFilePath = (source as? PlaybackSource.LocalFile)?.path,
 )
 
 /** Ephemeral source: never persist signed URLs or request headers. */
@@ -56,15 +98,24 @@ data class ResolvedAudio(
 interface MusicCatalog : AutoCloseable {
     suspend fun searchItems(query: String, params: String?): List<MusicCatalogItem> = searchItems(query)
     suspend fun searchItems(query: String): List<MusicCatalogItem> = search(query).map { MusicCatalogItem.Track(it) }
+    suspend fun searchSections(query: String): List<MusicSearchSection> =
+        searchItems(query, null).takeIf { it.isNotEmpty() }?.let { listOf(MusicSearchSection("Results", it)) }.orEmpty()
     suspend fun searchSuggestions(query: String): List<String> = emptyList()
     suspend fun radioQueue(clicked: MusicTrack): MusicRadioQueue = MusicRadioQueue(listOf(clicked))
     suspend fun discovery(): MusicDiscovery = MusicDiscovery()
     suspend fun moodArtwork(mood: MusicMood): String? = mood.artworkUrl
     suspend fun home(): List<MusicShelf> = emptyList()
+    suspend fun homePage(continuation: String? = null): MusicHomePage =
+        if (continuation == null) MusicHomePage(home(), homeChips(), null) else MusicHomePage()
     suspend fun homeChips(): List<MusicHomeChip> = emptyList()
     suspend fun browse(id: String, params: String? = null): MusicBrowsePage = MusicBrowsePage(title = "")
     suspend fun search(query: String): List<MusicTrack>
     suspend fun resolve(track: MusicTrack): ResolvedAudio
+    suspend fun resolveForDownload(track: MusicTrack): ResolvedAudio = resolve(track)
+    fun setLocale(language: String, country: String) {}
+    fun setAudioQuality(quality: MusicAudioQuality) {}
+    fun setAuth(auth: MusicYouTubeAuth?) {}
+    suspend fun fetchAccountInfo(): MusicYouTubeAccount? = null
     override fun close()
 }
 

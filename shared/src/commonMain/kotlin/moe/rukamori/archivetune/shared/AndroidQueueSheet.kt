@@ -97,13 +97,52 @@ internal fun AndroidQueueSheet(controller: MusicController, expanded: Boolean, o
             }
         }
         if (expanded || offset.value < heightPx) Column(Modifier.fillMaxSize().offset { IntOffset(0, offset.value.roundToInt()) }.background(MaterialTheme.colorScheme.surfaceContainer).statusBarsPadding().navigationBarsPadding()) {
+            var queueLocked by remember { mutableStateOf(false) }
+            var saveDialog by remember { mutableStateOf(false) }
+            var menuTrack by remember { mutableStateOf<Pair<Int, MusicTrack>?>(null) }
+            if (saveDialog) {
+                var playlistName by remember { mutableStateOf(state.queueTitle?.takeIf(String::isNotBlank) ?: "Saved Queue") }
+                AlertDialog(
+                    onDismissRequest = { saveDialog = false },
+                    title = { Text("Save queue as playlist") },
+                    text = { OutlinedTextField(playlistName, { playlistName = it }, singleLine = true, label = { Text("Playlist name") }) },
+                    confirmButton = {
+                        TextButton(enabled = playlistName.isNotBlank(), onClick = {
+                            controller.saveQueueAsPlaylist(playlistName)
+                            saveDialog = false
+                        }) { Text("Save") }
+                    },
+                    dismissButton = { TextButton(onClick = { saveDialog = false }) { Text("Cancel") } },
+                )
+            }
+            menuTrack?.let { (idx, tr) ->
+                AndroidSongMenuSheet(
+                    track = tr,
+                    controller = controller,
+                    onDismiss = { menuTrack = null },
+                    extraActionLabel = "Remove from queue",
+                    extraActionIcon = Res.drawable.close,
+                    onExtraAction = { controller.removeQueueItem(idx) },
+                )
+            }
+            val totalDurationMs = remember(state.queue) { state.queue.sumOf { it.durationMs ?: 0L } }
             Row(Modifier.fillMaxWidth().pointerInput(heightPx) {
                 detectVerticalDragGestures(onDragEnd = { settleSheet() }, onDragCancel = { settleSheet() }, onVerticalDrag = { change, amount -> change.consume(); dragSheet(amount) })
             }, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { onExpandedChange(false) }) { Icon(painterResource(Res.drawable.expand_more), "Close queue") }
                 Column(Modifier.weight(1f)) {
                     Text(state.queueTitle?.takeIf { it.isNotBlank() } ?: "Queue", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${state.queue.size} songs", style = MaterialTheme.typography.bodySmall)
+                    val subtitle = buildString {
+                        append("${state.queue.size} songs")
+                        if (totalDurationMs > 0L) append(" • ${formatTime(totalDurationMs)}")
+                    }
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { queueLocked = !queueLocked }) {
+                    Icon(painterResource(if (queueLocked) Res.drawable.lock else Res.drawable.lock_open), if (queueLocked) "Unlock queue" else "Lock queue", Modifier.size(20.dp))
+                }
+                if (state.queue.isNotEmpty()) {
+                    IconButton(onClick = { saveDialog = true }) { Icon(painterResource(Res.drawable.playlist_add), "Save queue", Modifier.size(20.dp)) }
                 }
                 IconButton(onClick = controller::toggleShuffle) { Icon(painterResource(Res.drawable.shuffle), "Shuffle", tint = if (options.shuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
                 IconButton(onClick = controller::cycleRepeat) { Icon(painterResource(if (options.repeatMode == MusicRepeatMode.ONE) Res.drawable.repeat_one else Res.drawable.repeat), "Repeat", tint = if (options.repeatMode != MusicRepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
@@ -130,42 +169,44 @@ internal fun AndroidQueueSheet(controller: MusicController, expanded: Boolean, o
                                 item.artworkUrl?.let { AsyncImage(it, null, Modifier.fillMaxSize()) }
                             }
                             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Text(item.title, color = if (index == state.queueIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(item.title, color = if (index == state.queueIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (index == state.queueIndex) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(item.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            IconButton(onClick = { if (index in keys.indices) keys.removeAt(index); controller.removeQueueItem(index) }) { Icon(painterResource(Res.drawable.close), "Remove from queue", Modifier.size(20.dp)) }
-                            val handleColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            val currentIndex by rememberUpdatedState(index)
-                            Box(Modifier.size(44.dp).pointerInput(keys.getOrNull(index)) {
-                                detectVerticalDragGestures(onDragStart = { draggedIndex = currentIndex; dragOffset = 0f }, onDragEnd = { draggedIndex = -1; dragOffset = 0f }, onDragCancel = { draggedIndex = -1; dragOffset = 0f }, onVerticalDrag = { change, amount ->
-                                    change.consume()
-                                    dragOffset += amount
-                                    val from = draggedIndex
-                                    val to = (from + (dragOffset / rowHeight).roundToInt()).coerceIn(0, keys.lastIndex)
-                                    if (from in keys.indices && to != from) {
-                                        keys.add(to, keys.removeAt(from))
-                                        draggedIndex = to
-                                        dragOffset -= (to - from) * rowHeight
-                                        controller.moveQueueItem(from, to)
-                                    }
-                                    val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == draggedIndex }
-                                    if (itemInfo != null) {
-                                        val center = itemInfo.offset + itemInfo.size / 2f + dragOffset
-                                        val layout = listState.layoutInfo
-                                        val edge = rowHeight
-                                        val scroll = when {
-                                            center < layout.viewportStartOffset + edge -> -rowHeight / 5f
-                                            center > layout.viewportEndOffset - edge -> rowHeight / 5f
-                                            else -> 0f
+                            IconButton(onClick = { menuTrack = index to item }) { Icon(painterResource(Res.drawable.more_vert), "Track options", Modifier.size(20.dp)) }
+                            if (!queueLocked) {
+                                val handleColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                val currentIndex by rememberUpdatedState(index)
+                                Box(Modifier.size(44.dp).pointerInput(keys.getOrNull(index)) {
+                                    detectVerticalDragGestures(onDragStart = { draggedIndex = currentIndex; dragOffset = 0f }, onDragEnd = { draggedIndex = -1; dragOffset = 0f }, onDragCancel = { draggedIndex = -1; dragOffset = 0f }, onVerticalDrag = { change, amount ->
+                                        change.consume()
+                                        dragOffset += amount
+                                        val from = draggedIndex
+                                        val to = (from + (dragOffset / rowHeight).roundToInt()).coerceIn(0, keys.lastIndex)
+                                        if (from in keys.indices && to != from) {
+                                            keys.add(to, keys.removeAt(from))
+                                            draggedIndex = to
+                                            dragOffset -= (to - from) * rowHeight
+                                            controller.moveQueueItem(from, to)
                                         }
-                                        if (scroll != 0f) scope.launch { listState.scrollBy(scroll) }
+                                        val itemInfo = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == draggedIndex }
+                                        if (itemInfo != null) {
+                                            val center = itemInfo.offset + itemInfo.size / 2f + dragOffset
+                                            val layout = listState.layoutInfo
+                                            val edge = rowHeight
+                                            val scroll = when {
+                                                center < layout.viewportStartOffset + edge -> -rowHeight / 5f
+                                                center > layout.viewportEndOffset - edge -> rowHeight / 5f
+                                                else -> 0f
+                                            }
+                                            if (scroll != 0f) scope.launch { listState.scrollBy(scroll) }
+                                        }
+                                    })
+                                }, contentAlignment = Alignment.Center) {
+                                    // Android's drag_handle vector: two horizontal 16 x 2 dp bars.
+                                    Canvas(Modifier.size(24.dp)) {
+                                        drawRect(handleColor, topLeft = Offset(size.width / 6f, size.height * 0.375f), size = androidx.compose.ui.geometry.Size(size.width * 2f / 3f, size.height / 12f))
+                                        drawRect(handleColor, topLeft = Offset(size.width / 6f, size.height * 0.542f), size = androidx.compose.ui.geometry.Size(size.width * 2f / 3f, size.height / 12f))
                                     }
-                                })
-                            }, contentAlignment = Alignment.Center) {
-                                // Android's drag_handle vector: two horizontal 16 x 2 dp bars.
-                                Canvas(Modifier.size(24.dp)) {
-                                    drawRect(handleColor, topLeft = Offset(size.width / 6f, size.height * 0.375f), size = androidx.compose.ui.geometry.Size(size.width * 2f / 3f, size.height / 12f))
-                                    drawRect(handleColor, topLeft = Offset(size.width / 6f, size.height * 0.542f), size = androidx.compose.ui.geometry.Size(size.width * 2f / 3f, size.height / 12f))
                                 }
                             }
                         }
