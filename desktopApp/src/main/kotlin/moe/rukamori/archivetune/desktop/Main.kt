@@ -345,6 +345,13 @@ fun main() {
                             browse = browse,
                             beatSync = beatSync,
                             onBrowseOpened = { showLyrics = false },
+                            onCloseLyrics = { showLyrics = false },
+                            onShowStems = {
+                                showLyrics = false
+                                showStems = true
+                            },
+                            onShowQueue = { showQueue = !showQueue },
+                            queueVisible = showQueue,
                             modifier = modifier,
                             useShellDynamicBackdrop = useShellDynamicBackdrop,
                         )
@@ -464,6 +471,7 @@ fun main() {
                                     showStems = true
                                 },
                                 onShowQueue = { showQueue = !showQueue },
+                                queueVisible = showQueue,
                                 modifier = modifier,
                             )
                         },

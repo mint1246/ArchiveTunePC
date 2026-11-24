@@ -2220,6 +2220,240 @@ private fun NowPlayingSubtitle(
     )
 }
 
+@Composable
+private fun DesktopPlayTogetherDialog(
+    playTogether: PlayTogetherManager,
+    partyState: moe.rukamori.archivetune.desktop.party.PlayTogetherState,
+    onDismiss: () -> Unit,
+) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var inviteInput by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (partyState.phase != PartyPhase.STARTING) onDismiss() },
+        title = { Text("Play together") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                when {
+                    partyState.phase == PartyPhase.STARTING -> {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                            Text(partyState.message ?: "Connecting…")
+                        }
+                    }
+                    partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
+                        Text("${partyState.participantCount} connected. share this invite with anyone you want in the party.")
+                        if (partyState.participantCount > 1) {
+                            val fallbackPeers = (partyState.participantCount - 1 - partyState.directPeerCount).coerceAtLeast(0)
+                            Text(
+                                buildString {
+                                    append("${partyState.directPeerCount} direct P2P")
+                                    if (fallbackPeers > 0) append(" · $fallbackPeers tunnel fallback")
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        OutlinedTextField(
+                            value = partyState.invite.orEmpty(),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Invite") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        partyState.participants.forEach { participant ->
+                            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(participant.name, style = MaterialTheme.typography.titleSmall)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Queue", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Switch(
+                                        checked = participant.canEditQueue,
+                                        onCheckedChange = { playTogether.setGuestQueueEditing(participant.id, it) },
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text("Play / pause", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(8.dp))
+                                    Switch(
+                                        checked = participant.canControlPlayback,
+                                        onCheckedChange = { playTogether.setGuestPlaybackControl(participant.id, it) },
+                                    )
+                                }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Skip / play new songs", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Switch(
+                                        checked = participant.canChangeSong,
+                                        onCheckedChange = { playTogether.setGuestSongChanging(participant.id, it) },
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text("Seek", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(8.dp))
+                                    Switch(
+                                        checked = participant.canSeek,
+                                        onCheckedChange = { playTogether.setGuestSeeking(participant.id, it) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
+                        Text(
+                            when (partyState.transport) {
+                                PartyTransport.DIRECT -> if (partyState.canControlPlayback) "Connected directly P2P. you can play or pause for everyone." else "Connected directly P2P. the host controls playback."
+                                PartyTransport.RELAY -> if (partyState.canControlPlayback) "Connected through the Quick Tunnel fallback. you can play or pause for everyone." else "Connected through the Quick Tunnel fallback. the host controls playback."
+                                else -> partyState.message ?: if (partyState.canControlPlayback) "Connected. you can play or pause for everyone." else "Connected. the host controls playback."
+                            },
+                        )
+                        partyState.roundTripMs?.let { Text("${it} ms round trip", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                    else -> {
+                        partyState.message?.takeIf { partyState.phase == PartyPhase.ERROR }?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error)
+                        }
+                        Text("Create a temporary party, or paste an invite from someone else.")
+                        OutlinedTextField(
+                            value = inviteInput,
+                            onValueChange = { inviteInput = it },
+                            singleLine = true,
+                            label = { Text("Party invite") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                partyState.phase == PartyPhase.STARTING -> Unit
+                partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
+                    TextButton(onClick = {
+                        partyState.invite?.let { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(it), null) }
+                    }) { Text("Copy invite") }
+                }
+                partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
+                    TextButton(onClick = { playTogether.leave(); onDismiss() }) { Text("Leave") }
+                }
+                else -> {
+                    TextButton(onClick = { scope.launch { playTogether.startHosting() } }) { Text("Create party") }
+                }
+            }
+        },
+        dismissButton = {
+            when {
+                partyState.phase == PartyPhase.STARTING -> Unit
+                partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
+                    TextButton(onClick = { playTogether.leave(); onDismiss() }) { Text("End party") }
+                }
+                partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> Unit
+                else -> {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                if (playTogether.join(inviteInput).isSuccess) onDismiss()
+                            }
+                        },
+                        enabled = inviteInput.isNotBlank(),
+                    ) { Text("Join") }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DesktopPlayerTransportButtons(
+    services: DesktopMusicServices,
+    playTogether: PlayTogetherManager,
+    snapshot: PlaybackSnapshot,
+    partyState: moe.rukamori.archivetune.desktop.party.PlayTogetherState,
+    onLyricsClick: () -> Unit,
+    lyricsActive: Boolean,
+    onShowStems: () -> Unit,
+    onShowPartyDialog: () -> Unit,
+    onShowQueue: () -> Unit,
+    queueVisible: Boolean,
+    scope: CoroutineScope,
+) {
+    val item = snapshot.currentItem
+    val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
+    DesktopTooltip(if (lyricsActive) "Close lyrics" else "Lyrics") {
+        TextButton(onClick = onLyricsClick, enabled = item != null || lyricsActive) {
+            Text(
+                "Lyrics",
+                color = if (lyricsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    DesktopTooltip("Stem player") {
+        IconButton(onClick = onShowStems, enabled = item != null) {
+            Icon(Icons.Rounded.GraphicEq, "Stem player")
+        }
+    }
+    IconButton({ scope.launch { playTogether.skipPrevious() } }, enabled = snapshot.canSkipPrevious && (!guestInParty || partyState.canChangeSong)) {
+        Icon(Icons.Rounded.SkipPrevious, "Previous")
+    }
+    FilledIconButton({ scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) {
+        AnimatedContent(
+            targetState = snapshot.isPlaying,
+            transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) },
+            label = "player-play-state",
+        ) { playing ->
+            Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play")
+        }
+    }
+    IconButton({ scope.launch { playTogether.skipNext() } }, enabled = snapshot.canSkipNext && (!guestInParty || partyState.canChangeSong)) {
+        Icon(Icons.Rounded.SkipNext, "Next")
+    }
+    DesktopTooltip(if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off") {
+        IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) {
+            Icon(
+                Icons.Rounded.Shuffle,
+                if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    DesktopTooltip(when (snapshot.repeatMode) { RepeatMode.OFF -> "Repeat off"; RepeatMode.ALL -> "Repeat all"; RepeatMode.ONE -> "Repeat one" }) {
+        IconButton(
+            {
+                scope.launch {
+                    services.playback.setRepeatMode(
+                        when (snapshot.repeatMode) {
+                            RepeatMode.OFF -> RepeatMode.ALL
+                            RepeatMode.ALL -> RepeatMode.ONE
+                            RepeatMode.ONE -> RepeatMode.OFF
+                        },
+                    )
+                }
+            },
+            enabled = !guestInParty && item != null,
+        ) {
+            Icon(
+                if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on",
+                tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    DesktopTooltip("Play together") {
+        IconButton(onClick = onShowPartyDialog) {
+            Icon(
+                Icons.Rounded.Group,
+                "Play together",
+                tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    DesktopTooltip("Queue") {
+        IconButton(onClick = onShowQueue, enabled = item != null || queueVisible) {
+            Icon(
+                Icons.Rounded.QueueMusic,
+                "Queue",
+                tint = if (queueVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    Icon(Icons.Rounded.VolumeUp, null)
+    Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp))
+}
+
 @Composable internal fun DesktopMiniPlayer(
     services: DesktopMusicServices,
     playTogether: PlayTogetherManager,
@@ -2228,6 +2462,7 @@ private fun NowPlayingSubtitle(
     onShowLyrics: () -> Unit,
     onShowStems: () -> Unit,
     onShowQueue: () -> Unit = {},
+    queueVisible: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val snapshot by services.playback.state.collectAsState()
@@ -2235,135 +2470,12 @@ private fun NowPlayingSubtitle(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val item = snapshot.currentItem
     var showPartyDialog by remember { mutableStateOf(false) }
-    var inviteInput by remember { mutableStateOf("") }
 
     if (showPartyDialog) {
-        AlertDialog(
-            onDismissRequest = { if (partyState.phase != PartyPhase.STARTING) showPartyDialog = false },
-            title = { Text("Play together") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    when {
-                        partyState.phase == PartyPhase.STARTING -> {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                                Text(partyState.message ?: "Connecting…")
-                            }
-                        }
-                        partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
-                            Text("${partyState.participantCount} connected. share this invite with anyone you want in the party.")
-                            if (partyState.participantCount > 1) {
-                                val fallbackPeers = (partyState.participantCount - 1 - partyState.directPeerCount).coerceAtLeast(0)
-                                Text(
-                                    buildString {
-                                        append("${partyState.directPeerCount} direct P2P")
-                                        if (fallbackPeers > 0) append(" · $fallbackPeers tunnel fallback")
-                                    },
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            OutlinedTextField(
-                                value = partyState.invite.orEmpty(),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Invite") },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            partyState.participants.forEach { participant ->
-                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(participant.name, style = MaterialTheme.typography.titleSmall)
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Text("Queue", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Switch(
-                                            checked = participant.canEditQueue,
-                                            onCheckedChange = { playTogether.setGuestQueueEditing(participant.id, it) },
-                                        )
-                                        Spacer(Modifier.width(14.dp))
-                                        Text("Play / pause", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(Modifier.width(8.dp))
-                                        Switch(
-                                            checked = participant.canControlPlayback,
-                                            onCheckedChange = { playTogether.setGuestPlaybackControl(participant.id, it) },
-                                        )
-                                    }
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Text("Skip / play new songs", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Switch(
-                                            checked = participant.canChangeSong,
-                                            onCheckedChange = { playTogether.setGuestSongChanging(participant.id, it) },
-                                        )
-                                        Spacer(Modifier.width(14.dp))
-                                        Text("Seek", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(Modifier.width(8.dp))
-                                        Switch(
-                                            checked = participant.canSeek,
-                                            onCheckedChange = { playTogether.setGuestSeeking(participant.id, it) },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
-                            Text(
-                                when (partyState.transport) {
-                                    PartyTransport.DIRECT -> if (partyState.canControlPlayback) "Connected directly P2P. you can play or pause for everyone." else "Connected directly P2P. the host controls playback."
-                                    PartyTransport.RELAY -> if (partyState.canControlPlayback) "Connected through the Quick Tunnel fallback. you can play or pause for everyone." else "Connected through the Quick Tunnel fallback. the host controls playback."
-                                    else -> partyState.message ?: if (partyState.canControlPlayback) "Connected. you can play or pause for everyone." else "Connected. the host controls playback."
-                                },
-                            )
-                            partyState.roundTripMs?.let { Text("${it} ms round trip", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        }
-                        else -> {
-                            partyState.message?.takeIf { partyState.phase == PartyPhase.ERROR }?.let {
-                                Text(it, color = MaterialTheme.colorScheme.error)
-                            }
-                            Text("Create a temporary party, or paste an invite from someone else.")
-                            OutlinedTextField(
-                                value = inviteInput,
-                                onValueChange = { inviteInput = it },
-                                singleLine = true,
-                                label = { Text("Party invite") },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                when {
-                    partyState.phase == PartyPhase.STARTING -> Unit
-                    partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
-                        TextButton(onClick = {
-                            partyState.invite?.let { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(it), null) }
-                        }) { Text("Copy invite") }
-                    }
-                    partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> {
-                        TextButton(onClick = { playTogether.leave(); showPartyDialog = false }) { Text("Leave") }
-                    }
-                    else -> {
-                        TextButton(onClick = { scope.launch { playTogether.startHosting() } }) { Text("Create party") }
-                    }
-                }
-            },
-            dismissButton = {
-                when {
-                    partyState.phase == PartyPhase.STARTING -> Unit
-                    partyState.mode == PartyMode.HOST && partyState.phase == PartyPhase.CONNECTED -> {
-                        TextButton(onClick = { playTogether.leave(); showPartyDialog = false }) { Text("End party") }
-                    }
-                    partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED -> Unit
-                    else -> {
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    if (playTogether.join(inviteInput).isSuccess) showPartyDialog = false
-                                }
-                            },
-                            enabled = inviteInput.isNotBlank(),
-                        ) { Text("Join") }
-                    }
-                }
-            },
+        DesktopPlayTogetherDialog(
+            playTogether = playTogether,
+            partyState = partyState,
+            onDismiss = { showPartyDialog = false },
         )
     }
 
@@ -2394,29 +2506,19 @@ private fun NowPlayingSubtitle(
                 NowPlayingTitle(item, { albumId -> browse.openAlbum(albumId, scope) })
                 NowPlayingSubtitle(snapshot, item, onAlbumClick = { albumId -> browse.openAlbum(albumId, scope) }, onArtistClick = { artistId -> browse.openArtist(artistId, scope) })
             }
-            TextButton(onClick = onShowLyrics, enabled = item != null) { Text("Lyrics") }
-            DesktopTooltip("Stem player") {
-                IconButton(onClick = onShowStems, enabled = item != null) {
-                    Icon(Icons.Rounded.GraphicEq, "Stem player")
-                }
-            }
-            IconButton({ scope.launch { playTogether.skipPrevious() } }, enabled = snapshot.canSkipPrevious && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
-            FilledIconButton({ scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) { Icon(if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (snapshot.isPlaying) "Pause" else "Play") }
-            IconButton({ scope.launch { playTogether.skipNext() } }, enabled = snapshot.canSkipNext && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipNext, "Next") }
-            DesktopTooltip(if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off") {
-                IconButton({ scope.launch { services.playback.setShuffleEnabled(!snapshot.shuffleEnabled) } }, enabled = partyState.mode == PartyMode.NONE && item != null) {
-                    Icon(Icons.Rounded.Shuffle, if (snapshot.shuffleEnabled) "Shuffle on" else "Shuffle off", tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            DesktopTooltip(when (snapshot.repeatMode) { RepeatMode.OFF -> "Repeat off"; RepeatMode.ALL -> "Repeat all"; RepeatMode.ONE -> "Repeat one" }) {
-                IconButton({ scope.launch { services.playback.setRepeatMode(when (snapshot.repeatMode) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }) } }, enabled = !guestInParty && item != null) {
-                    Icon(if (snapshot.repeatMode == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat, if (snapshot.repeatMode == RepeatMode.OFF) "Repeat off" else "Repeat on", tint = if (snapshot.repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            DesktopTooltip("Play together") { IconButton(onClick = { showPartyDialog = true }) { Icon(Icons.Rounded.Group, "Play together", tint = if (partyState.phase == PartyPhase.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) } }
-            DesktopTooltip("Queue") { IconButton(onClick = onShowQueue, enabled = item != null) { Icon(Icons.Rounded.QueueMusic, "Queue") } }
-            Icon(Icons.Rounded.VolumeUp, null)
-            Slider(snapshot.volume, { scope.launch { services.playback.setVolume(it) } }, Modifier.width(90.dp))
+            DesktopPlayerTransportButtons(
+                services = services,
+                playTogether = playTogether,
+                snapshot = snapshot,
+                partyState = partyState,
+                onLyricsClick = onShowLyrics,
+                lyricsActive = false,
+                onShowStems = onShowStems,
+                onShowPartyDialog = { showPartyDialog = true },
+                onShowQueue = onShowQueue,
+                queueVisible = queueVisible,
+                scope = scope,
+            )
         }
         if (item != null) Slider(if (snapshot.durationMs > 0) snapshot.positionMs.toFloat() / snapshot.durationMs else 0f, { scope.launch { playTogether.seekTo((it * snapshot.durationMs).roundToLong()) } }, Modifier.fillMaxWidth(), enabled = !guestInParty || partyState.canSeek)
     } }
@@ -2430,6 +2532,10 @@ internal fun DesktopLyricsView(
     browse: DesktopBrowseController,
     beatSync: DesktopBeatSyncController,
     onBrowseOpened: () -> Unit = {},
+    onCloseLyrics: () -> Unit = onBrowseOpened,
+    onShowStems: () -> Unit = {},
+    onShowQueue: () -> Unit = {},
+    queueVisible: Boolean = false,
     modifier: Modifier = Modifier,
     useShellDynamicBackdrop: Boolean = false,
 ) {
@@ -2439,6 +2545,16 @@ internal fun DesktopLyricsView(
     val guestInParty = partyState.mode == PartyMode.GUEST && partyState.phase == PartyPhase.CONNECTED
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val item = snapshot.currentItem
+    var showPartyDialog by remember { mutableStateOf(false) }
+
+    if (showPartyDialog) {
+        DesktopPlayTogetherDialog(
+            playTogether = playTogether,
+            partyState = partyState,
+            onDismiss = { showPartyDialog = false },
+        )
+    }
+
     Surface(
         modifier = modifier.fillMaxSize(),
         color = if (useShellDynamicBackdrop) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.surface,
@@ -2471,11 +2587,19 @@ internal fun DesktopLyricsView(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    IconButton(onClick = { scope.launch { playTogether.skipPrevious() } }, enabled = snapshot.canSkipPrevious && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipPrevious, "Previous") }
-                    FilledIconButton(onClick = { scope.launch { playTogether.togglePlayback() } }, enabled = item != null && (!guestInParty || partyState.canControlPlayback)) {
-AnimatedContent(targetState = snapshot.isPlaying, transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(100)) }, label = "mini-player-play-state") { playing -> Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Pause" else "Play") }
-                    }
-                    IconButton(onClick = { scope.launch { playTogether.skipNext() } }, enabled = snapshot.canSkipNext && (!guestInParty || partyState.canChangeSong)) { Icon(Icons.Rounded.SkipNext, "Next") }
+                    DesktopPlayerTransportButtons(
+                        services = services,
+                        playTogether = playTogether,
+                        snapshot = snapshot,
+                        partyState = partyState,
+                        onLyricsClick = onCloseLyrics,
+                        lyricsActive = true,
+                        onShowStems = onShowStems,
+                        onShowPartyDialog = { showPartyDialog = true },
+                        onShowQueue = onShowQueue,
+                        queueVisible = queueVisible,
+                        scope = scope,
+                    )
                 }
                 if (item != null) {
                     Slider(

@@ -31,14 +31,14 @@ internal fun desktopShortcutAction(
     else -> null
 }
 
-/** Overlay dismissal wins over page-level Escape behavior; text fields still receive the key first. */
+/** Topmost overlay dismissal wins over page-level Escape behavior; text fields still receive the key first. */
 internal fun desktopEscapeAction(
     immersiveVisible: Boolean,
     queueVisible: Boolean,
     hasSearchQuery: Boolean,
 ): DesktopEscapeAction? = when {
-    immersiveVisible -> DesktopEscapeAction.DISMISS_IMMERSIVE
     queueVisible -> DesktopEscapeAction.DISMISS_QUEUE
+    immersiveVisible -> DesktopEscapeAction.DISMISS_IMMERSIVE
     hasSearchQuery -> DesktopEscapeAction.CLEAR_SEARCH
     else -> null
 }

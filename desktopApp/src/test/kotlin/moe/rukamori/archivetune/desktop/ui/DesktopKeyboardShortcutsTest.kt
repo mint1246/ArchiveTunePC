@@ -31,10 +31,18 @@ class DesktopKeyboardShortcutsTest {
     }
 
     @Test
-    fun `escape dismisses immersive content before queue and search`() {
+    fun `escape dismisses queue overlay before immersive content and search`() {
+        assertEquals(
+            DesktopEscapeAction.DISMISS_QUEUE,
+            desktopEscapeAction(immersiveVisible = true, queueVisible = true, hasSearchQuery = true),
+        )
+    }
+
+    @Test
+    fun `escape dismisses immersive content when queue is closed`() {
         assertEquals(
             DesktopEscapeAction.DISMISS_IMMERSIVE,
-            desktopEscapeAction(immersiveVisible = true, queueVisible = true, hasSearchQuery = true),
+            desktopEscapeAction(immersiveVisible = true, queueVisible = false, hasSearchQuery = true),
         )
     }
 

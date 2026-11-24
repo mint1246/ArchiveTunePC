@@ -312,7 +312,15 @@ fun ArchiveTuneDesktopApp(
                             onNavigateBackOverride = onDismissImmersive,
                             showSearch = false,
                         )
-                        immersive(Modifier.weight(1f).fillMaxWidth(), dynamicActive)
+                        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                            immersive(Modifier.fillMaxSize(), dynamicActive)
+                            if (queueContent != null) {
+                                queueContent(
+                                    Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                    desktopQueueOverlayWidth(maxWidth),
+                                )
+                            }
+                        }
                     }
                 } else Row(Modifier.fillMaxSize()) {
                     when (layout) {
