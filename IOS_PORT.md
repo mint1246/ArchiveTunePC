@@ -1,96 +1,42 @@
-# ArchiveTune iOS port
+# ArchiveTune iOS Port
 
-The iOS target is a Kotlin Multiplatform application with a Compose UI and an
-AVFoundation player. Android's Media3 engine and the desktop VLC/Graal production
-path remain separate. This is the first implementation slice, not full feature
-parity with either existing application.
+ArchiveTune for iOS is a Kotlin Multiplatform application built with Compose Multiplatform UI and an AVFoundation playback engine, sharing core domain SDK modules directly with ArchiveTune's Android/Desktop ecosystem. Android's Media3 engine and the desktop VLC/Graal production path remain separate.
 
 ## Source boundaries
 
-The iOS port now consumes ArchiveTune's Kotlin Multiplatform SDK modules directly:
+The iOS target consumes ArchiveTune's Kotlin Multiplatform SDK modules directly:
 
-- `ios-playback` (`commonMain` + `iosMain`): iOS `PlaybackController` (`IosPlaybackController`), `AvFoundationPlaybackEngine` (`AVPlayer`, `AVAudioSession`, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`), source validation, queue JSON codec, and `createIosPlaybackSession`.
-- Shared KMP SDK modules (`sdk-lifecycle`, `playback-core`, `discovery-sdk`, `lyrics-sdk`, `playlist-sdk`, `social-sdk`, `social-session`): lifecycle ownership, queue/sleep-timer/clicked-item policies, bounded discovery caches & fan-out, LRC + YouLyPlus syllable timeline parsing + single-flight lyrics cache, playlist sorting, and Ktor Discord social auth/session APIs.
-- `shared/src/commonMain`: portable InnerTube catalog networking (`InnerTubeCatalog`, `CatalogParsing`), local library/settings persistence, thin SDK coordinators, and Compose music/lyrics UI surfaces.
-- `shared/src/iosMain`: Darwin `HttpClient` wiring, Foundation file persistence (`IosMusicStore`), `WKWebView` OAuth modal (`IosSocialLogin`), share sheet (`IosShare`), and the `UIViewController` entry point (`MainViewController`) wired via `SdkLifecycle` and `AvFoundationPlaybackEngine`.
-- `iosApp`: native Swift entry, Xcode project, signing/build instructions.
-- `shared/src/commonTest`: deterministic queue, request, parser and cancellation
-  tests that run on JVM without an Apple SDK.
-
-The existing `core` and `stream-resolver` projects still depend on JVM libraries and
-cannot be linked into an Apple framework as-is. The KMP `InnerTubeCatalog` path
-uses the existing request/client conventions as a reference, without pretending
-that NewPipe, JavaScript deciphering, yt-dlp, VLC, or a JVM is available on iOS.
-
-The selected queue index and clicked video ID remain authoritative. Obsolete
-stream resolution and searches are cancelled and generation-guarded. Signed URLs
-are ephemeral, search caches are bounded, and changing a screen does not recreate
-the application services or stop audio.
+- `ios-playback` (`commonMain` + `iosMain`): iOS `PlaybackController` (`IosPlaybackController`), `AvFoundationPlaybackEngine` (`AVPlayer`, `AVAudioSession`, `MPNowPlayingInfoCenter` with album + async lock-screen artwork, `MPRemoteCommandCenter`, `AVAudioTimePitchAlgorithmSpectral`, local `file:///` + HTTPS/HLS playback), source validation, queue JSON codec, and `createIosPlaybackSession`.
+- Shared KMP SDK modules (`sdk-lifecycle`, `playback-core`, `discovery-sdk`, `lyrics-sdk`, `playlist-sdk`, `social-sdk`, `social-session`): lifecycle ownership, queue/sleep-timer/clicked-item policies, bounded discovery caches & fan-out, LRC + YouLyPlus syllable timeline parsing + single-flight lyrics cache, playlist sorting & CSV export, and Ktor Discord social auth/session/friends/chat/presence/statistics APIs.
+- `shared/src/commonMain`: portable InnerTube catalog networking (`InnerTubeCatalog`, `CatalogParsing`, `KmpSha1` / `SAPISIDHASH` YouTube auth), backward-compatible JSON library/settings/downloads/statistics persistence (`MusicLibrary`, `MusicStatistics`, `MusicSettingsModels`), thin SDK coordinators (`MusicController`, `MusicSocialController`, `LyricsController`), and Compose UI surfaces matching Android 16's exact layout, typography, colors, menus, and settings.
+- `shared/src/iosMain`: Darwin `HttpClient` wiring, Foundation file persistence (`IosMusicStore`), Security.framework Keychain (`IosKeychain`, `IosSocialSessionStore`), native platform bridge (`IosPlatformBridge`: UIKit sharing, clipboard, URL launching, wake lock, offline audio downloads, `UIDocumentPickerViewController` audio & JSON backup import, `WKWebView` YouTube Music sign-in, storage usage & cache clearing), `WKWebView` Discord OAuth (`IosSocialLogin`), and the `UIViewController` entry point (`MainViewController`).
+- `iosApp`: native Swift entry (`ArchiveTuneApp.swift`), Xcode project (`ArchiveTune.xcodeproj`, version `15.2.0`, `Assets.xcassets/AppIcon.appiconset`, `archivetune://` URL scheme), and build/verification scripts (`build-simulator.sh`, `verify-resources.py`).
+- `shared/src/commonTest` & `ios-playback/src/commonTest`: deterministic queue, catalog, parser, SHA-1/SAPISIDHASH, audible-time statistics, backup/settings persistence, local-file validation, and cancellation tests that run on both JVM and Apple `iosX64Test`.
 
 ## Build and verification
 
 JDK 21 is required. From the repository root:
 
 ```sh
+python3 iosApp/scripts/verify-resources.py
 ./gradlew -p shared jvmTest
 ```
 
-The standalone shared settings avoid configuring Android/Windows prerequisites
-on a Mac. The root build also includes `:shared`; its focused verification task is
-`./gradlew :shared:jvmTest --configure-on-demand`.
-
-Apple targets (device ARM64, Apple Silicon simulator and Intel simulator) are configured on macOS. The Xcode application uses the Kotlin
-framework `ArchiveTuneShared`. See `iosApp/README.md` for the simulator and device
-commands. The iOS workflow runs shared tests and an unsigned simulator build;
-no App Store credentials are needed for that check.
-
-Use `./iosApp/scripts/build-simulator.sh` on a Mac for a local unsigned app and
-ZIP. Intel simulator compatibility requires the iOS module's Compose 1.10.3 and
-Coil 3.4 pins; desktop dependencies retain their own versions.
-
-## Live transport check
-
-The optional probe runs real search, resolves an explicit video, and reads only
-an initial range of media bytes without logging signed URLs:
+On macOS with Xcode installed:
 
 ```sh
-./gradlew -p shared catalogSmoke -PcatalogSmokeVideoId=jNQXAC9IVRw
+./iosApp/scripts/build-simulator.sh
+./gradlew -p shared iosX64Test -PiosSimulatorId=<SIMULATOR_UDID>
 ```
 
-On this Linux host, search returned songs and the explicit video resolved to
-AAC/MP4; the range request returned HTTP 206 with 4096 bytes. Carrying the
-anonymous visitor context from the search response into the player request was
-necessary here. The cold queue path also passed after a visitor-context
-bootstrap, without a search request. This proves transport only, not audio decoding or iPhone
-background playback. Anonymous results can still vary by region/session/client.
+`verify-resources.py` validates both vector dimensions (`dp`/`px`) and color attributes (`#RRGGBB`/`#AARRGGBB`) before Xcode builds so Apple's Compose Multiplatform resource loader never encounters Android-only `@android:color/...` or `dip` aliases.
 
-## Device acceptance gates
+## Key implemented parity capabilities
 
-A JVM test pass does not validate AVFoundation or an Apple framework. Before
-calling this a working first playable release, build on a Mac and test a real
-track on a physical iPhone, including:
-
-1. The clicked song is the song heard, including rapid switching and duplicates.
-2. Buffering/error UI follows actual playback, and seeking preserves identity.
-3. Queue advance works while locked and remote play/pause/seek work correctly.
-4. Audio survives locking/backgrounding; calls and unplugging headphones behave
-   correctly and teardown removes observers/remote handlers.
-5. Resolve a fresh source after expiration; unsupported/auth-required/ciphered
-   sources fail clearly rather than playing a substitute song.
-6. Saving songs/theme and backgrounding persists changes; reopening restores the
-   selected queue index and duplicates without starting audio.
-7. Lyrics follow the actual loaded track, stop obsolete lookups on song changes,
-   and retain plain/overlapping/multilingual content correctly.
-
-## Remaining migration work
-
-Account sign-in/session renewal and Keychain integration, authenticated library
-and playlist mutations, complete Home/browse parity, word-level lyrics/chord
-presentation, downloads/local imports, statistics, Play Together, advanced
-playback/audio/STEM inference, widgets and distribution remain required parity
-work. Local favorites, queue metadata and theme persistence are implemented; a
-restored queue does not auto-play. The player sheet presents timed LRCLIB lyrics
-with overlapping lines, Unicode text, tap-to-seek and automatic scrolling. Plain
-lyrics retain their untimed nature. Existing Android/desktop implementations are behavioral references. No
-production desktop dependency, model runtime, updater identity, or version number
-is changed for this target.
+- **Playback & AVFoundation**: Live HLS/HTTPS streaming and offline `file:///` playback, clicked-song identity preservation, Lock Screen / Control Center metadata + artwork, shuffle/repeat/sleep timer/speed/volume, Tempo & Pitch controls, queue drag-reordering, save queue as playlist, auto-skip-on-error, auto-download-on-like, and persistent queue restore without auto-play.
+- **Player & Menus**: ArchiveTune V4 player, Android `Standard` / `Wavy` / `Slim` sliders, animated Skia artwork backdrop with white foregrounds, expressive `AndroidPlayerMenuSheet`, `AndroidSongMenuSheet`, `AndroidBrowseMenuSheet`, and `AndroidAddToPlaylistSheet` bottom sheets.
+- **Timed Lyrics**: LRCLIB & YouLyPlus word-by-word synced lyrics, configurable text size, line spacing, alignment, line blur, tap-to-seek, auto-scroll, timing offset (`±200ms`), version picker, and sharing.
+- **Home, Search & Browse**: Pull-to-refresh, Home category chips, Speed Dial pins, Keep Listening shelf, Quick Picks modes (Hero Carousel, Compact Rows, Last Listened, Hidden), infinite-scroll Home continuation, Search Explore/Suggestions + grouped All-results sections with "See all" + offline Library search, and Artist/Album/Playlist/Podcast detail pages with Save/Subscribe and Download All.
+- **Library**: Real Liked songs, Offline downloads, Cached tracks, Local Files (with iOS Files importer), dynamic `My top N` powered by audible listening stats, Playlists with tags, track reordering, and CSV export, plus Podcasts, Songs filters, derived Artists, and derived Albums.
+- **Settings & Authoritative Statistics**: Full Android 16 segmented Settings hub and 11 sub-screens (Account with YouTube Music & Discord sign-in, Listening Stats with monotonic audible-only time and `min(30s, 50% duration)` play threshold, Appearance, Playback, Lyrics, Content, Behavior & Privacy, Integrations, Storage, Backup & Restore, About).
+- **Friends**: Discord OAuth with Keychain session persistence, user search, incoming/outgoing friend requests, live listening presence, Direct Chat (text + interactive shared songs, queues, and playlists), and Friend Statistics.
