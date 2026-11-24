@@ -7,6 +7,7 @@
 
 package moe.rukamori.archivetune.innertube.playback
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import moe.rukamori.archivetune.innertube.models.Album
 import moe.rukamori.archivetune.innertube.models.Artist
@@ -148,6 +149,28 @@ class DesktopUpNextQueueResolverTest {
         assertEquals(PlaybackAlbum("alb-learned", "Learned Album"), resolution.selection.items.single().metadata.album)
         assertTrue(infos.isEmpty())
         assertTrue(warnings.single().contains("up_next_selection event=failure requestedVideoId=clicked-id errorType=IllegalStateException error=Network timeout occurred"))
+    }
+
+    @Test
+    fun `cancellation exception is rethrown instead of falling back`() = runBlocking {
+        val clicked = song(id = "clicked-id", title = "Clicked")
+        val infos = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+        val resolver = DesktopUpNextQueueResolver(
+            fetchUpNext = { Result.failure(CancellationException("superseded")) },
+            diagnostics = RecordingDiagnostics(infos, warnings),
+        )
+
+        var caught: CancellationException? = null
+        try {
+            resolver.resolve(clicked)
+        } catch (cancelled: CancellationException) {
+            caught = cancelled
+        }
+
+        assertEquals("superseded", caught?.message)
+        assertTrue(infos.isEmpty())
+        assertTrue(warnings.isEmpty())
     }
 
     private fun song(id: String, title: String, album: Album? = null) = SongItem(

@@ -7,6 +7,7 @@
 
 package moe.rukamori.archivetune.innertube.playback
 
+import kotlinx.coroutines.CancellationException
 import moe.rukamori.archivetune.innertube.models.EpisodeItem
 import moe.rukamori.archivetune.innertube.models.SongItem
 import moe.rukamori.archivetune.innertube.pages.NextResult
@@ -89,6 +90,7 @@ class DesktopUpNextQueueResolver(
                 DesktopUpNextResolution(selection = selection)
             },
             onFailure = { failure ->
+                if (failure is CancellationException) throw failure
                 diagnostics.warning(
                     "up_next_selection event=failure requestedVideoId=${clickedSong.id} " +
                         "errorType=${failure::class.simpleName} error=${failure.message?.replace(Regex("\\s+"), " ")?.take(240)}",

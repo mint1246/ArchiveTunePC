@@ -86,7 +86,6 @@ import moe.rukamori.archivetune.innertube.pages.HomePage
 fun DesktopHomeSurface(
     services: DesktopMusicServices,
     onOpenItem: (YTItem) -> Unit,
-    onPlayQueue: (List<SongItem>, Int, String) -> Unit,
     onDownload: (SongItem) -> Unit,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
@@ -171,9 +170,7 @@ fun DesktopHomeSurface(
     val similarContent = remember(similarRecommendations, homeSnapshot) {
         similarRecommendations.mapNotNull { recommendation ->
             val items = recommendation.items.filter(::localVisible)
-            items.takeIf(List<YTItem>::isNotEmpty)?.let {
-                Triple(recommendation, it, it.filterIsInstance<SongItem>().distinctBy(SongItem::id))
-            }
+            items.takeIf(List<YTItem>::isNotEmpty)?.let { recommendation to it }
         }
     }
     fun isPinned(item: YTItem) = services.homeStore.isSpeedDialPinned(item)
@@ -265,7 +262,7 @@ fun DesktopHomeSurface(
                                     song = song,
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
-                                    onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                    onClick = { onOpenItem(song) },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
@@ -293,7 +290,7 @@ fun DesktopHomeSurface(
                                     song = song,
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
-                                    onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                    onClick = { onOpenItem(song) },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
@@ -328,12 +325,7 @@ fun DesktopHomeSurface(
                                     },
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
-                                    onClick = {
-                                        when (item) {
-                                            is SongItem -> onPlayQueue(speedDialSongs, speedDialSongs.indexOf(item).coerceAtLeast(0), "Speed dial")
-                                            else -> onOpenItem(item)
-                                        }
-                                    },
+                                    onClick = { onOpenItem(item) },
                                     onPin = { togglePin(item) },
                                     isPinned = isPinned(item),
                                 )
@@ -342,11 +334,7 @@ fun DesktopHomeSurface(
                                 item(key = "speed_dial_random") {
                                     SpeedDialRandomTile(
                                         onClick = {
-                                            onPlayQueue(
-                                                speedDialSongs,
-                                                Random.nextInt(speedDialSongs.size),
-                                                "Speed dial",
-                                            )
+                                            onOpenItem(speedDialSongs[Random.nextInt(speedDialSongs.size)])
                                         },
                                     )
                                 }
@@ -374,7 +362,7 @@ fun DesktopHomeSurface(
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
-                                    onClick = { onPlayQueue(listOf(song), 0, song.title) },
+                                    onClick = { onOpenItem(song) },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
@@ -453,9 +441,7 @@ fun DesktopHomeSurface(
                                     isActive = song.id == currentItemId,
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
-                                    onClick = {
-                                        onPlayQueue(forgottenFavorites, forgottenFavorites.indexOf(song), "Forgotten favorites")
-                                    },
+                                    onClick = { onOpenItem(song) },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
                                     onDownload = { onDownload(song) },
@@ -471,7 +457,7 @@ fun DesktopHomeSurface(
                     }
                 }
 
-                similarContent.forEach { (recommendation, visibleItems, songs) ->
+                similarContent.forEach { (recommendation, visibleItems) ->
                     item(key = "home_similar_header_${recommendation.title.id}") {
                         DesktopSectionHeader(
                             title = recommendation.title.title,
@@ -493,12 +479,7 @@ fun DesktopHomeSurface(
                                     },
                                     isPlaying = isPlaying,
                                     modifier = Modifier.width(160.dp),
-                                    onClick = {
-                                        when (item) {
-                                            is SongItem -> onPlayQueue(songs, songs.indexOf(item).coerceAtLeast(0), recommendation.title.title)
-                                            else -> onOpenItem(item)
-                                        }
-                                    },
+                                    onClick = { onOpenItem(item) },
                                     onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                                     onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
                                     onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },
@@ -521,7 +502,6 @@ fun DesktopHomeSurface(
                         currentItemId = currentItemId,
                         currentAlbumId = currentAlbumId,
                         onOpenItem = onOpenItem,
-                        onPlayQueue = onPlayQueue,
                         onPlayNext = onPlayNext,
                         onAddToQueue = onAddToQueue,
                         onDownload = onDownload,
@@ -798,7 +778,6 @@ private fun HomeSectionBlock(
     currentItemId: String?,
     currentAlbumId: String?,
     onOpenItem: (YTItem) -> Unit,
-    onPlayQueue: (List<SongItem>, Int, String) -> Unit,
     onPlayNext: (SongItem) -> Unit,
     onAddToQueue: (SongItem) -> Unit,
     onDownload: (SongItem) -> Unit,
@@ -836,7 +815,7 @@ private fun HomeSectionBlock(
                                 }
                                 val previews = card.itemIds.mapNotNull { id -> sectionSongs.firstOrNull { it.id == id } }
                                 previews.forEach { song ->
-                                    TextButton(onClick = { onPlayQueue(previews, previews.indexOf(song), card.title) }) {
+                                    TextButton(onClick = { onOpenItem(song) }) {
                                         Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
@@ -862,12 +841,7 @@ private fun HomeSectionBlock(
                     isActive = isActive,
                     isPlaying = isPlaying,
                     modifier = Modifier.width(160.dp),
-                    onClick = {
-                        when (item) {
-                            is SongItem -> onPlayQueue(sectionSongs, sectionSongs.indexOf(item).coerceAtLeast(0), section.title)
-                            else -> onOpenItem(item)
-                        }
-                    },
+                    onClick = { onOpenItem(item) },
                     onPlayNext = (item as? SongItem)?.let { song -> { onPlayNext(song) } },
                     onAddToQueue = (item as? SongItem)?.let { song -> { onAddToQueue(song) } },
                     onDownload = (item as? SongItem)?.let { song -> { onDownload(song) } },

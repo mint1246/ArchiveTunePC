@@ -94,7 +94,9 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -435,8 +437,22 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
         if (state.searchQuery.isNotBlank()) delay(250)
         services.searchRepository.activate(state.searchQuery)
     }
+    var pendingUpNextJob by remember { mutableStateOf<Job?>(null) }
+    fun playLocal(track: LocalTrack) {
+        if (partyState.mode != PartyMode.NONE) return
+        pendingUpNextJob?.cancel()
+        scope.launch {
+            val queue = localTracks.map(::toPlaybackItem)
+            services.playback.replaceQueue(
+                queue,
+                localTracks.indexOf(track).coerceAtLeast(0),
+                title = "Local library",
+            )
+        }
+    }
     fun playEpisode(episode: EpisodeItem) {
         if (guestInParty && !partyState.canChangeSong) return
+        pendingUpNextJob?.cancel()
         scope.launch {
             playTogether.playQueue(listOf(toPlaybackItem(episode)), title = episode.podcast?.name ?: "Podcast")
         }
@@ -444,8 +460,14 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     fun open(item: YTItem) {
         when (item) {
             is SongItem -> {
+                val local = localTracks.firstOrNull { it.id == item.id }
+                if (local != null) {
+                    playLocal(local)
+                    return
+                }
                 if (guestInParty && !partyState.canChangeSong) return
-                scope.launch {
+                pendingUpNextJob?.cancel()
+                pendingUpNextJob = scope.launch {
                     browse.failure = null
                     val resolution = DesktopUpNextQueueResolver(
                         fetchUpNext = services::upNext,
@@ -456,6 +478,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
                             override fun warning(message: String) = logger.warning(message)
                         },
                     ).resolve(item)
+                    ensureActive()
                     resolution.failureMessage?.let { browse.failure = it }
                     playTogether.playQueue(
                         items = resolution.selection.items,
@@ -474,6 +497,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     fun playPodcastEpisodes(episodes: List<EpisodeItem>, requestedId: String, title: String) {
         if (episodes.isEmpty() || (guestInParty && !partyState.canChangeSong)) return
         val startIndex = requestedEpisodeQueueIndex(episodes.map(EpisodeItem::id), requestedId) ?: return
+        pendingUpNextJob?.cancel()
         scope.launch { playTogether.playQueue(episodes.map(::toPlaybackItem), startIndex, title = title) }
     }
     fun openBrowseItem(item: YTItem) {
@@ -488,6 +512,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
     }
     fun playQueue(songs: List<SongItem>, startIndex: Int, title: String) {
         if (songs.isEmpty() || (guestInParty && !partyState.canChangeSong)) return
+        pendingUpNextJob?.cancel()
         scope.launch {
             playTogether.playQueue(
                 songs.map { toPlaybackItem(it, services.albumIndex) },
@@ -530,17 +555,6 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             if (!playTogether.addToQueue(listOf(toPlaybackItem(song, services.albumIndex))) && guestInParty) {
                 browse.failure = if (partyState.canEditQueue) "Could not add this song to the shared queue." else "The party owner disabled queue editing for you."
             }
-        }
-    }
-    fun playLocal(track: LocalTrack) {
-        if (partyState.mode != PartyMode.NONE) return
-        scope.launch {
-            val queue = localTracks.map(::toPlaybackItem)
-            services.playback.replaceQueue(
-                queue,
-                localTracks.indexOf(track).coerceAtLeast(0),
-                title = "Local library",
-            )
         }
     }
     fun playNextLocal(track: LocalTrack) {
@@ -663,8 +677,7 @@ internal fun DesktopMusicContent(state: DesktopContentState, services: DesktopMu
             )
             moe.rukamori.archivetune.desktop.state.DesktopDestination.HOME -> DesktopHomeSurface(
                 services,
-                onOpenItem = ::openBrowseItem,
-                onPlayQueue = ::playQueue,
+                onOpenItem = ::open,
                 onDownload = ::downloadSong,
                 onPlayNext = ::playNextSong,
                 onAddToQueue = ::enqueueSong,
