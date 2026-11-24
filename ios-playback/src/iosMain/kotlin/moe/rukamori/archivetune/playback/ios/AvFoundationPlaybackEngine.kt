@@ -34,6 +34,7 @@ import platform.AVFoundation.*
 import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMake
 import platform.CoreMedia.CMTimeMakeWithSeconds
+import platform.Foundation.NSData
 import platform.Foundation.NSLog
 import platform.Foundation.NSNotification
 import platform.Foundation.NSNotificationCenter
@@ -41,8 +42,13 @@ import platform.Foundation.NSNumber
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSTimer
 import platform.Foundation.NSURL
+import platform.Foundation.NSURLSession
+import platform.Foundation.dataTaskWithURL
 import platform.MediaPlayer.MPChangePlaybackPositionCommandEvent
+import platform.MediaPlayer.MPMediaItemArtwork
+import platform.MediaPlayer.MPMediaItemPropertyAlbumTitle
 import platform.MediaPlayer.MPMediaItemPropertyArtist
+import platform.MediaPlayer.MPMediaItemPropertyArtwork
 import platform.MediaPlayer.MPMediaItemPropertyPlaybackDuration
 import platform.MediaPlayer.MPMediaItemPropertyTitle
 import platform.MediaPlayer.MPNowPlayingInfoCenter
@@ -55,6 +61,9 @@ import platform.MediaPlayer.MPRemoteCommandEvent
 import platform.MediaPlayer.MPRemoteCommandHandlerStatusCommandFailed
 import platform.MediaPlayer.MPRemoteCommandHandlerStatusSuccess
 import platform.UIKit.UIApplicationDidBecomeActiveNotification
+import platform.UIKit.UIImage
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 
 /**
  * AVFoundation implementation of [IosPlaybackEngine].
@@ -102,6 +111,8 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
     private var lastNowPlayingSecond = -1L
     private var lastNowPlayingDuration = -1L
     private var lastNowPlayingRate = -1.0
+    private var nowPlayingArtworkItemId: String? = null
+    private var nowPlayingArtwork: MPMediaItemArtwork? = null
 
     init {
         timeObserver = player.addPeriodicTimeObserverForInterval(
@@ -156,16 +167,21 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
     override fun load(item: PlaybackItem, source: ResolvedPlaybackSource, startPositionMs: Long) {
         checkOpen()
         validateIosPlaybackSource(source)?.let { throw IosPlaybackException(it) }
-        val url = NSURL(string = source.uri)
-        if (url == null ||
-            url.scheme?.lowercase() != "https" ||
-            url.host.isNullOrBlank() ||
-            url.user != null ||
-            url.password != null
-        ) {
+        val isLocalFile = source.uri.startsWith("file://", ignoreCase = true)
+        val url = if (isLocalFile) {
+            NSURL(string = source.uri)?.takeIf { it.isFileURL() && !it.path.isNullOrBlank() }
+        } else {
+            NSURL(string = source.uri)?.takeIf {
+                it.scheme?.lowercase() == "https" &&
+                    !it.host.isNullOrBlank() &&
+                    it.user == null &&
+                    it.password == null
+            }
+        }
+        if (url == null) {
             throw IosPlaybackException(
                 PlaybackFailure(
-                    message = "The player requires a direct HTTPS media URL.",
+                    message = "The player requires a direct HTTPS or local file media URL.",
                     kind = PlaybackFailure.Kind.UNSUPPORTED_FORMAT,
                     recoverable = false,
                 ),
@@ -180,10 +196,15 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         resumeAfterInterruption = false
         player.pause()
 
-        val avItem = AVPlayerItem(uRL = url)
+        val avItem = AVPlayerItem(uRL = url).apply {
+            audioTimePitchAlgorithm = AVAudioTimePitchAlgorithmSpectral
+        }
         currentItem = avItem
         currentPlaybackItem = item
+        nowPlayingArtworkItemId = null
+        nowPlayingArtwork = null
         player.replaceCurrentItemWithPlayerItem(avItem)
+        loadNowPlayingArtwork(expectedGeneration = generation, item = item)
 
         val clampedStart = startPositionMs.coerceAtLeast(0L)
         val initialDuration = item.metadata.durationHintMs?.coerceAtLeast(0L) ?: 0L
@@ -394,8 +415,9 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         if (measuredDuration.isFinite() && measuredDuration > 0 && reportedTimelineGeneration != generation) {
             reportedTimelineGeneration = generation
             val raw = item.duration.useContents { "value=$value timescale=$timescale flags=$flags" }
+            // Use %s (not %@): Kotlin/Native bridges varargs String to C char*, not NSString*.
             NSLog(
-                "%@",
+                "%s",
                 "ArchiveTune media timeline: $raw seconds=$measuredDuration metadataMs=${currentPlaybackItem?.metadata?.durationHintMs}",
             )
         }
@@ -481,6 +503,28 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
         lastNowPlayingSecond = -1L
         lastNowPlayingDuration = -1L
         lastNowPlayingRate = -1.0
+        nowPlayingArtworkItemId = null
+        nowPlayingArtwork = null
+    }
+
+    private fun loadNowPlayingArtwork(expectedGeneration: Long, item: PlaybackItem) {
+        val artUri = item.metadata.artworkUri?.takeIf { it.startsWith("https://", ignoreCase = true) } ?: return
+        val url = NSURL(string = artUri) ?: return
+        val itemId = item.metadata.id
+        NSURLSession.sharedSession.dataTaskWithURL(
+            url = url,
+            completionHandler = { data, _, _ ->
+                val image = data?.let { UIImage.imageWithData(it) } ?: return@dataTaskWithURL
+                val artwork = MPMediaItemArtwork(boundsSize = image.size, requestHandler = { _ -> image })
+                dispatch_async(dispatch_get_main_queue()) {
+                    if (!closed && generation == expectedGeneration && currentPlaybackItem?.metadata?.id == itemId) {
+                        nowPlayingArtworkItemId = itemId
+                        nowPlayingArtwork = artwork
+                        updateNowPlaying(force = true)
+                    }
+                }
+            },
+        ).resume()
     }
 
     private fun updateNowPlaying(force: Boolean = false) {
@@ -506,6 +550,12 @@ class AvFoundationPlaybackEngine : IosPlaybackEngine {
             MPNowPlayingInfoPropertyPlaybackRate to playbackRate,
             MPNowPlayingInfoPropertyDefaultPlaybackRate to 1.0,
         )
+        metadata.album?.title?.takeIf(String::isNotBlank)?.let {
+            info[MPMediaItemPropertyAlbumTitle] = it
+        }
+        if (nowPlayingArtworkItemId == metadata.id) {
+            nowPlayingArtwork?.let { info[MPMediaItemPropertyArtwork] = it }
+        }
         if (current.durationMs > 0L) {
             info[MPMediaItemPropertyPlaybackDuration] = current.durationMs / 1000.0
         }

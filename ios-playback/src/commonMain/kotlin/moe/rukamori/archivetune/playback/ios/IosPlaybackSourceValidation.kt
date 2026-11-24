@@ -12,6 +12,15 @@ import moe.rukamori.archivetune.playback.api.ResolvedPlaybackSource
 
 private val SUPPORTED_IOS_MIME_TYPES = setOf(
     "audio/mp4",
+    "audio/m4a",
+    "audio/x-m4a",
+    "audio/aac",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/flac",
+    "audio/x-flac",
     "application/vnd.apple.mpegurl",
     "application/x-mpegurl",
 )
@@ -42,15 +51,22 @@ fun validateIosPlaybackSource(source: ResolvedPlaybackSource): PlaybackFailure? 
     }
 
     val uri = source.uri
-    if (!isValidDirectHttpsUrl(uri)) {
+    if (!isValidDirectHttpsUrl(uri) && !isValidLocalFileUrl(uri)) {
         return PlaybackFailure(
-            message = "The player requires a direct HTTPS media URL.",
+            message = "The player requires a direct HTTPS or local file media URL.",
             kind = PlaybackFailure.Kind.UNSUPPORTED_FORMAT,
             recoverable = false,
         )
     }
 
     return null
+}
+
+internal fun isValidLocalFileUrl(rawUrl: String): Boolean {
+    if (rawUrl.length < 9 || rawUrl.any { it.code < 32 }) return false
+    if (!rawUrl.startsWith("file:///", ignoreCase = true)) return false
+    val path = rawUrl.substring(7)
+    return path.length > 1 && !path.contains("..")
 }
 
 internal fun isValidDirectHttpsUrl(rawUrl: String): Boolean {
